@@ -92,18 +92,18 @@ class StoreConfig:
     wait_post_acquisto: float = 0.5
 
     # ── Template paths (relativi a templates/) ────────────────────────────────
-    tmpl_store:         str = "store/pin_store.png"
-    tmpl_store_attivo:  str = "store/pin_store_attivo.png"
-    tmpl_carrello:      str = "store/pin_carrello.png"
-    tmpl_merchant:      str = "store/pin_merchant.png"
-    tmpl_mercante:      str = "store/pin_mercante.png"
-    tmpl_banner_aperto: str = "store/pin_banner_aperto.png"
-    tmpl_banner_chiuso: str = "store/pin_banner_chiuso.png"
-    tmpl_legno:         str = "store/pin_legno.png"
-    tmpl_pomodoro:      str = "store/pin_pomodoro.png"
-    tmpl_acciaio:       str = "store/pin_acciaio.png"
-    tmpl_free_refresh:  str = "store/pin_free_refresh.png"
-    tmpl_no_refresh:    str = "store/pin_no_refresh.png"
+    tmpl_store:         str = "pin/pin_store.png"
+    tmpl_store_attivo:  str = "pin/pin_store_attivo.png"
+    tmpl_carrello:      str = "pin/pin_carrello.png"
+    tmpl_merchant:      str = "pin/pin_merchant.png"
+    tmpl_mercante:      str = "pin/pin_mercante.png"
+    tmpl_banner_aperto: str = "pin/pin_banner_aperto.png"
+    tmpl_banner_chiuso: str = "pin/pin_banner_chiuso.png"
+    tmpl_legno:         str = "pin/pin_legno.png"
+    tmpl_pomodoro:      str = "pin/pin_pomodoro.png"
+    tmpl_acciaio:       str = "pin/pin_acciaio.png"
+    tmpl_free_refresh:  str = "pin/pin_free_refresh.png"
+    tmpl_no_refresh:    str = "pin/pin_no_refresh.png"
 
     @property
     def pin_acquisto(self) -> list[str]:
