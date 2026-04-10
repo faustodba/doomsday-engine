@@ -69,6 +69,7 @@ doomsday-engine/
 8. **Tutti i task** implementano `Task` ABC da `core/task.py`.
 9. **Tutti i test task** usano `FakeDevice` + `FakeMatcher` — zero ADB reale.
 10. **Scheduling**: boost/vip/arena = `daily`; store/messaggi/alleanza/radar/arena_mercato = `periodic`.
+11. **Template**: tutti i PNG in `templates/pin/` — cartella piatta unica. Nessuna sottocartella per task. I path nei `*Config` usano sempre il prefisso `pin/` (es. `"pin/pin_store.png"`).
 
 ---
 
