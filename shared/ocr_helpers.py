@@ -278,10 +278,11 @@ def estrai_numero(testo: str) -> int | None:
         testo = testo.replace(".", "")  # rimuove punto-separatore
         testo = testo.replace(",", ".")  # virgola → decimale
     elif "," in testo:
-        # Solo virgola: potrebbe essere separatore migliaia (12,345) o decimale
-        # Se ci sono esattamente 3 cifre dopo la virgola → separatore migliaia
+        # Solo virgola: separatore migliaia se tutti i gruppi dopo il primo hanno 3 cifre
+        # es. "1,200,000" → ["1","200","000"] → tutti i gruppi dopo il primo = 3 cifre
         parts = testo.split(",")
-        if len(parts) == 2 and len(parts[1]) == 3:
+        all_groups_3 = all(len(p) == 3 for p in parts[1:])
+        if all_groups_3 and len(parts) >= 2:
             testo = testo.replace(",", "")
         else:
             testo = testo.replace(",", ".")
