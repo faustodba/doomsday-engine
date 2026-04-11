@@ -111,21 +111,24 @@ class RadarCensusTask(Task):
 
     # ── Task ABC ──────────────────────────────────────────────────────────────
 
-    @property
     def name(self) -> str:
         return "radar_census"
 
-    @property
     def schedule_type(self) -> Literal["daily", "periodic"]:
         return "periodic"
 
-    @property
     def interval_hours(self) -> float:
         return 24.0
 
-    @property
     def priority(self) -> int:
         return 31
+
+    def should_run(self, ctx) -> bool:
+        if ctx.device is None or ctx.matcher is None:
+            return False
+        if hasattr(ctx.config, "task_abilitato"):
+            return ctx.config.task_abilitato("radar_census")
+        return True
 
     def run(self, ctx: TaskContext) -> TaskResult:
         enabled = (getattr(ctx, "config", {}) or {}).get(

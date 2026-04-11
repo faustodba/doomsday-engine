@@ -290,3 +290,155 @@ class Screenshot:
 
     def __repr__(self) -> str:
         return f"Screenshot(w={self.width}, h={self.height})"
+
+
+# ==============================================================================
+#  AdbDevice — device reale via ADB (MuMu Player)
+# ==============================================================================
+
+import subprocess
+import tempfile
+import os
+
+
+class AdbDevice:
+    """
+    Device reale che parla con MuMu via ADB.
+
+    Implementa la stessa interfaccia di FakeDevice (sincrona):
+      screenshot()  → Screenshot
+      tap(x, y)
+      swipe(x1, y1, x2, y2, duration_ms)
+      back()
+      key(keycode)
+      input_text(text)
+    """
+
+    # Percorso ADB MuMu — override tramite variabile d'ambiente MUMU_ADB_PATH
+    ADB = os.environ.get(
+        "MUMU_ADB_PATH",
+        r"C:\Program Files\Netease\MuMuPlayer\nx_main\adb.exe",
+    )
+
+    def __init__(self, host: str = "127.0.0.1", port: int = 16384,
+                 name: str = "FAU_00", index: int = 0):
+        """
+        Args:
+            host  : indirizzo ADB (tipicamente 127.0.0.1)
+            port  : porta ADB dell'istanza MuMu
+            name  : nome istanza (es. "FAU_01") — solo per logging
+            index : indice istanza (0-based)
+        """
+        self.host  = host
+        self.port  = port
+        self.name  = name
+        self.index = index
+        self._serial = f"{host}:{port}"
+
+    # ── Esecuzione comandi ADB ─────────────────────────────────────────────────
+
+    def _run(self, *args: str, timeout: int = 15) -> subprocess.CompletedProcess:
+        """Esegue un comando ADB contro l'istanza corrente."""
+        cmd = [self.ADB, "-s", self._serial] + list(args)
+        return subprocess.run(cmd, capture_output=True, timeout=timeout)
+
+    def _shell(self, *args: str, timeout: int = 15) -> subprocess.CompletedProcess:
+        """Esegue un comando ADB shell contro l'istanza corrente."""
+        return self._run("shell", *args, timeout=timeout)
+
+    # ── Screenshot ────────────────────────────────────────────────────────────
+
+    def screenshot(self) -> Optional["Screenshot"]:
+        """
+        Cattura uno screenshot via exec-out (senza file intermedio su sdcard).
+        Ritorna un oggetto Screenshot o None in caso di errore.
+        """
+        try:
+            result = self._run(
+                "exec-out", "screencap", "-p",
+                timeout=20,
+            )
+            if result.returncode != 0 or not result.stdout:
+                return None
+
+            data = np.frombuffer(result.stdout, dtype=np.uint8)
+            frame = cv2.imdecode(data, cv2.IMREAD_COLOR)
+            if frame is None:
+                return None
+            return Screenshot(frame)
+        except Exception:
+            return None
+
+    def screenshot_sync(self) -> Optional["Screenshot"]:
+        """Alias di screenshot() — compatibilità navigator."""
+        return self.screenshot()
+
+    # ── Tap ───────────────────────────────────────────────────────────────────
+
+    def tap(self, x_or_coord, y=None) -> None:
+        """
+        Invia un tap alle coordinate (x, y).
+        Accetta sia tap(x, y) sia tap((x, y)).
+        """
+        if y is None:
+            x, y = int(x_or_coord[0]), int(x_or_coord[1])
+        else:
+            x, y = int(x_or_coord), int(y)
+        self._shell("input", "tap", str(x), str(y))
+
+    def tap_sync(self, coord_or_x, y=None) -> None:
+        """Alias di tap() — compatibilità navigator."""
+        self.tap(coord_or_x, y)
+
+    def tap_tuple(self, coord: tuple) -> None:
+        self.tap(coord[0], coord[1])
+
+    # ── Swipe ─────────────────────────────────────────────────────────────────
+
+    def swipe(self, x1: int, y1: int, x2: int, y2: int,
+              duration_ms: int = 300, **kw) -> None:
+        """Esegue uno swipe da (x1,y1) a (x2,y2) in duration_ms millisecondi."""
+        self._shell(
+            "input", "swipe",
+            str(x1), str(y1), str(x2), str(y2), str(duration_ms),
+        )
+
+    def scroll(self, x: int, y: int, direction: int, durata_ms: int = 300) -> None:
+        """
+        Scroll simulato con swipe verticale.
+        direction > 0 → scroll verso il basso, < 0 → verso l'alto.
+        """
+        dy = 200 if direction > 0 else -200
+        self.swipe(x, y, x, y + dy, durata_ms)
+
+    # ── Back / Key ────────────────────────────────────────────────────────────
+
+    def back(self) -> None:
+        """Preme il tasto BACK di Android."""
+        self._shell("input", "keyevent", "KEYCODE_BACK")
+
+    def key(self, keycode: str) -> None:
+        """
+        Invia un keycode Android (es. "KEYCODE_HOME", "KEYCODE_BACK").
+        Accetta sia la stringa con prefisso sia il solo nome.
+        """
+        if not keycode.startswith("KEYCODE_"):
+            keycode = f"KEYCODE_{keycode}"
+        self._shell("input", "keyevent", keycode)
+
+    def keyevent(self, key: str) -> None:
+        """Alias di key() per compatibilità."""
+        self.key(key)
+
+    # ── Input testo ───────────────────────────────────────────────────────────
+
+    def input_text(self, text: str) -> None:
+        """Invia testo via ADB input text (no caratteri speciali)."""
+        # Escape degli spazi per la shell ADB
+        safe = text.replace(" ", "%s")
+        self._shell("input", "text", safe)
+
+    # ── Utility ───────────────────────────────────────────────────────────────
+
+    def __repr__(self) -> str:
+        return f"AdbDevice(name={self.name!r}, serial={self._serial!r})"

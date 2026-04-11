@@ -108,21 +108,24 @@ class RadarTask(Task):
 
     # ── Task ABC ──────────────────────────────────────────────────────────────
 
-    @property
     def name(self) -> str:
         return "radar"
 
-    @property
     def schedule_type(self) -> Literal["daily", "periodic"]:
         return "periodic"
 
-    @property
     def interval_hours(self) -> float:
         return 12.0
 
-    @property
     def priority(self) -> int:
         return 30
+
+    def should_run(self, ctx) -> bool:
+        if ctx.device is None or ctx.matcher is None:
+            return False
+        if hasattr(ctx.config, "task_abilitato"):
+            return ctx.config.task_abilitato("radar")
+        return True
 
     def run(self, ctx: TaskContext) -> TaskResult:
         pallini_tappati = 0

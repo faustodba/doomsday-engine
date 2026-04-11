@@ -288,7 +288,7 @@ def _centra_mappa(ctx: TaskContext) -> None:
     """
     rx = _cfg(ctx, "RIFUGIO_X")
     ry = _cfg(ctx, "RIFUGIO_Y")
-    ctx.log(f"Rifornimento: centratura mappa sul rifugio X:{rx} Y:{ry}")
+    ctx.log_msg(f"Rifornimento: centratura mappa sul rifugio X:{rx} Y:{ry}")
 
     ctx.device.tap(_cfg(ctx, "TAP_LENTE_MAPPA"))
     time.sleep(1.5)
@@ -314,7 +314,7 @@ def _centra_mappa(ctx: TaskContext) -> None:
 
     ctx.device.tap(_cfg(ctx, "TAP_CASTELLO_CENTER"))
     time.sleep(2.0)
-    ctx.log("Rifornimento: mappa centrata e castello tappato")
+    ctx.log_msg("Rifornimento: mappa centrata e castello tappato")
 
 
 def _apri_resource_supply(ctx: TaskContext) -> bool:
@@ -324,17 +324,17 @@ def _apri_resource_supply(ctx: TaskContext) -> bool:
     """
     screen = ctx.device.screenshot()
     if not screen:
-        ctx.log("Rifornimento: screenshot fallito dopo tap castello")
+        ctx.log_msg("Rifornimento: screenshot fallito dopo tap castello")
         return False
 
     template = _cfg(ctx, "TEMPLATE_RESOURCE_SUPPLY")
     soglia   = _cfg(ctx, "TEMPLATE_RESOURCE_SUPPLY_SOGLIA")
     coord = ctx.matcher.find(template, screen, soglia)
     if coord is None:
-        ctx.log(f"Rifornimento: RESOURCE SUPPLY non trovato (soglia={soglia})")
+        ctx.log_msg(f"Rifornimento: RESOURCE SUPPLY non trovato (soglia={soglia})")
         return False
 
-    ctx.log(f"Rifornimento: RESOURCE SUPPLY trovato a {coord} → tap")
+    ctx.log_msg(f"Rifornimento: RESOURCE SUPPLY trovato a {coord} → tap")
     ctx.device.tap(coord)
     time.sleep(2.5)
     return True
@@ -364,26 +364,26 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
     # Leggi provviste
     provviste = _leggi_provviste(screen, ocr_provv)
     if provviste >= 0:
-        ctx.log(f"Rifornimento: provviste rimanenti={provviste:,}")
+        ctx.log_msg(f"Rifornimento: provviste rimanenti={provviste:,}")
     else:
-        ctx.log("Rifornimento: provviste OCR fallito — procedo")
+        ctx.log_msg("Rifornimento: provviste OCR fallito — procedo")
 
     if provviste == 0:
-        ctx.log("Rifornimento: provviste esaurite → stop")
+        ctx.log_msg("Rifornimento: provviste esaurite → stop")
         ctx.device.key("KEYCODE_BACK")
         time.sleep(0.8)
         return False, 0, True, 0
 
     eta_sec = _leggi_eta(screen, ocr_tempo)
-    ctx.log(f"Rifornimento: ETA viaggio={eta_sec}s")
+    ctx.log_msg(f"Rifornimento: ETA viaggio={eta_sec}s")
 
     # Compila campo risorsa
     coord = coord_campo.get(risorsa)
     if not coord:
-        ctx.log(f"Rifornimento: campo {risorsa} non configurato")
+        ctx.log_msg(f"Rifornimento: campo {risorsa} non configurato")
         return False, 0, False, 0
 
-    ctx.log(f"Rifornimento: compila {risorsa}={qta:,}")
+    ctx.log_msg(f"Rifornimento: compila {risorsa}={qta:,}")
     for _ in range(3):
         ctx.device.tap(coord)
         time.sleep(0.3)
@@ -398,7 +398,7 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
     # Verifica VAI
     screen2 = ctx.device.screenshot()
     if screen2 and not _vai_abilitato(screen2, vai_zona, soglia_vai):
-        ctx.log("Rifornimento: VAI non abilitato dopo compilazione")
+        ctx.log_msg("Rifornimento: VAI non abilitato dopo compilazione")
         provviste2 = _leggi_provviste(screen2, ocr_provv)
         if provviste2 == 0:
             ctx.device.key("KEYCODE_BACK")
@@ -407,7 +407,7 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
         ctx.device.key("KEYCODE_BACK")
         return False, 0, False, 0
 
-    ctx.log("Rifornimento: tap VAI")
+    ctx.log_msg("Rifornimento: tap VAI")
     ctx.device.tap(coord_vai)
     time.sleep(2.5)
     return True, eta_sec, False, qta
@@ -457,17 +457,21 @@ class RifornimentoTask(Task):
     Implementa il loop ottimizzato in mappa con coda_volo per la gestione degli slot.
     """
 
-    @property
     def name(self) -> str:
         return "rifornimento"
 
-    @property
     def schedule_type(self) -> str:
         return "periodic"
 
-    @property
     def interval_hours(self) -> float:
         return 4.0
+
+    def should_run(self, ctx) -> bool:
+        if ctx.device is None or ctx.matcher is None:
+            return False
+        if hasattr(ctx.config, "task_abilitato"):
+            return ctx.config.task_abilitato("rifornimento")
+        return True
 
     def run(self, ctx: TaskContext,
             deposito: Optional[dict[str, float]] = None,
@@ -485,7 +489,7 @@ class RifornimentoTask(Task):
         """
         # --- Verifica abilitazione ---
         if not _cfg(ctx, "RIFORNIMENTO_MAPPA_ABILITATO"):
-            ctx.log("Rifornimento: modulo disabilitato — skip")
+            ctx.log_msg("Rifornimento: modulo disabilitato — skip")
             return TaskResult(
                 success=True,
                 message="disabilitato",
@@ -495,7 +499,7 @@ class RifornimentoTask(Task):
         # --- Verifica account destinatario ---
         nome_rifugio = _cfg(ctx, "DOOMS_ACCOUNT")
         if not nome_rifugio:
-            ctx.log("Rifornimento: DOOMS_ACCOUNT non configurato — skip")
+            ctx.log_msg("Rifornimento: DOOMS_ACCOUNT non configurato — skip")
             return TaskResult(
                 success=False,
                 message="DOOMS_ACCOUNT mancante",
@@ -505,7 +509,7 @@ class RifornimentoTask(Task):
         # --- Configurazione risorse ---
         risorse_config, soglie, _ = _build_risorse_config(ctx)
         if not risorse_config:
-            ctx.log("Rifornimento: nessuna risorsa configurata — skip")
+            ctx.log_msg("Rifornimento: nessuna risorsa configurata — skip")
             return TaskResult(
                 success=True,
                 message="nessuna risorsa configurata",
@@ -514,7 +518,7 @@ class RifornimentoTask(Task):
 
         # --- Verifica deposito ---
         if deposito is None:
-            ctx.log("Rifornimento: deposito non fornito — skip (usare orchestrator)")
+            ctx.log_msg("Rifornimento: deposito non fornito — skip (usare orchestrator)")
             return TaskResult(
                 success=False,
                 message="deposito non disponibile",
@@ -530,37 +534,37 @@ class RifornimentoTask(Task):
         coda_volo: deque = deque()
         in_mappa = False
 
-        ctx.log(f"Rifornimento: start — risorse={risorse_l} max_sped={max_sped}")
+        ctx.log_msg(f"Rifornimento: start — risorse={risorse_l} max_sped={max_sped}")
 
         try:
             while True:
                 if max_sped > 0 and spedizioni >= max_sped:
-                    ctx.log(f"Rifornimento: limite spedizioni raggiunto ({spedizioni}/{max_sped})")
+                    ctx.log_msg(f"Rifornimento: limite spedizioni raggiunto ({spedizioni}/{max_sped})")
                     break
 
                 # ── 1. Slot liberi ──────────────────────────────────────────
                 _aggiorna_coda(coda_volo)
                 slot = slot_liberi  # iniettato o lettura reale
-                ctx.log(f"Rifornimento: slot liberi={slot}")
+                ctx.log_msg(f"Rifornimento: slot liberi={slot}")
 
                 if slot == 0:
                     attesa = _attesa_prima_spedizione(coda_volo, margine)
                     if attesa > 0:
-                        ctx.log(f"Rifornimento: slot 0 — attendo {attesa:.0f}s rientro prima sped.")
+                        ctx.log_msg(f"Rifornimento: slot 0 — attendo {attesa:.0f}s rientro prima sped.")
                         time.sleep(attesa)
                         _aggiorna_coda(coda_volo)
                     else:
-                        ctx.log("Rifornimento: slot 0, coda vuota — attendo 30s")
+                        ctx.log_msg("Rifornimento: slot 0, coda vuota — attendo 30s")
                         time.sleep(30)
 
                     # Dopo attesa slot rimane 0 → stop
                     # (nei test slot_liberi è fisso → uscita immediata)
-                    ctx.log("Rifornimento: nessun slot libero dopo attesa — stop")
+                    ctx.log_msg("Rifornimento: nessun slot libero dopo attesa — stop")
                     break
 
                 # ── 2. Vai in mappa (solo prima volta) ──────────────────────
                 if not in_mappa:
-                    ctx.log("Rifornimento: navigazione → mappa")
+                    ctx.log_msg("Rifornimento: navigazione → mappa")
                     ctx.device.key("KEYCODE_MAP")   # segnale testabile
                     in_mappa = True
                     time.sleep(1.5)
@@ -570,17 +574,17 @@ class RifornimentoTask(Task):
                     deposito, risorse_config, soglie, idx_risorsa
                 )
                 if risorsa_scelta is None:
-                    ctx.log("Rifornimento: tutte le risorse sotto soglia — stop")
+                    ctx.log_msg("Rifornimento: tutte le risorse sotto soglia — stop")
                     break
 
-                ctx.log(f"Rifornimento: risorsa selezionata={risorsa_scelta}")
+                ctx.log_msg(f"Rifornimento: risorsa selezionata={risorsa_scelta}")
                 qta = risorse_config[risorsa_scelta]
 
                 # ── 4. Centra mappa + apri RESOURCE SUPPLY ──────────────────
                 _centra_mappa(ctx)
 
                 if not _apri_resource_supply(ctx):
-                    ctx.log("Rifornimento: RESOURCE SUPPLY non trovato — stop")
+                    ctx.log_msg("Rifornimento: RESOURCE SUPPLY non trovato — stop")
                     break
 
                 # ── 5. Compila e invia ──────────────────────────────────────
@@ -590,34 +594,34 @@ class RifornimentoTask(Task):
                 )
 
                 if quota_esaurita:
-                    ctx.log("Rifornimento: quota giornaliera esaurita — stop")
+                    ctx.log_msg("Rifornimento: quota giornaliera esaurita — stop")
                     break
 
                 if not ok:
-                    ctx.log("Rifornimento: invio fallito — stop")
+                    ctx.log_msg("Rifornimento: invio fallito — stop")
                     break
 
                 # ── 6. Registra in coda ─────────────────────────────────────
                 spedizioni += 1
                 eta_ar = float(eta_sec * 2)   # A/R = andata × 2
                 coda_volo.append((ts_invio, eta_ar))
-                ctx.log(
+                ctx.log_msg(
                     f"Rifornimento: spedizione {spedizioni} "
                     f"— {risorsa_scelta} {qta_inviata:,} | ETA A/R={eta_ar:.0f}s"
                 )
                 time.sleep(2.0)
 
         finally:
-            ctx.log("Rifornimento: ritorno in home")
+            ctx.log_msg("Rifornimento: ritorno in home")
             ctx.device.key("KEYCODE_HOME")
 
         # ── ETA residua ultima spedizione (comunicata alla raccolta) ───────
         _aggiorna_coda(coda_volo)
         eta_residua = _attesa_ultima_spedizione(coda_volo, margine)
         if eta_residua > 0:
-            ctx.log(f"Rifornimento: ETA residua ultima sped. = {eta_residua:.0f}s")
+            ctx.log_msg(f"Rifornimento: ETA residua ultima sped. = {eta_residua:.0f}s")
 
-        ctx.log(f"Rifornimento: completato — {spedizioni} spedizioni")
+        ctx.log_msg(f"Rifornimento: completato — {spedizioni} spedizioni")
         return TaskResult(
             success=True,
             message=f"{spedizioni} spedizioni",
