@@ -179,6 +179,10 @@ def _build_cfg(ist: dict, rt: dict, nome: str):
         BOOST_ABILITATO                   = g.get("BOOST_ABILITATO",  True)
         STORE_ABILITATO                   = g.get("STORE_ABILITATO",  True)
 
+        def get(self, key: str, default=None):
+            """Compatibilita' con ctx.config.get(key, default) usato dai task V6."""
+            return getattr(self, key, default)
+
         def task_abilitato(self, nome_task: str) -> bool:
             mappa = {
                 "raccolta":      True,
@@ -250,6 +254,29 @@ def _build_ctx(ist: dict, rt: dict, dry_run: bool) -> TaskContext:
     )
 
 
+
+class _TaskWrapper:
+    """
+    Wrappa un task sovrascrivendo schedule_type e interval_hours.
+    Necessario quando il task li definisce come @property (non settabile).
+    """
+    def __init__(self, task, schedule_type: str, interval_hours: float):
+        self._task           = task
+        self._schedule_type  = schedule_type
+        self._interval_hours = interval_hours
+
+    @property
+    def schedule_type(self) -> str:
+        return self._schedule_type
+
+    @property
+    def interval_hours(self) -> float:
+        return self._interval_hours
+
+    def __getattr__(self, name):
+        return getattr(self._task, name)
+
+
 # ---------------------------------------------------------------------------
 # Thread istanza
 # ---------------------------------------------------------------------------
@@ -291,10 +318,9 @@ def _thread_istanza(ist, tasks_cls, dry_run, tick_sleep, stop_event):
         if Cls is None:
             continue
         try:
-            task = Cls()
-            task.schedule_type  = schedule      # sempre impostato da main
-            task.interval_hours = interval_h    # sempre impostato da main
-            orc.register(task, priority=priority)
+            task    = Cls()
+            wrapped = _TaskWrapper(task, schedule, interval_h)
+            orc.register(wrapped, priority=priority)
         except Exception as exc:
             _log(nome, f"[WARN] Impossibile registrare {class_name}: {exc}")
 
