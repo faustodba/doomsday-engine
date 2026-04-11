@@ -292,8 +292,8 @@ def _thread_istanza(ist, tasks_cls, dry_run, tick_sleep, stop_event):
             continue
         try:
             task = Cls()
-            if hasattr(task, "schedule_type"):  task.schedule_type  = schedule
-            if hasattr(task, "interval_hours"): task.interval_hours = interval_h
+            task.schedule_type  = schedule      # sempre impostato da main
+            task.interval_hours = interval_h    # sempre impostato da main
             orc.register(task, priority=priority)
         except Exception as exc:
             _log(nome, f"[WARN] Impossibile registrare {class_name}: {exc}")
