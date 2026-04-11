@@ -18,7 +18,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 
 import numpy as np
@@ -75,7 +74,7 @@ class FakeDevice:
     def set_default_shot(self, shot: FakeScreenshot) -> None:
         self._default_shot = shot
 
-    async def screenshot(self) -> FakeScreenshot:
+    def screenshot(self) -> FakeScreenshot:
         self.calls.append(("screenshot",))
         if self._shot_idx < len(self._shots):
             s = self._shots[self._shot_idx]
@@ -83,13 +82,13 @@ class FakeDevice:
             return s
         return self._default_shot
 
-    async def tap(self, x: int, y: int) -> None:
+    def tap(self, x: int, y: int) -> None:
         self.calls.append(("tap", x, y))
 
-    async def back(self) -> None:
+    def back(self) -> None:
         self.calls.append(("back",))
 
-    async def swipe(self, x1, y1, x2, y2, duration_ms=400) -> None:
+    def swipe(self, x1, y1, x2, y2, duration_ms=400) -> None:
         self.calls.append(("swipe", x1, y1, x2, y2))
 
     def tap_count(self) -> int:
@@ -132,8 +131,6 @@ def _make_ctx(device=None, navigator=None, abilitato=True):
     )
 
 
-def run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 def _cfg() -> AlleanzaConfig:
@@ -141,12 +138,30 @@ def _cfg() -> AlleanzaConfig:
 
 
 def _task() -> AlleanzaTask:
-    return AlleanzaTask()
+    return _task()
 
 
 # ==============================================================================
 # Test: should_run()
 # ==============================================================================
+
+def _cfg_zero() -> AlleanzaConfig:
+    """Config con tutti i wait azzerati per test veloci."""
+    return AlleanzaConfig(
+        wait_open_alleanza=0,
+        wait_open_dono=0,
+        wait_tab=0,
+        wait_rivendica=0,
+        wait_raccogli=0,
+        wait_back=0,
+        wait_back_last=0,
+    )
+
+
+def _task():
+    return AlleanzaTask(config=_cfg_zero())
+
+
 
 class TestShouldRun:
 
@@ -280,7 +295,7 @@ class TestFlussoCompleto:
     def test_ritorna_ok(self):
         device = self._device_un_rivendica()
         ctx    = _make_ctx(device=device)
-        result = run(AlleanzaTask().run(ctx))
+        result = _task().run(ctx)
         assert result.success is True
         assert result.skipped is False
 
@@ -288,28 +303,28 @@ class TestFlussoCompleto:
         cfg    = _cfg()
         device = self._device_un_rivendica()
         ctx    = _make_ctx(device=device)
-        run(AlleanzaTask().run(ctx))
+        _task().run(ctx)
         assert device.taps_at(*cfg.coord_rivendica) == 1
 
     def test_raccogli_tutto_eseguito(self):
         cfg    = _cfg()
         device = self._device_un_rivendica()
         ctx    = _make_ctx(device=device)
-        run(AlleanzaTask().run(ctx))
+        _task().run(ctx)
         assert device.taps_at(*cfg.coord_raccogli) == 1
 
     def test_back_tre_volte(self):
         cfg    = _cfg()
         device = self._device_un_rivendica()
         ctx    = _make_ctx(device=device)
-        run(AlleanzaTask().run(ctx))
+        _task().run(ctx)
         assert device.back_count() == cfg.n_back_chiudi
 
     def test_tap_alleanza_e_dono(self):
         cfg    = _cfg()
         device = self._device_un_rivendica()
         ctx    = _make_ctx(device=device)
-        run(AlleanzaTask().run(ctx))
+        _task().run(ctx)
         assert device.taps_at(*cfg.coord_alleanza) == 1
         assert device.taps_at(*cfg.coord_dono) == 1
 
@@ -331,7 +346,7 @@ class TestNoChangeStreak:
         device.set_default_shot(FakeScreenshot.con_pulsante(cfg))
 
         ctx    = _make_ctx(device=device)
-        result = run(AlleanzaTask().run(ctx))
+        result = _task().run(ctx)
 
         assert result.success is True
         # Con no_change_limit=2: stop dopo 2 streak consecutivi
@@ -350,7 +365,9 @@ class TestMaxRivendica:
         Pulsante sempre presente e ROI cambia sempre (hash diverso)
         → stop a max_rivendica.
         """
-        cfg = AlleanzaConfig(max_rivendica=3, no_change_limit=99)
+        cfg = AlleanzaConfig(max_rivendica=3, no_change_limit=99,
+                            wait_open_alleanza=0, wait_open_dono=0, wait_tab=0,
+                            wait_rivendica=0, wait_raccogli=0, wait_back=0, wait_back_last=0)
 
         # Sequenza: alternanza pulsante/assente per hash diverso ma present=True
         shots = []
@@ -371,7 +388,7 @@ class TestMaxRivendica:
         device.set_default_shot(FakeScreenshot.con_pulsante(cfg))
 
         ctx    = _make_ctx(device=device)
-        result = run(AlleanzaTask(config=cfg).run(ctx))
+        result = AlleanzaTask(config=cfg).run(ctx)
 
         assert result.success is True
         assert device.taps_at(*cfg.coord_rivendica) == cfg.max_rivendica

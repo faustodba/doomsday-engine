@@ -17,7 +17,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 
 import pytest
@@ -46,17 +45,17 @@ class FakeDevice:
         self.name  = name
         self.calls: list[tuple] = []
 
-    async def screenshot(self):
+    def screenshot(self):
         self.calls.append(("screenshot",))
         return FakeScreenshot()
 
-    async def tap(self, x: int, y: int) -> None:
+    def tap(self, x: int, y: int) -> None:
         self.calls.append(("tap", x, y))
 
-    async def back(self) -> None:
+    def back(self) -> None:
         self.calls.append(("back",))
 
-    async def swipe(self, x1, y1, x2, y2, duration_ms=400) -> None:
+    def swipe(self, x1, y1, x2, y2, duration_ms=400) -> None:
         self.calls.append(("swipe", x1, y1, x2, y2))
 
     def tap_count(self) -> int:
@@ -134,8 +133,6 @@ def _make_ctx(device=None, matcher=None, navigator=None, abilitato=True):
     )
 
 
-def run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 def _cfg() -> MessaggiConfig:
@@ -165,6 +162,25 @@ def _matcher_no_read() -> FakeMatcher:
 # ==============================================================================
 # Test: should_run()
 # ==============================================================================
+
+def _cfg_zero() -> MessaggiConfig:
+    """Config con tutti i wait azzerati per test veloci."""
+    return MessaggiConfig(
+        wait_open=0,
+        wait_tab=0,
+        wait_read=0,
+        wait_close=0,
+        wait_back=0,
+        retry_sleep=0,
+        retry_sleep_open=0,
+        retry_sleep_read=0,
+    )
+
+
+def _task():
+    return MessaggiTask(config=_cfg_zero())
+
+
 
 class TestShouldRun:
 
@@ -224,26 +240,26 @@ class TestMappaEsito:
 class TestVerificaPin:
 
     def _task(self) -> MessaggiTask:
-        return MessaggiTask()
+        return _task()
 
     def test_trovato_primo_tentativo(self):
         cfg  = _cfg()
         m    = FakeMatcher({cfg.tmpl_alliance: 0.95})
         device = FakeDevice()
-        ok = run(self._task()._verifica_pin(
+        ok = self._task()._verifica_pin(
             device, m, cfg.tmpl_alliance, cfg.soglia_alliance,
             cfg.roi_alliance, retry=0, retry_sleep=0, log=lambda x: None, label="TEST"
-        ))
+        )
         assert ok is True
 
     def test_non_trovato(self):
         cfg  = _cfg()
         m    = FakeMatcher({cfg.tmpl_alliance: 0.10})
         device = FakeDevice()
-        ok = run(self._task()._verifica_pin(
+        ok = self._task()._verifica_pin(
             device, m, cfg.tmpl_alliance, cfg.soglia_alliance,
             cfg.roi_alliance, retry=0, retry_sleep=0, log=lambda x: None, label="TEST"
-        ))
+        )
         assert ok is False
 
     def test_trovato_al_retry(self):
@@ -252,10 +268,10 @@ class TestVerificaPin:
         m   = FakeMatcher()
         m.set_sequence(cfg.tmpl_alliance, [0.10, 0.95])   # fail → ok
         device = FakeDevice()
-        ok = run(self._task()._verifica_pin(
+        ok = self._task()._verifica_pin(
             device, m, cfg.tmpl_alliance, cfg.soglia_alliance,
             cfg.roi_alliance, retry=1, retry_sleep=0, log=lambda x: None, label="TEST"
-        ))
+        )
         assert ok is True
         # Due screenshot: uno per il fail, uno per il retry
         assert device.calls.count(("screenshot",)) == 2
@@ -264,10 +280,10 @@ class TestVerificaPin:
         cfg = _cfg()
         m   = FakeMatcher({cfg.tmpl_alliance: 0.10})
         device = FakeDevice()
-        ok = run(self._task()._verifica_pin(
+        ok = self._task()._verifica_pin(
             device, m, cfg.tmpl_alliance, cfg.soglia_alliance,
             cfg.roi_alliance, retry=2, retry_sleep=0, log=lambda x: None, label="TEST"
-        ))
+        )
         assert ok is False
         assert device.calls.count(("screenshot",)) == 3   # tentativo 0,1,2
 
@@ -282,7 +298,7 @@ class TestFlussoCompleto:
         device  = FakeDevice()
         matcher = _matcher_tutto_ok()
         ctx     = _make_ctx(device=device, matcher=matcher)
-        result  = run(MessaggiTask().run(ctx))
+        result = _task().run(ctx)
         assert result.success is True
         assert result.skipped is False
 
@@ -290,7 +306,7 @@ class TestFlussoCompleto:
         device  = FakeDevice()
         matcher = _matcher_tutto_ok()
         ctx     = _make_ctx(device=device, matcher=matcher)
-        result  = run(MessaggiTask().run(ctx))
+        result = _task().run(ctx)
         assert result.data["alliance"] is True
         assert result.data["system"] is True
 
@@ -300,7 +316,7 @@ class TestFlussoCompleto:
         device  = FakeDevice()
         matcher = _matcher_tutto_ok()
         ctx     = _make_ctx(device=device, matcher=matcher)
-        run(MessaggiTask().run(ctx))
+        _task().run(ctx)
         assert device.taps_at(*cfg.tap_read_all) == 2
 
     def test_back_chiusura_eseguiti(self):
@@ -308,7 +324,7 @@ class TestFlussoCompleto:
         device  = FakeDevice()
         matcher = _matcher_tutto_ok()
         ctx     = _make_ctx(device=device, matcher=matcher)
-        run(MessaggiTask().run(ctx))
+        _task().run(ctx)
         assert device.back_count() == cfg.n_back_close
 
     def test_tap_close_eseguito(self):
@@ -316,7 +332,7 @@ class TestFlussoCompleto:
         device  = FakeDevice()
         matcher = _matcher_tutto_ok()
         ctx     = _make_ctx(device=device, matcher=matcher)
-        run(MessaggiTask().run(ctx))
+        _task().run(ctx)
         assert device.taps_at(*cfg.tap_close) == 1
 
 
@@ -330,7 +346,7 @@ class TestNessunMessaggio:
         device  = FakeDevice()
         matcher = _matcher_no_read()
         ctx     = _make_ctx(device=device, matcher=matcher)
-        result  = run(MessaggiTask().run(ctx))
+        result = _task().run(ctx)
         assert result.success is True
         assert result.skipped is False
 
@@ -339,7 +355,7 @@ class TestNessunMessaggio:
         device  = FakeDevice()
         matcher = _matcher_no_read()
         ctx     = _make_ctx(device=device, matcher=matcher)
-        run(MessaggiTask().run(ctx))
+        _task().run(ctx)
         assert device.taps_at(*cfg.tap_read_all) == 0
 
 
@@ -354,7 +370,7 @@ class TestSchermataNonAperta:
         device  = FakeDevice()
         matcher = FakeMatcher({cfg.tmpl_alliance: 0.10})   # schermata non rilevata
         ctx     = _make_ctx(device=device, matcher=matcher)
-        result  = run(MessaggiTask().run(ctx))
+        result = _task().run(ctx)
         assert result.success is True
         assert result.skipped is True
 
@@ -363,7 +379,7 @@ class TestSchermataNonAperta:
         device  = FakeDevice()
         matcher = FakeMatcher({cfg.tmpl_alliance: 0.10})
         ctx     = _make_ctx(device=device, matcher=matcher)
-        run(MessaggiTask().run(ctx))
+        _task().run(ctx)
         assert device.back_count() >= 1
 
     def test_tab_non_tappati(self):
@@ -372,7 +388,7 @@ class TestSchermataNonAperta:
         device  = FakeDevice()
         matcher = FakeMatcher({cfg.tmpl_alliance: 0.10})
         ctx     = _make_ctx(device=device, matcher=matcher)
-        run(MessaggiTask().run(ctx))
+        _task().run(ctx)
         assert device.taps_at(*cfg.tap_tab_alliance) == 0
         assert device.taps_at(*cfg.tap_tab_system) == 0
 
@@ -395,7 +411,7 @@ class TestAllianceAnomala:
         m.set_score(cfg.tmpl_system, 0.95)
         m.set_score(cfg.tmpl_read, 0.95)
         ctx    = _make_ctx(device=device, matcher=m)
-        result = run(MessaggiTask().run(ctx))
+        result = _task().run(ctx)
 
         assert result.success is True
         assert result.data["alliance"] is False

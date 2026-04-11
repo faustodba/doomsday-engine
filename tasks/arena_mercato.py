@@ -47,14 +47,12 @@ Coordinata tap (960×540)
 from __future__ import annotations
 
 import time
-import logging
 from dataclasses import dataclass
 from typing import Literal
 
 from core.task import Task, TaskContext, TaskResult
 from core.navigator import Screen
 
-logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -111,21 +109,19 @@ class ArenaMercatoTask(Task):
 
     # ── Task ABC ──────────────────────────────────────────────────────────────
 
-    @property
     def name(self) -> str:
         return "arena_mercato"
 
-    @property
-    def schedule_type(self) -> Literal["daily", "periodic"]:
-        return "periodic"
+    def should_run(self, ctx: TaskContext) -> bool:
+        if ctx.device is None or ctx.matcher is None:
+            return False
+        if hasattr(ctx.config, "task_abilitato"):
+            return ctx.config.task_abilitato("arena_mercato")
+        return True
 
     @property
     def interval_hours(self) -> float:
         return 12.0
-
-    @property
-    def priority(self) -> int:
-        return 25
 
     def run(self, ctx: TaskContext) -> TaskResult:
         acquisti_360 = 0
@@ -135,13 +131,13 @@ class ArenaMercatoTask(Task):
         # 1. HOME
         if not self._assicura_home(ctx):
             errore = "impossibile raggiungere home"
-            logger.error("[MERCATO-ARENA] %s", errore)
+            ctx.log_msg("[MERCATO-ARENA] %s", errore)
             return TaskResult(success=False, data=self._data(0, 0, errore))
 
         # 2. Navigazione verso Arena Store
         if not self._naviga_a_store(ctx):
             errore = "impossibile raggiungere arena store"
-            logger.error("[MERCATO-ARENA] %s", errore)
+            ctx.log_msg("[MERCATO-ARENA] %s", errore)
             self._torna_home(ctx)
             return TaskResult(success=False, data=self._data(0, 0, errore))
 
@@ -150,13 +146,13 @@ class ArenaMercatoTask(Task):
             acquisti_360, acquisti_15 = self._loop_acquisti(ctx)
         except Exception as exc:
             errore = str(exc)
-            logger.error("[MERCATO-ARENA] eccezione acquisti: %s", exc)
+            ctx.log_msg("[MERCATO-ARENA] eccezione acquisti: %s", exc)
 
         # 4. Ritorno home
         self._torna_home(ctx)
 
         successo = errore is None
-        logger.info(
+        ctx.log_msg(
             "[MERCATO-ARENA] completato — pack360=%d pack15=%d%s",
             acquisti_360, acquisti_15,
             f" errore={errore}" if errore else "",
@@ -177,9 +173,9 @@ class ArenaMercatoTask(Task):
             time.sleep(0.8)
             screen = ctx.device.screenshot()
             if screen is not None and ctx.navigator.current_screen(screen) == Screen.HOME:
-                logger.debug("[MERCATO-ARENA] home confermata (ciclo %d)", ciclo + 1)
+                ctx.log_msg("[MERCATO-ARENA] home confermata (ciclo %d)", ciclo + 1)
                 return True
-        logger.warning("[MERCATO-ARENA] impossibile confermare home")
+        ctx.log_msg("[MERCATO-ARENA] impossibile confermare home")
         return False
 
     def _naviga_a_store(self, ctx: TaskContext) -> bool:
@@ -188,11 +184,11 @@ class ArenaMercatoTask(Task):
         Gestisce popup Glory Silver in ingresso.
         Verifica lista arena (pin_arena_01_lista) prima di aprire il carrello.
         """
-        logger.info("[MERCATO-ARENA] HOME → Campaign")
+        ctx.log_msg("[MERCATO-ARENA] HOME → Campaign")
         ctx.device.tap(*_TAP_CAMPAIGN)
         time.sleep(3.0)
 
-        logger.info("[MERCATO-ARENA] Campaign → Arena of Doom")
+        ctx.log_msg("[MERCATO-ARENA] Campaign → Arena of Doom")
         ctx.device.tap(*_TAP_ARENA_OF_DOOM)
         time.sleep(3.5)
 
@@ -201,17 +197,17 @@ class ArenaMercatoTask(Task):
 
         # Verifica lista arena aperta
         if not self._check_pin(ctx, "lista", retry=2, retry_s=2.0):
-            logger.warning("[MERCATO-ARENA] lista arena non rilevata")
+            ctx.log_msg("[MERCATO-ARENA] lista arena non rilevata")
             return False
 
-        logger.info("[MERCATO-ARENA] lista arena OK → tap carrello")
+        ctx.log_msg("[MERCATO-ARENA] lista arena OK → tap carrello")
         ctx.device.tap(*_TAP_CARRELLO)
         time.sleep(2.0)
         return True
 
     def _torna_home(self, ctx: TaskContext) -> None:
         """BACK × 3 per uscire da store → lista → campaign → home."""
-        logger.info("[MERCATO-ARENA] ritorno HOME — BACK×3")
+        ctx.log_msg("[MERCATO-ARENA] ritorno HOME — BACK×3")
         for _ in range(3):
             ctx.device.back()
             time.sleep(0.8)
@@ -231,20 +227,20 @@ class ArenaMercatoTask(Task):
         for iterazione in range(_MERCATO_MAX_ITER):
             screen = ctx.device.screenshot()
             if screen is None:
-                logger.warning("[MERCATO-ARENA] screenshot fallito (iter=%d) — stop", iterazione)
+                ctx.log_msg("[MERCATO-ARENA] screenshot fallito (iter=%d) — stop", iterazione)
                 break
 
             if not pack360_esaurito:
                 # ── FASE 1: Pack 360 ──────────────────────────────────────
                 if self._pulsante_360_attivo(ctx, screen):
-                    logger.info("[MERCATO-360] pulsante attivo — tap acquisto")
+                    ctx.log_msg("[MERCATO-360] pulsante attivo — tap acquisto")
                     ctx.device.tap(*_TAP_PRIMO_ACQ)
                     time.sleep(1.0)
                     ctx.device.tap(*_TAP_MAX_ACQ)
                     time.sleep(1.5)
                     acquisti_360 += 1
                 else:
-                    logger.info(
+                    ctx.log_msg(
                         "[MERCATO-360] esaurito (%d cicli) → passo pack 15",
                         acquisti_360,
                     )
@@ -252,36 +248,36 @@ class ArenaMercatoTask(Task):
                     # Ri-acquisisce screen fresco per valutare subito pack 15
                     screen = ctx.device.screenshot()
                     if screen is None:
-                        logger.warning("[MERCATO-ARENA] screenshot fallito dopo switch — stop")
+                        ctx.log_msg("[MERCATO-ARENA] screenshot fallito dopo switch — stop")
                         break
                     # Valuta pack 15 nella stessa iterazione
                     if self._pulsante_15_attivo(ctx, screen):
-                        logger.info("[MERCATO-15] pulsante attivo — tap pack 15")
+                        ctx.log_msg("[MERCATO-15] pulsante attivo — tap pack 15")
                         ctx.device.tap(*_TAP_PACK15)
                         time.sleep(1.0)
                         ctx.device.tap(*_TAP_PACK15_MAX)
                         time.sleep(1.5)
                         acquisti_15 += 1
                     else:
-                        logger.info("[MERCATO-15] pulsante non attivo — monete esaurite, stop")
+                        ctx.log_msg("[MERCATO-15] pulsante non attivo — monete esaurite, stop")
                         break
             else:
                 # ── FASE 2: Pack 15 ──────────────────────────────────────
                 if self._pulsante_15_attivo(ctx, screen):
-                    logger.info("[MERCATO-15] pulsante attivo — tap pack 15")
+                    ctx.log_msg("[MERCATO-15] pulsante attivo — tap pack 15")
                     ctx.device.tap(*_TAP_PACK15)
                     time.sleep(1.0)
                     ctx.device.tap(*_TAP_PACK15_MAX)
                     time.sleep(1.5)
                     acquisti_15 += 1
                 else:
-                    logger.info(
+                    ctx.log_msg(
                         "[MERCATO-15] monete esaurite (%d cicli) — stop",
                         acquisti_15,
                     )
                     break
 
-        logger.info(
+        ctx.log_msg(
             "[MERCATO-ARENA] loop completato — pack360=%d pack15=%d",
             acquisti_360, acquisti_15,
         )
@@ -302,7 +298,7 @@ class ArenaMercatoTask(Task):
         spec_close = _MERCATO_PIN["btn360_close"]
         score_open  = ctx.matcher.match(screen, spec_open.path,  spec_open.roi)
         score_close = ctx.matcher.match(screen, spec_close.path, spec_close.roi)
-        logger.debug("[MERCATO] btn360 open=%.3f close=%.3f", score_open, score_close)
+        ctx.log_msg("[MERCATO] btn360 open=%.3f close=%.3f", score_open, score_close)
 
         if score_open  >= spec_open.soglia:  return True
         if score_close >= spec_close.soglia: return False
@@ -319,12 +315,12 @@ class ArenaMercatoTask(Task):
         spec_close = _MERCATO_PIN["btn15_close"]
         score_open  = ctx.matcher.match(screen, spec_open.path,  spec_open.roi)
         score_close = ctx.matcher.match(screen, spec_close.path, spec_close.roi)
-        logger.debug("[MERCATO-15] btn15 open=%.3f close=%.3f", score_open, score_close)
+        ctx.log_msg("[MERCATO-15] btn15 open=%.3f close=%.3f", score_open, score_close)
 
         if score_open  >= spec_open.soglia:  return True
         if score_close >= spec_close.soglia: return False
         # Nessun match chiaro: fail-safe stop (non acquistare)
-        logger.debug("[MERCATO-15] nessun match chiaro — fail-safe stop")
+        ctx.log_msg("[MERCATO-15] nessun match chiaro — fail-safe stop")
         return False
 
     # ── Popup Glory ───────────────────────────────────────────────────────────
@@ -342,7 +338,7 @@ class ArenaMercatoTask(Task):
         if score < spec.soglia:
             return False
 
-        logger.info("[MERCATO-ARENA] popup Glory Silver — tap Continue")
+        ctx.log_msg("[MERCATO-ARENA] popup Glory Silver — tap Continue")
         ctx.device.tap(*_TAP_GLORY_CONTINUE)
         time.sleep(2.0)
 
@@ -351,7 +347,7 @@ class ArenaMercatoTask(Task):
         if screen2 is not None:
             score2 = ctx.matcher.match(screen2, spec.path, spec.roi)
             if score2 >= spec.soglia:
-                logger.info("[MERCATO-ARENA] popup Glory ancora visibile — retry tap")
+                ctx.log_msg("[MERCATO-ARENA] popup Glory ancora visibile — retry tap")
                 ctx.device.tap(*_TAP_GLORY_CONTINUE)
                 time.sleep(2.0)
         return True
@@ -369,12 +365,12 @@ class ArenaMercatoTask(Task):
         for tentativo in range(retry + 1):
             screen = ctx.device.screenshot()
             if screen is None:
-                logger.debug("[MERCATO-PIN] %s: screenshot fallito (t=%d)", key, tentativo + 1)
+                ctx.log_msg("[MERCATO-PIN] %s: screenshot fallito (t=%d)", key, tentativo + 1)
                 time.sleep(retry_s)
                 continue
             score = ctx.matcher.match(screen, spec.path, spec.roi)
             ok = score >= spec.soglia
-            logger.debug("[MERCATO-PIN] %s: score=%.3f → %s", key, score, "OK" if ok else "KO")
+            ctx.log_msg("[MERCATO-PIN] %s: score=%.3f → %s", key, score, "OK" if ok else "KO")
             if ok or tentativo == retry:
                 return ok
             time.sleep(retry_s)

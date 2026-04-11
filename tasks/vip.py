@@ -38,7 +38,7 @@
 
 from __future__ import annotations
 
-import asyncio
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -155,17 +155,17 @@ class VipTask(Task):
 
     # ── ABC: run ──────────────────────────────────────────────────────────────
 
-    async def run(self, ctx: TaskContext) -> TaskResult:
+    def run(self, ctx: TaskContext) -> TaskResult:
         cfg     = self._cfg
         device  = ctx.device
         matcher = ctx.matcher
 
         def log(msg: str) -> None:
-            if ctx.log:
-                ctx.log.info(self.name(), f"[VIP] {msg}")
+            # log
+                ctx.log_msg(f"[VIP] {msg}")
 
         try:
-            esito, cass_ok, free_ok = await self._esegui_vip(
+            esito, cass_ok, free_ok = self._esegui_vip(
                 device, matcher, ctx.navigator, log, cfg
             )
         except Exception as exc:
@@ -175,7 +175,7 @@ class VipTask(Task):
 
     # ── Flusso principale con retry ───────────────────────────────────────────
 
-    async def _esegui_vip(
+    def _esegui_vip(
         self,
         device:    "MuMuDevice | FakeDevice",
         matcher:   "TemplateMatcher",
@@ -192,7 +192,7 @@ class VipTask(Task):
 
             # ── STEP 1: HOME ─────────────────────────────────────────────────
             if navigator is not None:
-                if not await navigator.vai_in_home():
+                if not navigator.vai_in_home():
                     log(f"HOME non raggiungibile (t={tentativo}) — prossimo tentativo")
                     continue
             else:
@@ -200,10 +200,10 @@ class VipTask(Task):
 
             # ── STEP 2: apri maschera VIP ─────────────────────────────────────
             log(f"Tap badge VIP {cfg.tap_badge}")
-            await device.tap(*cfg.tap_badge)
-            await asyncio.sleep(cfg.wait_open_badge)
+            device.tap(*cfg.tap_badge)
+            time.sleep(cfg.wait_open_badge)
 
-            ok_store = await self._check_pin(
+            ok_store = self._check_pin(
                 device, matcher,
                 cfg.tmpl_store, cfg.soglia_store, cfg.roi_store,
                 retry=cfg.retry_screen, retry_sleep=cfg.retry_sleep,
@@ -212,19 +212,19 @@ class VipTask(Task):
             if not ok_store:
                 log("[PRE-VIP] maschera non aperta → 3×BACK + retry")
                 for _ in range(cfg.n_back_chiudi):
-                    await device.back()
-                    await asyncio.sleep(cfg.wait_back_pre)
+                    device.back()
+                    time.sleep(cfg.wait_back_pre)
                 continue
 
             log("[PRE-VIP] pin_vip_01_store visibile — maschera aperta OK")
 
             # ── STEP 3: CASSAFORTE ────────────────────────────────────────────
-            cass_ok = await self._gestisci_cassaforte(
+            cass_ok = self._gestisci_cassaforte(
                 device, matcher, log, cfg
             )
 
             # ── STEP 4: CLAIM FREE ────────────────────────────────────────────
-            free_ok = await self._gestisci_claim_free(
+            free_ok = self._gestisci_claim_free(
                 device, matcher, log, cfg
             )
 
@@ -234,11 +234,11 @@ class VipTask(Task):
 
             # Chiudi maschera VIP prima di tornare in home
             for _ in range(cfg.n_back_chiudi):
-                await device.back()
-                await asyncio.sleep(cfg.wait_back)
+                device.back()
+                time.sleep(cfg.wait_back)
 
             if navigator is not None:
-                await navigator.vai_in_home()
+                navigator.vai_in_home()
 
             if cass_ok and free_ok:
                 log("Entrambe le ricompense confermate — completato ✓")
@@ -256,7 +256,7 @@ class VipTask(Task):
 
     # ── Gestione cassaforte ───────────────────────────────────────────────────
 
-    async def _gestisci_cassaforte(
+    def _gestisci_cassaforte(
         self,
         device:  "MuMuDevice | FakeDevice",
         matcher: "TemplateMatcher",
@@ -268,7 +268,7 @@ class VipTask(Task):
         Ritorna True se ritirata (o già ritirata), False se anomalia.
         """
         log("[1] Verifica stato cassaforte")
-        shot = await device.screenshot()
+        shot = device.screenshot()
 
         cass_chiusa = matcher.score(shot, cfg.tmpl_cass_chiusa,
                                     zone=cfg.roi_cass_chiusa) >= cfg.soglia_cass_chiusa
@@ -285,11 +285,11 @@ class VipTask(Task):
 
         # Cassaforte disponibile → tap Claim
         log(f"[1] pin_vip_02 visibile → tap Claim {cfg.tap_claim_cassaforte}")
-        await device.tap(*cfg.tap_claim_cassaforte)
-        await asyncio.sleep(cfg.wait_claim_cass)
+        device.tap(*cfg.tap_claim_cassaforte)
+        time.sleep(cfg.wait_claim_cass)
 
         # [PRE-POPUP-C]
-        ok_popup = await self._check_pin(
+        ok_popup = self._check_pin(
             device, matcher,
             cfg.tmpl_popup_cass, cfg.soglia_popup_cass, cfg.roi_popup_cass,
             retry=cfg.retry_screen, retry_sleep=cfg.retry_sleep,
@@ -298,10 +298,10 @@ class VipTask(Task):
         if not ok_popup:
             log("[PRE-POPUP-C] ANOMALIA: popup_cass non visibile — tento dismiss")
 
-        await device.tap(*cfg.tap_dismiss_cass)
+        device.tap(*cfg.tap_dismiss_cass)
 
         # [GATE-C] polling pin_vip_01_store tornato
-        gate_c = await self._polling_gate(
+        gate_c = self._polling_gate(
             device, matcher,
             cfg.tmpl_store, cfg.soglia_store, cfg.roi_store,
             max_poll=cfg.gate_max_poll, poll_sleep=cfg.wait_gate_poll,
@@ -309,8 +309,8 @@ class VipTask(Task):
         )
         if not gate_c:
             log("[GATE-C] ANOMALIA: maschera non tornata — retry dismiss")
-            await device.tap(*cfg.tap_dismiss_cass)
-            gate_c = await self._polling_gate(
+            device.tap(*cfg.tap_dismiss_cass)
+            gate_c = self._polling_gate(
                 device, matcher,
                 cfg.tmpl_store, cfg.soglia_store, cfg.roi_store,
                 max_poll=cfg.gate_max_poll, poll_sleep=cfg.wait_gate_poll,
@@ -320,7 +320,7 @@ class VipTask(Task):
                 log("[GATE-C] ANOMALIA: maschera ancora non tornata — procedo")
 
         # [POST-C]
-        cass_ok = await self._check_pin(
+        cass_ok = self._check_pin(
             device, matcher,
             cfg.tmpl_cass_aperta, cfg.soglia_cass_aperta, cfg.roi_cass_aperta,
             retry=cfg.retry_screen, retry_sleep=cfg.retry_sleep,
@@ -335,7 +335,7 @@ class VipTask(Task):
 
     # ── Gestione claim free ───────────────────────────────────────────────────
 
-    async def _gestisci_claim_free(
+    def _gestisci_claim_free(
         self,
         device:  "MuMuDevice | FakeDevice",
         matcher: "TemplateMatcher",
@@ -347,7 +347,7 @@ class VipTask(Task):
         Ritorna True se ritirato (o già ritirato), False se anomalia.
         """
         log("[2] Verifica stato Claim Free Daily")
-        shot = await device.screenshot()
+        shot = device.screenshot()
 
         free_chiuso = matcher.score(shot, cfg.tmpl_free_chiuso,
                                     zone=cfg.roi_free_chiuso) >= cfg.soglia_free_chiuso
@@ -364,11 +364,11 @@ class VipTask(Task):
 
         # Claim Free disponibile → tap
         log(f"[2] pin_vip_04 visibile → tap Claim Free {cfg.tap_claim_free}")
-        await device.tap(*cfg.tap_claim_free)
-        await asyncio.sleep(cfg.wait_claim_free)
+        device.tap(*cfg.tap_claim_free)
+        time.sleep(cfg.wait_claim_free)
 
         # [PRE-POPUP-F]
-        ok_popup = await self._check_pin(
+        ok_popup = self._check_pin(
             device, matcher,
             cfg.tmpl_popup_free, cfg.soglia_popup_free, cfg.roi_popup_free,
             retry=cfg.retry_screen, retry_sleep=cfg.retry_sleep,
@@ -379,10 +379,10 @@ class VipTask(Task):
 
         # Chiudi schermata ricompensa (richiede tap esplicito)
         log(f"Tap chiudi reward free {cfg.tap_chiudi_reward_free}")
-        await device.tap(*cfg.tap_chiudi_reward_free)
+        device.tap(*cfg.tap_chiudi_reward_free)
 
         # [GATE-F] polling pin_vip_01_store tornato
-        gate_f = await self._polling_gate(
+        gate_f = self._polling_gate(
             device, matcher,
             cfg.tmpl_store, cfg.soglia_store, cfg.roi_store,
             max_poll=cfg.gate_f_max_poll, poll_sleep=cfg.wait_gate_poll,
@@ -390,8 +390,8 @@ class VipTask(Task):
         )
         if not gate_f:
             log("[GATE-F] ANOMALIA: maschera non tornata — retry tap chiudi reward")
-            await device.tap(*cfg.tap_chiudi_reward_free)
-            gate_f = await self._polling_gate(
+            device.tap(*cfg.tap_chiudi_reward_free)
+            gate_f = self._polling_gate(
                 device, matcher,
                 cfg.tmpl_store, cfg.soglia_store, cfg.roi_store,
                 max_poll=cfg.gate_f_max_poll, poll_sleep=cfg.wait_gate_poll,
@@ -401,7 +401,7 @@ class VipTask(Task):
                 log("[GATE-F] ANOMALIA: maschera ancora non tornata — procedo")
 
         # [POST-F]
-        free_ok = await self._check_pin(
+        free_ok = self._check_pin(
             device, matcher,
             cfg.tmpl_free_aperto, cfg.soglia_free_aperto, cfg.roi_free_aperto,
             retry=2, retry_sleep=cfg.retry_sleep,
@@ -416,7 +416,7 @@ class VipTask(Task):
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
-    async def _check_pin(
+    def _check_pin(
         self,
         device:      "MuMuDevice | FakeDevice",
         matcher:     "TemplateMatcher",
@@ -430,7 +430,7 @@ class VipTask(Task):
     ) -> bool:
         """Verifica presenza pin con retry. Ritorna True se trovato."""
         for tentativo in range(retry + 1):
-            shot  = await device.screenshot()
+            shot  = device.screenshot()
             score = matcher.score(shot, tmpl, zone=roi)
             found = score >= soglia
             log(f"[{label}] {tmpl}: score={score:.3f} → {'OK' if found else 'NON trovato'}"
@@ -438,10 +438,10 @@ class VipTask(Task):
             if found:
                 return True
             if tentativo < retry:
-                await asyncio.sleep(retry_sleep)
+                time.sleep(retry_sleep)
         return False
 
-    async def _polling_gate(
+    def _polling_gate(
         self,
         device:     "MuMuDevice | FakeDevice",
         matcher:    "TemplateMatcher",
@@ -458,8 +458,8 @@ class VipTask(Task):
         Ritorna True appena trovato, False se esauriti i tentativi.
         """
         for t in range(max_poll):
-            await asyncio.sleep(poll_sleep)
-            shot  = await device.screenshot()
+            time.sleep(poll_sleep)
+            shot  = device.screenshot()
             score = matcher.score(shot, tmpl, zone=roi)
             if score >= soglia:
                 log(f"[{label}] pin tornato ({t+1}s) — OK")

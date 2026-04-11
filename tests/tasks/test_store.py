@@ -20,7 +20,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from typing import Any
 
@@ -50,17 +49,17 @@ class FakeDevice:
         self.name  = name
         self.calls: list[tuple] = []
 
-    async def screenshot(self):
+    def screenshot(self):
         self.calls.append(("screenshot",))
         return FakeScreenshot()
 
-    async def tap(self, x: int, y: int) -> None:
+    def tap(self, x: int, y: int) -> None:
         self.calls.append(("tap", x, y))
 
-    async def back(self) -> None:
+    def back(self) -> None:
         self.calls.append(("back",))
 
-    async def swipe(self, x1, y1, x2, y2, duration_ms=400) -> None:
+    def swipe(self, x1, y1, x2, y2, duration_ms=400) -> None:
         self.calls.append(("swipe", x1, y1, x2, y2))
 
     def tap_count(self) -> int:
@@ -145,8 +144,6 @@ def _make_ctx(device=None, matcher=None, navigator=None, abilitato=True):
     )
 
 
-def run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 def _cfg() -> StoreConfig:
@@ -178,6 +175,24 @@ def _matcher_store_trovato(**extra) -> FakeMatcher:
 # Test: should_run()
 # ==============================================================================
 
+def _cfg_zero() -> StoreConfig:
+    """Config con tutti i wait azzerati per test veloci."""
+    return StoreConfig(
+        wait_tap=0,
+        wait_swipe=0,
+        wait_back=0,
+        wait_refresh=0,
+        wait_post_acquisto=0,
+        wait_back_extra=0,
+        wait_swipe_extra=0,
+    )
+
+
+def _task():
+    return StoreTask(config=_cfg_zero())
+
+
+
 class TestShouldRun:
 
     def test_device_none_ritorna_false(self):
@@ -204,7 +219,7 @@ class TestShouldRun:
 class TestRilevaBanner:
 
     def _task(self) -> StoreTask:
-        return StoreTask()
+        return _task()
 
     def test_aperto(self):
         cfg = _cfg()
@@ -237,14 +252,14 @@ class TestContaPulsanti:
     def test_nessun_pulsante(self):
         cfg  = _cfg()
         m    = FakeMatcher()   # tutti score=0.0
-        res  = StoreTask()._conta_pulsanti(FakeScreenshot(), m, cfg)
+        res  = _task()._conta_pulsanti(FakeScreenshot(), m, cfg)
         assert res == []
 
     def test_un_pulsante_legno(self):
         cfg = _cfg()
         m   = FakeMatcher()
         m.set_all(cfg.tmpl_legno, [FakeMatch(cx=300, cy=200, score=0.85)])
-        res = StoreTask()._conta_pulsanti(FakeScreenshot(), m, cfg)
+        res = _task()._conta_pulsanti(FakeScreenshot(), m, cfg)
         assert len(res) == 1
         assert res[0][3] == cfg.tmpl_legno
 
@@ -256,7 +271,7 @@ class TestContaPulsanti:
             FakeMatch(cx=300, cy=300, score=0.85),
             FakeMatch(cx=300, cy=100, score=0.85),
         ])
-        res = StoreTask()._conta_pulsanti(FakeScreenshot(), m, cfg)
+        res = _task()._conta_pulsanti(FakeScreenshot(), m, cfg)
         assert res[0][0] < res[1][0]   # cy crescente
 
     def test_piu_tipi_pulsanti(self):
@@ -264,7 +279,7 @@ class TestContaPulsanti:
         m   = FakeMatcher()
         m.set_all(cfg.tmpl_legno,    [FakeMatch(cx=200, cy=150, score=0.85)])
         m.set_all(cfg.tmpl_pomodoro, [FakeMatch(cx=400, cy=250, score=0.82)])
-        res = StoreTask()._conta_pulsanti(FakeScreenshot(), m, cfg)
+        res = _task()._conta_pulsanti(FakeScreenshot(), m, cfg)
         assert len(res) == 2
 
 
@@ -321,7 +336,7 @@ class TestStoreCompletato:
         device  = FakeDevice()
         matcher = _matcher_store_trovato()
         ctx     = _make_ctx(device=device, matcher=matcher)
-        result  = run(StoreTask().run(ctx))
+        result = _task().run(ctx)
         assert result.success is True
         assert result.skipped is False
 
@@ -329,7 +344,7 @@ class TestStoreCompletato:
         device  = FakeDevice()
         matcher = _matcher_store_trovato()
         ctx     = _make_ctx(device=device, matcher=matcher)
-        run(StoreTask().run(ctx))
+        _task().run(ctx)
         taps = [c for c in device.calls if c[0] == "tap" and c[1] == 400]
         assert len(taps) >= 1
 
@@ -337,7 +352,7 @@ class TestStoreCompletato:
         device  = FakeDevice()
         matcher = _matcher_store_trovato()
         ctx     = _make_ctx(device=device, matcher=matcher)
-        run(StoreTask().run(ctx))
+        _task().run(ctx)
         assert device.back_count() >= 1
 
 
@@ -353,7 +368,7 @@ class TestMercanteDiretto:
         matcher = _matcher_store_trovato()
         matcher.set_score(cfg.tmpl_mercante, 0.90)   # mercante visibile
         ctx     = _make_ctx(device=device, matcher=matcher)
-        run(StoreTask().run(ctx))
+        _task().run(ctx)
 
         # Nessun tap su carrello
         carrello_taps = [
@@ -382,7 +397,7 @@ class TestStoreNonTrovato:
         device  = FakeDevice()
         matcher = self._matcher_no_store()
         ctx     = _make_ctx(device=device, matcher=matcher)
-        result  = run(StoreTask().run(ctx))
+        result = _task().run(ctx)
         assert result.success is True
         assert result.skipped is True
 
@@ -391,7 +406,7 @@ class TestStoreNonTrovato:
         device  = FakeDevice()
         matcher = self._matcher_no_store()
         ctx     = _make_ctx(device=device, matcher=matcher)
-        run(StoreTask().run(ctx))
+        _task().run(ctx)
         # 25 passi griglia, passo 0 nessuno swipe → 24 swipe mappa
         assert device.swipe_count() == 24
 
@@ -408,7 +423,7 @@ class TestLabelNonTrovata:
         matcher = _matcher_store_trovato()
         matcher.set_score(cfg.tmpl_store_attivo, 0.10)   # label assente
         ctx     = _make_ctx(device=device, matcher=matcher)
-        result  = run(StoreTask().run(ctx))
+        result = _task().run(ctx)
         assert result.skipped is True
 
     def test_back_eseguito(self):
@@ -417,7 +432,7 @@ class TestLabelNonTrovata:
         matcher = _matcher_store_trovato()
         matcher.set_score(cfg.tmpl_store_attivo, 0.10)
         ctx     = _make_ctx(device=device, matcher=matcher)
-        run(StoreTask().run(ctx))
+        _task().run(ctx)
         assert device.back_count() >= 1
 
 
@@ -436,7 +451,7 @@ class TestFreeRefresh:
         matcher.set_find(cfg.tmpl_free_refresh,
                          FakeMatch(cx=500, cy=500, score=0.90))
         ctx    = _make_ctx(device=device, matcher=matcher)
-        result = run(StoreTask().run(ctx))
+        result = _task().run(ctx)
 
         assert result.success is True
         assert result.data.get("refreshed") is True
@@ -448,7 +463,7 @@ class TestFreeRefresh:
         matcher = _matcher_store_trovato()
         matcher.set_score(cfg.tmpl_no_refresh, 0.90)
         ctx    = _make_ctx(device=device, matcher=matcher)
-        result = run(StoreTask().run(ctx))
+        result = _task().run(ctx)
         assert result.data.get("refreshed") is False
 
 

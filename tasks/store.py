@@ -33,7 +33,7 @@
 
 from __future__ import annotations
 
-import asyncio
+import time
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -90,6 +90,8 @@ class StoreConfig:
     wait_swipe:   float = 0.7
     wait_refresh: float = 1.5
     wait_post_acquisto: float = 0.5
+    wait_back_extra:    float = 0.5
+    wait_swipe_extra:   float = 0.1
 
     # ── Template paths (relativi a templates/) ────────────────────────────────
     tmpl_store:         str = "pin/pin_store.png"
@@ -175,24 +177,24 @@ class StoreTask(Task):
 
     # ── ABC: run ──────────────────────────────────────────────────────────────
 
-    async def run(self, ctx: TaskContext) -> TaskResult:
+    def run(self, ctx: TaskContext) -> TaskResult:
         cfg     = self._cfg
         device  = ctx.device
         matcher = ctx.matcher
 
         def log(msg: str) -> None:
-            if ctx.log:
-                ctx.log.info(self.name(), f"[STORE] {msg}")
+            # log
+                ctx.log_msg(f"[STORE] {msg}")
 
         # ── Step 0: assicura HOME ─────────────────────────────────────────────
         if ctx.navigator is not None:
-            if not await ctx.navigator.vai_in_home():
+            if not ctx.navigator.vai_in_home():
                 return TaskResult.fail("Navigator non ha raggiunto HOME", step="assicura_home")
         else:
             log("Navigator non disponibile — assumo HOME corrente")
 
         try:
-            esito, acquistati, refreshed = await self._esegui_store(
+            esito, acquistati, refreshed = self._esegui_store(
                 device, matcher, log, cfg
             )
         except Exception as exc:
@@ -202,7 +204,7 @@ class StoreTask(Task):
 
     # ── Flusso principale ─────────────────────────────────────────────────────
 
-    async def _esegui_store(
+    def _esegui_store(
         self,
         device:  "MuMuDevice | FakeDevice",
         matcher: "TemplateMatcher",
@@ -215,7 +217,7 @@ class StoreTask(Task):
         """
 
         # ── Gestione banner ───────────────────────────────────────────────────
-        stato_banner = await self._comprimi_banner(device, matcher, log, cfg)
+        stato_banner = self._comprimi_banner(device, matcher, log, cfg)
         roi_corrente = (
             cfg.roi_home_banner_chiuso
             if stato_banner in ("aperto", "chiuso")
@@ -231,9 +233,9 @@ class StoreTask(Task):
 
         for n, (dx, dy) in enumerate(cfg.griglia):
             if dx != 0 or dy != 0:
-                await self._swipe_mappa(device, dx, dy, cfg)
+                self._swipe_mappa(device, dx, dy, cfg)
 
-            shot = await device.screenshot()
+            shot = device.screenshot()
             result = matcher.find_one(shot, cfg.tmpl_store,
                                       threshold=cfg.soglia_store,
                                       zone=roi_corrente)
@@ -254,30 +256,30 @@ class StoreTask(Task):
         if not trovato:
             log(f"Store NON trovato dopo {len(cfg.griglia)} posizioni"
                 f" (best score={best_score:.3f})")
-            await self._ripristina_banner(device, stato_banner, log, cfg)
+            self._ripristina_banner(device, stato_banner, log, cfg)
             return _Esito.STORE_NON_TROVATO, 0, False
 
         # ── Gestione negozio ──────────────────────────────────────────────────
-        esito_neg, acquistati, refreshed = await self._gestisci_negozio(
+        esito_neg, acquistati, refreshed = self._gestisci_negozio(
             device, matcher, cx_fin, cy_fin, log, cfg
         )
 
         # ── Ripristina banner ─────────────────────────────────────────────────
-        await self._ripristina_banner(device, stato_banner, log, cfg)
+        self._ripristina_banner(device, stato_banner, log, cfg)
 
         # ── Verifica HOME finale ──────────────────────────────────────────────
-        shot = await device.screenshot()
+        shot = device.screenshot()
         home_ok = matcher.exists(shot, "pin/pin_home.png", threshold=0.80)
         if not home_ok:
             log("WARN: non in home dopo store — BACK")
-            await device.back()
-            await asyncio.sleep(cfg.wait_back)
+            device.back()
+            time.sleep(cfg.wait_back)
 
         return esito_neg, acquistati, refreshed
 
     # ── Negozio ───────────────────────────────────────────────────────────────
 
-    async def _gestisci_negozio(
+    def _gestisci_negozio(
         self,
         device:   "MuMuDevice | FakeDevice",
         matcher:  "TemplateMatcher",
@@ -293,7 +295,7 @@ class StoreTask(Task):
         log(f"Tap edificio ({cx_store},{cy_store})")
 
         # Controlla mercante visibile prima del tap
-        shot = await device.screenshot()
+        shot = device.screenshot()
         mercante_diretto = False
         s_merc = matcher.score(shot, cfg.tmpl_mercante, zone=cfg.roi_negozio)
         log(f"Pre-tap mercante: score={s_merc:.3f} (soglia={cfg.soglia_mercante:.2f})")
@@ -301,10 +303,10 @@ class StoreTask(Task):
             mercante_diretto = True
             log("Mercante visibile — apertura diretta (skip carrello)")
 
-        await device.tap(cx_store, cy_store)
-        await asyncio.sleep(cfg.wait_tap)
+        device.tap(cx_store, cy_store)
+        time.sleep(cfg.wait_tap)
 
-        shot = await device.screenshot()
+        shot = device.screenshot()
 
         if not mercante_diretto:
             # Flusso standard: verifica label → tap carrello
@@ -312,8 +314,8 @@ class StoreTask(Task):
             log(f"Label: score={s_label:.3f} (soglia={cfg.soglia_store_attivo:.2f})")
             if s_label < cfg.soglia_store_attivo:
                 log("Label non trovata — abort")
-                await device.back()
-                await asyncio.sleep(cfg.wait_back)
+                device.back()
+                time.sleep(cfg.wait_back)
                 return _Esito.LABEL_NON_TROVATA, 0, False
 
             r_carr = matcher.find_one(shot, cfg.tmpl_carrello,
@@ -321,22 +323,22 @@ class StoreTask(Task):
             log(f"Carrello: score={r_carr.score:.3f} (soglia={cfg.soglia_carrello:.2f})")
             if not r_carr.found:
                 log("Carrello non trovato — abort")
-                await device.back()
-                await asyncio.sleep(cfg.wait_back)
+                device.back()
+                time.sleep(cfg.wait_back)
                 return _Esito.CARRELLO_NON_TROVATO, 0, False
 
             log(f"Tap carrello ({r_carr.cx},{r_carr.cy})")
-            await device.tap(r_carr.cx, r_carr.cy)
-            await asyncio.sleep(cfg.wait_tap + 0.2)
+            device.tap(r_carr.cx, r_carr.cy)
+            time.sleep(cfg.wait_tap + 0.2)
 
         # Verifica merchant aperto
-        shot = await device.screenshot()
+        shot = device.screenshot()
         s_merch = matcher.score(shot, cfg.tmpl_merchant)
         log(f"Merchant aperto: score={s_merch:.3f} (soglia={cfg.soglia_merchant:.2f})")
         if s_merch < cfg.soglia_merchant:
             log("Merchant non confermato — abort")
-            await device.back()
-            await asyncio.sleep(cfg.wait_back)
+            device.back()
+            time.sleep(cfg.wait_back)
             return _Esito.MERCHANT_NON_APERTO, 0, False
 
         # ── Cicli acquisto ────────────────────────────────────────────────────
@@ -350,7 +352,7 @@ class StoreTask(Task):
             log(f"Ciclo acquisti {ciclo + 1}")
 
             for pagina in range(cfg.max_pagine):
-                n_acq = await self._acquista_pagina(
+                n_acq = self._acquista_pagina(
                     device, matcher,
                     pagina_n=ciclo * 10 + pagina + 1,
                     log=log, cfg=cfg
@@ -359,18 +361,18 @@ class StoreTask(Task):
 
                 if pagina < cfg.max_pagine - 1:
                     log(f"Swipe ↓ pagina {pagina + 1} → {pagina + 2}")
-                    await self._swipe_merchant(device, verso_basso=True, cfg=cfg)
+                    self._swipe_merchant(device, verso_basso=True, cfg=cfg)
 
             # Torna in cima
             for _ in range(cfg.max_pagine - 1):
-                await self._swipe_merchant(device, verso_basso=False, cfg=cfg)
-            await asyncio.sleep(0.5)
+                self._swipe_merchant(device, verso_basso=False, cfg=cfg)
+            time.sleep(0.5)
 
             if ciclo == 1:
                 break
 
             # Controlla refresh
-            shot = await device.screenshot()
+            shot = device.screenshot()
 
             s_noref = matcher.score(shot, cfg.tmpl_no_refresh, zone=cfg.roi_footer)
             if s_noref >= cfg.soglia_no_refresh:
@@ -386,22 +388,22 @@ class StoreTask(Task):
                 break
 
             log(f"Tap Free Refresh ({r_free.cx},{r_free.cy})")
-            await device.tap(r_free.cx, r_free.cy)
-            await asyncio.sleep(cfg.wait_refresh)
+            device.tap(r_free.cx, r_free.cy)
+            time.sleep(cfg.wait_refresh)
             refreshed = True
             log("Free Refresh eseguito ✓")
 
         # Chiudi negozio
         log("Chiusura → BACK")
-        await device.back()
-        await asyncio.sleep(cfg.wait_back + 0.5)
+        device.back()
+        time.sleep(cfg.wait_back + cfg.wait_back_extra)
 
         log(f"Completato — acquistati: {totale}  refresh: {refreshed}")
         return _Esito.COMPLETATO, totale, refreshed
 
     # ── Acquisto pagina ───────────────────────────────────────────────────────
 
-    async def _acquista_pagina(
+    def _acquista_pagina(
         self,
         device:  "MuMuDevice | FakeDevice",
         matcher: "TemplateMatcher",
@@ -410,7 +412,7 @@ class StoreTask(Task):
         cfg:     StoreConfig,
     ) -> int:
         """Acquista tutti i pulsanti gialli visibili. Ritorna n acquisti."""
-        shot = await device.screenshot()
+        shot = device.screenshot()
         candidati = self._conta_pulsanti(shot, matcher, cfg)
         log(f"Pagina {pagina_n}: {len(candidati)} pulsanti trovati")
 
@@ -419,12 +421,12 @@ class StoreTask(Task):
 
         for i, (cy, cx, score, pin_file) in enumerate(candidati):
             log(f"Acquisto #{i}: tap ({cx},{cy}) [{pin_file} {score:.3f}]")
-            await device.tap(cx, cy)
-            await asyncio.sleep(cfg.wait_tap)
+            device.tap(cx, cy)
+            time.sleep(cfg.wait_tap)
 
         # Verifica finale
-        await asyncio.sleep(cfg.wait_post_acquisto)
-        shot_after = await device.screenshot()
+        time.sleep(cfg.wait_post_acquisto)
+        shot_after = device.screenshot()
         rimasti = self._conta_pulsanti(shot_after, matcher, cfg)
         if rimasti:
             log(f"ATTENZIONE: {len(rimasti)} pulsanti ancora presenti dopo acquisto")
@@ -458,7 +460,7 @@ class StoreTask(Task):
 
     # ── Banner ────────────────────────────────────────────────────────────────
 
-    async def _comprimi_banner(
+    def _comprimi_banner(
         self,
         device:  "MuMuDevice | FakeDevice",
         matcher: "TemplateMatcher",
@@ -466,13 +468,13 @@ class StoreTask(Task):
         cfg:     StoreConfig,
     ) -> str:
         """Collassa il banner eventi. Ritorna stato originale."""
-        shot = await device.screenshot()
+        shot = device.screenshot()
         stato = self._rileva_banner(shot, matcher, cfg)
         if stato == "aperto":
             log(f"Banner: collasso → tap ({cfg.banner_tap_x},{cfg.banner_tap_y})")
-            await device.tap(cfg.banner_tap_x, cfg.banner_tap_y)
-            await asyncio.sleep(0.5)
-            shot2 = await device.screenshot()
+            device.tap(cfg.banner_tap_x, cfg.banner_tap_y)
+            time.sleep(0.5)
+            shot2 = device.screenshot()
             if self._rileva_banner(shot2, matcher, cfg) == "chiuso":
                 log("Banner collassato ✓")
             else:
@@ -483,7 +485,7 @@ class StoreTask(Task):
             log("Banner sconosciuto — procedo")
         return stato
 
-    async def _ripristina_banner(
+    def _ripristina_banner(
         self,
         device:       "MuMuDevice | FakeDevice",
         stato_orig:   str,
@@ -493,8 +495,8 @@ class StoreTask(Task):
         if stato_orig != "aperto":
             return
         log(f"Banner: ripristino → tap ({cfg.banner_tap_x},{cfg.banner_tap_y})")
-        await device.tap(cfg.banner_tap_x, cfg.banner_tap_y)
-        await asyncio.sleep(0.5)
+        device.tap(cfg.banner_tap_x, cfg.banner_tap_y)
+        time.sleep(0.5)
 
     def _rileva_banner(self, shot, matcher: "TemplateMatcher", cfg: StoreConfig) -> str:
         s_ap = matcher.score(shot, cfg.tmpl_banner_aperto, zone=cfg.roi_banner_pin)
@@ -507,7 +509,7 @@ class StoreTask(Task):
 
     # ── Swipe helpers ─────────────────────────────────────────────────────────
 
-    async def _swipe_mappa(
+    def _swipe_mappa(
         self,
         device: "MuMuDevice | FakeDevice",
         dx: int,
@@ -519,13 +521,13 @@ class StoreTask(Task):
             return
         x2 = max(10,  min(950, cfg.swipe_cx - dx))
         y2 = max(130, min(450, cfg.swipe_cy - dy))
-        await device.swipe(
+        device.swipe(
             cfg.swipe_cx, cfg.swipe_cy, x2, y2,
             duration_ms=cfg.swipe_dur_ms,
         )
-        await asyncio.sleep(cfg.wait_swipe)
+        time.sleep(cfg.wait_swipe)
 
-    async def _swipe_merchant(
+    def _swipe_merchant(
         self,
         device:      "MuMuDevice | FakeDevice",
         verso_basso: bool,
@@ -535,8 +537,8 @@ class StoreTask(Task):
         sy = 300
         ey = (300 - cfg.merchant_swipe_dy) if verso_basso else (300 + cfg.merchant_swipe_dy)
         ey = max(120, min(440, ey))
-        await device.swipe(480, sy, 480, ey, duration_ms=cfg.merchant_swipe_dur)
-        await asyncio.sleep(cfg.wait_swipe + 0.1)
+        device.swipe(480, sy, 480, ey, duration_ms=cfg.merchant_swipe_dur)
+        time.sleep(cfg.wait_swipe + cfg.wait_swipe_extra)
 
     # ── Mapping esito → TaskResult ────────────────────────────────────────────
 

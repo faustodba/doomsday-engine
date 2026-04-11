@@ -38,7 +38,6 @@ Logica principale
 from __future__ import annotations
 
 import time
-import logging
 from dataclasses import dataclass, field
 from typing import Literal
 
@@ -48,7 +47,6 @@ from core.task import Task, TaskContext, TaskResult
 from core.navigator import GameNavigator, Screen
 from shared.template_matcher import TemplateMatcher
 
-logger = logging.getLogger(__name__)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -131,17 +129,15 @@ class ArenaTask(Task):
 
     # ── Task ABC ──────────────────────────────────────────────────────────────
 
-    @property
     def name(self) -> str:
         return "arena"
 
-    @property
-    def schedule_type(self) -> Literal["daily", "periodic"]:
-        return "daily"
-
-    @property
-    def priority(self) -> int:
-        return 20
+    def should_run(self, ctx: TaskContext) -> bool:
+        if ctx.device is None or ctx.matcher is None:
+            return False
+        if hasattr(ctx.config, "task_abilitato"):
+            return ctx.config.task_abilitato("arena")
+        return True
 
     def run(self, ctx: TaskContext) -> TaskResult:
         run = _ArenaRun()
@@ -159,19 +155,19 @@ class ArenaTask(Task):
     # ── Entry point interno ───────────────────────────────────────────────────
 
     def _esegui(self, ctx: TaskContext, run: _ArenaRun) -> None:
-        logger.info("[ARENA] Avvio Arena of Glory (max %d sfide)", MAX_SFIDE)
+        ctx.log_msg("[ARENA] Avvio Arena of Glory (max %d sfide)", MAX_SFIDE)
 
         for tentativo in range(1, MAX_TENTATIVI + 1):
-            logger.info("[ARENA] tentativo %d/%d", tentativo, MAX_TENTATIVI)
+            ctx.log_msg("[ARENA] tentativo %d/%d", tentativo, MAX_TENTATIVI)
 
             # 1. Verifica HOME
             if not self._assicura_home(ctx):
-                logger.warning("[ARENA] impossibile confermare home (t=%d)", tentativo)
+                ctx.log_msg("[ARENA] impossibile confermare home (t=%d)", tentativo)
                 continue
 
             # 2. Naviga verso lista arena
             if not self._naviga_a_arena(ctx):
-                logger.warning("[ARENA] lista arena non raggiunta (t=%d) — torno home", tentativo)
+                ctx.log_msg("[ARENA] lista arena non raggiunta (t=%d) — torno home", tentativo)
                 self._torna_home(ctx)
                 continue
 
@@ -190,12 +186,12 @@ class ArenaTask(Task):
                 if esito == "ok":
                     run.sfide_eseguite += 1
                     errori_consec = 0
-                    logger.info("[ARENA] Progresso: %d/%d", run.sfide_eseguite, MAX_SFIDE)
+                    ctx.log_msg("[ARENA] Progresso: %d/%d", run.sfide_eseguite, MAX_SFIDE)
                     continue
 
                 # esito == "errore"
                 errori_consec += 1
-                logger.warning("[ARENA] errore sfida %d (%d/%d consec.)",
+                ctx.log_msg("[ARENA] errore sfida %d (%d/%d consec.)",
                                i, errori_consec, MAX_ERRORI_CONSEC)
                 if errori_consec >= MAX_ERRORI_CONSEC:
                     errore_loop = f"troppi errori consecutivi alla sfida {i}"
@@ -204,25 +200,25 @@ class ArenaTask(Task):
 
             # 4. Valuta successo
             successo = run.esaurite or run.sfide_eseguite >= MAX_SFIDE
-            logger.info("[ARENA] t=%d sfide=%d esaurite=%s successo=%s",
+            ctx.log_msg("[ARENA] t=%d sfide=%d esaurite=%s successo=%s",
                         tentativo, run.sfide_eseguite, run.esaurite, successo)
 
             self._torna_home(ctx)
 
             if successo:
-                logger.info("[ARENA] completato ✓ — %d sfide%s",
+                ctx.log_msg("[ARENA] completato ✓ — %d sfide%s",
                             run.sfide_eseguite,
                             " (esaurite)" if run.esaurite else "")
                 return
 
             if errore_loop:
                 run.errore = errore_loop
-            logger.info("[ARENA] t=%d incompleto — %s",
+            ctx.log_msg("[ARENA] t=%d incompleto — %s",
                         tentativo,
                         "altro tentativo" if tentativo < MAX_TENTATIVI else "fallito")
 
         if not (run.sfide_eseguite > 0 or run.esaurite):
-            logger.error("[ARENA] fallito dopo %d tentativi", MAX_TENTATIVI)
+            ctx.log_msg("[ARENA] fallito dopo %d tentativi", MAX_TENTATIVI)
             if not run.errore:
                 run.errore = "nessuna sfida eseguita dopo tutti i tentativi"
 
@@ -241,10 +237,10 @@ class ArenaTask(Task):
             time.sleep(0.8)
             screen = ctx.device.screenshot()
             if screen is not None and nav.current_screen(screen) == Screen.HOME:
-                logger.debug("[ARENA] home confermata (ciclo %d)", ciclo + 1)
+                ctx.log_msg("[ARENA] home confermata (ciclo %d)", ciclo + 1)
                 return True
-            logger.debug("[ARENA] non in home (ciclo %d) — riprovo", ciclo + 1)
-        logger.warning("[ARENA] impossibile confermare home dopo 3 cicli")
+            ctx.log_msg("[ARENA] non in home (ciclo %d) — riprovo", ciclo + 1)
+        ctx.log_msg("[ARENA] impossibile confermare home dopo 3 cicli")
         return False
 
     def _naviga_a_arena(self, ctx: TaskContext) -> bool:
@@ -254,11 +250,11 @@ class ArenaTask(Task):
         Verifica pin_arena_01_lista (retry=2).
         Ritorna True se lista visibile.
         """
-        logger.info("[ARENA] HOME → Campaign")
+        ctx.log_msg("[ARENA] HOME → Campaign")
         ctx.device.tap(*_TAP_CAMPAIGN)
         time.sleep(3.0)
 
-        logger.info("[ARENA] Campaign → Arena of Doom")
+        ctx.log_msg("[ARENA] Campaign → Arena of Doom")
         ctx.device.tap(*_TAP_ARENA_OF_DOOM)
         time.sleep(3.5)
 
@@ -269,9 +265,9 @@ class ArenaTask(Task):
         # Verifica lista arena
         ok = self._check_pin(ctx, "lista", retry=2, retry_s=2.0)
         if ok:
-            logger.info("[ARENA] [PRE-LISTA] lista aperta OK")
+            ctx.log_msg("[ARENA] [PRE-LISTA] lista aperta OK")
         else:
-            logger.warning("[ARENA] [PRE-LISTA] ANOMALIA: lista non rilevata")
+            ctx.log_msg("[ARENA] [PRE-LISTA] ANOMALIA: lista non rilevata")
         return ok
 
     def _torna_home(self, ctx: TaskContext) -> None:
@@ -279,7 +275,7 @@ class ArenaTask(Task):
         Doppio tap centro + 4x BACK.
         Il doppio tap chiude overlay/risultati persistenti (fix FAU_07).
         """
-        logger.info("[ARENA] ritorno HOME — doppio tap centro + BACK×4")
+        ctx.log_msg("[ARENA] ritorno HOME — doppio tap centro + BACK×4")
         self._doppio_tap_centro(ctx)
         time.sleep(1.5)
         for _ in range(4):
@@ -301,18 +297,18 @@ class ArenaTask(Task):
           "ok"       — sfida completata (victory o failure)
           "errore"   — anomalia (lista non visibile, challenge non visibile)
         """
-        logger.info("[ARENA] sfida %d/%d", n, MAX_SFIDE)
+        ctx.log_msg("[ARENA] sfida %d/%d", n, MAX_SFIDE)
 
         # GUARD-GLORY: popup Glory può comparire tra sfide (cambio tier mid-session)
         screen_guard = ctx.device.screenshot()
         if screen_guard is not None and self._match(ctx, screen_guard, "glory"):
-            logger.info("[ARENA] [GUARD-GLORY] popup Glory pre-sfida — chiudo")
+            ctx.log_msg("[ARENA] [GUARD-GLORY] popup Glory pre-sfida — chiudo")
             ctx.device.tap(*_TAP_GLORY_CONTINUE)
             time.sleep(2.0)
 
         # PRE-SFIDA: lista visibile?
         if not self._check_pin(ctx, "lista", retry=1, retry_s=1.5):
-            logger.warning("[ARENA] [PRE-SFIDA] lista non visibile — abort sfida")
+            ctx.log_msg("[ARENA] [PRE-SFIDA] lista non visibile — abort sfida")
             return "errore"
 
         ctx.device.tap(*_TAP_ULTIMA_SFIDA)
@@ -320,62 +316,62 @@ class ArenaTask(Task):
 
         # CHECK-PURCHASE: sfide esaurite?
         if self._check_pin(ctx, "purchase", retry=1, retry_s=1.0):
-            logger.info("[ARENA] [CHECK-PURCHASE] sfide esaurite → Cancel")
+            ctx.log_msg("[ARENA] [CHECK-PURCHASE] sfide esaurite → Cancel")
             ctx.device.tap(*_TAP_ESAURITE_CANCEL)
             time.sleep(1.5)
             return "esaurite"
 
         # PRE-CHALLENGE: START CHALLENGE visibile?
         if not self._check_pin(ctx, "challenge", retry=2, retry_s=1.5):
-            logger.warning("[ARENA] [PRE-CHALLENGE] START CHALLENGE non visibile — abort")
+            ctx.log_msg("[ARENA] [PRE-CHALLENGE] START CHALLENGE non visibile — abort")
             ctx.device.back()
             time.sleep(1.5)
             return "errore"
 
-        logger.info("[ARENA] [PRE-CHALLENGE] START CHALLENGE — tap")
+        ctx.log_msg("[ARENA] [PRE-CHALLENGE] START CHALLENGE — tap")
         ctx.device.tap(*_TAP_START_CHALLENGE)
 
         # Attesa battaglia
         victory, failure = self._attendi_fine_battaglia(ctx)
 
         if victory:
-            logger.info("[ARENA] [POST-BATTAGLIA] Victory ✓")
+            ctx.log_msg("[ARENA] [POST-BATTAGLIA] Victory ✓")
         elif failure:
-            logger.info("[ARENA] [POST-BATTAGLIA] Failure")
+            ctx.log_msg("[ARENA] [POST-BATTAGLIA] Failure")
         else:
-            logger.warning("[ARENA] [POST-BATTAGLIA] timeout — né Victory né Failure")
+            ctx.log_msg("[ARENA] [POST-BATTAGLIA] timeout — né Victory né Failure")
 
         # Diagnostico: pin_continue (solo logging)
         screen_diag = ctx.device.screenshot()
         if screen_diag is not None:
             ok_cont = self._match(ctx, screen_diag, "continue")
-            logger.debug("[ARENA] [PRE-CONTINUE] pin_arena_05=%s", ok_cont)
+            ctx.log_msg("[ARENA] [PRE-CONTINUE] pin_arena_05=%s", ok_cont)
 
         # Tap "Tap to continue" con coordinata dipendente dal risultato
         if victory:
-            logger.info("[ARENA] [CONTINUE] Victory → tap %s", _TAP_CONTINUE_VICTORY)
+            ctx.log_msg("[ARENA] [CONTINUE] Victory → tap %s", _TAP_CONTINUE_VICTORY)
             ctx.device.tap(*_TAP_CONTINUE_VICTORY)
         elif failure:
-            logger.info("[ARENA] [CONTINUE] Failure → tap %s", _TAP_CONTINUE_FAILURE)
+            ctx.log_msg("[ARENA] [CONTINUE] Failure → tap %s", _TAP_CONTINUE_FAILURE)
             ctx.device.tap(*_TAP_CONTINUE_FAILURE)
         else:
-            logger.info("[ARENA] [CONTINUE] fallback → doppio tap centro")
+            ctx.log_msg("[ARENA] [CONTINUE] fallback → doppio tap centro")
             self._doppio_tap_centro(ctx)
         time.sleep(2.5)
 
         # POST-CONTINUE: popup Glory post-vittoria (cambio tier)?
         screen_post = ctx.device.screenshot()
         if screen_post is not None and self._match(ctx, screen_post, "glory"):
-            logger.info("[ARENA] [POST-CONTINUE] popup Glory — chiudo")
+            ctx.log_msg("[ARENA] [POST-CONTINUE] popup Glory — chiudo")
             ctx.device.tap(*_TAP_GLORY_CONTINUE)
             time.sleep(2.0)
 
         # Verifica ritorno lista
         if not self._check_pin(ctx, "lista", retry=2, retry_s=1.5):
-            logger.info("[ARENA] [POST-CONTINUE] lista non tornata — retry dopo 2s")
+            ctx.log_msg("[ARENA] [POST-CONTINUE] lista non tornata — retry dopo 2s")
             time.sleep(2.0)
             if not self._check_pin(ctx, "lista", retry=2, retry_s=1.5):
-                logger.warning("[ARENA] [POST-CONTINUE] lista ancora non visibile — procedo comunque")
+                ctx.log_msg("[ARENA] [POST-CONTINUE] lista ancora non visibile — procedo comunque")
 
         return "ok"
 
@@ -392,14 +388,14 @@ class ArenaTask(Task):
         if not self._match(ctx, screen, "glory"):
             return False
 
-        logger.info("[ARENA] popup Glory Silver — tap Continue")
+        ctx.log_msg("[ARENA] popup Glory Silver — tap Continue")
         ctx.device.tap(*_TAP_GLORY_CONTINUE)
         time.sleep(2.0)
 
         # Riverifica
         screen2 = ctx.device.screenshot()
         if screen2 is not None and self._match(ctx, screen2, "glory"):
-            logger.info("[ARENA] popup Glory ancora visibile — retry tap")
+            ctx.log_msg("[ARENA] popup Glory ancora visibile — retry tap")
             ctx.device.tap(*_TAP_GLORY_CONTINUE)
             time.sleep(2.0)
         return True
@@ -421,7 +417,7 @@ class ArenaTask(Task):
         px, py = _CONGRATS_CHECK_XY
         pixel = img[py, px]
         if np.all(pixel >= _CONGRATS_BGR_LOW) and np.all(pixel <= _CONGRATS_BGR_HIGH):
-            logger.info("[ARENA] popup Congratulations (pixel) — tap Continue")
+            ctx.log_msg("[ARENA] popup Congratulations (pixel) — tap Continue")
             ctx.device.tap(*_TAP_CONGRATULATIONS)
             time.sleep(2.0)
             return True
@@ -436,7 +432,7 @@ class ArenaTask(Task):
         Returns:
             (victory, failure) — entrambi False = timeout/anomalia.
         """
-        logger.info("[ARENA] attesa battaglia — delay iniziale %.0fs", _DELAY_BATTAGLIA_S)
+        ctx.log_msg("[ARENA] attesa battaglia — delay iniziale %.0fs", _DELAY_BATTAGLIA_S)
         time.sleep(_DELAY_BATTAGLIA_S)
 
         t_start = time.time()
@@ -447,12 +443,12 @@ class ArenaTask(Task):
                 failure = self._match(ctx, screen, "failure")
                 elapsed = _DELAY_BATTAGLIA_S + (time.time() - t_start)
                 if victory or failure:
-                    logger.info("[ARENA] fine battaglia in %.1fs totali", elapsed)
+                    ctx.log_msg("[ARENA] fine battaglia in %.1fs totali", elapsed)
                     return victory, failure
             time.sleep(_POLL_BATTAGLIA_S)
 
         totale = _DELAY_BATTAGLIA_S + _MAX_BATTAGLIA_S
-        logger.warning("[ARENA] timeout battaglia dopo %.0fs", totale)
+        ctx.log_msg("[ARENA] timeout battaglia dopo %.0fs", totale)
         return False, False
 
     # ── Primitivi template matching ───────────────────────────────────────────
@@ -465,7 +461,7 @@ class ArenaTask(Task):
         spec = _ARENA_PIN[key]
         score = ctx.matcher.match(screen, spec.path, spec.roi)
         ok = score >= spec.soglia
-        logger.debug("[ARENA-PIN] %s: score=%.3f → %s", key, score, "OK" if ok else "NON trovato")
+        ctx.log_msg("[ARENA-PIN] %s: score=%.3f → %s", key, score, "OK" if ok else "NON trovato")
         return ok
 
     def _check_pin(self,
@@ -481,7 +477,7 @@ class ArenaTask(Task):
         for tentativo in range(retry + 1):
             screen = ctx.device.screenshot()
             if screen is None:
-                logger.debug("[ARENA-PIN] %s: screenshot fallito (t=%d)", key, tentativo + 1)
+                ctx.log_msg("[ARENA-PIN] %s: screenshot fallito (t=%d)", key, tentativo + 1)
                 time.sleep(retry_s)
                 continue
             ok = self._match(ctx, screen, key)

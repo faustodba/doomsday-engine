@@ -91,6 +91,11 @@ class FakeCtx:
         self.matcher   = matcher   or FakeMatcher()
         self.navigator = navigator or FakeNavigator(home=True)
         self.instance_id = "FAU_00"
+        self.config      = type('Cfg', (), {'task_abilitato': lambda self, n: True})()
+        self.log         = None
+
+    def log_msg(self, *args, **kwargs) -> None:
+        pass
 
 
 # ──────────────────────────────────────────────────────────────────────────────

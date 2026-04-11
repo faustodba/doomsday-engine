@@ -19,7 +19,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 
 import pytest
@@ -40,14 +39,14 @@ class FakeDevice:
         self.name  = name
         self.calls: list[tuple] = []
 
-    async def screenshot(self):
+    def screenshot(self):
         self.calls.append(("screenshot",))
         return FakeScreenshot()
 
-    async def tap(self, x: int, y: int) -> None:
+    def tap(self, x: int, y: int) -> None:
         self.calls.append(("tap", x, y))
 
-    async def back(self) -> None:
+    def back(self) -> None:
         self.calls.append(("back",))
 
     def tap_count(self) -> int:
@@ -113,8 +112,6 @@ def _make_ctx(device=None, matcher=None, navigator=None, abilitato=True):
     )
 
 
-def run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
 
 
 def _cfg() -> VipConfig:
@@ -218,11 +215,11 @@ class TestCheckPin:
         m   = FakeMatcher()
         m.set_sequence(cfg.tmpl_store, scores)
         device = FakeDevice()
-        return run(_task(cfg)._check_pin(
+        return _task(cfg)._check_pin(
             device, m, cfg.tmpl_store, soglia, cfg.roi_store,
             retry=retry, retry_sleep=0,
             log=lambda x: None, label="TEST"
-        ))
+        )
 
     def test_trovato_subito(self):
         assert self._check([0.90]) is True
@@ -248,11 +245,11 @@ class TestPollingGate:
         m   = FakeMatcher()
         m.set_sequence(cfg.tmpl_store, scores)
         device = FakeDevice()
-        return run(_task(cfg)._polling_gate(
+        return _task(cfg)._polling_gate(
             device, m, cfg.tmpl_store, cfg.soglia_store, cfg.roi_store,
             max_poll=max_poll, poll_sleep=0,
             log=lambda x: None, label="TEST"
-        ))
+        )
 
     def test_trovato_al_primo_poll(self):
         assert self._gate([0.90]) is True
@@ -277,7 +274,7 @@ class TestGestisciCassaforte:
         m.set_sequence(cfg.tmpl_cass_chiusa, [0.10])
         m.set_sequence(cfg.tmpl_cass_aperta, [0.90])
         device = FakeDevice()
-        ok = run(_task(cfg)._gestisci_cassaforte(device, m, lambda x: None, cfg))
+        ok = _task(cfg)._gestisci_cassaforte(device, m, lambda x: None, cfg)
         assert ok is True
         assert device.taps_at(*cfg.tap_claim_cassaforte) == 0
 
@@ -291,7 +288,7 @@ class TestGestisciCassaforte:
         m.set_score(cfg.tmpl_popup_cass, 0.90)
         m.set_score(cfg.tmpl_store, 0.90)   # GATE-C
         device = FakeDevice()
-        ok = run(_task(cfg)._gestisci_cassaforte(device, m, lambda x: None, cfg))
+        ok = _task(cfg)._gestisci_cassaforte(device, m, lambda x: None, cfg)
         assert ok is True
         assert device.taps_at(*cfg.tap_claim_cassaforte) == 1
 
@@ -302,7 +299,7 @@ class TestGestisciCassaforte:
         m.set_score(cfg.tmpl_cass_chiusa, 0.10)
         m.set_score(cfg.tmpl_cass_aperta, 0.10)
         device = FakeDevice()
-        ok = run(_task(cfg)._gestisci_cassaforte(device, m, lambda x: None, cfg))
+        ok = _task(cfg)._gestisci_cassaforte(device, m, lambda x: None, cfg)
         assert ok is False
 
 
@@ -318,7 +315,7 @@ class TestGestisciClaimFree:
         m.set_sequence(cfg.tmpl_free_chiuso, [0.10])
         m.set_sequence(cfg.tmpl_free_aperto, [0.90])
         device = FakeDevice()
-        ok = run(_task(cfg)._gestisci_claim_free(device, m, lambda x: None, cfg))
+        ok = _task(cfg)._gestisci_claim_free(device, m, lambda x: None, cfg)
         assert ok is True
         assert device.taps_at(*cfg.tap_claim_free) == 0
 
@@ -330,7 +327,7 @@ class TestGestisciClaimFree:
         m.set_score(cfg.tmpl_popup_free, 0.90)
         m.set_score(cfg.tmpl_store, 0.90)   # GATE-F
         device = FakeDevice()
-        ok = run(_task(cfg)._gestisci_claim_free(device, m, lambda x: None, cfg))
+        ok = _task(cfg)._gestisci_claim_free(device, m, lambda x: None, cfg)
         assert ok is True
         assert device.taps_at(*cfg.tap_claim_free) == 1
 
@@ -343,7 +340,7 @@ class TestGestisciClaimFree:
         m.set_score(cfg.tmpl_popup_free, 0.90)
         m.set_score(cfg.tmpl_store, 0.90)
         device = FakeDevice()
-        run(_task(cfg)._gestisci_claim_free(device, m, lambda x: None, cfg))
+        _task(cfg)._gestisci_claim_free(device, m, lambda x: None, cfg)
         assert device.taps_at(*cfg.tap_chiudi_reward_free) >= 1
 
     def test_nessun_pin_anomalia(self):
@@ -352,7 +349,7 @@ class TestGestisciClaimFree:
         m.set_score(cfg.tmpl_free_chiuso, 0.10)
         m.set_score(cfg.tmpl_free_aperto, 0.10)
         device = FakeDevice()
-        ok = run(_task(cfg)._gestisci_claim_free(device, m, lambda x: None, cfg))
+        ok = _task(cfg)._gestisci_claim_free(device, m, lambda x: None, cfg)
         assert ok is False
 
 
@@ -366,7 +363,7 @@ class TestRunCompleto:
         device  = FakeDevice()
         matcher = _matcher_tutto_ok()
         ctx     = _make_ctx(device=device, matcher=matcher)
-        result  = run(_task().run(ctx))
+        result = _task().run(ctx)
         assert result.success is True
         assert result.skipped is False
         assert result.data["cass_ok"] is True
@@ -378,7 +375,7 @@ class TestRunCompleto:
         device  = FakeDevice()
         matcher = _matcher_tutto_ok()
         ctx     = _make_ctx(device=device, matcher=matcher)
-        run(_task(cfg).run(ctx))
+        _task(cfg).run(ctx)
         assert device.back_count() == cfg.n_back_chiudi
 
     def test_tap_badge_eseguito(self):
@@ -386,7 +383,7 @@ class TestRunCompleto:
         device  = FakeDevice()
         matcher = _matcher_tutto_ok()
         ctx     = _make_ctx(device=device, matcher=matcher)
-        run(_task(cfg).run(ctx))
+        _task(cfg).run(ctx)
         assert device.taps_at(*cfg.tap_badge) == 1
 
 
@@ -403,7 +400,7 @@ class TestMascheraNonAperta:
         # store mai visibile → maschera mai aperta
         matcher = FakeMatcher({cfg.tmpl_store: 0.10})
         ctx     = _make_ctx(device=device, matcher=matcher)
-        result  = run(VipTask(config=cfg).run(ctx))
+        result = VipTask(config=cfg).run(ctx)
         assert result.success is True
         assert result.skipped is True
 
@@ -413,7 +410,7 @@ class TestMascheraNonAperta:
         device  = FakeDevice()
         matcher = FakeMatcher({cfg.tmpl_store: 0.10})
         ctx     = _make_ctx(device=device, matcher=matcher)
-        run(VipTask(config=cfg).run(ctx))
+        VipTask(config=cfg).run(ctx)
         assert device.taps_at(*cfg.tap_badge) == 2
 
 

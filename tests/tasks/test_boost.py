@@ -22,7 +22,6 @@
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass, field
 from typing import Any
 from unittest.mock import MagicMock
@@ -60,26 +59,26 @@ class FakeDevice:
         self.calls: list[tuple] = []
         self._shot = FakeScreenshot()
 
-    async def screenshot(self) -> FakeScreenshot:
+    def screenshot(self) -> FakeScreenshot:
         self.calls.append(("screenshot",))
         return self._shot
 
-    async def tap(self, x: int, y: int) -> None:
+    def tap(self, x: int, y: int) -> None:
         self.calls.append(("tap", x, y))
 
-    async def back(self) -> None:
+    def back(self) -> None:
         self.calls.append(("back",))
 
-    async def swipe(self, x1, y1, x2, y2, duration_ms=400) -> None:
+    def swipe(self, x1, y1, x2, y2, duration_ms=400) -> None:
         self.calls.append(("swipe", x1, y1, x2, y2))
 
-    async def scroll(self, x1, y1, x2, y2, durata_ms=400) -> None:
+    def scroll(self, x1, y1, x2, y2, durata_ms=400) -> None:
         self.calls.append(("scroll", x1, y1, x2, y2))
 
-    async def keyevent(self, code: str) -> None:
+    def keyevent(self, code: str) -> None:
         self.calls.append(("keyevent", code))
 
-    async def input_text(self, text: str) -> None:
+    def input_text(self, text: str) -> None:
         self.calls.append(("input_text", text))
 
     def tap_count(self) -> int:
@@ -154,6 +153,26 @@ class FakeLogger:
         self.records.append(("ERROR", task, msg))
 
 
+
+def _cfg_zero() -> BoostConfig:
+    """Config con tutti i wait azzerati per test veloci."""
+    return BoostConfig(
+        wait_after_tap=0,
+        wait_after_swipe=0,
+        wait_after_use=0,
+        wait_after_back=0,
+        wait_after_speed_tap=0,
+    )
+
+
+def _cfg() -> BoostConfig:
+    return BoostConfig()
+
+
+def _task() -> BoostTask:
+    return BoostTask(config=_cfg_zero())
+
+
 def _make_ctx(
     device:  FakeDevice | None  = None,
     matcher: FakeMatcher | None = None,
@@ -184,8 +203,6 @@ def run(coro):
 # Helpers — costruzione FakeMatcher per scenari comuni
 # ==============================================================================
 
-def _cfg() -> BoostConfig:
-    return BoostConfig()
 
 
 def _matcher_popup_ok(**extra_scores) -> FakeMatcher:
@@ -209,25 +226,25 @@ def _matcher_popup_ok(**extra_scores) -> FakeMatcher:
 class TestShouldRun:
 
     def test_device_none_ritorna_false(self):
-        task = BoostTask()
+        task = _task()
         ctx  = _make_ctx(device=None, matcher=FakeMatcher())
         assert task.should_run(ctx) is False
 
     def test_matcher_none_ritorna_false(self):
-        task   = BoostTask()
+        task   = _task()
         device = FakeDevice()
         ctx    = _make_ctx(device=device, matcher=None)
         assert task.should_run(ctx) is False
 
     def test_task_disabilitato_ritorna_false(self):
-        task    = BoostTask()
+        task    = _task()
         device  = FakeDevice()
         matcher = FakeMatcher()
         ctx     = _make_ctx(device=device, matcher=matcher, task_abilitato=False)
         assert task.should_run(ctx) is False
 
     def test_condizioni_ok_ritorna_true(self):
-        task    = BoostTask()
+        task    = _task()
         device  = FakeDevice()
         matcher = FakeMatcher()
         ctx     = _make_ctx(device=device, matcher=matcher, task_abilitato=True)
@@ -313,7 +330,7 @@ class TestBoostGiaAttivo:
 
         device = FakeDevice()
         ctx    = _make_ctx(device=device, matcher=m)
-        result = run(BoostTask().run(ctx))
+        result = _task().run(ctx)
 
         assert result.success is True
         assert result.skipped is False
@@ -329,7 +346,7 @@ class TestBoostGiaAttivo:
 
         device = FakeDevice()
         ctx    = _make_ctx(device=device, matcher=m)
-        run(BoostTask().run(ctx))
+        _task().run(ctx)
 
         assert device.back_count() == cfg.n_back_chiudi
 
@@ -351,7 +368,7 @@ class TestBoost8h:
     def test_ritorna_ok_con_durata_8h(self):
         device = FakeDevice()
         ctx    = _make_ctx(device=device, matcher=self._matcher_8h())
-        result = run(BoostTask().run(ctx))
+        result = _task().run(ctx)
 
         assert result.success is True
         assert result.skipped is False
@@ -360,7 +377,7 @@ class TestBoost8h:
     def test_tap_use_eseguito(self):
         device = FakeDevice()
         ctx    = _make_ctx(device=device, matcher=self._matcher_8h())
-        run(BoostTask().run(ctx))
+        _task().run(ctx)
 
         use_taps = [c for c in device.calls if c[0] == "tap" and c[1] == 700]
         assert len(use_taps) == 1
@@ -369,7 +386,7 @@ class TestBoost8h:
         """Dopo tap USE viene inviato un solo BACK (non N_BACK_CHIUDI)."""
         device = FakeDevice()
         ctx    = _make_ctx(device=device, matcher=self._matcher_8h())
-        run(BoostTask().run(ctx))
+        _task().run(ctx)
 
         assert device.back_count() == 1
 
@@ -393,7 +410,7 @@ class TestBoost1d:
     def test_ritorna_ok_con_durata_1d(self):
         device = FakeDevice()
         ctx    = _make_ctx(device=device, matcher=self._matcher_1d())
-        result = run(BoostTask().run(ctx))
+        result = _task().run(ctx)
 
         assert result.success is True
         assert result.data.get("durata") == "1d"
@@ -401,7 +418,7 @@ class TestBoost1d:
     def test_tap_use_eseguito(self):
         device = FakeDevice()
         ctx    = _make_ctx(device=device, matcher=self._matcher_1d())
-        run(BoostTask().run(ctx))
+        _task().run(ctx)
 
         use_taps = [c for c in device.calls if c[0] == "tap" and c[1] == 700]
         assert len(use_taps) == 1
@@ -424,7 +441,7 @@ class TestNessunBoost:
     def test_ritorna_skip(self):
         device = FakeDevice()
         ctx    = _make_ctx(device=device, matcher=self._matcher_nessun_boost())
-        result = run(BoostTask().run(ctx))
+        result = _task().run(ctx)
 
         assert result.success is True
         assert result.skipped is True
@@ -433,7 +450,7 @@ class TestNessunBoost:
         cfg    = _cfg()
         device = FakeDevice()
         ctx    = _make_ctx(device=device, matcher=self._matcher_nessun_boost())
-        run(BoostTask().run(ctx))
+        _task().run(ctx)
 
         assert device.back_count() == cfg.n_back_chiudi
 
@@ -454,7 +471,7 @@ class TestPopupNonAperto:
     def test_ritorna_skip(self):
         device = FakeDevice()
         ctx    = _make_ctx(device=device, matcher=self._matcher_popup_ko())
-        result = run(BoostTask().run(ctx))
+        result = _task().run(ctx)
 
         assert result.success is True
         assert result.skipped is True
@@ -463,7 +480,7 @@ class TestPopupNonAperto:
         cfg    = _cfg()
         device = FakeDevice()
         ctx    = _make_ctx(device=device, matcher=self._matcher_popup_ko())
-        run(BoostTask().run(ctx))
+        _task().run(ctx)
 
         assert device.back_count() == cfg.n_back_chiudi
 
@@ -472,7 +489,7 @@ class TestPopupNonAperto:
         cfg    = _cfg()
         device = FakeDevice()
         ctx    = _make_ctx(device=device, matcher=self._matcher_popup_ko())
-        run(BoostTask().run(ctx))
+        _task().run(ctx)
 
         # Solo il tap iniziale su TAP_BOOST
         taps = [c for c in device.calls if c[0] == "tap"]
@@ -498,7 +515,7 @@ class TestSpeedNonTrovato:
     def test_ritorna_skip(self):
         device = FakeDevice()
         ctx    = _make_ctx(device=device, matcher=self._matcher_speed_ko())
-        result = run(BoostTask().run(ctx))
+        result = _task().run(ctx)
 
         assert result.success is True
         assert result.skipped is True
@@ -511,7 +528,7 @@ class TestSpeedNonTrovato:
         cfg    = _cfg()
         device = FakeDevice()
         ctx    = _make_ctx(device=device, matcher=self._matcher_speed_ko())
-        run(BoostTask().run(ctx))
+        _task().run(ctx)
 
         swipes = [c for c in device.calls if c[0] in ("swipe", "scroll")]
         assert len(swipes) == cfg.max_swipe
@@ -520,7 +537,7 @@ class TestSpeedNonTrovato:
         cfg    = _cfg()
         device = FakeDevice()
         ctx    = _make_ctx(device=device, matcher=self._matcher_speed_ko())
-        run(BoostTask().run(ctx))
+        _task().run(ctx)
 
         assert device.back_count() == cfg.n_back_chiudi
 
@@ -541,7 +558,7 @@ class TestNavigatorAssente:
 
         device = FakeDevice()
         ctx    = _make_ctx(device=device, matcher=m, navigator=None)
-        result = run(BoostTask().run(ctx))
+        result = _task().run(ctx)
 
         # Deve comunque completare (ok o skip, non fail strutturale)
         assert result is not None
