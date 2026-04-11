@@ -3,13 +3,13 @@
 # Step 23 — server HTTP per la dashboard di monitoraggio V6
 #
 # Endpoint:
-#   GET  /ping                → { ok, ts, version }
-#   GET  /status.json         → legge engine_status.json (scritto dall'orchestratore)
-#   GET  /config_istanze.json → legge config/instances.json + overrides runtime.json
-#   GET  /log?n=&since=&filter= → ultime N righe di bot.log
-#   POST /runtime.json        → merge conservativo di globali + overrides
+#   GET  /ping                -> { ok, ts, version }
+#   GET  /status.json         -> legge engine_status.json (scritto dall'orchestratore)
+#   GET  /config_istanze.json -> legge config/instances.json + overrides runtime.json
+#   GET  /log?n=&since=&filter= -> ultime N righe di bot.log
+#   POST /runtime.json        -> merge conservativo di globali + overrides
 #   GET  /robots.txt
-#   GET  /*                   → file statici in dashboard/
+#   GET  /*                   -> file statici in dashboard/
 # ==============================================================================
 from __future__ import annotations
 
@@ -213,7 +213,7 @@ def _make_handler(root_dir: str):
 
         def _serve_config_istanze(self):
             """
-            Legge config/instances.json e runtime.json → restituisce istanze MuMu
+            Legge config/instances.json e runtime.json -> restituisce istanze MuMu
             con overrides già applicati (la dashboard mostra il valore "effettivo"
             così il delta = 0 se l'utente non modifica nulla).
             """
@@ -290,7 +290,7 @@ def _run():
     dashboard_dir = os.path.dirname(os.path.abspath(__file__))
     Handler = _make_handler(dashboard_dir)
     server = http.server.HTTPServer(("", PORT), Handler)
-    print(f"[dashboard] Server V6 → http://localhost:{PORT}/dashboard.html")
+    print(f"[dashboard] Server V6 -> http://localhost:{PORT}/dashboard.html")
     server.serve_forever()
 
 

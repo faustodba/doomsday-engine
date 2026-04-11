@@ -175,12 +175,12 @@ class Orchestrator:
                 continue
 
             task_name = _tname(entry.task)
-            self._ctx.log(f"Orchestrator: avvio task '{task_name}'")
+            self._ctx.log_msg(f"Orchestrator: avvio task '{task_name}'")
 
             try:
                 result = entry.task.run(self._ctx)
             except Exception as exc:
-                self._ctx.log(f"Orchestrator: task '{task_name}' — eccezione: {exc}")
+                self._ctx.log_msg(f"Orchestrator: task '{task_name}' -- eccezione: {exc}")
                 result = TaskResult(
                     success=False,
                     message=f"eccezione: {exc}",
@@ -191,9 +191,9 @@ class Orchestrator:
             entry.last_result = result
             results.append(result)
 
-            self._ctx.log(
+            self._ctx.log_msg(
                 f"Orchestrator: task '{task_name}' completato "
-                f"— success={result.success} msg='{result.message}'"
+                f"-- success={result.success} msg='{result.message}'"
             )
 
         return results
