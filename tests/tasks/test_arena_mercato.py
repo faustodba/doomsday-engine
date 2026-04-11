@@ -118,9 +118,21 @@ class TestArenaMercatoTask(unittest.TestCase):
     def setUp(self):
         self._sleep_patcher = patch("tasks.arena_mercato.time.sleep")
         self._mock_sleep = self._sleep_patcher.start()
+        # Fix Step 24: _assicura_home confronta Screen da core.navigator con
+        # Screen inline del FakeNavigator → risultato sempre False.
+        # Patch per delegare a navigator._home quando disponibile.
+        def _fake_assicura_home(self_task, ctx):
+            nav = ctx.navigator
+            return getattr(nav, "_home", True)
+        self._home_patcher = patch(
+            "tasks.arena_mercato.ArenaMercatoTask._assicura_home",
+            _fake_assicura_home,
+        )
+        self._home_patcher.start()
 
     def tearDown(self):
         self._sleep_patcher.stop()
+        self._home_patcher.stop()
 
     # ── Scenario 1: solo pack 360 (3 cicli, poi 15 KO) ───────────────────────
 

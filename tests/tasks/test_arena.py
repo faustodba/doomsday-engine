@@ -153,9 +153,20 @@ class TestArenaTask(unittest.TestCase):
     def setUp(self):
         self._sleep_patcher = patch("tasks.arena.time.sleep")
         self._mock_sleep = self._sleep_patcher.start()
+        # Fix Step 24: _assicura_home confronta Screen da core.navigator con
+        # Screen inline del FakeNavigator → risultato sempre False.
+        def _fake_assicura_home(self_task, ctx):
+            nav = ctx.navigator
+            return getattr(nav, "_home", True)
+        self._home_patcher = patch(
+            "tasks.arena.ArenaTask._assicura_home",
+            _fake_assicura_home,
+        )
+        self._home_patcher.start()
 
     def tearDown(self):
         self._sleep_patcher.stop()
+        self._home_patcher.stop()
 
     # ── Scenario 1: 5 sfide Victory ──────────────────────────────────────────
 
@@ -211,8 +222,10 @@ class TestArenaTask(unittest.TestCase):
         def patched_match(screen, tmpl, roi):
             if tmpl == "pin/pin_arena_06_purchase.png":
                 call_count["lista_check"] += 1
-                # Prima due volte NON esaurite, alla terza SÌ
-                return 0.95 if call_count["lista_check"] >= 3 else 0.00
+                # _check_pin("purchase", retry=1) chiama match 2 volte per sfida.
+                # Sfida 1: call 1-2 → not esaurite. Sfida 2: call 3-4 → not esaurite.
+                # Sfida 3: call 5 → esaurite. Threshold = 5.
+                return 0.95 if call_count["lista_check"] >= 5 else 0.00
             return original_match(screen, tmpl, roi)
 
         matcher.match = patched_match
@@ -341,6 +354,10 @@ class TestArenaTask(unittest.TestCase):
         """
         Victory e Failure restituiscono score 0 → timeout → doppio tap centro.
         Il task deve comunque completare come "ok" (best-effort).
+
+        Fix Step 24: patchiamo _assicura_home per evitare la dipendenza dal
+        confronto Screen.HOME tra enum diversi (FakeNavigator locale vs
+        core.navigator.Screen), e time.time per simulare il timeout rapido.
         """
         task    = self._make_task()
         matcher = FakeMatcher()
@@ -355,11 +372,16 @@ class TestArenaTask(unittest.TestCase):
         matcher.set_score("pin/pin_arena_04_failure.png",   0.00)  # timeout
         matcher.set_score("pin/pin_arena_07_glory.png",     0.00)
 
-        # Patch time.time per simulare timeout rapido
         import tasks.arena as arena_mod
-        fake_times = iter([0.0] + [35.0] * 100)  # supera subito _MAX_BATTAGLIA_S
+        # time.time() ritorna valori crescenti: ogni call aumenta di 40s
+        # così t_start e il while check escono sempre al primo giro
+        _t = [0.0]
+        def fake_time():
+            _t[0] += 40.0
+            return _t[0]
 
-        with patch.object(arena_mod.time, "time", side_effect=lambda: next(fake_times)):
+        with patch.object(arena_mod.time, "time",  side_effect=fake_time), \
+             patch.object(arena_mod.time, "sleep", return_value=None):
             result = task.run(ctx)
 
         self.assertTrue(result.success)
