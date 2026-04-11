@@ -142,3 +142,151 @@ class FakeDevice:
 
     def __repr__(self) -> str:
         return f"FakeDevice(name={self.name!r}, taps={len(self.taps)})"
+
+
+# ==============================================================================
+#  Tipi di dato condivisi — usati da template_matcher.py e dai task
+# ==============================================================================
+
+from dataclasses import dataclass
+import numpy as np
+import cv2
+
+
+@dataclass
+class MatchResult:
+    """
+    Risultato di un'operazione di template matching.
+
+    Attributi:
+        found : True se lo score supera la soglia
+        score : valore grezzo del match (0.0 – 1.0)
+        cx    : coordinata X del centro del match
+        cy    : coordinata Y del centro del match
+    """
+    found: bool
+    score: float
+    cx:    int
+    cy:    int
+
+
+class Screenshot:
+    """
+    Wrapper attorno a un frame BGR (numpy array) con metodi di template matching.
+
+    Usato da TemplateMatcher e dai task per eseguire ricerche visive
+    senza dipendere dall'implementazione ADB concreta.
+    """
+
+    def __init__(self, frame: np.ndarray):
+        """
+        Args:
+            frame: immagine BGR come numpy array (h, w, 3)
+        """
+        self._frame = frame
+
+    @property
+    def frame(self) -> np.ndarray:
+        return self._frame
+
+    @property
+    def width(self) -> int:
+        return self._frame.shape[1]
+
+    @property
+    def height(self) -> int:
+        return self._frame.shape[0]
+
+    def crop(self, roi: tuple[int, int, int, int]) -> "Screenshot":
+        """Ritorna una nuova Screenshot ritagliata sulla ROI (x1,y1,x2,y2)."""
+        x1, y1, x2, y2 = roi
+        return Screenshot(self._frame[y1:y2, x1:x2].copy())
+
+    def match_template(
+        self,
+        template: "Screenshot",
+        threshold: float = 0.80,
+        zone: tuple[int, int, int, int] | None = None,
+    ) -> MatchResult:
+        """
+        Cerca `template` nello screenshot con cv2.TM_CCOEFF_NORMED.
+
+        Args:
+            template:  Screenshot del template da cercare
+            threshold: soglia minima per considerare il match trovato
+            zone:      (x1,y1,x2,y2) — limita la ricerca a questa area
+
+        Returns:
+            MatchResult(found, score, cx, cy)
+        """
+        haystack = self._frame
+        offset_x = offset_y = 0
+
+        if zone is not None:
+            x1, y1, x2, y2 = zone
+            haystack  = self._frame[y1:y2, x1:x2]
+            offset_x  = x1
+            offset_y  = y1
+
+        needle = template.frame
+        if haystack.shape[0] < needle.shape[0] or haystack.shape[1] < needle.shape[1]:
+            return MatchResult(False, 0.0, 0, 0)
+
+        result = cv2.matchTemplate(haystack, needle, cv2.TM_CCOEFF_NORMED)
+        _, score, _, max_loc = cv2.minMaxLoc(result)
+        score = float(score)
+
+        th, tw = needle.shape[:2]
+        cx = offset_x + max_loc[0] + tw // 2
+        cy = offset_y + max_loc[1] + th // 2
+
+        return MatchResult(found=score >= threshold, score=score, cx=cx, cy=cy)
+
+    def match_template_all(
+        self,
+        template: "Screenshot",
+        threshold: float = 0.80,
+        zone: tuple[int, int, int, int] | None = None,
+        cluster_px: int = 20,
+    ) -> list[MatchResult]:
+        """
+        Trova tutte le occorrenze del template (NMS con cluster_px).
+
+        Returns:
+            Lista di MatchResult ordinata per score decrescente.
+        """
+        haystack = self._frame
+        offset_x = offset_y = 0
+
+        if zone is not None:
+            x1, y1, x2, y2 = zone
+            haystack  = self._frame[y1:y2, x1:x2]
+            offset_x  = x1
+            offset_y  = y1
+
+        needle = template.frame
+        if haystack.shape[0] < needle.shape[0] or haystack.shape[1] < needle.shape[1]:
+            return []
+
+        result = cv2.matchTemplate(haystack, needle, cv2.TM_CCOEFF_NORMED)
+        th, tw = needle.shape[:2]
+
+        locations = np.where(result >= threshold)
+        matches: list[MatchResult] = []
+        for pt in zip(*locations[::-1]):
+            score = float(result[pt[1], pt[0]])
+            cx = offset_x + pt[0] + tw // 2
+            cy = offset_y + pt[1] + th // 2
+            matches.append(MatchResult(True, score, cx, cy))
+
+        # NMS semplice: rimuovi match troppo vicini tenendo il migliore
+        matches.sort(key=lambda m: m.score, reverse=True)
+        kept: list[MatchResult] = []
+        for m in matches:
+            if all(abs(m.cx - k.cx) > cluster_px or abs(m.cy - k.cy) > cluster_px
+                   for k in kept):
+                kept.append(m)
+        return kept
+
+    def __repr__(self) -> str:
+        return f"Screenshot(w={self.width}, h={self.height})"
