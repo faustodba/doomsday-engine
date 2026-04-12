@@ -2,18 +2,21 @@
 #  DOOMSDAY ENGINE V6 - core/navigator.py
 #
 #  Navigazione schermate del gioco — SINCRONO (Step 25).
-#  Tutte le operazioni usano time.sleep() e metodi sync del device.
 #
-#  FIX 12/04/2026:
-#    - _classifica: aggiunto log score per debug template matching in produzione
-#    - vai_in_home: log dettagliato per ogni tentativo (screen + score)
-#    - NavigatorConfig: aggiunto log_scores (default True) per diagnostica
+#  FIX 12/04/2026 sessione 3 — da lettura config.py V5:
+#    - HOME e MAPPA si alternano con UN SOLO bottone toggle (38, 505)
+#      V5: TAP_TOGGLE_HOME_MAPPA = (38, 505)
+#    - home_btn e map_btn eliminati — sostituiti da toggle_btn
+#    - Template corretti da V5:
+#        pin_region.png  → visibile in HOME  (bottone mostra "Region")
+#        pin_shelter.png → visibile in MAPPA (bottone mostra "Shelter")
+#    - Logica vai_in_home / vai_in_mappa aggiornata: tap toggle se schermata sbagliata
 # ==============================================================================
 
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import TYPE_CHECKING, Optional
 
@@ -36,12 +39,13 @@ class NavigatorConfig:
     wait_after_overlay: float = 2.0
     max_attempts:       int   = 8
     overlay_tap:        tuple[int, int] = (480, 270)
-    home_btn:           tuple[int, int] = (142, 505)
-    map_btn:            tuple[int, int] = (242, 505)
-    pin_threshold:      float = 0.70          # FIX: abbassato da 0.80 → 0.70 per tolleranza MuMu
-    pin_home_template:  str   = "pin/pin_home.png"
-    pin_map_template:   str   = "pin/pin_map.png"
-    log_scores:         bool  = True           # FIX: log score template matching per debug
+    # V5: TAP_TOGGLE_HOME_MAPPA = (38, 505) — unico bottone che alterna HOME/MAPPA
+    toggle_btn:         tuple[int, int] = (38, 505)
+    pin_threshold:      float = 0.70
+    # V5: pin_region.png visibile in HOME, pin_shelter.png visibile in MAPPA
+    pin_home_template:  str   = "pin/pin_region.png"
+    pin_map_template:   str   = "pin/pin_shelter.png"
+    log_scores:         bool  = True
 
 
 class GameNavigator:
@@ -60,7 +64,7 @@ class GameNavigator:
         self.device  = device
         self.matcher = matcher
         self.config  = config or NavigatorConfig()
-        self._log    = log_fn or (lambda msg: None)   # FIX: supporto log esterno
+        self._log    = log_fn or (lambda msg: None)
 
     # ── Riconoscimento schermata ──────────────────────────────────────────────
 
@@ -69,10 +73,6 @@ class GameNavigator:
         return self._classifica(shot)
 
     def _classifica(self, shot: "Screenshot") -> Screen:
-        """
-        Classifica lo screenshot corrente.
-        FIX: logga i score per debug in produzione quando log_scores=True.
-        """
         cfg = self.config
         if shot is None:
             self._log("[NAV] screenshot None — UNKNOWN")
@@ -115,10 +115,12 @@ class GameNavigator:
                 return True
 
             if screen == Screen.MAP:
-                self.device.tap_sync(cfg.home_btn)
+                # Toggle unico HOME/MAPPA
+                self.device.tap_sync(cfg.toggle_btn)
                 time.sleep(cfg.wait_after_action)
                 continue
 
+            # UNKNOWN/OVERLAY: prova tap overlay poi BACK alternati
             if attempt % 2 == 0:
                 self.device.tap_sync(cfg.overlay_tap)
                 time.sleep(cfg.wait_after_overlay)
@@ -132,11 +134,12 @@ class GameNavigator:
     # ── Navigazione MAPPA ─────────────────────────────────────────────────────
 
     def vai_in_mappa(self) -> bool:
-        """Porta il bot in MAPPA. Richiede di passare prima per HOME."""
+        """Porta il bot in MAPPA. Passa prima per HOME poi tap toggle."""
         cfg = self.config
         if not self.vai_in_home():
             return False
-        self.device.tap_sync(cfg.map_btn)
+        # Da HOME: tap toggle → MAPPA
+        self.device.tap_sync(cfg.toggle_btn)
         time.sleep(cfg.wait_after_action)
         for _ in range(3):
             shot   = self.device.screenshot_sync()
