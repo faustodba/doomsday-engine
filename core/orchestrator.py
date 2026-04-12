@@ -165,6 +165,13 @@ class Orchestrator:
     def tick(self) -> list[TaskResult]:
         """
         Esegue tutti i task dovuti (nell'ordine di priorità registrato).
+
+        GATE HOME (Step 22 — fix RT):
+          Prima di ogni task verifica che il navigator sia in HOME.
+          Se il gate fallisce il task viene saltato (skip) senza aggiornare
+          last_run, così verrà riprovato al tick successivo.
+          I task che dichiarano requires_home = False saltano il gate.
+
         Ogni task viene avvolto in try/except: un errore non interrompe gli altri.
         Ritorna la lista dei TaskResult prodotti in questo tick.
         """
@@ -175,6 +182,43 @@ class Orchestrator:
                 continue
 
             task_name = _tname(entry.task)
+
+            # ── GATE HOME ────────────────────────────────────────────────────
+            # Salta il gate se il task lo dichiara esplicitamente non necessario
+            # oppure se il navigator non è disponibile (dry-run / test).
+            richiede_home = getattr(entry.task, "requires_home", True)
+            nav = self._ctx.navigator if hasattr(self._ctx, "navigator") else None
+
+            if richiede_home and nav is not None:
+                self._ctx.log_msg(
+                    f"Orchestrator: [{task_name}] gate HOME pre-task"
+                )
+                try:
+                    in_home = nav.vai_in_home()
+                except Exception as exc:
+                    in_home = False
+                    self._ctx.log_msg(
+                        f"Orchestrator: [{task_name}] gate HOME eccezione: {exc}"
+                    )
+
+                if not in_home:
+                    self._ctx.log_msg(
+                        f"Orchestrator: [{task_name}] gate HOME FALLITO "
+                        f"— task SALTATO (last_run non aggiornato)"
+                    )
+                    # NON aggiorniamo last_run → il task verrà riprovato
+                    results.append(TaskResult(
+                        success=False,
+                        message="gate HOME fallito — task saltato",
+                        data={"gate_home": False},
+                    ))
+                    continue
+
+                self._ctx.log_msg(
+                    f"Orchestrator: [{task_name}] gate HOME OK"
+                )
+            # ── fine GATE HOME ───────────────────────────────────────────────
+
             self._ctx.log_msg(f"Orchestrator: avvio task '{task_name}'")
 
             try:
