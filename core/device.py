@@ -376,28 +376,35 @@ class AdbDevice:
 
     def screenshot(self) -> Optional["Screenshot"]:
         """
-        Screenshot via screencap + pull — metodo V5 collaudato su MuMu12.
+        Screenshot via screencap + pull — copia esatta del metodo V5 adb.py.
+        screencap viene passato come stringa unica al shell (non argomenti separati).
         Lock per porta: istanze parallele non si bloccano a vicenda.
         """
-        import tempfile, threading
+        import tempfile
 
-        # Lock per porta (stesso pattern V5 adb.py)
+        remote = f"/sdcard/v6_screen_{self.port}.png"
+        local  = os.path.join(
+            tempfile.gettempdir(), f"v6_screen_{self.port}.png"
+        )
+
         with _screencap_lock_for(self._serial):
-            remote = f"/sdcard/v6_screen_{self.port}.png"
-            local  = os.path.join(
-                tempfile.gettempdir(), f"v6_screen_{self.port}.png"
-            )
             try:
-                r1 = self._shell(
-                    "screencap", "-p", remote, timeout=15
+                # V5: adb_shell(porta, f"screencap -p {remote_path}")
+                # = subprocess.run([ADB, "-s", serial, "shell", "screencap -p /sdcard/..."])
+                # stringa unica — NON argomenti separati
+                subprocess.run(
+                    [self.ADB, "-s", self._serial,
+                     "shell", f"screencap -p {remote}"],
+                    capture_output=True, timeout=15,
                 )
-                if r1.returncode != 0:
-                    return None
+                # V5: subprocess.run([ADB_EXE, "-s", serial, "pull", remote, local])
                 r2 = subprocess.run(
                     [self.ADB, "-s", self._serial, "pull", remote, local],
                     capture_output=True, timeout=15,
                 )
                 if r2.returncode != 0:
+                    return None
+                if not os.path.exists(local):
                     return None
                 frame = cv2.imread(local)
                 if frame is None:
