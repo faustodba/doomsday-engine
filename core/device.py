@@ -279,6 +279,18 @@ import subprocess
 import os
 
 
+
+# Lock per-porta screencap — pattern V5 adb.py
+import threading as _threading
+_screencap_locks: dict = {}
+_screencap_locks_meta = _threading.Lock()
+
+def _screencap_lock_for(serial: str) -> _threading.Lock:
+    with _screencap_locks_meta:
+        if serial not in _screencap_locks:
+            _screencap_locks[serial] = _threading.Lock()
+        return _screencap_locks[serial]
+
 class AdbDevice:
     """
     Device reale che parla con MuMu via ADB.
@@ -364,20 +376,40 @@ class AdbDevice:
 
     def screenshot(self) -> Optional["Screenshot"]:
         """
-        Cattura uno screenshot via exec-out (senza file intermedio su sdcard).
-        Ritorna un oggetto Screenshot o None in caso di errore.
+        Screenshot via screencap + pull — metodo V5 collaudato su MuMu12.
+        Lock per porta: istanze parallele non si bloccano a vicenda.
         """
-        try:
-            result = self._run("exec-out", "screencap", "-p", timeout=20)
-            if result.returncode != 0 or not result.stdout:
+        import tempfile, threading
+
+        # Lock per porta (stesso pattern V5 adb.py)
+        with _screencap_lock_for(self._serial):
+            remote = f"/sdcard/v6_screen_{self.port}.png"
+            local  = os.path.join(
+                tempfile.gettempdir(), f"v6_screen_{self.port}.png"
+            )
+            try:
+                r1 = self._shell(
+                    "screencap", "-p", remote, timeout=15
+                )
+                if r1.returncode != 0:
+                    return None
+                r2 = subprocess.run(
+                    [self.ADB, "-s", self._serial, "pull", remote, local],
+                    capture_output=True, timeout=15,
+                )
+                if r2.returncode != 0:
+                    return None
+                frame = cv2.imread(local)
+                if frame is None:
+                    return None
+                return Screenshot(frame)
+            except Exception:
                 return None
-            data = np.frombuffer(result.stdout, dtype=np.uint8)
-            frame = cv2.imdecode(data, cv2.IMREAD_COLOR)
-            if frame is None:
-                return None
-            return Screenshot(frame)
-        except Exception:
-            return None
+            finally:
+                try:
+                    os.remove(local)
+                except Exception:
+                    pass
 
     def screenshot_sync(self) -> Optional["Screenshot"]:
         """Alias di screenshot() — compatibilità navigator."""
