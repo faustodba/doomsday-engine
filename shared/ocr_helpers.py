@@ -3,6 +3,9 @@
 #
 #  Funzioni OCR riutilizzabili tra tutti i task.
 #
+#  FIX 12/04/2026:
+#    - _to_array: img.array → img.frame (Screenshot espone .frame non .array)
+#
 #  Funzioni:
 #    ocr_zona()          — estrae testo grezzo da una zona screenshot
 #    ocr_intero()        — OCR con psm=7 (riga singola, zona intera)
@@ -63,9 +66,13 @@ _NUM_WHITELIST = "0123456789KkMm.,/ "
 # ==============================================================================
 
 def _to_array(img: "Screenshot | np.ndarray") -> np.ndarray:
-    """Converte Screenshot → np.ndarray BGR, o passa array invariato."""
+    """
+    Converte Screenshot → np.ndarray BGR, o passa array invariato.
+
+    FIX 12/04/2026: Screenshot espone .frame (non .array).
+    """
     if _ScreenshotType is not None and isinstance(img, _ScreenshotType):
-        return img.array
+        return img.frame   # ← FIX: era img.array
     if isinstance(img, np.ndarray):
         return img
     raise TypeError(f"ocr_helpers: tipo immagine non supportato: {type(img)}")
@@ -259,7 +266,6 @@ def estrai_numero(testo: str) -> int | None:
     testo = testo.strip().upper().replace(" ", "")
 
     # Rimuove caratteri non numerici prima di analizzare i separatori
-    # (gestisce testo OCR sporco come "8.542 res" → "8.542")
     import re as _re
     testo = _re.sub(r"[^0-9.,KM]", "", testo)
 
@@ -273,13 +279,10 @@ def estrai_numero(testo: str) -> int | None:
         testo = testo[:-1]
 
     # Rimuove separatori migliaia (punto o virgola se seguiti da 3 cifre)
-    # Strategia: se c'è sia punto che virgola, il punto è separatore migliaia
     if "." in testo and "," in testo:
-        testo = testo.replace(".", "")  # rimuove punto-separatore
-        testo = testo.replace(",", ".")  # virgola → decimale
+        testo = testo.replace(".", "")
+        testo = testo.replace(",", ".")
     elif "," in testo:
-        # Solo virgola: separatore migliaia se tutti i gruppi dopo il primo hanno 3 cifre
-        # es. "1,200,000" → ["1","200","000"] → tutti i gruppi dopo il primo = 3 cifre
         parts = testo.split(",")
         all_groups_3 = all(len(p) == 3 for p in parts[1:])
         if all_groups_3 and len(parts) >= 2:
@@ -287,14 +290,12 @@ def estrai_numero(testo: str) -> int | None:
         else:
             testo = testo.replace(",", ".")
     elif "." in testo:
-        # Multipli punti (1.234.567) → tutti separatori migliaia
         parts = testo.split(".")
         if len(parts) > 2:
             testo = testo.replace(".", "")
         elif len(parts) == 2 and len(parts[1]) == 3:
             testo = testo.replace(".", "")
 
-    # Estrae la prima sequenza numerica (ignora testo spazzatura dopo)
     match = re.search(r"\d[\d.]*", testo)
     if not match:
         return None
@@ -320,7 +321,6 @@ class RisorseDeposito(NamedTuple):
 
 
 # Zone standard del deposito risorse (coordinate 960x540)
-# Possono essere sovrascritte se lo schermo del gioco cambia
 ZONE_RISORSE_DEFAULT: dict[str, tuple[int, int, int, int]] = {
     "pomodoro": (68,  11, 160, 25),
     "legno":    (175, 11, 267, 25),
@@ -337,11 +337,6 @@ def ocr_risorse(
     """
     Legge le 4 risorse dal deposito nella barra superiore dello screenshot.
 
-    Strategia per ogni risorsa:
-      1. OCR sulla zona intera con psm=7
-      2. Se fallisce, OCR cifre-only sulla stessa zona
-      3. Parsing con estrai_numero()
-
     Args:
         img:          Screenshot della schermata HOME
         zone_risorse: dict con zone custom (None = usa ZONE_RISORSE_DEFAULT)
@@ -354,15 +349,11 @@ def ocr_risorse(
     risultati: dict[str, int | None] = {}
 
     for risorsa, zona in zone.items():
-        # Tentativo 1: psm=7 zona intera
         testo = ocr_intero(img, zona, preprocessor=preprocessor)
         valore = estrai_numero(testo)
-
-        # Tentativo 2: solo cifre
         if valore is None:
             testo = ocr_cifre(img, zona, preprocessor=preprocessor)
             valore = estrai_numero(testo)
-
         risultati[risorsa] = valore
 
     return RisorseDeposito(

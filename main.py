@@ -1,5 +1,10 @@
 # ==============================================================================
 #  DOOMSDAY ENGINE V6 -- main.py
+#
+#  FIX 12/04/2026:
+#    - _on_signal: guard if not stop_event.is_set() — evita log multipli Ctrl+C
+#    - _thread_istanza: ruota FAU_XX.jsonl all'avvio (max 1 backup .bak)
+#    - _build_ctx: passa log_fn a GameNavigator per log score template matching
 # ==============================================================================
 from __future__ import annotations
 import argparse, json, os, signal, sys, threading, time
@@ -239,7 +244,13 @@ def _build_ctx(ist: dict, rt: dict, dry_run: bool) -> TaskContext:
     if not dry_run:
         try:
             from core.navigator import GameNavigator
-            navigator = GameNavigator(device=device, matcher=matcher)
+
+            # FIX 12/04/2026: passa log_fn al navigator per loggare i score
+            # dei template matching nel JSONL strutturato dell'istanza
+            def _nav_log(msg: str) -> None:
+                logger.info(msg, module="navigator")
+
+            navigator = GameNavigator(device=device, matcher=matcher, log_fn=_nav_log)
         except (ImportError, Exception) as exc:
             _log(nome, f"[WARN] GameNavigator: {exc}")
 
@@ -252,7 +263,6 @@ def _build_ctx(ist: dict, rt: dict, dry_run: bool) -> TaskContext:
         matcher=matcher,
         navigator=navigator,
     )
-
 
 
 class _TaskWrapper:
@@ -302,6 +312,15 @@ _contatori_lock = threading.Lock()
 def _thread_istanza(ist, tasks_cls, dry_run, tick_sleep, stop_event):
     nome  = ist["nome"]
     porta = ist.get("porta", 16384 + ist.get("indice", 0) * 32)
+
+    # FIX 12/04/2026: ruota il log JSONL dell'istanza ad ogni avvio
+    # Mantiene 1 backup (.bak) — il file non cresce indefinitamente
+    _jsonl_path = os.path.join(ROOT, "logs", f"{nome}.jsonl")
+    if os.path.exists(_jsonl_path):
+        try:
+            os.replace(_jsonl_path, _jsonl_path + ".bak")
+        except Exception:
+            pass
 
     _log(nome, f"Thread avviato -- porta ADB {porta}")
     _aggiorna_stato_istanza(nome, {"stato": "waiting", "porta": porta})
@@ -438,8 +457,11 @@ def main():
 
     stop_event = threading.Event()
 
+    # FIX 12/04/2026: guard — evita log multipli su Ctrl+C Windows
     def _on_signal(sig, frame):
-        _log("MAIN", f"Segnale {sig} -- stop..."); stop_event.set()
+        if not stop_event.is_set():
+            _log("MAIN", f"Segnale {sig} -- stop...")
+            stop_event.set()
 
     signal.signal(signal.SIGINT,  _on_signal)
     signal.signal(signal.SIGTERM, _on_signal)

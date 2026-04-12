@@ -3,6 +3,14 @@
 #
 #  Invio squadre raccoglitrici ai nodi risorse sulla mappa.
 #
+#  FIX 12/04/2026:
+#    - _leggi_coordinate_nodo: ctx.matcher.find() → ctx.matcher.find_one()
+#      firma corretta: find_one(screenshot, template_name, threshold)
+#      ritorna MatchResult, non (cx,cy) — estratto .cx/.cy se found
+#    - _esegui_marcia: stessa correzione firma matcher (2 occorrenze)
+#    - _invia_squadra: stessa correzione firma matcher (1 occorrenza)
+#    - Tutti i ctx.matcher.find() sostituiti con find_one() + controllo .found
+#
 #  STRATEGIA V6:
 #    Il loop marce di V5 dipende pesantemente da ADB diretto, VerificaUI,
 #    debug, OCR, allocation, config globale — non è portabile 1:1 in V6.
@@ -53,7 +61,6 @@ from __future__ import annotations
 
 import time
 import threading
-from collections import defaultdict
 from typing import Optional
 
 from core.task import Task, TaskContext, TaskResult
@@ -221,9 +228,9 @@ def _cerca_nodo(ctx: TaskContext, tipo: str) -> None:
     Esegue: LENTE → tap tipo × 2 → imposta livello → CERCA.
     Tutte le azioni via ctx.device.tap/key.
     """
-    tap_lente  = _cfg(ctx, "TAP_LENTE")
-    coord_lv   = _cfg(ctx, "COORD_LIVELLO").get(tipo, _cfg(ctx, "COORD_LIVELLO")["campo"])
-    livello    = max(1, min(7, int(_cfg(ctx, "RACCOLTA_LIVELLO"))))
+    tap_lente   = _cfg(ctx, "TAP_LENTE")
+    coord_lv    = _cfg(ctx, "COORD_LIVELLO").get(tipo, _cfg(ctx, "COORD_LIVELLO")["campo"])
+    livello     = max(1, min(7, int(_cfg(ctx, "RACCOLTA_LIVELLO"))))
     delay_cerca = _cfg(ctx, "DELAY_CERCA")
 
     ctx.log_msg(f"Raccolta: LENTE → {tipo} Lv.{livello}")
@@ -231,9 +238,7 @@ def _cerca_nodo(ctx: TaskContext, tipo: str) -> None:
     time.sleep(0.5)
 
     # Seleziona tipo × 2
-    tap_tipo = coord_lv["meno"]   # usiamo "meno" come ancora per il tipo
-    # In V5: tap su icona tipo × 2 → apre popup livello
-    # In V6: usiamo TAP_NODO come proxy dell'icona tipo (testabile)
+    tap_tipo = coord_lv["meno"]
     ctx.device.tap(tap_tipo)
     ctx.device.tap(tap_tipo)
     time.sleep(1.2)
@@ -254,22 +259,34 @@ def _cerca_nodo(ctx: TaskContext, tipo: str) -> None:
 def _leggi_coordinate_nodo(ctx: TaskContext) -> Optional[tuple[int, int]]:
     """
     Legge le coordinate del nodo trovato dalla CERCA.
-    In V6: usa ctx.matcher per trovare il nodo sullo screenshot.
+    Usa ctx.matcher.find_one(screenshot, template_name, threshold).
     Ritorna (cx, cy) o None se non trovato.
+
+    FIX 12/04/2026: era ctx.matcher.find(template, screen, soglia) —
+    firma errata, find() non esiste su TemplateMatcher.
+    Corretto in find_one(screen, template, soglia) che ritorna MatchResult.
     """
     screen = ctx.device.screenshot()
     if not screen:
         return None
     template_gather = _cfg(ctx, "TEMPLATE_GATHER")
     soglia          = _cfg(ctx, "TEMPLATE_SOGLIA")
-    coord = ctx.matcher.find(template_gather, screen, soglia)
-    return coord  # (cx, cy) o None
+
+    result = ctx.matcher.find_one(screen, template_gather, threshold=soglia)
+    if not result.found:
+        ctx.log_msg(
+            f"Raccolta: pin_gather score={result.score:.3f} < soglia={soglia} — nodo non trovato"
+        )
+        return None
+    return (result.cx, result.cy)
 
 
 def _esegui_marcia(ctx: TaskContext, n_truppe: int) -> tuple[bool, Optional[float]]:
     """
     Sequenza UI: RACCOGLI → SQUADRA → (truppe) → MARCIA.
     Ritorna (ok, eta_s).
+
+    FIX 12/04/2026: ctx.matcher.find() → ctx.matcher.find_one() (2 occorrenze).
     """
     tap_raccogli    = _cfg(ctx, "TAP_RACCOGLI")
     tap_squadra     = _cfg(ctx, "TAP_SQUADRA")
@@ -289,15 +306,14 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int) -> tuple[bool, Optional[floa
     # Verifica maschera invio aperta
     screen = ctx.device.screenshot()
     if screen:
-        maschera = ctx.matcher.find(template_marcia, screen, soglia)
-        if maschera is None:
+        maschera = ctx.matcher.find_one(screen, template_marcia, threshold=soglia)
+        if not maschera.found:
             ctx.log_msg("Raccolta: maschera invio NON aperta — retry")
             ctx.device.tap(tap_squadra)
             time.sleep(1.8)
             screen = ctx.device.screenshot()
-            if screen:
-                maschera = ctx.matcher.find(template_marcia, screen, soglia)
-            if maschera is None:
+            maschera2 = ctx.matcher.find_one(screen, template_marcia, threshold=soglia) if screen else None
+            if maschera2 is None or not maschera2.found:
                 ctx.log_msg("Raccolta: maschera invio ancora non aperta — FALLITO")
                 return False, None
 
@@ -325,14 +341,15 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int) -> tuple[bool, Optional[floa
     # Verifica maschera chiusa (marcia partita)
     screen_post = ctx.device.screenshot()
     if screen_post:
-        maschera_post = ctx.matcher.find(template_marcia, screen_post, soglia)
-        if maschera_post is not None:
+        maschera_post = ctx.matcher.find_one(screen_post, template_marcia, threshold=soglia)
+        if maschera_post.found:
             ctx.log_msg("Raccolta: maschera ancora aperta dopo MARCIA — retry")
             ctx.device.tap(tap_marcia)
             time.sleep(1.0)
             screen_post2 = ctx.device.screenshot()
             if screen_post2:
-                if ctx.matcher.find(template_marcia, screen_post2, soglia) is not None:
+                maschera_post2 = ctx.matcher.find_one(screen_post2, template_marcia, threshold=soglia)
+                if maschera_post2.found:
                     ctx.log_msg("Raccolta: maschera ancora aperta dopo retry — FALLITO")
                     return False, None
     return True, None
@@ -345,8 +362,11 @@ def _invia_squadra(ctx: TaskContext, tipo: str, blacklist: Blacklist,
     Cerca nodo, verifica blacklist, invia marcia.
 
     Ritorna (marcia_ok, tipo_bloccato):
-      marcia_ok    = True se la marcia è partita
+      marcia_ok     = True se la marcia è partita
       tipo_bloccato = True se il tipo deve essere aggiunto a tipi_bloccati
+
+    FIX 12/04/2026: ctx.matcher.find() → ctx.matcher.find_one() (1 occorrenza
+    nella verifica gather visibile).
     """
     _cerca_nodo(ctx, tipo)
 
@@ -368,7 +388,6 @@ def _invia_squadra(ctx: TaskContext, tipo: str, blacklist: Blacklist,
         coord2 = _leggi_coordinate_nodo(ctx)
 
         if coord2 is None or f"{coord2[0]}_{coord2[1]}" == chiave_primo:
-            # Gioco ripropone stesso nodo → cooldown tipo
             attesa = _cfg(ctx, "BLACKLIST_ATTESA_NODO")
             eta_prev = blacklist.get_eta(chiave_primo)
             if isinstance(eta_prev, (int, float)) and eta_prev > 0:
@@ -377,7 +396,7 @@ def _invia_squadra(ctx: TaskContext, tipo: str, blacklist: Blacklist,
             cooldown_map[tipo] = time.time() + attesa
             ctx.device.key("KEYCODE_BACK")
             time.sleep(0.4)
-            return False, True  # tipo bloccato (cooldown)
+            return False, True
 
         cx2, cy2 = coord2
         chiave = f"{cx2}_{cy2}"
@@ -394,19 +413,20 @@ def _invia_squadra(ctx: TaskContext, tipo: str, blacklist: Blacklist,
     time.sleep(0.7)
 
     # Verifica gather visibile
-    screen_popup = ctx.device.screenshot()
+    screen_popup    = ctx.device.screenshot()
     template_gather = _cfg(ctx, "TEMPLATE_GATHER")
     soglia          = _cfg(ctx, "TEMPLATE_SOGLIA")
+
     if screen_popup:
-        gather = ctx.matcher.find(template_gather, screen_popup, soglia)
-        if gather is None:
+        gather = ctx.matcher.find_one(screen_popup, template_gather, threshold=soglia)
+        if not gather.found:
             ctx.log_msg(f"Raccolta [{tipo}]: GATHER non visibile dopo tap nodo — retry")
             ctx.device.tap(tap_nodo)
             time.sleep(1.0)
             screen_popup2 = ctx.device.screenshot()
             if screen_popup2:
-                gather2 = ctx.matcher.find(template_gather, screen_popup2, soglia)
-                if gather2 is None:
+                gather2 = ctx.matcher.find_one(screen_popup2, template_gather, threshold=soglia)
+                if not gather2.found:
                     ctx.log_msg(f"Raccolta [{tipo}]: GATHER ancora non visibile — rollback")
                     ctx.device.key("KEYCODE_BACK")
                     time.sleep(0.4)
@@ -463,7 +483,6 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
             ctx.log_msg(f"Raccolta: troppi fallimenti ({fallimenti_cons}) — abbandono")
             break
 
-        # Attesa cooldown se tutti i tipi disponibili in cooldown
         tipi_disponibili = [t for t in _TUTTI_I_TIPI if t not in tipi_bloccati]
         if not tipi_disponibili:
             ctx.log_msg("Raccolta: tutti i tipi bloccati — abbandono")
@@ -472,13 +491,12 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
         ora = time.time()
         pronti = [t for t in tipi_disponibili if cooldown_map.get(t, 0) <= ora]
         if not pronti:
-            t_min   = min(cooldown_map.get(t, ora) for t in tipi_disponibili)
-            wait_s  = max(1, int(t_min - ora))
+            t_min  = min(cooldown_map.get(t, ora) for t in tipi_disponibili)
+            wait_s = max(1, int(t_min - ora))
             ctx.log_msg(f"Raccolta: tutti in cooldown — attendo {wait_s}s")
             time.sleep(wait_s)
             continue
 
-        # Sequenza aggiornata
         sequenza = _calcola_sequenza(obiettivo - attive_correnti, sequenza_base,
                                       tipi_bloccati)
         if not sequenza:
@@ -488,7 +506,6 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
         tipo = sequenza[idx_seq % len(sequenza)]
         idx_seq += 1
 
-        # Skip se in cooldown o bloccato
         if cooldown_map.get(tipo, 0) > time.time():
             continue
         if tipo in tipi_bloccati:
@@ -498,9 +515,9 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
         ok, tipo_bloccato = _invia_squadra(ctx, tipo, blacklist, cooldown_map,
                                             n_truppe, tipi_bloccati)
         if ok:
-            inviate          += 1
-            attive_correnti  += 1
-            fallimenti_cons   = 0
+            inviate         += 1
+            attive_correnti += 1
+            fallimenti_cons  = 0
             time.sleep(_cfg(ctx, "DELAY_POST_MARCIA"))
         else:
             if tipo_bloccato:
@@ -549,22 +566,13 @@ class RaccoltaTask(Task):
           attive_inizio : squadre già attive al momento dell'invocazione
           slot_liberi   : slot liberi (-1 = usa RACCOLTA_OBIETTIVO - attive_inizio)
           blacklist     : istanza Blacklist (creata internamente se None)
-
-        In produzione: l'orchestrator legge attive_inizio e slot_liberi
-        dal contatore squadre della UI.
         """
-        # --- Verifica abilitazione ---
         if not _cfg(ctx, "RACCOLTA_ABILITATA"):
             ctx.log_msg("Raccolta: modulo disabilitato — skip")
-            return TaskResult(
-                success=True,
-                message="disabilitato",
-                data={"inviate": 0},
-            )
+            return TaskResult(success=True, message="disabilitato", data={"inviate": 0})
 
         obiettivo = int(_cfg(ctx, "RACCOLTA_OBIETTIVO"))
 
-        # Calcola slot liberi
         if slot_liberi < 0:
             libere = max(0, obiettivo - attive_inizio)
         else:
@@ -572,22 +580,16 @@ class RaccoltaTask(Task):
 
         if libere == 0:
             ctx.log_msg(f"Raccolta: nessuna squadra libera ({attive_inizio}/{obiettivo}) — skip")
-            return TaskResult(
-                success=True,
-                message="nessuna squadra libera",
-                data={"inviate": 0},
-            )
+            return TaskResult(success=True, message="nessuna squadra libera", data={"inviate": 0})
 
         ctx.log_msg(f"Raccolta: start — attive={attive_inizio}/{obiettivo} libere={libere}")
 
-        # Inizializza blacklist
         if blacklist is None:
             blacklist = Blacklist(
                 committed_ttl=int(_cfg(ctx, "BLACKLIST_COMMITTED_TTL")),
                 reserved_ttl=int(_cfg(ctx, "BLACKLIST_RESERVED_TTL")),
             )
 
-        # Naviga in mappa
         ctx.log_msg("Raccolta: navigazione → mappa")
         ctx.device.key("KEYCODE_MAP")
         time.sleep(2.0)
@@ -597,18 +599,10 @@ class RaccoltaTask(Task):
             inviate = _loop_invio_marce(ctx, obiettivo, attive_inizio, blacklist)
         except Exception as e:
             ctx.log_msg(f"Raccolta: errore nel loop marce: {e}")
-            return TaskResult(
-                success=False,
-                message=f"errore: {e}",
-                data={"inviate": inviate},
-            )
+            return TaskResult(success=False, message=f"errore: {e}", data={"inviate": inviate})
         finally:
             ctx.log_msg("Raccolta: ritorno in home")
             ctx.device.key("KEYCODE_HOME")
 
         ctx.log_msg(f"Raccolta: completata — {inviate}/{libere} squadre inviate")
-        return TaskResult(
-            success=True,
-            message=f"{inviate} squadre inviate",
-            data={"inviate": inviate},
-        )
+        return TaskResult(success=True, message=f"{inviate} squadre inviate", data={"inviate": inviate})
