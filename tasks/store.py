@@ -269,7 +269,7 @@ class StoreTask(Task):
 
         # ── Verifica HOME finale ──────────────────────────────────────────────
         shot = device.screenshot()
-        home_ok = matcher.exists(shot, "pin/pin_home.png", threshold=0.80)
+        home_ok = matcher.exists(shot, "pin/pin_region.png", threshold=0.80)
         if not home_ok:
             log("WARN: non in home dopo store — BACK")
             device.back()

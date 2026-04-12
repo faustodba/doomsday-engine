@@ -298,64 +298,47 @@ class ArenaMercatoTask(Task):
     # ── Rilevamento stato pulsanti ────────────────────────────────────────────
 
     def _pulsante_360_attivo(self, ctx: TaskContext, screen: object) -> bool:
-        """
-        True  → btn360_open supera soglia (arancione, acquistabile).
-        False → btn360_close supera soglia (grigio, esaurito).
-        Fallback: open > close score → True; altrimenti False (fail-safe).
-        """
         spec_open  = _MERCATO_PIN["btn360_open"]
         spec_close = _MERCATO_PIN["btn360_close"]
-        score_open  = ctx.matcher.match(screen, spec_open.path,  spec_open.roi)
-        score_close = ctx.matcher.match(screen, spec_close.path, spec_close.roi)
+        score_open  = ctx.matcher.find_one(screen, spec_open.path,  threshold=0.0, zone=spec_open.roi).score
+        score_close = ctx.matcher.find_one(screen, spec_close.path, threshold=0.0, zone=spec_close.roi).score
         ctx.log_msg("[MERCATO] btn360 open=%.3f close=%.3f", score_open, score_close)
 
         if score_open  >= spec_open.soglia:  return True
         if score_close >= spec_close.soglia: return False
-        # Nessun match chiaro: fallback su confronto diretto
         return score_open > score_close
 
     def _pulsante_15_attivo(self, ctx: TaskContext, screen: object) -> bool:
-        """
-        True  → btn15_open supera soglia (arancione, acquistabile).
-        False → btn15_close supera soglia (grigio, esaurito).
-        Fail-safe: se nessun match → False (non acquistare).
-        """
         spec_open  = _MERCATO_PIN["btn15_open"]
         spec_close = _MERCATO_PIN["btn15_close"]
-        score_open  = ctx.matcher.match(screen, spec_open.path,  spec_open.roi)
-        score_close = ctx.matcher.match(screen, spec_close.path, spec_close.roi)
+        score_open  = ctx.matcher.find_one(screen, spec_open.path,  threshold=0.0, zone=spec_open.roi).score
+        score_close = ctx.matcher.find_one(screen, spec_close.path, threshold=0.0, zone=spec_close.roi).score
         ctx.log_msg("[MERCATO-15] btn15 open=%.3f close=%.3f", score_open, score_close)
 
         if score_open  >= spec_open.soglia:  return True
         if score_close >= spec_close.soglia: return False
-        # Nessun match chiaro: fail-safe stop (non acquistare)
         ctx.log_msg("[MERCATO-15] nessun match chiaro — fail-safe stop")
         return False
 
     # ── Popup Glory ───────────────────────────────────────────────────────────
 
     def _gestisci_popup_glory(self, ctx: TaskContext) -> bool:
-        """
-        Rileva e chiude popup 'Congratulations / Glory Silver'.
-        Ritorna True se il popup era presente.
-        """
         screen = ctx.device.screenshot()
         if screen is None:
             return False
         spec = _MERCATO_PIN["glory"]
-        score = ctx.matcher.match(screen, spec.path, spec.roi)
-        if score < spec.soglia:
+        result = ctx.matcher.find_one(screen, spec.path, threshold=spec.soglia, zone=spec.roi)
+        if not result.found:
             return False
 
         ctx.log_msg("[MERCATO-ARENA] popup Glory Silver — tap Continue")
         ctx.device.tap(*_TAP_GLORY_CONTINUE)
         time.sleep(2.0)
 
-        # Riverifica
         screen2 = ctx.device.screenshot()
         if screen2 is not None:
-            score2 = ctx.matcher.match(screen2, spec.path, spec.roi)
-            if score2 >= spec.soglia:
+            result2 = ctx.matcher.find_one(screen2, spec.path, threshold=spec.soglia, zone=spec.roi)
+            if result2.found:
                 ctx.log_msg("[MERCATO-ARENA] popup Glory ancora visibile — retry tap")
                 ctx.device.tap(*_TAP_GLORY_CONTINUE)
                 time.sleep(2.0)
@@ -377,9 +360,9 @@ class ArenaMercatoTask(Task):
                 ctx.log_msg("[MERCATO-PIN] %s: screenshot fallito (t=%d)", key, tentativo + 1)
                 time.sleep(retry_s)
                 continue
-            score = ctx.matcher.match(screen, spec.path, spec.roi)
-            ok = score >= spec.soglia
-            ctx.log_msg("[MERCATO-PIN] %s: score=%.3f → %s", key, score, "OK" if ok else "KO")
+            result = ctx.matcher.find_one(screen, spec.path, threshold=spec.soglia, zone=spec.roi)
+            ok = result.found
+            ctx.log_msg("[MERCATO-PIN] %s: score=%.3f → %s", key, result.score, "OK" if ok else "KO")
             if ok or tentativo == retry:
                 return ok
             time.sleep(retry_s)

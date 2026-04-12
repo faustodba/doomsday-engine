@@ -460,11 +460,12 @@ class ArenaTask(Task):
     def _match(self, ctx: TaskContext, screen: object, key: str) -> bool:
         """
         Template matching su un singolo pin.
+        API V6: find_one(screenshot, name, zone=roi) — non esiste match().
         """
         spec = _ARENA_PIN[key]
-        score = ctx.matcher.match(screen, spec.path, spec.roi)
-        ok = score >= spec.soglia
-        ctx.log_msg("[ARENA-PIN] %s: score=%.3f → %s", key, score, "OK" if ok else "NON trovato")
+        result = ctx.matcher.find_one(screen, spec.path, threshold=spec.soglia, zone=spec.roi)
+        ok = result.found
+        ctx.log_msg("[ARENA-PIN] %s: score=%.3f → %s", key, result.score, "OK" if ok else "NON trovato")
         return ok
 
     def _check_pin(self,
