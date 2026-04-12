@@ -5,6 +5,11 @@
 #    Tutti i metodi sono SINCRONI. Non esistono più metodi async.
 #    I task usano: device.tap(x,y), device.screenshot(), device.back(),
 #                  device.swipe(x1,y1,x2,y2), device.tap_sync((x,y))
+#
+#  FIX 12/04/2026:
+#    - AdbDevice.__init__: aggiunto connect() automatico come in V5.
+#      MuMu richiede 'adb connect 127.0.0.1:PORT' prima di accettare comandi.
+#      Senza connect il serial TCP non viene riconosciuto e screenshot() → None.
 # ==============================================================================
 
 from __future__ import annotations
@@ -173,16 +178,9 @@ class MatchResult:
 class Screenshot:
     """
     Wrapper attorno a un frame BGR (numpy array) con metodi di template matching.
-
-    Usato da TemplateMatcher e dai task per eseguire ricerche visive
-    senza dipendere dall'implementazione ADB concreta.
     """
 
     def __init__(self, frame: np.ndarray):
-        """
-        Args:
-            frame: immagine BGR come numpy array (h, w, 3)
-        """
         self._frame = frame
 
     @property
@@ -198,7 +196,6 @@ class Screenshot:
         return self._frame.shape[0]
 
     def crop(self, roi: tuple[int, int, int, int]) -> "Screenshot":
-        """Ritorna una nuova Screenshot ritagliata sulla ROI (x1,y1,x2,y2)."""
         x1, y1, x2, y2 = roi
         return Screenshot(self._frame[y1:y2, x1:x2].copy())
 
@@ -208,17 +205,6 @@ class Screenshot:
         threshold: float = 0.80,
         zone: tuple[int, int, int, int] | None = None,
     ) -> MatchResult:
-        """
-        Cerca `template` nello screenshot con cv2.TM_CCOEFF_NORMED.
-
-        Args:
-            template:  Screenshot del template da cercare
-            threshold: soglia minima per considerare il match trovato
-            zone:      (x1,y1,x2,y2) — limita la ricerca a questa area
-
-        Returns:
-            MatchResult(found, score, cx, cy)
-        """
         haystack = self._frame
         offset_x = offset_y = 0
 
@@ -249,12 +235,6 @@ class Screenshot:
         zone: tuple[int, int, int, int] | None = None,
         cluster_px: int = 20,
     ) -> list[MatchResult]:
-        """
-        Trova tutte le occorrenze del template (NMS con cluster_px).
-
-        Returns:
-            Lista di MatchResult ordinata per score decrescente.
-        """
         haystack = self._frame
         offset_x = offset_y = 0
 
@@ -279,7 +259,6 @@ class Screenshot:
             cy = offset_y + pt[1] + th // 2
             matches.append(MatchResult(True, score, cx, cy))
 
-        # NMS semplice: rimuovi match troppo vicini tenendo il migliore
         matches.sort(key=lambda m: m.score, reverse=True)
         kept: list[MatchResult] = []
         for m in matches:
@@ -297,13 +276,17 @@ class Screenshot:
 # ==============================================================================
 
 import subprocess
-import tempfile
 import os
 
 
 class AdbDevice:
     """
     Device reale che parla con MuMu via ADB.
+
+    FIX 12/04/2026: aggiunto connect() automatico nel costruttore.
+    MuMu Player richiede 'adb connect HOST:PORT' prima di accettare comandi
+    via serial TCP. Senza questo il device non viene trovato e screenshot()
+    ritorna sempre None. Comportamento identico a V5.
 
     Implementa la stessa interfaccia di FakeDevice (sincrona):
       screenshot()  → Screenshot
@@ -321,13 +304,15 @@ class AdbDevice:
     )
 
     def __init__(self, host: str = "127.0.0.1", port: int = 16384,
-                 name: str = "FAU_00", index: int = 0):
+                 name: str = "FAU_00", index: int = 0,
+                 auto_connect: bool = True):
         """
         Args:
-            host  : indirizzo ADB (tipicamente 127.0.0.1)
-            port  : porta ADB dell'istanza MuMu
-            name  : nome istanza (es. "FAU_01") — solo per logging
-            index : indice istanza (0-based)
+            host         : indirizzo ADB (tipicamente 127.0.0.1)
+            port         : porta ADB dell'istanza MuMu
+            name         : nome istanza (es. "FAU_01") — solo per logging
+            index        : indice istanza (0-based)
+            auto_connect : esegue 'adb connect' automaticamente (default True)
         """
         self.host  = host
         self.port  = port
@@ -335,7 +320,36 @@ class AdbDevice:
         self.index = index
         self._serial = f"{host}:{port}"
 
-    # ── Esecuzione comandi ADB ─────────────────────────────────────────────────
+        # FIX: connect automatico come in V5 — MuMu TCP richiede connect esplicito
+        if auto_connect:
+            self.connect()
+
+    # ── Connessione ───────────────────────────────────────────────────────────
+
+    def connect(self, max_retry: int = 3, retry_delay: float = 2.0) -> bool:
+        """
+        Esegue 'adb connect HOST:PORT'.
+        Riprova fino a max_retry volte in caso di errore.
+        Ritorna True se connesso, False altrimenti.
+        """
+        import time
+        for attempt in range(1, max_retry + 1):
+            try:
+                result = subprocess.run(
+                    [self.ADB, "connect", self._serial],
+                    capture_output=True,
+                    timeout=10,
+                )
+                out = result.stdout.decode(errors="replace").strip()
+                if "connected" in out or "already connected" in out:
+                    return True
+            except Exception:
+                pass
+            if attempt < max_retry:
+                time.sleep(retry_delay)
+        return False
+
+    # ── Esecuzione comandi ADB ────────────────────────────────────────────────
 
     def _run(self, *args: str, timeout: int = 15) -> subprocess.CompletedProcess:
         """Esegue un comando ADB contro l'istanza corrente."""
@@ -354,13 +368,9 @@ class AdbDevice:
         Ritorna un oggetto Screenshot o None in caso di errore.
         """
         try:
-            result = self._run(
-                "exec-out", "screencap", "-p",
-                timeout=20,
-            )
+            result = self._run("exec-out", "screencap", "-p", timeout=20)
             if result.returncode != 0 or not result.stdout:
                 return None
-
             data = np.frombuffer(result.stdout, dtype=np.uint8)
             frame = cv2.imdecode(data, cv2.IMREAD_COLOR)
             if frame is None:
@@ -376,10 +386,7 @@ class AdbDevice:
     # ── Tap ───────────────────────────────────────────────────────────────────
 
     def tap(self, x_or_coord, y=None) -> None:
-        """
-        Invia un tap alle coordinate (x, y).
-        Accetta sia tap(x, y) sia tap((x, y)).
-        """
+        """Invia un tap alle coordinate (x, y). Accetta tap(x,y) o tap((x,y))."""
         if y is None:
             x, y = int(x_or_coord[0]), int(x_or_coord[1])
         else:
@@ -404,10 +411,7 @@ class AdbDevice:
         )
 
     def scroll(self, x: int, y: int, direction: int, durata_ms: int = 300) -> None:
-        """
-        Scroll simulato con swipe verticale.
-        direction > 0 → scroll verso il basso, < 0 → verso l'alto.
-        """
+        """Scroll simulato con swipe verticale. direction > 0 = verso il basso."""
         dy = 200 if direction > 0 else -200
         self.swipe(x, y, x, y + dy, durata_ms)
 
@@ -418,10 +422,7 @@ class AdbDevice:
         self._shell("input", "keyevent", "KEYCODE_BACK")
 
     def key(self, keycode: str) -> None:
-        """
-        Invia un keycode Android (es. "KEYCODE_HOME", "KEYCODE_BACK").
-        Accetta sia la stringa con prefisso sia il solo nome.
-        """
+        """Invia un keycode Android. Accetta sia 'KEYCODE_HOME' sia 'HOME'."""
         if not keycode.startswith("KEYCODE_"):
             keycode = f"KEYCODE_{keycode}"
         self._shell("input", "keyevent", keycode)
@@ -434,7 +435,6 @@ class AdbDevice:
 
     def input_text(self, text: str) -> None:
         """Invia testo via ADB input text (no caratteri speciali)."""
-        # Escape degli spazi per la shell ADB
         safe = text.replace(" ", "%s")
         self._shell("input", "text", safe)
 
