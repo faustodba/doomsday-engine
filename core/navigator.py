@@ -51,7 +51,7 @@ class NavigatorConfig:
 class GameNavigator:
     """
     Naviga le schermate del gioco — SINCRONO.
-    Usa device.screenshot_sync(), device.tap_sync(), device.back() sync.
+    Usa device.screenshot(), device.tap(), device.back() — API AdbDevice reale.
     """
 
     def __init__(
@@ -69,7 +69,7 @@ class GameNavigator:
     # ── Riconoscimento schermata ──────────────────────────────────────────────
 
     def schermata_corrente(self) -> Screen:
-        shot = self.device.screenshot_sync()
+        shot = self.device.screenshot()
         return self._classifica(shot)
 
     def _classifica(self, shot: "Screenshot") -> Screen:
@@ -106,7 +106,7 @@ class GameNavigator:
         """Porta il bot in HOME. Ritorna True se raggiunto."""
         cfg = self.config
         for attempt in range(cfg.max_attempts):
-            shot   = self.device.screenshot_sync()
+            shot   = self.device.screenshot()
             screen = self._classifica(shot)
 
             self._log(f"[NAV] vai_in_home tentativo {attempt+1}/{cfg.max_attempts} — screen={screen.name}")
@@ -116,13 +116,13 @@ class GameNavigator:
 
             if screen == Screen.MAP:
                 # Toggle unico HOME/MAPPA
-                self.device.tap_sync(cfg.toggle_btn)
+                self.device.tap(*cfg.toggle_btn)
                 time.sleep(cfg.wait_after_action)
                 continue
 
             # UNKNOWN/OVERLAY: prova tap overlay poi BACK alternati
             if attempt % 2 == 0:
-                self.device.tap_sync(cfg.overlay_tap)
+                self.device.tap(*cfg.overlay_tap)
                 time.sleep(cfg.wait_after_overlay)
             else:
                 self.device.back()
@@ -139,10 +139,10 @@ class GameNavigator:
         if not self.vai_in_home():
             return False
         # Da HOME: tap toggle → MAPPA
-        self.device.tap_sync(cfg.toggle_btn)
+        self.device.tap(*cfg.toggle_btn)
         time.sleep(cfg.wait_after_action)
         for _ in range(3):
-            shot   = self.device.screenshot_sync()
+            shot   = self.device.screenshot()
             screen = self._classifica(shot)
             if screen == Screen.MAP:
                 return True
@@ -155,11 +155,11 @@ class GameNavigator:
         cfg = self.config
         for i in range(max_tries):
             if i % 2 == 0:
-                self.device.tap_sync(cfg.overlay_tap)
+                self.device.tap(*cfg.overlay_tap)
             else:
                 self.device.back()
             time.sleep(cfg.wait_after_overlay)
-            shot   = self.device.screenshot_sync()
+            shot   = self.device.screenshot()
             screen = self._classifica(shot)
             if screen != Screen.UNKNOWN:
                 return True
