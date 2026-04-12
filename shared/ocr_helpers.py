@@ -28,6 +28,12 @@ from PIL import Image
 
 try:
     import pytesseract
+    # Path Tesseract da config V5 — override via variabile d'ambiente TESSERACT_EXE
+    import os as _os
+    pytesseract.pytesseract.tesseract_cmd = _os.environ.get(
+        "TESSERACT_EXE",
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+    )
     _TESSERACT_OK = True
 except ImportError:
     _TESSERACT_OK = False
