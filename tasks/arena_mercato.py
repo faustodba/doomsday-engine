@@ -51,8 +51,6 @@ from dataclasses import dataclass
 from typing import Literal
 
 from core.task import Task, TaskContext, TaskResult
-from core.navigator import Screen
-
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -119,7 +117,7 @@ class ArenaMercatoTask(Task):
             return ctx.config.task_abilitato("arena_mercato")
         return True
 
-    @property
+    # FIX: rimosso @property — viola standard V6 (def senza decoratore)
     def interval_hours(self) -> float:
         return 12.0
 
@@ -128,7 +126,7 @@ class ArenaMercatoTask(Task):
         acquisti_15  = 0
         errore: str | None = None
 
-        # 1. HOME
+        # 1. HOME — FIX: usa vai_in_home() invece di current_screen()
         if not self._assicura_home(ctx):
             errore = "impossibile raggiungere home"
             ctx.log_msg("[MERCATO-ARENA] %s", errore)
@@ -165,18 +163,29 @@ class ArenaMercatoTask(Task):
     # ── Navigazione ──────────────────────────────────────────────────────────
 
     def _assicura_home(self, ctx: TaskContext) -> bool:
-        """Porta l'istanza in HOME (3 cicli, 5 BACK ciascuno)."""
+        """
+        Porta l'istanza in HOME.
+        FIX: usa ctx.navigator.vai_in_home() — GameNavigator non espone current_screen().
+        """
+        if ctx.navigator is not None:
+            ok = ctx.navigator.vai_in_home()
+            if ok:
+                ctx.log_msg("[MERCATO-ARENA] home confermata via navigator")
+            else:
+                ctx.log_msg("[MERCATO-ARENA] navigator: vai_in_home() fallito — BACK di recupero")
+                for _ in range(5):
+                    ctx.device.back()
+                    time.sleep(0.4)
+            return ok
+
+        # Fallback senza navigator: sequenza BACK
         for ciclo in range(3):
             for _ in range(5):
                 ctx.device.back()
                 time.sleep(0.4)
             time.sleep(0.8)
-            screen = ctx.device.screenshot()
-            if screen is not None and ctx.navigator.current_screen(screen) == Screen.HOME:
-                ctx.log_msg("[MERCATO-ARENA] home confermata (ciclo %d)", ciclo + 1)
-                return True
-        ctx.log_msg("[MERCATO-ARENA] impossibile confermare home")
-        return False
+            ctx.log_msg("[MERCATO-ARENA] home fallback ciclo %d", ciclo + 1)
+        return True  # ottimistico senza navigator
 
     def _naviga_a_store(self, ctx: TaskContext) -> bool:
         """

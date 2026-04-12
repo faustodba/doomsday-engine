@@ -22,6 +22,7 @@ Flusso
 Rilevamento badge
 ─────────────────────────────────────────────────────────────────────────────
   Pixel check in area 55×45 attorno a tap_icona (calibrata su 960×540).
+  FIX: usa screenshot().frame (numpy BGR) invece di device.last_frame.
   Fail-safe: True in caso di errore (meglio tentare che saltare).
 
 Rilevamento pallini
@@ -94,6 +95,24 @@ def _cfg(ctx: TaskContext, key: str):
     return cfg.get(key, _DEFAULTS[key])
 
 
+def _frame_from_screenshot(screen) -> np.ndarray | None:
+    """
+    Estrae il frame numpy BGR da un oggetto Screenshot.
+    FIX: AdbDevice non espone last_frame — si usa screenshot().frame.
+    Compatibile sia con Screenshot (ha .frame) che con numpy array diretto.
+    """
+    if screen is None:
+        return None
+    # Screenshot V6 ha attributo .frame (numpy array BGR)
+    frame = getattr(screen, "frame", None)
+    if frame is not None:
+        return frame
+    # Fallback: se è già un numpy array (FakeDevice nei test)
+    if isinstance(screen, np.ndarray):
+        return screen
+    return None
+
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Task
 # ──────────────────────────────────────────────────────────────────────────────
@@ -134,7 +153,7 @@ class RadarTask(Task):
 
         tap_icona = _cfg(ctx, "TAP_RADAR_ICONA")
 
-        # 1. Verifica badge
+        # 1. Verifica badge — FIX: frame da screenshot().frame, non device.last_frame
         screen = ctx.device.screenshot()
         if screen is None:
             errore = "screenshot fallito — skip"
@@ -142,7 +161,7 @@ class RadarTask(Task):
             return TaskResult(success=False,
                               data=self._data(False, 0, 0, errore))
 
-        frame = ctx.device.last_frame
+        frame = _frame_from_screenshot(screen)
         if not self._ha_badge(frame, tap_icona, ctx):
             logger.info("[RADAR] nessun badge — skip")
             return TaskResult(success=True,
@@ -243,7 +262,8 @@ class RadarTask(Task):
                 logger.warning("[RADAR] screenshot fallito nel loop — esco")
                 break
 
-            frame = ctx.device.last_frame
+            # FIX: frame da screenshot().frame, non device.last_frame
+            frame = _frame_from_screenshot(screen)
             pallini = self._trova_pallini(frame, ctx)
 
             if not pallini:

@@ -25,7 +25,7 @@ Navigazione
 Logica principale
 ─────────────────────────────────────────────────────────────────────────────
   3 tentativi esterni.  Per ogni tentativo:
-    1. Verifica HOME via navigator
+    1. Verifica HOME via navigator.vai_in_home()
     2. Naviga verso lista arena
     3. Loop sfide (MAX_SFIDE)
        - "esaurite" → break immediato (successo)
@@ -44,9 +44,6 @@ from typing import Literal
 import numpy as np
 
 from core.task import Task, TaskContext, TaskResult
-from core.navigator import GameNavigator, Screen
-from shared.template_matcher import TemplateMatcher
-
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -160,7 +157,7 @@ class ArenaTask(Task):
         for tentativo in range(1, MAX_TENTATIVI + 1):
             ctx.log_msg("[ARENA] tentativo %d/%d", tentativo, MAX_TENTATIVI)
 
-            # 1. Verifica HOME
+            # 1. Verifica HOME — FIX: usa vai_in_home() invece di current_screen()
             if not self._assicura_home(ctx):
                 ctx.log_msg("[ARENA] impossibile confermare home (t=%d)", tentativo)
                 continue
@@ -227,21 +224,27 @@ class ArenaTask(Task):
     def _assicura_home(self, ctx: TaskContext) -> bool:
         """
         Porta l'istanza in HOME usando il navigator V6.
-        Ritorna True se HOME confermata entro 3 cicli.
+        FIX: usa ctx.navigator.vai_in_home() — GameNavigator non espone current_screen().
         """
-        nav: GameNavigator = ctx.navigator
+        if ctx.navigator is not None:
+            ok = ctx.navigator.vai_in_home()
+            if ok:
+                ctx.log_msg("[ARENA] home confermata via navigator")
+            else:
+                ctx.log_msg("[ARENA] navigator: vai_in_home() fallito — BACK di recupero")
+                for _ in range(5):
+                    ctx.device.back()
+                    time.sleep(0.4)
+            return ok
+
+        # Fallback senza navigator: sequenza BACK
         for ciclo in range(3):
             for _ in range(5):
                 ctx.device.back()
                 time.sleep(0.4)
             time.sleep(0.8)
-            screen = ctx.device.screenshot()
-            if screen is not None and nav.current_screen(screen) == Screen.HOME:
-                ctx.log_msg("[ARENA] home confermata (ciclo %d)", ciclo + 1)
-                return True
-            ctx.log_msg("[ARENA] non in home (ciclo %d) — riprovo", ciclo + 1)
-        ctx.log_msg("[ARENA] impossibile confermare home dopo 3 cicli")
-        return False
+            ctx.log_msg("[ARENA] home fallback ciclo %d", ciclo + 1)
+        return True  # ottimistico senza navigator
 
     def _naviga_a_arena(self, ctx: TaskContext) -> bool:
         """
@@ -403,14 +406,15 @@ class ArenaTask(Task):
     def _gestisci_popup_congratulations(self, ctx: TaskContext) -> bool:
         """
         Controllo pixel per popup Congratulations generico.
+        FIX: usa device.screenshot().frame invece di device.last_frame.
         Ritorna True se il popup era presente.
         """
         screen = ctx.device.screenshot()
         if screen is None:
             return False
 
-        import cv2
-        img = ctx.device.last_frame  # numpy array BGR già in memoria
+        # FIX: Screenshot.frame invece di device.last_frame (non esiste in AdbDevice)
+        img = getattr(screen, "frame", None)
         if img is None:
             return False
 
@@ -456,7 +460,6 @@ class ArenaTask(Task):
     def _match(self, ctx: TaskContext, screen: object, key: str) -> bool:
         """
         Template matching su un singolo pin.
-        screen può essere il path (str) o il frame numpy a seconda dell'implementazione.
         """
         spec = _ARENA_PIN[key]
         score = ctx.matcher.match(screen, spec.path, spec.roi)

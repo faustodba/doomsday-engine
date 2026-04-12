@@ -42,7 +42,7 @@ class BoostConfig:
     wait_after_swipe: float           = 1.5
     wait_after_use:   float           = 1.5
     wait_after_back:  float           = 0.5
-    wait_after_speed_tap: float         = 2.0
+    wait_after_speed_tap: float       = 2.0
     tmpl_boost:       str             = "pin/pin_boost.png"
     tmpl_manage:      str             = "pin/pin_manage.png"
     tmpl_speed:       str             = "pin/pin_speed.png"
@@ -132,8 +132,9 @@ class BoostTask(Task):
             log(f"swipe {swipe_n:02d} → pin_speed={score_speed:.3f}  pin_50_={score_50:.3f}")
 
             if score_speed >= cfg.soglia_speed:
-                match         = matcher.find(shot, cfg.tmpl_speed, threshold=cfg.soglia_speed)
-                speed_cy      = match.cy if match else 270
+                # FIX: find_one() al posto di find()
+                match         = matcher.find_one(shot, cfg.tmpl_speed, threshold=cfg.soglia_speed)
+                speed_cy      = match.cy if match and match.found else 270
                 speed_trovato = True
                 score_50_last = score_50
                 log(f"pin_speed TROVATO cy={speed_cy}")
@@ -167,11 +168,12 @@ class BoostTask(Task):
 
         # STEP 6 — boost 8h
         score_8h  = matcher.score(shot, cfg.tmpl_speed_8h)
-        match_use = matcher.find(shot, cfg.tmpl_speed_use, threshold=cfg.soglia_use)
-        score_use = match_use.score if match_use else -1.0
+        # FIX: find_one() al posto di find()
+        match_use = matcher.find_one(shot, cfg.tmpl_speed_use, threshold=cfg.soglia_use)
+        score_use = match_use.score if (match_use and match_use.found) else -1.0
         log(f"pin_speed_8h={score_8h:.3f}  pin_speed_use={score_use:.3f}")
 
-        if score_8h >= cfg.soglia_8h and match_use is not None:
+        if score_8h >= cfg.soglia_8h and match_use is not None and match_use.found:
             log(f"Boost 8h → tap USE ({match_use.cx},{match_use.cy})")
             device.tap(match_use.cx, match_use.cy)
             time.sleep(cfg.wait_after_use)
@@ -181,11 +183,12 @@ class BoostTask(Task):
 
         # STEP 7 — fallback boost 1d
         score_1d  = matcher.score(shot, cfg.tmpl_speed_1d)
-        match_use = matcher.find(shot, cfg.tmpl_speed_use, threshold=cfg.soglia_use)
-        score_use = match_use.score if match_use else -1.0
+        # FIX: find_one() al posto di find()
+        match_use = matcher.find_one(shot, cfg.tmpl_speed_use, threshold=cfg.soglia_use)
+        score_use = match_use.score if (match_use and match_use.found) else -1.0
         log(f"pin_speed_1d={score_1d:.3f}  pin_speed_use={score_use:.3f}")
 
-        if score_1d >= cfg.soglia_1d and match_use is not None:
+        if score_1d >= cfg.soglia_1d and match_use is not None and match_use.found:
             log(f"Boost 1d → tap USE ({match_use.cx},{match_use.cy})")
             device.tap(match_use.cx, match_use.cy)
             time.sleep(cfg.wait_after_use)
