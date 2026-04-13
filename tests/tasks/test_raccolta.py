@@ -465,9 +465,9 @@ class TestLoopInvioMarceConGather:
                 ctx.matcher.set_result(tmpl, (500, 500))
             bl = Blacklist()
             _loop_invio_marce(ctx, 1, 0, bl)
-            # chiave blacklist = TAP_NODO fisso "480_280"
-            assert bl.get_state("480_280") == "COMMITTED"
-            assert bl.get_eta("480_280") == 45.0
+            # chiave blacklist = TAP_NODO fisso "tipo_campo"
+            assert bl.get_state("tipo_campo") == "COMMITTED"
+            assert bl.get_eta("tipo_campo") == 45.0
 
 
 # ==============================================================================

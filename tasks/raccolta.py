@@ -446,15 +446,13 @@ def _invia_squadra(ctx: TaskContext, tipo: str, blacklist: Blacklist,
         return False, False
 
     # Tap nodo + verifica GATHER visibile
-    # In V6 non abbiamo OCR coordinate — usiamo TAP_NODO fisso (centro lista)
-    # e verifichiamo che il popup si apra con GATHER visibile.
-    # La chiave blacklist è ricavata dalla posizione TAP_NODO (approssimazione).
-    tap_nodo = _cfg(ctx, "TAP_NODO")
-    chiave   = f"{tap_nodo[0]}_{tap_nodo[1]}"  # chiave approssimata senza OCR
+    # In V6 non abbiamo OCR coordinate — chiave blacklist basata sul tipo.
+    # Ogni tipo risorsa ha il proprio slot nella blacklist.
+    chiave = f"tipo_{tipo}"
 
-    # Verifica blacklist sul nodo centrale
+    # Verifica blacklist per questo tipo
     if blacklist.contiene(chiave):
-        ctx.log_msg(f"Raccolta [{tipo}]: nodo centrale in blacklist — skip tipo")
+        ctx.log_msg(f"Raccolta [{tipo}]: tipo in cooldown blacklist — skip")
         return False, True
 
     # Tap nodo e verifica GATHER
@@ -462,7 +460,7 @@ def _invia_squadra(ctx: TaskContext, tipo: str, blacklist: Blacklist,
         ctx.log_msg(f"Raccolta [{tipo}]: popup nodo non aperto — skip")
         return False, False
 
-    # RESERVED con chiave approssimata
+    # RESERVED per questo tipo
     blacklist.reserve(chiave)
     ctx.log_msg(f"Raccolta [{tipo}]: nodo RESERVED")
 
