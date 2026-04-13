@@ -492,3 +492,57 @@ class TestStoreConfig:
 
     def test_name_ritorna_store(self):
         assert StoreTask().name() == "store"
+
+
+# ==============================================================================
+# Test: run() — VIP Store attivo (merchant_close vince su merchant_open)
+# ==============================================================================
+
+class TestVipStoreAttivo:
+
+    def _matcher_vip_store(self) -> FakeMatcher:
+        """Merchant_close score alto, merchant_open basso → VIP Store attivo."""
+        cfg = _cfg()
+        m = FakeMatcher({
+            cfg.tmpl_store:          0.85,
+            cfg.tmpl_store_attivo:   0.85,
+            cfg.tmpl_carrello:       0.80,
+            cfg.tmpl_merchant:       0.20,   # open basso
+            "pin/pin_merchant_close.png": 0.90,  # close alto
+            cfg.tmpl_mercante:       0.10,
+            cfg.tmpl_banner_aperto:  0.10,
+            cfg.tmpl_banner_chiuso:  0.10,
+            cfg.tmpl_no_refresh:     0.10,
+            cfg.tmpl_free_refresh:   0.10,
+            "pin/pin_home.png":      0.85,
+        })
+        m.set_find(cfg.tmpl_store,    FakeMatch(cx=400, cy=300, score=0.85))
+        m.set_find(cfg.tmpl_carrello, FakeMatch(cx=600, cy=400, score=0.80))
+        return m
+
+    def test_vip_store_ritorna_skip(self):
+        device  = FakeDevice()
+        matcher = self._matcher_vip_store()
+        ctx     = _make_ctx(device=device, matcher=matcher)
+        result  = _task().run(ctx)
+        assert result.success  is True
+        assert result.skipped  is True
+
+    def test_vip_store_back_eseguito(self):
+        device  = FakeDevice()
+        matcher = self._matcher_vip_store()
+        ctx     = _make_ctx(device=device, matcher=matcher)
+        _task().run(ctx)
+        assert device.back_count() >= 1
+
+    def test_merchant_open_vince_su_close(self):
+        """Se open > close entrambi sopra soglia → merchant confermato."""
+        cfg     = _cfg()
+        device  = FakeDevice()
+        matcher = _matcher_store_trovato()
+        matcher.set_score(cfg.tmpl_merchant, 0.90)
+        matcher.set_score("pin/pin_merchant_close.png", 0.80)
+        ctx     = _make_ctx(device=device, matcher=matcher)
+        result  = _task().run(ctx)
+        assert result.success  is True
+        assert result.skipped  is False

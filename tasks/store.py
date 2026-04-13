@@ -97,8 +97,9 @@ class StoreConfig:
     tmpl_store:         str = "pin/pin_store.png"
     tmpl_store_attivo:  str = "pin/pin_store_attivo.png"
     tmpl_carrello:      str = "pin/pin_carrello.png"
-    tmpl_merchant:      str = "pin/pin_merchant.png"
-    tmpl_mercante:      str = "pin/pin_mercante.png"
+    tmpl_merchant:       str = "pin/pin_merchant.png"
+    tmpl_merchant_close: str = "pin/pin_merchant_close.png"
+    tmpl_mercante:       str = "pin/pin_mercante.png"
     tmpl_banner_aperto: str = "pin/pin_banner_aperto.png"
     tmpl_banner_chiuso: str = "pin/pin_banner_chiuso.png"
     tmpl_legno:         str = "pin/pin_legno.png"
@@ -331,12 +332,22 @@ class StoreTask(Task):
             device.tap(r_carr.cx, r_carr.cy)
             time.sleep(cfg.wait_tap + 0.2)
 
-        # Verifica merchant aperto
+        # Verifica merchant aperto: doppio match open vs close
         shot = device.screenshot()
-        s_merch = matcher.score(shot, cfg.tmpl_merchant)
-        log(f"Merchant aperto: score={s_merch:.3f} (soglia={cfg.soglia_merchant:.2f})")
-        if s_merch < cfg.soglia_merchant:
-            log("Merchant non confermato — abort")
+        s_merch_open  = matcher.score(shot, cfg.tmpl_merchant)
+        s_merch_close = matcher.score(shot, cfg.tmpl_merchant_close)
+        log(f"Merchant open={s_merch_open:.3f}  close={s_merch_close:.3f}"
+            f" (soglia={cfg.soglia_merchant:.2f})")
+
+        merchant_ok = (
+            s_merch_open >= cfg.soglia_merchant
+            and s_merch_open > s_merch_close
+        )
+        if not merchant_ok:
+            if s_merch_close >= cfg.soglia_merchant and s_merch_close > s_merch_open:
+                log("VIP Store attivo — Mysterious Merchant assente — abort")
+            else:
+                log("Merchant non confermato — abort")
             device.back()
             time.sleep(cfg.wait_back)
             return _Esito.MERCHANT_NON_APERTO, 0, False
@@ -549,11 +560,11 @@ class StoreTask(Task):
         refreshed:  bool,
         log,
     ) -> TaskResult:
+        data = {"acquistati": acquistati, "refreshed": refreshed}
         if esito == _Esito.COMPLETATO:
             return TaskResult.ok(
                 f"Store completato — acquistati: {acquistati}",
-                acquistati=acquistati,
-                refreshed=refreshed,
+                data=data,
             )
         skip_esiti = {
             _Esito.STORE_NON_TROVATO:    "Store non trovato nella griglia",
