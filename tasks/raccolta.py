@@ -61,6 +61,7 @@ from __future__ import annotations
 
 import time
 import threading
+import numpy as np
 from typing import Optional
 
 from core.task import Task, TaskContext, TaskResult
@@ -124,6 +125,10 @@ _DEFAULTS: dict = {
 }
 
 _TUTTI_I_TIPI = ["campo", "segheria", "petrolio", "acciaio"]
+
+# Verifica territorio alleanza — pixel check V5 verifica_ui.py
+_TERRITORIO_BUFF_ZONA = (250, 340, 420, 370)  # (x1,y1,x2,y2) riga "+30%"
+_TERRITORIO_SOGLIA_PX = 20                     # pixel verdi minimi
 
 
 def _cfg(ctx: TaskContext, key: str):
@@ -240,6 +245,28 @@ def _calcola_sequenza(obiettivo: int, sequenza_base: list[str],
 # Operazioni UI via ctx.device — zero ADB diretto
 # ==============================================================================
 
+def _nodo_in_territorio(screen, tipo: str, ctx: TaskContext) -> bool:
+    """
+    Pixel check V5 verifica_ui.py: popup nodo mostra buff territorio (+30%)?
+    Ritorna True se IN territorio, True per fail-safe.
+    """
+    try:
+        frame = getattr(screen, "frame", None)
+        if frame is None:
+            return True  # fail-safe: non scartare per dubbio
+        x1, y1, x2, y2 = _TERRITORIO_BUFF_ZONA
+        zona = frame[y1:y2, x1:x2, :3].astype(int)
+        r, g, b = zona[:, :, 0], zona[:, :, 1], zona[:, :, 2]
+        verdi = (g > 140) & (g > r * 1.4) & (g > b * 1.3) & ((g - r) > 40)
+        n_verdi = int(verdi.sum())
+        in_territorio = n_verdi >= _TERRITORIO_SOGLIA_PX
+        ctx.log_msg(f"Raccolta [{tipo}]: territorio pixel_verdi={n_verdi} "
+                    f"(soglia={_TERRITORIO_SOGLIA_PX}) → {'IN' if in_territorio else 'FUORI'} territorio")
+        return in_territorio
+    except Exception:
+        return True  # fail-safe
+
+
 def _verifica_tipo(ctx: TaskContext, tipo: str) -> bool:
     """Verifica visiva che il tipo sia selezionato nel pannello lente."""
     tmpl_tipo = _cfg(ctx, "TMPL_TIPO").get(tipo)
@@ -345,7 +372,19 @@ def _tap_nodo_e_verifica_gather(ctx: TaskContext, tipo: str) -> bool:
             r2 = ctx.matcher.find_one(screen2, template_gather, threshold=soglia, zone=roi_gather)
             ctx.log_msg(f"Raccolta [{tipo}]: pin_gather retry score={r2.score:.3f} → {'OK' if r2.found else 'NON trovato'}")
             if r2.found:
-                return True
+                screen = screen2
+            else:
+                ctx.device.key("KEYCODE_BACK")
+                time.sleep(0.5)
+                return False
+        else:
+            ctx.device.key("KEYCODE_BACK")
+            time.sleep(0.5)
+            return False
+
+    # Verifica territorio alleanza — pixel check V5
+    if not _nodo_in_territorio(screen, tipo, ctx):
+        ctx.log_msg(f"Raccolta [{tipo}]: nodo FUORI territorio — BACK e skip")
         ctx.device.key("KEYCODE_BACK")
         time.sleep(0.5)
         return False

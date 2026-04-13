@@ -538,3 +538,54 @@ class TestRaccoltaSlotLiberi:
         ctx = ctx_base(**{"RACCOLTA_OBIETTIVO": 4})
         RaccoltaTask().run(ctx, attive_inizio=0, slot_liberi=1)
         mock_loop.assert_called_once()
+
+
+# ==============================================================================
+# 15. _nodo_in_territorio — pixel check territorio alleanza
+# ==============================================================================
+
+class TestNodoInTerritorio:
+
+    def _make_screen_con_verde(self):
+        """Crea uno screenshot fake con pixel verdi nella zona buff."""
+        import numpy as np
+        from unittest.mock import MagicMock
+        frame = np.zeros((540, 960, 3), dtype=np.uint8)
+        # Zona buff: (250,340,420,370) — riempi con verde "alleanza"
+        # BGR: B=30, G=180, R=20 → g>140, g>r*1.4, g>b*1.3, g-r>40
+        frame[340:370, 250:420] = [30, 180, 20]
+        screen = MagicMock()
+        screen.frame = frame
+        return screen
+
+    def _make_screen_senza_verde(self):
+        """Crea uno screenshot fake senza pixel verdi — fuori territorio."""
+        import numpy as np
+        from unittest.mock import MagicMock
+        frame = np.zeros((540, 960, 3), dtype=np.uint8)
+        # Zona buff: grigi neutri — nessun verde
+        frame[340:370, 250:420] = [100, 100, 100]
+        screen = MagicMock()
+        screen.frame = frame
+        return screen
+
+    def test_in_territorio(self):
+        from tasks.raccolta import _nodo_in_territorio
+        ctx = ctx_base()
+        screen = self._make_screen_con_verde()
+        assert _nodo_in_territorio(screen, "campo", ctx) is True
+
+    def test_fuori_territorio(self):
+        from tasks.raccolta import _nodo_in_territorio
+        ctx = ctx_base()
+        screen = self._make_screen_senza_verde()
+        assert _nodo_in_territorio(screen, "campo", ctx) is False
+
+    def test_fail_safe_frame_none(self):
+        """Se frame è None ritorna True (fail-safe)."""
+        from tasks.raccolta import _nodo_in_territorio
+        from unittest.mock import MagicMock
+        ctx = ctx_base()
+        screen = MagicMock()
+        screen.frame = None
+        assert _nodo_in_territorio(screen, "campo", ctx) is True
