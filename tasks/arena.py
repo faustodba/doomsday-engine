@@ -52,8 +52,8 @@ from core.task import Task, TaskContext, TaskResult
 
 _TAP_CAMPAIGN        = (584, 486)   # bottone Campaign in home (layout 1 standard)
 _TAP_ARENA_OF_DOOM   = (321, 297)   # card Arena of Doom nella schermata Campaign
-_TAP_ULTIMA_SFIDA    = (480, 350)   # ultima voce nella lista sfide
-_TAP_START_CHALLENGE = (730, 460)   # bottone START CHALLENGE
+_TAP_ULTIMA_SFIDA    = (745, 482)   # pulsante Challenge ultima riga lista (V5 config)
+_TAP_START_CHALLENGE = (730, 451)   # bottone START CHALLENGE (V5 config)
 _TAP_ESAURITE_CANCEL = (334, 380)   # Cancel nel popup "sfide esaurite"
 _TAP_CONGRATULATIONS = (480, 440)   # Continue nel popup Congratulations generico
 _TAP_GLORY_CONTINUE  = (471, 432)   # Continue nel popup Glory Silver
