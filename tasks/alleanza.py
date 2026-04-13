@@ -4,16 +4,15 @@
 #  Task: raccolta ricompense Alleanza → Dono.
 #  SINCRONO (Step 25) — time.sleep, ctx.log_msg, navigator sincrono.
 #
-#  FIX (RT-08): log per ogni tap Rivendica con indice + motivo stop esplicito.
+#  MIGLIORAMENTO: loop Rivendica usa template matching su pin_claim.png
+#  invece di coordinate fisse + heuristica cromatica. Il tap avviene sulla
+#  posizione dinamica rilevata dal matcher → nessun click a vuoto.
 # ==============================================================================
 
 from __future__ import annotations
 
-import hashlib
 import time
 from dataclasses import dataclass
-
-import numpy as np
 
 from core.task import Task, TaskContext, TaskResult
 
@@ -24,15 +23,10 @@ class AlleanzaConfig:
     coord_dono:         tuple[int, int] = (877, 458)
     coord_tab_negozio:  tuple[int, int] = (810,  75)
     coord_tab_attivita: tuple[int, int] = (600,  75)
-    coord_rivendica:    tuple[int, int] = (856, 240)
     coord_raccogli:     tuple[int, int] = (856, 505)
-    riv_roi_half_w:     int   = 130
-    riv_roi_half_h:     int   = 28
-    riv_sat_min:        int   = 35
-    riv_bright_min:     int   = 120
-    riv_ratio_min:      float = 0.10
+    tmpl_claim:         str   = "pin/pin_claim.png"
+    soglia_claim:       float = 0.75
     max_rivendica:      int   = 20
-    no_change_limit:    int   = 2
     n_back_chiudi:      int   = 3
     wait_open_alleanza: float = 2.0
     wait_open_dono:     float = 2.0
@@ -59,15 +53,16 @@ class AlleanzaTask(Task):
         return "alleanza"
 
     def should_run(self, ctx: TaskContext) -> bool:
-        if ctx.device is None:
+        if ctx.device is None or ctx.matcher is None:
             return False
         if hasattr(ctx.config, "task_abilitato"):
             return ctx.config.task_abilitato("alleanza")
         return True
 
     def run(self, ctx: TaskContext) -> TaskResult:
-        cfg    = self._cfg
-        device = ctx.device
+        cfg     = self._cfg
+        device  = ctx.device
+        matcher = ctx.matcher
 
         def log(msg: str) -> None:
             ctx.log_msg(f"[ALLEANZA] {msg}")
@@ -81,13 +76,15 @@ class AlleanzaTask(Task):
             coord_alleanza = ctx.config.coord_alleanza
 
         try:
-            esito, rivendiche, raccolti = self._esegui_alleanza(device, coord_alleanza, log, cfg)
+            esito, rivendiche, raccolti = self._esegui_alleanza(
+                device, matcher, coord_alleanza, log, cfg
+            )
         except Exception as exc:
             return TaskResult.fail(f"Eccezione: {exc}", step="esegui_alleanza")
 
         return self._mappa_esito(esito, rivendiche, raccolti, log)
 
-    def _esegui_alleanza(self, device, coord_alleanza, log, cfg):
+    def _esegui_alleanza(self, device, matcher, coord_alleanza, log, cfg):
         log(f"Tap Alleanza {coord_alleanza}")
         device.tap(*coord_alleanza)
         time.sleep(cfg.wait_open_alleanza)
@@ -100,35 +97,23 @@ class AlleanzaTask(Task):
         device.tap(*cfg.coord_tab_negozio)
         time.sleep(cfg.wait_tab)
 
-        n_rivendiche     = 0
-        no_change_streak = 0
+        n_rivendiche = 0
 
         for i in range(cfg.max_rivendica):
-            shot = device.screenshot()
-            if not self._rivendica_presente(shot, cfg):
-                log(f"Rivendica non visibile prima del tap — stop a {i}/{cfg.max_rivendica}")
+            shot   = device.screenshot()
+            result = matcher.find_one(shot, cfg.tmpl_claim)
+            if not result.found or result.score < cfg.soglia_claim:
+                log(f"pin_claim non trovato (score={result.score:.3f}) — stop a {i}/{cfg.max_rivendica}")
                 break
-            h_before = self._roi_hash(shot, cfg)
-            log(f"Rivendica tap {i+1}/{cfg.max_rivendica}")
-            device.tap(*cfg.coord_rivendica)
+            cx, cy = result.cx, result.cy
+            log(f"Claim tap {i+1}/{cfg.max_rivendica} → ({cx},{cy}) score={result.score:.3f}")
+            device.tap(cx, cy)
             time.sleep(cfg.wait_rivendica)
             n_rivendiche += 1
-            shot2   = device.screenshot()
-            h_after = self._roi_hash(shot2, cfg)
-            if h_before and h_after and h_before == h_after:
-                no_change_streak += 1
-            else:
-                no_change_streak = 0
-            if not self._rivendica_presente(shot2, cfg):
-                log(f"Rivendica sparito dopo tap — stop a {i+1}/{cfg.max_rivendica}")
-                break
-            if no_change_streak >= cfg.no_change_limit:
-                log(f"No-change streak={no_change_streak} — stop a {i+1}/{cfg.max_rivendica}")
-                break
         else:
-            log(f"Rivendica completato: raggiunto limite {cfg.max_rivendica}")
+            log(f"Claim completato: raggiunto limite {cfg.max_rivendica}")
 
-        log(f"Rivendica totale: {n_rivendiche} tap")
+        log(f"Claim totale: {n_rivendiche} tap")
 
         log(f"Tab Attivita {cfg.coord_tab_attivita}")
         device.tap(*cfg.coord_tab_attivita)
@@ -142,40 +127,6 @@ class AlleanzaTask(Task):
             time.sleep(cfg.wait_back_last if i == cfg.n_back_chiudi - 1 else cfg.wait_back)
 
         return _Esito.COMPLETATO, n_rivendiche, True
-
-    def _rivendica_presente(self, shot, cfg: AlleanzaConfig) -> bool:
-        try:
-            arr = self._crop_roi(shot, cfg.coord_rivendica, cfg.riv_roi_half_w, cfg.riv_roi_half_h)
-            if arr is None:
-                return True
-            r, g, b = arr[:,:,2].astype(int), arr[:,:,1].astype(int), arr[:,:,0].astype(int)
-            mx, mn  = np.maximum(np.maximum(r,g),b), np.minimum(np.minimum(r,g),b)
-            mask    = ((mx - mn) > cfg.riv_sat_min) & (mx > cfg.riv_bright_min)
-            return float(mask.sum()) / float(mask.size) > cfg.riv_ratio_min
-        except Exception:
-            return True
-
-    def _roi_hash(self, shot, cfg: AlleanzaConfig) -> str:
-        try:
-            arr = self._crop_roi(shot, cfg.coord_rivendica, cfg.riv_roi_half_w, cfg.riv_roi_half_h)
-            if arr is None:
-                return ""
-            h = hashlib.md5()
-            h.update(arr.tobytes())
-            return h.hexdigest()
-        except Exception:
-            return ""
-
-    @staticmethod
-    def _crop_roi(shot, center, half_w, half_h):
-        try:
-            arr = shot.array
-            h_img, w_img = arr.shape[:2]
-            x, y = center
-            roi = arr[max(0,y-half_h):min(h_img,y+half_h), max(0,x-half_w):min(w_img,x+half_w)]
-            return roi if roi.size > 0 else None
-        except Exception:
-            return None
 
     @staticmethod
     def _mappa_esito(esito, rivendiche, raccolti, log) -> TaskResult:
