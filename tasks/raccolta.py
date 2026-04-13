@@ -599,8 +599,13 @@ class RaccoltaTask(Task):
             )
 
         ctx.log_msg("Raccolta: navigazione → mappa")
-        ctx.device.key("KEYCODE_MAP")
-        time.sleep(2.0)
+        if ctx.navigator is not None:
+            if not ctx.navigator.vai_in_mappa():
+                ctx.log_msg("Raccolta: impossibile andare in mappa — abort")
+                return TaskResult(success=False, message="vai_in_mappa fallito", data={"inviate": 0})
+        else:
+            ctx.device.key("KEYCODE_MAP")
+            time.sleep(2.0)
 
         inviate = 0
         try:
@@ -610,7 +615,10 @@ class RaccoltaTask(Task):
             return TaskResult(success=False, message=f"errore: {e}", data={"inviate": inviate})
         finally:
             ctx.log_msg("Raccolta: ritorno in home")
-            ctx.device.key("KEYCODE_HOME")
+            if ctx.navigator is not None:
+                ctx.navigator.vai_in_home()
+            else:
+                ctx.device.key("KEYCODE_HOME")
 
         ctx.log_msg(f"Raccolta: completata — {inviate}/{libere} squadre inviate")
         return TaskResult(success=True, message=f"{inviate} squadre inviate", data={"inviate": inviate})
