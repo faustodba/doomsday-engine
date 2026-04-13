@@ -57,7 +57,7 @@ def ctx_base(**overrides) -> TaskContext:
         "DELAY_POST_MARCIA":       0.0,
         "DELAY_CERCA":             0.0,
         "TEMPLATE_GATHER":         "pin/pin_gather.png",
-        "TEMPLATE_MARCIA":         "pin/pin_marcia.png",
+        "TEMPLATE_MARCIA":         "pin/pin_march.png",
         "TEMPLATE_SOGLIA":         0.75,
     }
     base.update(overrides)

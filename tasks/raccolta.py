@@ -43,7 +43,7 @@
 #    TAP_CAMPO_TESTO    = (480, 340)
 #    TAP_OK_TASTIERA    = (480, 380)
 #    TEMPLATE_GATHER    = "pin/pin_gather.png"
-#    TEMPLATE_MARCIA    = "pin/pin_marcia.png"
+#    TEMPLATE_MARCIA    = "pin/pin_march.png"
 #
 #  CONFIG (ctx.config — chiavi con fallback ai default):
 #    RACCOLTA_ABILITATA          bool   default True
@@ -105,7 +105,7 @@ _DEFAULTS: dict = {
     # Template gather + marcia
     "TEMPLATE_GATHER":  "pin/pin_gather.png",
     "ROI_GATHER":       (60, 350, 420, 420),   # V5 _ROI_GATHER
-    "TEMPLATE_MARCIA":  "pin/pin_marcia.png",
+    "TEMPLATE_MARCIA":  "pin/pin_march.png",
     "TEMPLATE_SOGLIA":  0.75,
     # Logica raccolta
     "RACCOLTA_ABILITATA":       True,
@@ -296,8 +296,8 @@ def _cerca_nodo(ctx: TaskContext, tipo: str) -> bool:
                 time.sleep(0.5)
                 return False
 
-    # Reset livello: 6× tap MENO (porta a Lv.1)
-    for _ in range(6):
+    # Reset livello: 7× tap MENO (porta sicuro a Lv.1 da qualsiasi stato)
+    for _ in range(7):
         ctx.device.tap(coord_lv["meno"])
     # Sale al livello target: (livello-1) × tap PIU
     for _ in range(livello - 1):
