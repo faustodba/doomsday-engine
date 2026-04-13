@@ -213,7 +213,12 @@ class ArenaMercatoTask(Task):
         speculare a V5 _visita_mercato_arena() che fa tap carrello prima del loop.
         """
         ctx.log_msg("[MERCATO-ARENA] HOME → Campaign")
-        ctx.device.tap(*_TAP_CAMPAIGN)
+        _navigato = False
+        if ctx.navigator is not None and hasattr(ctx.navigator, "tap_barra"):
+            _navigato = ctx.navigator.tap_barra(ctx, "campaign")
+        if not _navigato:
+            ctx.log_msg("[MERCATO-ARENA] tap_barra fallback → coordinate fisse %s", _TAP_CAMPAIGN)
+            ctx.device.tap(*_TAP_CAMPAIGN)
         time.sleep(3.0)
 
         ctx.log_msg("[MERCATO-ARENA] Campaign → Arena of Doom")

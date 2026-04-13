@@ -11,6 +11,13 @@
 #        pin_region.png  → visibile in HOME  (bottone mostra "Region")
 #        pin_shelter.png → visibile in MAPPA (bottone mostra "Shelter")
 #    - Logica vai_in_home / vai_in_mappa aggiornata: tap toggle se schermata sbagliata
+#
+#  ADD 13/04/2026 — tap_barra():
+#    - Barra inferiore: Campaign, Bag, Alliance, Beast, Hero
+#    - Navigazione via template matching invece di coordinate fisse
+#    - Necessario perché FAU_10 ha layout diverso (manca Beast → icone shiftate)
+#    - ROI calibrata su screenshot reale 960×540: (546, 456, 910, 529)
+#    - Score misurati: 0.993–0.995 su tutti e 5 i bottoni
 # ==============================================================================
 
 from __future__ import annotations
@@ -46,6 +53,33 @@ class NavigatorConfig:
     pin_home_template:  str   = "pin/pin_region.png"
     pin_map_template:   str   = "pin/pin_shelter.png"
     log_scores:         bool  = True
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# Barra inferiore — template matching
+# ──────────────────────────────────────────────────────────────────────────────
+#
+# ROI calibrata su screenshot reale 960×540 (home con tutti i bottoni visibili).
+# Copre l'intera zona dei 5 bottoni escludendo la label "Region" a sinistra.
+#
+# Bottoni presenti (layout standard):  Campaign | Bag | Alliance | Beast | Hero
+# Bottoni presenti (layout FAU_10):    Campaign | Bag | Alliance |        Hero
+#                                      (Beast assente → Alliance e Hero shiftati)
+#
+# tap_barra() trova il centro del bottone richiesto via TM e lo tappa.
+# Se il bottone non esiste nel layout corrente (score < soglia) → ritorna False.
+
+_BARRA_ROI = (546, 456, 910, 529)   # (x1, y1, x2, y2) — zona 5 bottoni
+
+_BARRA_PIN: dict[str, str] = {
+    "campaign": "pin/pin_campaign.png",
+    "bag":      "pin/pin_bag.png",
+    "alliance": "pin/pin_alliance.png",
+    "beast":    "pin/pin_beast.png",
+    "hero":     "pin/pin_hero.png",
+}
+
+_BARRA_SOGLIA = 0.80   # soglia conservativa — score reali 0.993-0.995
 
 
 class GameNavigator:
@@ -147,6 +181,43 @@ class GameNavigator:
             if screen == Screen.MAP:
                 return True
             time.sleep(cfg.wait_after_action)
+        return False
+
+    # ── Barra inferiore — template matching ───────────────────────────────────
+
+    def tap_barra(self, ctx, voce: str, soglia: float = _BARRA_SOGLIA) -> bool:
+        """
+        Trova e tappa un bottone della barra inferiore via template matching.
+
+        Parametri:
+            ctx   : TaskContext — usato per device e matcher
+            voce  : chiave in _BARRA_PIN ("campaign", "bag", "alliance", "beast", "hero")
+            soglia: soglia minima di confidenza (default 0.80)
+
+        Ritorna True se il bottone è stato trovato e tappato, False altrimenti.
+        False indica che il bottone non esiste nel layout corrente (es. Beast su FAU_10)
+        o che lo screenshot è fallito.
+
+        Nota: usa ctx.device e ctx.matcher (non self.device/self.matcher) perché
+        il TaskContext porta il dispositivo e il matcher dell'istanza corrente.
+        """
+        if voce not in _BARRA_PIN:
+            self._log(f"[NAV-BARRA] voce sconosciuta: '{voce}'")
+            return False
+
+        pin_path = _BARRA_PIN[voce]
+        screen = ctx.device.screenshot()
+        if screen is None:
+            self._log(f"[NAV-BARRA] screenshot fallito per '{voce}'")
+            return False
+
+        result = ctx.matcher.find_one(screen, pin_path, threshold=soglia, zone=_BARRA_ROI)
+        if result.found:
+            self._log(f"[NAV-BARRA] '{voce}' trovato score={result.score:.3f} → tap ({result.cx},{result.cy})")
+            ctx.device.tap(result.cx, result.cy)
+            return True
+
+        self._log(f"[NAV-BARRA] '{voce}' non trovato (score={result.score:.3f} < {soglia})")
         return False
 
     # ── Escape overlay ────────────────────────────────────────────────────────

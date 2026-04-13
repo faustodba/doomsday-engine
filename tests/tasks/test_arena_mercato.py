@@ -59,6 +59,15 @@ class FakeDevice:
         self.backs += 1
 
 
+class _MatchResult:
+    """Stub di shared.template_matcher.MatchResult."""
+    def __init__(self, score: float, soglia: float) -> None:
+        self.score = score
+        self.found = score >= soglia
+        self.cx    = 0
+        self.cy    = 0
+
+
 class FakeMatcher:
     def __init__(self) -> None:
         self._scores: dict[str, float] = {}
@@ -69,10 +78,19 @@ class FakeMatcher:
     def match(self, screen: Any, path: str, roi: tuple) -> float:
         return self._scores.get(path, 0.0)
 
+    def find_one(self, screen: Any, path: str,
+                 threshold: float = 0.0, zone: Any = None) -> _MatchResult:
+        score = self.match(screen, path, ())
+        return _MatchResult(score, threshold)
+
+    def score(self, screen: Any, path: str) -> float:
+        return self._scores.get(path, 0.0)
+
 
 class FakeNavigator:
     def __init__(self, home: bool = True) -> None:
         self._home = home
+        self.barra_taps: list[str] = []
 
     def current_screen(self, frame: Any):
         from enum import Enum
@@ -80,6 +98,12 @@ class FakeNavigator:
             HOME  = "home"
             OTHER = "other"
         return Screen.HOME if self._home else Screen.OTHER
+
+    def tap_barra(self, ctx: Any, voce: str, soglia: float = 0.80) -> bool:
+        """Stub: registra la voce e tappa coordinate fittizie."""
+        self.barra_taps.append(voce)
+        ctx.device.tap(0, 0)
+        return True
 
 
 class FakeCtx:
@@ -260,7 +284,7 @@ class TestArenaMercatoTask(unittest.TestCase):
         result = task.run(ctx)
 
         self.assertFalse(result.success)
-        self.assertIn("store", result.data["errore"])
+        self.assertIn("arena", result.data["errore"])
 
     # ── Scenario 6: screenshot None durante acquisti ──────────────────────────
 

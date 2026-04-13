@@ -256,9 +256,19 @@ class ArenaTask(Task):
         Gestisce popup Glory Silver e Congratulations generico.
         Verifica pin_arena_01_lista (retry=2).
         Ritorna True se lista visibile.
+
+        FIX 13/04/2026: tap Campaign via template matching (tap_barra) invece di
+        coordinate fisse (_TAP_CAMPAIGN=584,486). FAU_10 ha layout diverso
+        (bottone Beast assente → icone shiftate). Fallback su _TAP_CAMPAIGN se
+        navigator non disponibile o tap_barra fallisce.
         """
         ctx.log_msg("[ARENA] HOME → Campaign")
-        ctx.device.tap(*_TAP_CAMPAIGN)
+        _navigato = False
+        if ctx.navigator is not None and hasattr(ctx.navigator, "tap_barra"):
+            _navigato = ctx.navigator.tap_barra(ctx, "campaign")
+        if not _navigato:
+            ctx.log_msg("[ARENA] tap_barra fallback → coordinate fisse %s", _TAP_CAMPAIGN)
+            ctx.device.tap(*_TAP_CAMPAIGN)
         time.sleep(3.0)
 
         ctx.log_msg("[ARENA] Campaign → Arena of Doom")

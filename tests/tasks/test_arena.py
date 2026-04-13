@@ -71,12 +71,22 @@ class FakeDevice:
         self.backs += 1
 
 
+class _MatchResult:
+    """Stub di shared.template_matcher.MatchResult."""
+    def __init__(self, score: float, soglia: float) -> None:
+        self.score = score
+        self.found = score >= soglia
+        self.cx    = 0
+        self.cy    = 0
+
+
 class FakeMatcher:
     """
     Emula shared.template_matcher.TemplateMatcher.
 
     match(screen, template_path, roi) ritorna il valore configurato
     via set_score(template_path, score).
+    find_one(screen, path, threshold, zone) ritorna _MatchResult.
     Default: 0.0 (nessun match).
     """
 
@@ -89,6 +99,14 @@ class FakeMatcher:
     def match(self, screen: Any, template_path: str, roi: tuple) -> float:
         return self._scores.get(template_path, 0.0)
 
+    def find_one(self, screen: Any, template_path: str,
+                 threshold: float = 0.0, zone: Any = None) -> _MatchResult:
+        score = self.match(screen, template_path, ())
+        return _MatchResult(score, threshold)
+
+    def score(self, screen: Any, template_path: str) -> float:
+        return self._scores.get(template_path, 0.0)
+
 
 class FakeNavigator:
     """Emula core.navigator.GameNavigator."""
@@ -96,6 +114,7 @@ class FakeNavigator:
     def __init__(self, home: bool = True) -> None:
         self._home = home
         self._call_count = 0
+        self.barra_taps: list[str] = []
 
     def current_screen(self, frame: Any):
         from enum import Enum
@@ -106,6 +125,12 @@ class FakeNavigator:
 
         self._call_count += 1
         return Screen.HOME if self._home else Screen.OTHER
+
+    def tap_barra(self, ctx: Any, voce: str, soglia: float = 0.80) -> bool:
+        """Stub: registra la voce e tappa coordinate fittizie."""
+        self.barra_taps.append(voce)
+        ctx.device.tap(0, 0)
+        return True
 
 
 class FakeTaskContext:
