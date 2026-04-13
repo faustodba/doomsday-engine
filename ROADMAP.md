@@ -5,52 +5,6 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
-## Contesto di progetto
-
-Stiamo riscrivendo il bot Doomsday da V5 (monolitico, `config.py` globale, ADB diretto)
-a V6 (architettura modulare, `TaskContext`, `FakeDevice` testabile, zero ADB nei test).
-
----
-
-## Struttura cartelle
-
-```
-doomsday-engine/
-├── core/
-│   ├── device.py          # FakeDevice + AdbDevice + MatchResult + Screenshot
-│   ├── state.py           # InstanceState
-│   ├── logger.py          # StructuredLogger
-│   ├── navigator.py       # GameNavigator SINCRONO — toggle (38,505) pin_region/pin_shelter
-│   ├── scheduler.py
-│   ├── task.py            # Task ABC + TaskContext + TaskResult
-│   └── orchestrator.py    # tick() con gate HOME obbligatorio pre-task
-├── shared/
-│   ├── ocr_helpers.py     # OCR risorse + leggi_contatore_slot()
-│   ├── template_matcher.py  # TemplateMatcher + FakeMatcher
-│   └── rifornimento_base.py
-├── config/
-│   ├── config.py
-│   └── instances.json
-├── tasks/
-│   ├── boost.py, store.py, messaggi.py, alleanza.py
-│   ├── vip.py
-│   ├── arena.py, arena_mercato.py
-│   ├── radar.py, radar_census.py
-│   ├── zaino.py, rifornimento.py
-│   └── raccolta.py
-├── tests/tasks/
-├── dashboard/
-├── templates/pin/          # 42 PNG
-├── test_task_base.py       # Helper condiviso (pulisce log prima del run)
-├── test_task_raccolta.py   # ✅ RT-11 FAU_00
-├── test_task_raccolta_FAU01.py  # ✅ RT-11 FAU_01
-├── smoke_test.py
-├── main.py
-└── runtime.json
-```
-
----
-
 ## Stato step pytest
 
 | Step | File principali | Test | Note |
@@ -66,46 +20,11 @@ doomsday-engine/
 | 18 | `tasks/radar.py` + `radar_census.py` | ✅ 16/16 | |
 | 19 | `tasks/zaino.py` | ✅ 39/39 | |
 | 20 | `tasks/rifornimento.py` | ✅ 47/47 | |
-| 21 | `tasks/raccolta.py` | ✅ 57/57 | territorio + FakeMatcher |
+| 21 | `tasks/raccolta.py` | ✅ 57/57 | territorio + allocation gap V5 |
 | 22 | `core/orchestrator.py` | ✅ 49/49 | |
 | 23 | `dashboard/` | ✅ 30/30 | |
-| 24 | Fix test step 11-17 | ✅ 170/170 | |
-| 25 | Refactoring architettura sincrona | ✅ 170/170 | |
+| 24-25 | Fix + refactoring | ✅ | |
 | **main** | `main.py` + `smoke_test.py` | ✅ 61/61 | |
-
----
-
-## Fix sessione 13/04/2026
-
-### Store (RT-09)
-- Tap mercante diretto su `find_one(pin_mercante).cx/cy` preciso
-- Merchant check doppio match `pin_merchant` vs `pin_merchant_close` (VIP Store)
-- Nuovi template: `pin_merchant_close.png`
-- **Risultato:** 18 acquistati + Free Refresh
-
-### Arena (RT-10)
-- `_TAP_CAMPAIGN (760,505)` → `(584,486)` — era coordinata Alleanza
-- `_TAP_ARENA_OF_DOOM (480,270)` → `(321,297)`
-- `_TAP_ULTIMA_SFIDA (480,350)` → `(745,482)`
-- `_TAP_START_CHALLENGE (730,460)` → `(730,451)`
-- Aggiunto skip checkbox `(723,488)` con `pin_arena_check/no_check.png`
-- **Risultato:** 2 vittorie + esaurite rilevato
-
-### Raccolta (RT-11)
-- `KEYCODE_MAP/HOME` → `navigator.vai_in_mappa/home()` con verifica
-- Coordinate V5: TAP_LENTE(38,325) TAP_RACCOGLI(230,390) TAP_SQUADRA(700,185) TAP_MARCIA(727,476)
-- `TAP_ICONA_TIPO` separato: Campo(410,450) Segheria(535,450) Acciaio(672,490) Petrolio(820,490)
-- `_verifica_tipo()`: find_one su pin_field/sawmill/steel_mill/oil_refinery + retry+reset
-- `_tap_nodo_e_verifica_gather()`: tap TAP_NODO + verifica pin_gather ROI(60,350,420,420)
-- `_nodo_in_territorio()`: pixel check V5 zona(250,340,420,370) soglia 20px verdi
-- `pin_marcia` → `pin_march` (nome corretto)
-- Reset livello 7x MENO con delay 0.15s + 5x PIU con delay 0.2s
-- Blacklist chiave `tipo_X` per tipo indipendente
-- `FakeMatcher` aggiunta in `template_matcher.py`
-- Log positivi maschera+marcia
-- Pulizia log all'avvio in `test_task_raccolta.py`
-- **Risultato FAU_00:** 4/4 squadre inviate
-- **Risultato FAU_01:** 0/4 — territorio FUORI rilevato correttamente (pixel_verdi=0)
 
 ---
 
@@ -113,83 +32,139 @@ doomsday-engine/
 
 | Test | Descrizione | Stato | Note |
 |------|-------------|-------|------|
-| RT-01 | Connessione ADB | ✅ | |
-| RT-02 | Avvio engine + 12 task | ✅ | 12/12 task caricati |
-| RT-03 | Navigator HOME/MAPPA | ✅ | score 0.990/0.989 |
-| RT-04 | OCR risorse + diamanti | ✅ | 5/5 valori |
-| RT-05 | Contatore slot (X/Y) | ✅ | 0/5, 2/5, 3/5 testati |
-| RT-06 | VIP claim | ✅ | cass=OK free=OK |
-| RT-07 | Boost attivazione | ✅ | boost_gia_attivo + nessun_boost OK |
-| RT-08 | Messaggi + Alleanza | ✅ | icona fix + pin_claim.png |
+| RT-01..05 | Infrastruttura, navigator, OCR, slot | ✅ | |
+| RT-06 | VIP claim | ✅ | |
+| RT-07 | Boost | ✅ | |
+| RT-08 | Messaggi + Alleanza | ✅ | |
 | RT-09 | Store | ✅ | 18 acquistati + Free Refresh |
-| RT-10 | Arena | ✅ | 2 vittorie + esaurite |
+| RT-10 | Arena | ✅ | 5 sfide + skip checkbox |
 | RT-11 | Raccolta | ✅ | 4/4 FAU_00; territorio FUORI FAU_01 OK |
-| RT-12 | Tick completo FAU_00 | ⏳ | **PROSSIMO** |
-| RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dipende da RT-12 |
-| RT-14 | Full farm 12 istanze | ⏳ | dipende da RT-13 |
+| RT-12 | Tick completo FAU_01 | ✅ | Tick completo funzionante — vedi issues sotto |
+| RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo fix issues RT-12 |
+| RT-14 | Full farm 12 istanze | ⏳ | |
 
 ---
 
-## Prossima sessione — RT-12 Tick completo FAU_00
+## Issues aperti da RT-12 (priorità)
 
-Obiettivo: eseguire un tick completo dell'orchestrator su FAU_00 con tutti i task
-in sequenza reale, incluso OCR contatore slot via `leggi_contatore_slot()`.
+### 1. Arena mercato — navigazione sbagliata (ALTA)
+- **Problema:** V6 `arena_mercato.py` usa `pin_arena_01_lista` per rilevare
+  l'arena store, ma quel template è per la lista sfide — score sempre -0.038.
+- **Fix:** Il mercato arena è accessibile con `TAP_CARRELLO=(905,68)` DENTRO
+  la schermata arena (già aperta dopo `_naviga_a_arena`). NON serve secondo
+  tentativo di navigazione. Riscrivere `arena_mercato.py` seguendo V5:
+  `_naviga_a_arena()` → `tap carrello (905,68)` → acquisto pack 360/15 → BACK.
+- **File V5 riferimento:** `arena_of_glory.py` → `run_mercato_arena()` +
+  `_visita_mercato_arena()`. Template: `btn_360_open/close`, `btn_15_open/close`.
+  Coordinate: `TAP_CARRELLO=(905,68)`, `TAP_PRIMO=(235,283)`,
+  `TAP_MAX=(451,286)`, `TAP_PACK15=(788,408)`, `TAP_PACK15_MAX=(654,408)`.
 
-**Prerequisiti da integrare:**
-- `leggi_contatore_slot()` da `ocr_helpers.py` in `RaccoltaTask.run()` per slot reali
-- Verifica orchestrator gate HOME prima di ogni task
-- Tutti i task RT-06..RT-11 deployati ✅
+### 2. Arena — timeout battaglia sfide 2 e 4 (MEDIA)
+- **Problema:** Sfide 2 e 4 timeout dopo 38s — victory/failure non rilevati.
+  La battaglia è probabilmente ancora in corso (animazioni > 38s).
+- **Fix:** Aumentare `TIMEOUT_BATTAGLIA` da 38s a 60s. Verificare visivamente
+  quanto durano le battaglie più lunghe su FAU_01.
+- **TODO pin mancanti:**
+  - `pin_arena_video.png` — popup video introduttivo primo accesso
+  - `pin_arena_categoria.png` — popup categoria settimanale (lunedì)
 
-**Funzionalita' V5 da integrare in RT-12:**
-- Lettura contatore slot reale (`leggi_contatore_slot()` — gia' in `ocr_helpers.py`)
-- ETA marcia da maschera invio (OCR)
-- Blacklist con coordinate reali nodo (richiede OCR popup lente coord)
+### 3. Zaino — deposito non passato dall'orchestrator (MEDIA)
+- **Problema:** `ZainoTask.run()` riceve `ctx` senza `deposito` OCR.
+  Il deposito viene letto in `RaccoltaTask` ma non condiviso.
+- **Fix:** Leggere `ocr_risorse()` nell'orchestrator PRIMA di eseguire i task,
+  salvarlo in `ctx.state` e passarlo a Zaino. Alternativa: leggere in `ZainoTask.run()`.
+- **Priorità:** dopo rifornimento e radar.
+
+### 4. Rifornimento — da mettere a punto (ALTA)
+- **Stato:** task disabilitato in runtime. Da verificare con log reale.
+- **Azione:** abilitare `RIFORNIMENTO_ABILITATO=True` in `runtime.json`,
+  lanciare tick su FAU_00 (che ha slot rifornimento), analizzare log.
+- **File V5:** `rifornimento_mappa.py` — leggere prima di qualsiasi modifica V6.
+
+### 5. Radar — da mettere a punto (ALTA)
+- **Stato:** task esegue ma non logga nulla (skip silenzioso).
+- **Azione:** leggere `radar_census.py` V5 + `radar.py` V6 per capire
+  cosa manca. Il radar richiede istanza in MAPPA con radar aperto.
+- **File V5:** `radar_census.py` — classifier Random Forest già trainato.
+
+### 6. Store NMS cross-template (BASSA)
+- `pin_acciaio.png` = `pin_pomodoro.png` (stesso file) → stesso cx,cy.
+  Quando sarà disponibile il vero `pin_acciaio.png`, il NMS si risolve.
 
 ---
 
-## Problemi aperti
+## Prossima sessione — Fix arena_mercato + rifornimento
 
-| Problema | Task | Priorita' | Nota |
-|----------|------|-----------|------|
-| Slot reale non letto da OCR | raccolta | MEDIA | RT-12: integrare leggi_contatore_slot() |
-| ETA marcia sempre None | raccolta | MEDIA | RT-12: OCR maschera invio |
-| Blacklist chiave approssimata | raccolta | BASSA | Coordinate reali richiedono OCR popup |
-| `pin_speed_use` score -1.000 | boost | MEDIA | Template da rifare |
-| `pin_oil_refinery.png` score basso | raccolta | BASSA | Template da rifare |
-| NMS cross-template store | store | MEDIA | pin_acciaio+pin_pomodoro stessa cx,cy |
+### Step 1: Fix arena_mercato.py
+Leggere `C:\doomsday-engine\tasks\arena_mercato.py` V6 attuale.
+Riscrivere seguendo V5 `arena_of_glory.py → run_mercato_arena()`.
+Flusso corretto:
+1. `HOME → Campaign → Arena of Doom` (riusa `_naviga_a_arena`)
+2. `tap carrello (905,68)` → attesa 2s → Arena Store aperto
+3. Loop acquisto pack 360: `btn_360_open/close` → `tap (235,283)` → `tap (451,286)`
+4. Se 360 esaurito → pack 15: `btn_15_open/close` → `tap (788,408)` → `tap (654,408) x34`
+5. BACK → home
 
----
-
-## Principio fondamentale
-
-> **Leggere SEMPRE i file V5 prima di scrivere qualsiasi primitiva.**
-> Zone OCR, coordinate UI, template names, logica di parsing, metodi ADB —
-> tutto e' gia' calibrato e funzionante in V5.
->
-> **File V5 da leggere prima di ogni primitiva:**
-> `adb.py`, `config.py`, `ocr.py`, `stato.py`, il task corrispondente.
-
----
-
-## Standard architetturale V6 (Step 25 — vincolante)
-
-```python
-class XxxTask(Task):
-
-    def name(self) -> str:
-        return "xxx"
-
-    def should_run(self, ctx: TaskContext) -> bool:
-        if ctx.device is None or ctx.matcher is None:
-            return False
-        if hasattr(ctx.config, "task_abilitato"):
-            return ctx.config.task_abilitato("xxx")
-        return True
-
-    def run(self, ctx: TaskContext) -> TaskResult:
-        def log(msg): ctx.log_msg(f"[XXX] {msg}")
-        return TaskResult.ok("completato")
+### Step 2: Rifornimento
 ```
+Abilitare in runtime.json:
+  "RIFORNIMENTO_ABILITATO": true
+  "RIFORNIMENTO_MAPPA_ABILITATO": true
+Lanciare: python main.py --istanze FAU_00 --tick-sleep 10
+Analizzare log rifornimento.
+```
+
+---
+
+## Fix applicati in sessione 13/04/2026
+
+| Fix | File | Dettaglio |
+|-----|------|-----------|
+| Porta FAU_01 | `instances.json` | 16448 → 16416 |
+| VIP retry cassaforte | `vip.py` | wait_open_badge 2→3s + retry 1.5s se nessun pin |
+| Raccolta skip neutro | `raccolta.py` | territorio FUORI → skip_neutro=True → fallimenti_cons invariato |
+| Raccolta allocation | `raccolta.py` | logica gap V5 allocation.py integrata; OCR deposito → sequenza ottimale |
+| Raccolta OCR slot | `raccolta.py` | leggi_contatore_slot() in run() — lettura slot reale da schermo |
+| Raccolta pin_march | `raccolta.py` | pin_marcia → pin_march (nome corretto) |
+| Raccolta delay livello | `raccolta.py` | 0.15s/tap MENO + 0.2s/tap PIU |
+| Raccolta blacklist tipo | `raccolta.py` | chiave tipo_X invece di coordinate fisse |
+| Raccolta territorio | `raccolta.py` | pixel check V5 zona(250,340,420,370) soglia 20px verdi |
+
+---
+
+## Coordinate di riferimento (960x540)
+
+| Costante | Valore | Task |
+|----------|--------|------|
+| `TAP_TOGGLE_HOME_MAPPA` | `(38, 505)` | navigator |
+| `_ZONA_TESTO_SLOT` | `(890,117,946,141)` | slot OCR |
+| `TAP_LENTE` | `(38, 325)` | raccolta |
+| `TAP_NODO` | `(480, 280)` | raccolta |
+| `TAP_RACCOGLI` | `(230, 390)` | raccolta |
+| `TAP_SQUADRA` | `(700, 185)` | raccolta |
+| `TAP_MARCIA` | `(727, 476)` | raccolta |
+| `TERRITORIO_BUFF_ZONA` | `(250,340,420,370)` | raccolta |
+| `TAP_ICONA campo` | `(410, 450)` | raccolta |
+| `TAP_ICONA segheria` | `(535, 450)` | raccolta |
+| `TAP_ICONA acciaio` | `(672, 490)` | raccolta |
+| `TAP_ICONA petrolio` | `(820, 490)` | raccolta |
+| ARENA `tap_campaign` | `(584, 486)` | arena layout 1 |
+| ARENA `tap_arena_of_doom` | `(321, 297)` | arena |
+| ARENA `tap_ultima_sfida` | `(745, 482)` | arena |
+| ARENA `tap_start_challenge` | `(730, 451)` | arena |
+| ARENA `tap_skip_checkbox` | `(723, 488)` | arena |
+| ARENA `tap_carrello` | `(905, 68)` | arena_mercato |
+| ARENA `tap_primo_360` | `(235, 283)` | arena_mercato |
+| ARENA `tap_max_360` | `(451, 286)` | arena_mercato |
+| ARENA `tap_pack15` | `(788, 408)` | arena_mercato |
+| ARENA `tap_pack15_max` | `(654, 408)` | arena_mercato |
+| MSG `tap_icona_messaggi` | `(928, 430)` | messaggi |
+| VIP `tap_badge` | `(85, 52)` | vip |
+| ALLEANZA `coord_alleanza` | `(760, 505)` | alleanza |
+
+---
+
+## Standard architetturale V6 (vincolante)
 
 | Cosa | Standard | Vietato |
 |------|----------|---------|
@@ -200,54 +175,33 @@ class XxxTask(Task):
 | Template matching | `matcher.find_one()`, `matcher.score()` | `matcher.match()`, `matcher.find()` |
 | Screenshot frame | `screen.frame` | `device.last_frame` |
 
+**REGOLA ASSOLUTA:** Leggere SEMPRE il file V5 corrispondente prima di
+scrivere qualsiasi primitiva. Zone OCR, coordinate UI, template names,
+logica di parsing — tutto è già calibrato in V5.
+
 ---
 
 ## Template disponibili in templates/pin/ (42 file)
 
 ```
-pin_region.png          pin_shelter.png
-pin_vip_01..07.png      (7 file VIP)
-pin_boost.png           pin_manage.png
-pin_speed.png           pin_50_.png
-pin_speed_8h.png        pin_speed_1d.png        pin_speed_use.png
-pin_gather.png          pin_march.png
-pin_field.png           pin_sawmill.png
-pin_steel_mill.png      pin_oil_refinery.png
-pin_store.png           pin_store_attivo.png    pin_mercante.png
-pin_merchant.png        pin_merchant_close.png  pin_carrello.png
-pin_banner_aperto.png   pin_banner_chiuso.png
-pin_legno.png           pin_pomodoro.png        pin_acciaio.png
-pin_free_refresh.png    pin_no_refresh.png
-pin_arena_01..07.png    (7 file arena)
-pin_arena_check.png     pin_arena_no_check.png
-pin_360_open/close.png  pin_15_open/close.png
-pin_msg_02..04.png      pin_claim.png
-btn_resource_supply_map.png
+pin_region, pin_shelter
+pin_vip_01..07 (7 file)
+pin_boost, pin_manage, pin_speed, pin_50_, pin_speed_8h, pin_speed_1d, pin_speed_use
+pin_gather, pin_march
+pin_field, pin_sawmill, pin_steel_mill, pin_oil_refinery
+pin_store, pin_store_attivo, pin_mercante, pin_merchant, pin_merchant_close, pin_carrello
+pin_banner_aperto, pin_banner_chiuso
+pin_legno, pin_pomodoro, pin_acciaio (= pin_pomodoro — TODO rimpiazzare)
+pin_free_refresh, pin_no_refresh
+pin_arena_01..07 (7 file)
+pin_arena_check, pin_arena_no_check
+pin_360_open, pin_360_close, pin_15_open, pin_15_close
+pin_msg_02..04, pin_claim
+btn_resource_supply_map
 ```
 
----
-
-## Coordinate di riferimento (960x540)
-
-| Costante | Valore | Fonte V5 | Task |
-|----------|--------|----------|------|
-| `TAP_TOGGLE_HOME_MAPPA` | `(38, 505)` | `config.py` | navigator |
-| `_ZONA_TESTO_SLOT` | `(890,117,946,141)` | `ocr.py` | slot |
-| `TAP_LENTE` | `(38, 325)` | `config.py` | raccolta |
-| `TAP_NODO` | `(480, 280)` | `config.py` | raccolta |
-| `TAP_RACCOGLI` | `(230, 390)` | `config.py` | raccolta |
-| `TAP_SQUADRA` | `(700, 185)` | `config.py` | raccolta |
-| `TAP_MARCIA` | `(727, 476)` | `config.py` | raccolta |
-| `TERRITORIO_BUFF_ZONA` | `(250,340,420,370)` | `verifica_ui.py` | raccolta |
-| `TAP_ICONA campo` | `(410, 450)` | `config.py` | raccolta |
-| `TAP_ICONA segheria` | `(535, 450)` | `config.py` | raccolta |
-| `TAP_ICONA acciaio` | `(672, 490)` | `config.py` | raccolta |
-| `TAP_ICONA petrolio` | `(820, 490)` | `config.py` | raccolta |
-| ARENA `tap_campaign` | `(584, 486)` | `config.py` V5 layout 1 | arena |
-| ARENA `tap_arena_of_doom` | `(321, 297)` | `config.py` V5 | arena |
-| ARENA `tap_ultima_sfida` | `(745, 482)` | `config.py` V5 | arena |
-| ARENA `tap_start_challenge` | `(730, 451)` | `config.py` V5 | arena |
-| ARENA `tap_skip_checkbox` | `(723, 488)` | screenshot reale | arena |
-| MSG `tap_icona_messaggi` | `(928, 430)` | `config.py` V5 | messaggi |
-| VIP `tap_badge` | `(85, 52)` | `vip.py` V6 | vip |
-| ALLEANZA `coord_alleanza` | `(760, 505)` | `alleanza.py` V5 | alleanza |
+**Template mancanti (TODO):**
+- `pin_acciaio.png` — reale (attuale = pin_pomodoro)
+- `pin_arena_video.png` — popup video primo accesso arena
+- `pin_arena_categoria.png` — popup categoria settimanale arena (lunedì)
+- Template arena mercato: `btn_360_open/close`, `btn_15_open/close`
