@@ -154,19 +154,19 @@ def _matcher_store_trovato(**extra) -> FakeMatcher:
     """Matcher con store trovato al passo 0, merchant confermato, niente pulsanti."""
     cfg = _cfg()
     m   = FakeMatcher({
-        cfg.tmpl_store:         0.85,
-        cfg.tmpl_store_attivo:  0.85,
-        cfg.tmpl_carrello:      0.80,
-        cfg.tmpl_merchant:      0.80,
-        cfg.tmpl_mercante:      0.10,
-        cfg.tmpl_banner_aperto: 0.10,
-        cfg.tmpl_banner_chiuso: 0.10,
-        cfg.tmpl_no_refresh:    0.10,
-        cfg.tmpl_free_refresh:  0.10,
-        "pin/pin_home.png":     0.85,
+        cfg.tmpl_store:          0.85,
+        cfg.tmpl_store_attivo:   0.85,
+        cfg.tmpl_carrello:       0.80,
+        cfg.tmpl_merchant:       0.90,
+        cfg.tmpl_merchant_close: 0.10,
+        cfg.tmpl_mercante:       0.10,
+        cfg.tmpl_banner_aperto:  0.10,
+        cfg.tmpl_banner_chiuso:  0.10,
+        cfg.tmpl_no_refresh:     0.10,
+        cfg.tmpl_free_refresh:   0.10,
         **extra,
     })
-    m.set_find(cfg.tmpl_store, FakeMatch(cx=400, cy=300, score=0.85))
+    m.set_find(cfg.tmpl_store,    FakeMatch(cx=400, cy=300, score=0.85))
     m.set_find(cfg.tmpl_carrello, FakeMatch(cx=600, cy=400, score=0.80))
     return m
 
@@ -354,28 +354,6 @@ class TestStoreCompletato:
         ctx     = _make_ctx(device=device, matcher=matcher)
         _task().run(ctx)
         assert device.back_count() >= 1
-
-
-# ==============================================================================
-# Test: run() — mercante diretto (skip carrello)
-# ==============================================================================
-
-class TestMercanteDiretto:
-
-    def test_skip_carrello(self):
-        cfg     = _cfg()
-        device  = FakeDevice()
-        matcher = _matcher_store_trovato()
-        matcher.set_score(cfg.tmpl_mercante, 0.90)   # mercante visibile
-        ctx     = _make_ctx(device=device, matcher=matcher)
-        _task().run(ctx)
-
-        # Nessun tap su carrello
-        carrello_taps = [
-            c for c in device.calls
-            if c[0] == "tap" and c[1] == 600 and c[2] == 400
-        ]
-        assert len(carrello_taps) == 0
 
 
 # ==============================================================================
