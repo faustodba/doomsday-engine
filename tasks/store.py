@@ -293,34 +293,47 @@ class StoreTask(Task):
         Flusso completo negozio dopo aver trovato lo store.
         Ritorna (esito, acquistati, refreshed).
         """
-        log(f"Tap edificio ({cx_store},{cy_store})")
+        # Pre-tap: cerca pin_mercante sull'edificio
+        # Se trovato → tap preciso su (cx_merc, cy_merc) apre popup direttamente
+        # Se non trovato → tap su edificio → label + carrello
+        shot_pre = device.screenshot()
+        r_merc = matcher.find_one(shot_pre, cfg.tmpl_mercante,
+                                  threshold=cfg.soglia_mercante,
+                                  zone=cfg.roi_negozio)
+        log(f"Pre-tap mercante: score={r_merc.score:.3f} (soglia={cfg.soglia_mercante:.2f})")
 
-        device.tap(cx_store, cy_store)
-        time.sleep(cfg.wait_tap)
+        if r_merc.found:
+            log(f"Mercante visibile — tap diretto ({r_merc.cx},{r_merc.cy})")
+            device.tap(r_merc.cx, r_merc.cy)
+            time.sleep(cfg.wait_tap)
+        else:
+            log(f"Tap edificio ({cx_store},{cy_store})")
+            device.tap(cx_store, cy_store)
+            time.sleep(cfg.wait_tap)
 
-        shot = device.screenshot()
+            shot = device.screenshot()
 
-        # Flusso sempre standard: label → carrello → merchant check
-        s_label = matcher.score(shot, cfg.tmpl_store_attivo)
-        log(f"Label: score={s_label:.3f} (soglia={cfg.soglia_store_attivo:.2f})")
-        if s_label < cfg.soglia_store_attivo:
-            log("Label non trovata — abort")
-            device.back()
-            time.sleep(cfg.wait_back)
-            return _Esito.LABEL_NON_TROVATA, 0, False
+            # Flusso standard: label → carrello
+            s_label = matcher.score(shot, cfg.tmpl_store_attivo)
+            log(f"Label: score={s_label:.3f} (soglia={cfg.soglia_store_attivo:.2f})")
+            if s_label < cfg.soglia_store_attivo:
+                log("Label non trovata — abort")
+                device.back()
+                time.sleep(cfg.wait_back)
+                return _Esito.LABEL_NON_TROVATA, 0, False
 
-        r_carr = matcher.find_one(shot, cfg.tmpl_carrello,
-                                  threshold=cfg.soglia_carrello)
-        log(f"Carrello: score={r_carr.score:.3f} (soglia={cfg.soglia_carrello:.2f})")
-        if not r_carr.found:
-            log("Carrello non trovato — abort")
-            device.back()
-            time.sleep(cfg.wait_back)
-            return _Esito.CARRELLO_NON_TROVATO, 0, False
+            r_carr = matcher.find_one(shot, cfg.tmpl_carrello,
+                                      threshold=cfg.soglia_carrello)
+            log(f"Carrello: score={r_carr.score:.3f} (soglia={cfg.soglia_carrello:.2f})")
+            if not r_carr.found:
+                log("Carrello non trovato — abort")
+                device.back()
+                time.sleep(cfg.wait_back)
+                return _Esito.CARRELLO_NON_TROVATO, 0, False
 
-        log(f"Tap carrello ({r_carr.cx},{r_carr.cy})")
-        device.tap(r_carr.cx, r_carr.cy)
-        time.sleep(cfg.wait_tap + 0.2)
+            log(f"Tap carrello ({r_carr.cx},{r_carr.cy})")
+            device.tap(r_carr.cx, r_carr.cy)
+            time.sleep(cfg.wait_tap + 0.2)
 
         # Verifica merchant aperto: doppio match open vs close
         shot = device.screenshot()

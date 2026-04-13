@@ -357,6 +357,58 @@ class TestStoreCompletato:
 
 
 # ==============================================================================
+# Test: run() — mercante diretto (tap su cx_merc,cy_merc, skip carrello)
+# ==============================================================================
+
+class TestMercanteDiretto:
+
+    def _matcher_mercante_diretto(self) -> FakeMatcher:
+        """pin_mercante trovato a (550,300) → tap diretto, skip carrello."""
+        cfg = _cfg()
+        m   = FakeMatcher({
+            cfg.tmpl_store:          0.85,
+            cfg.tmpl_merchant:       0.90,
+            cfg.tmpl_merchant_close: 0.10,
+            cfg.tmpl_mercante:       0.90,
+            cfg.tmpl_banner_aperto:  0.10,
+            cfg.tmpl_banner_chiuso:  0.10,
+            cfg.tmpl_no_refresh:     0.10,
+            cfg.tmpl_free_refresh:   0.10,
+        })
+        m.set_find(cfg.tmpl_store,    FakeMatch(cx=400, cy=300, score=0.85))
+        m.set_find(cfg.tmpl_mercante, FakeMatch(cx=550, cy=300, score=0.90))
+        return m
+
+    def test_tap_su_mercante_non_su_edificio(self):
+        """Con mercante visibile il tap va su (550,300), non su (400,300)."""
+        device  = FakeDevice()
+        matcher = self._matcher_mercante_diretto()
+        ctx     = _make_ctx(device=device, matcher=matcher)
+        _task().run(ctx)
+        # Primo tap deve essere sulla coordinata del mercante
+        tap_calls = [c for c in device.calls if c[0] == "tap"]
+        assert any(c[1] == 550 and c[2] == 300 for c in tap_calls)
+
+    def test_skip_carrello(self):
+        """Con mercante visibile non viene tappato il carrello (600,400)."""
+        device  = FakeDevice()
+        matcher = self._matcher_mercante_diretto()
+        ctx     = _make_ctx(device=device, matcher=matcher)
+        _task().run(ctx)
+        carrello_taps = [c for c in device.calls
+                         if c[0] == "tap" and c[1] == 600 and c[2] == 400]
+        assert len(carrello_taps) == 0
+
+    def test_ritorna_ok(self):
+        device  = FakeDevice()
+        matcher = self._matcher_mercante_diretto()
+        ctx     = _make_ctx(device=device, matcher=matcher)
+        result  = _task().run(ctx)
+        assert result.success is True
+        assert result.skipped is False
+
+
+# ==============================================================================
 # Test: run() — store non trovato
 # ==============================================================================
 
