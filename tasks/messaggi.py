@@ -4,7 +4,8 @@
 #  Task: raccolta ricompense dalla sezione Messaggi (tab Alliance + System).
 #  SINCRONO (Step 25) — time.sleep, ctx.log_msg, navigator sincrono.
 #
-#  FIX (RT-08): tap_icona_messaggi corretto da (930,13) a (928,430) — da V5 config.
+#  FIX RT-08a: chiusura con navigator.vai_in_home() invece di n_back_close fissi.
+#  Gestisce correttamente sia il caso con popup ricompense sia senza.
 # ==============================================================================
 
 from __future__ import annotations
@@ -17,7 +18,7 @@ from core.task import Task, TaskContext, TaskResult
 
 @dataclass
 class MessaggiConfig:
-    tap_icona_messaggi: tuple[int, int] = (928, 430)   # FIX: era (930,13)
+    tap_icona_messaggi: tuple[int, int] = (928, 430)
     tap_tab_alliance:   tuple[int, int] = (325, 35)
     tap_tab_system:     tuple[int, int] = (453, 36)
     tap_read_all:       tuple[int, int] = (108, 511)
@@ -32,8 +33,6 @@ class MessaggiConfig:
     wait_tab:           float = 1.0
     wait_read:          float = 2.0
     wait_close:         float = 1.5
-    wait_back:          float = 0.5
-    n_back_close:       int   = 3
     retry_tab:          int   = 2
     retry_sleep:        float = 1.0
     retry_sleep_open:   float = 1.5
@@ -78,13 +77,15 @@ class MessaggiTask(Task):
                 return TaskResult.fail("Navigator non ha raggiunto HOME", step="assicura_home")
 
         try:
-            esito, alliance_ok, system_ok = self._esegui_messaggi(device, matcher, log, cfg)
+            esito, alliance_ok, system_ok = self._esegui_messaggi(
+                device, matcher, ctx.navigator, log, cfg
+            )
         except Exception as exc:
             return TaskResult.fail(f"Eccezione: {exc}", step="esegui_messaggi")
 
         return self._mappa_esito(esito, alliance_ok, system_ok, log)
 
-    def _esegui_messaggi(self, device, matcher, log, cfg):
+    def _esegui_messaggi(self, device, matcher, navigator, log, cfg):
         log(f"Tap icona messaggi {cfg.tap_icona_messaggi}")
         device.tap(*cfg.tap_icona_messaggi)
         time.sleep(cfg.wait_open)
@@ -96,7 +97,6 @@ class MessaggiTask(Task):
         if not ok_open:
             log("ANOMALIA: schermata non aperta — BACK + abort")
             device.back()
-            time.sleep(cfg.wait_back)
             return _Esito.SCHERMATA_NON_APERTA, False, False
 
         log("[PRE-OPEN] schermata messaggi aperta — OK")
@@ -113,9 +113,13 @@ class MessaggiTask(Task):
         log(f"Tap X chiudi {cfg.tap_close}")
         device.tap(*cfg.tap_close)
         time.sleep(cfg.wait_close)
-        for _ in range(cfg.n_back_close):
-            device.back()
-            time.sleep(cfg.wait_back)
+
+        # Ritorno in HOME robusto: gestisce popup ricompense e stack screen
+        if navigator is not None:
+            ok_home = navigator.vai_in_home()
+            log(f"[POST-CLOSE] vai_in_home → {'OK' if ok_home else 'FALLITO'}")
+        else:
+            log("[POST-CLOSE] navigator non disponibile — nessun recovery")
 
         return _Esito.COMPLETATO, alliance_ok, system_ok
 
