@@ -339,3 +339,46 @@ def clear_matchers() -> None:
         for m in _matchers.values():
             m._cache.clear()
         _matchers.clear()
+
+
+# ==============================================================================
+# FakeMatcher — per test (zero I/O, zero cv2)
+# ==============================================================================
+
+class FakeMatcher:
+    """
+    Matcher fittizio per test. Ritorna risultati configurabili via set_result().
+    API identica a TemplateMatcher.
+    """
+
+    def __init__(self):
+        self._results: dict[str, tuple[int, int] | None] = {}
+        self._scores:  dict[str, float] = {}
+
+    def set_result(self, template: str, coord: tuple[int, int] | None) -> None:
+        """Configura la risposta per un template: None = non trovato."""
+        self._results[template] = coord
+
+    def set_score(self, template: str, score: float) -> None:
+        self._scores[template] = score
+
+    def find_one(self, screenshot, template_name: str,
+                 threshold: float = 0.75, zone=None) -> "MatchResult":
+        coord = self._results.get(template_name)
+        score = self._scores.get(template_name, 0.9 if coord is not None else 0.0)
+        if coord is not None:
+            return MatchResult(found=True, score=score, cx=coord[0], cy=coord[1])
+        return MatchResult(found=False, score=score, cx=0, cy=0)
+
+    def find_all(self, screenshot, template_name: str,
+                 threshold: float = 0.75, zone=None,
+                 cluster_px: int = 20) -> list:
+        r = self.find_one(screenshot, template_name, threshold, zone)
+        return [r] if r.found else []
+
+    def exists(self, screenshot, template_name: str,
+               threshold: float = 0.75, zone=None) -> bool:
+        return self.find_one(screenshot, template_name, threshold, zone).found
+
+    def score(self, screenshot, template_name: str, zone=None) -> float:
+        return self._scores.get(template_name, 0.0)

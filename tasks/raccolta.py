@@ -70,16 +70,23 @@ from core.task import Task, TaskContext, TaskResult
 # ------------------------------------------------------------------------------
 
 _DEFAULTS: dict = {
-    # Coordinate UI (960x540)
-    "TAP_LENTE":            (334,  13),
-    "TAP_NODO":             (480, 270),
-    "TAP_RACCOGLI":         (662, 410),
-    "TAP_SQUADRA":          (480, 410),
-    "TAP_MARCIA":           (480, 448),
-    "TAP_CANCELLA":         (390, 340),
-    "TAP_CAMPO_TESTO":      (480, 340),
-    "TAP_OK_TASTIERA":      (480, 380),
-    # Coordinate livello per tipo (meno, piu, search) — 960x540
+    # Coordinate UI (960x540) — da V5 config.py
+    "TAP_LENTE":            (38,  325),   # icona lente grande in mappa
+    "TAP_NODO":             (480, 280),   # centro nodo dopo CERCA
+    "TAP_RACCOGLI":         (230, 390),   # pulsante RACCOGLI nel popup nodo
+    "TAP_SQUADRA":          (700, 185),   # selezione squadra
+    "TAP_MARCIA":           (727, 476),   # pulsante MARCIA
+    "TAP_CANCELLA":         (527, 469),   # pulsante CANCELLA truppe
+    "TAP_CAMPO_TESTO":      (748,  75),   # campo testo truppe
+    "TAP_OK_TASTIERA":      (480, 380),   # OK tastiera
+    # Icone tipo risorsa nella lente (da V5 config.py)
+    "TAP_ICONA_TIPO": {
+        "campo":    (410, 450),
+        "segheria": (535, 450),
+        "acciaio":  (672, 490),
+        "petrolio": (820, 490),
+    },
+    # Coordinate livello per tipo (meno, piu, search) — 960x540 (V5 raccolta.py)
     "COORD_LIVELLO": {
         "campo":    {"meno": (294, 295), "piu": (519, 293), "search": (413, 352)},
         "segheria": {"meno": (419, 295), "piu": (644, 293), "search": (538, 352)},
@@ -233,14 +240,15 @@ def _cerca_nodo(ctx: TaskContext, tipo: str) -> None:
     livello     = max(1, min(7, int(_cfg(ctx, "RACCOLTA_LIVELLO"))))
     delay_cerca = _cfg(ctx, "DELAY_CERCA")
 
+    tap_icona = _cfg(ctx, "TAP_ICONA_TIPO").get(tipo, _cfg(ctx, "TAP_ICONA_TIPO")["campo"])
+
     ctx.log_msg(f"Raccolta: LENTE → {tipo} Lv.{livello}")
     ctx.device.tap(tap_lente)
     time.sleep(0.5)
 
-    # Seleziona tipo × 2
-    tap_tipo = coord_lv["meno"]
-    ctx.device.tap(tap_tipo)
-    ctx.device.tap(tap_tipo)
+    # Seleziona tipo × 2 (tap sull'icona del tipo nella lente)
+    ctx.device.tap(tap_icona)
+    ctx.device.tap(tap_icona)
     time.sleep(1.2)
 
     # Reset livello: 6× tap MENO (porta a Lv.1)

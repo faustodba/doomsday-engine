@@ -32,12 +32,13 @@ def make_ctx(config_overrides: dict | None = None) -> TaskContext:
     navigator = GameNavigator(device, matcher)
     config = dict(config_overrides or {})
     return TaskContext(
+        instance_name="FAU_00",
+        config=config,
+        state=None,
+        log=None,
         device=device,
         matcher=matcher,
         navigator=navigator,
-        config=config,
-        instance_id="FAU_00",
-        logger=None,
     )
 
 
@@ -70,13 +71,13 @@ def ctx_base(**overrides) -> TaskContext:
 class TestRaccoltaProperties:
 
     def test_name(self):
-        assert RaccoltaTask().name == "raccolta"
+        assert RaccoltaTask().name() == "raccolta"
 
     def test_schedule_type(self):
-        assert RaccoltaTask().schedule_type == "periodic"
+        assert RaccoltaTask().schedule_type() == "periodic"
 
     def test_interval_hours(self):
-        assert RaccoltaTask().interval_hours == 4.0
+        assert RaccoltaTask().interval_hours() == 4.0
 
 
 # ==============================================================================
@@ -436,7 +437,7 @@ class TestLoopInvioMarceConGather:
         with patch("tasks.raccolta._esegui_marcia", return_value=(True, 60.0)):
             ctx = ctx_base(**{"RACCOLTA_MAX_FALLIMENTI": 1,
                               "RACCOLTA_OBIETTIVO": 1})
-            ctx.device.set_screenshot("dummy.png")
+            ctx.device.set_default_shot(object())
             ctx.matcher.set_result("pin/pin_gather.png", (400, 300))
             bl = Blacklist()
             inviate = _loop_invio_marce(ctx, 1, 0, bl)
@@ -448,7 +449,7 @@ class TestLoopInvioMarceConGather:
         with patch("tasks.raccolta._esegui_marcia", return_value=(True, 45.0)):
             ctx = ctx_base(**{"RACCOLTA_MAX_FALLIMENTI": 1,
                               "RACCOLTA_OBIETTIVO": 1})
-            ctx.device.set_screenshot("dummy.png")
+            ctx.device.set_default_shot(object())
             ctx.matcher.set_result("pin/pin_gather.png", (400, 300))
             bl = Blacklist()
             _loop_invio_marce(ctx, 1, 0, bl)
@@ -470,7 +471,7 @@ class TestLoopBlacklist:
         """
         ctx = ctx_base(**{"RACCOLTA_MAX_FALLIMENTI": 1,
                           "RACCOLTA_OBIETTIVO": 1})
-        ctx.device.set_screenshot("dummy.png")
+        ctx.device.set_default_shot(object())
         # Sempre lo stesso nodo → blacklisted → riproposto → cooldown
         ctx.matcher.set_result("pin/pin_gather.png", (400, 300))
         bl = Blacklist()
