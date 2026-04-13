@@ -444,6 +444,10 @@ class TestLoopInvioMarceConGather:
                               "RACCOLTA_OBIETTIVO": 1})
             ctx.device.set_default_shot(object())
             ctx.matcher.set_result("pin/pin_gather.png", (400, 300))
+            # verifica tipo: tutti i pin tipo trovati per non bloccare _cerca_nodo
+            for tmpl in ["pin/pin_field.png", "pin/pin_sawmill.png",
+                         "pin/pin_steel_mill.png", "pin/pin_oil_refinery.png"]:
+                ctx.matcher.set_result(tmpl, (500, 500))
             bl = Blacklist()
             inviate = _loop_invio_marce(ctx, 1, 0, bl)
             assert inviate == 1
@@ -456,11 +460,14 @@ class TestLoopInvioMarceConGather:
                               "RACCOLTA_OBIETTIVO": 1})
             ctx.device.set_default_shot(object())
             ctx.matcher.set_result("pin/pin_gather.png", (400, 300))
+            for tmpl in ["pin/pin_field.png", "pin/pin_sawmill.png",
+                         "pin/pin_steel_mill.png", "pin/pin_oil_refinery.png"]:
+                ctx.matcher.set_result(tmpl, (500, 500))
             bl = Blacklist()
             _loop_invio_marce(ctx, 1, 0, bl)
-            # Il nodo (400, 300) → chiave "400_300" deve essere in blacklist
-            assert bl.get_state("400_300") == "COMMITTED"
-            assert bl.get_eta("400_300") == 45.0
+            # chiave blacklist = TAP_NODO fisso "480_280"
+            assert bl.get_state("480_280") == "COMMITTED"
+            assert bl.get_eta("480_280") == 45.0
 
 
 # ==============================================================================

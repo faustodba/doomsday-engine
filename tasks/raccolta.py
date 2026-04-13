@@ -93,8 +93,18 @@ _DEFAULTS: dict = {
         "acciaio":  {"meno": (556, 295), "piu": (781, 293), "search": (675, 352)},
         "petrolio": {"meno": (701, 295), "piu": (890, 293), "search": (791, 352)},
     },
-    # Template
+    # Template verifica tipo selezionato nella lente
+    "TMPL_TIPO": {
+        "campo":    "pin/pin_field.png",
+        "segheria": "pin/pin_sawmill.png",
+        "acciaio":  "pin/pin_steel_mill.png",
+        "petrolio": "pin/pin_oil_refinery.png",
+    },
+    "SOGLIA_TIPO":      0.85,   # V5 verifica_ui.py _SOGLIA_TIPI
+    "ROI_LENTE":        (350, 460, 870, 540),  # V5 _ROI_LENTE
+    # Template gather + marcia
     "TEMPLATE_GATHER":  "pin/pin_gather.png",
+    "ROI_GATHER":       (60, 350, 420, 420),   # V5 _ROI_GATHER
     "TEMPLATE_MARCIA":  "pin/pin_marcia.png",
     "TEMPLATE_SOGLIA":  0.75,
     # Logica raccolta
@@ -230,26 +240,61 @@ def _calcola_sequenza(obiettivo: int, sequenza_base: list[str],
 # Operazioni UI via ctx.device — zero ADB diretto
 # ==============================================================================
 
-def _cerca_nodo(ctx: TaskContext, tipo: str) -> None:
+def _verifica_tipo(ctx: TaskContext, tipo: str) -> bool:
+    """Verifica visiva che il tipo sia selezionato nel pannello lente."""
+    tmpl_tipo = _cfg(ctx, "TMPL_TIPO").get(tipo)
+    if not tmpl_tipo:
+        return True  # tipo sconosciuto — fail-safe
+    soglia = _cfg(ctx, "SOGLIA_TIPO")
+    roi    = _cfg(ctx, "ROI_LENTE")
+    screen = ctx.device.screenshot()
+    if not screen:
+        return True  # fail-safe
+    r = ctx.matcher.find_one(screen, tmpl_tipo, threshold=soglia, zone=roi)
+    ctx.log_msg(f"Raccolta: [VERIFICA] tipo {tipo} score={r.score:.3f} (soglia={soglia}) → {'OK' if r.found else 'NON selezionato'}")
+    return r.found
+
+
+def _cerca_nodo(ctx: TaskContext, tipo: str) -> bool:
     """
-    Esegue: LENTE → tap tipo × 2 → imposta livello → CERCA.
-    Tutte le azioni via ctx.device.tap/key.
+    Esegue: LENTE → tap tipo × 2 → verifica tipo selezionato → livello → CERCA.
+    Ritorna True se la CERCA è stata eseguita, False se il tipo non è stato
+    selezionato correttamente dopo i retry.
     """
     tap_lente   = _cfg(ctx, "TAP_LENTE")
     coord_lv    = _cfg(ctx, "COORD_LIVELLO").get(tipo, _cfg(ctx, "COORD_LIVELLO")["campo"])
     livello     = max(1, min(7, int(_cfg(ctx, "RACCOLTA_LIVELLO"))))
     delay_cerca = _cfg(ctx, "DELAY_CERCA")
-
-    tap_icona = _cfg(ctx, "TAP_ICONA_TIPO").get(tipo, _cfg(ctx, "TAP_ICONA_TIPO")["campo"])
+    tap_icona   = _cfg(ctx, "TAP_ICONA_TIPO").get(tipo, _cfg(ctx, "TAP_ICONA_TIPO")["campo"])
 
     ctx.log_msg(f"Raccolta: LENTE → {tipo} Lv.{livello}")
     ctx.device.tap(tap_lente)
-    time.sleep(0.5)
+    time.sleep(0.8)
 
-    # Seleziona tipo × 2 (tap sull'icona del tipo nella lente)
+    # Seleziona tipo × 2
     ctx.device.tap(tap_icona)
     ctx.device.tap(tap_icona)
     time.sleep(1.2)
+
+    # Verifica tipo selezionato — V5 pattern: retry con reset pannello
+    if not _verifica_tipo(ctx, tipo):
+        ctx.log_msg(f"Raccolta: tipo {tipo} NON selezionato — retry tap icona")
+        ctx.device.tap(tap_icona)
+        time.sleep(1.5)
+        if not _verifica_tipo(ctx, tipo):
+            ctx.log_msg(f"Raccolta: tipo {tipo} ancora NON selezionato — reset pannello")
+            ctx.device.key("KEYCODE_BACK")
+            time.sleep(2.0)
+            ctx.device.tap(tap_lente)
+            time.sleep(0.8)
+            ctx.device.tap(tap_icona)
+            ctx.device.tap(tap_icona)
+            time.sleep(1.5)
+            if not _verifica_tipo(ctx, tipo):
+                ctx.log_msg(f"Raccolta: tipo {tipo} NON selezionato dopo reset — abort CERCA")
+                ctx.device.key("KEYCODE_BACK")
+                time.sleep(0.5)
+                return False
 
     # Reset livello: 6× tap MENO (porta a Lv.1)
     for _ in range(6):
@@ -262,31 +307,47 @@ def _cerca_nodo(ctx: TaskContext, tipo: str) -> None:
     ctx.device.tap(coord_lv["search"])
     time.sleep(delay_cerca)
     ctx.log_msg(f"Raccolta: CERCA eseguita per {tipo} Lv.{livello}")
+    return True
 
 
-def _leggi_coordinate_nodo(ctx: TaskContext) -> Optional[tuple[int, int]]:
+def _tap_nodo_e_verifica_gather(ctx: TaskContext, tipo: str) -> bool:
     """
-    Legge le coordinate del nodo trovato dalla CERCA.
-    Usa ctx.matcher.find_one(screenshot, template_name, threshold).
-    Ritorna (cx, cy) o None se non trovato.
-
-    FIX 12/04/2026: era ctx.matcher.find(template, screen, soglia) —
-    firma errata, find() non esiste su TemplateMatcher.
-    Corretto in find_one(screen, template, soglia) che ritorna MatchResult.
+    Tappa il nodo al centro della lista risultati CERCA e verifica
+    che il popup si apra con il pulsante GATHER visibile.
+    Ritorna True se GATHER è visibile, False altrimenti.
     """
-    screen = ctx.device.screenshot()
-    if not screen:
-        return None
+    tap_nodo        = _cfg(ctx, "TAP_NODO")
     template_gather = _cfg(ctx, "TEMPLATE_GATHER")
     soglia          = _cfg(ctx, "TEMPLATE_SOGLIA")
+    roi_gather      = _cfg(ctx, "ROI_GATHER")
 
-    result = ctx.matcher.find_one(screen, template_gather, threshold=soglia)
-    if not result.found:
-        ctx.log_msg(
-            f"Raccolta: pin_gather score={result.score:.3f} < soglia={soglia} — nodo non trovato"
-        )
-        return None
-    return (result.cx, result.cy)
+    ctx.log_msg(f"Raccolta [{tipo}]: tap nodo {tap_nodo}")
+    ctx.device.tap(tap_nodo)
+    time.sleep(1.0)
+
+    screen = ctx.device.screenshot()
+    if not screen:
+        return False
+
+    r = ctx.matcher.find_one(screen, template_gather, threshold=soglia, zone=roi_gather)
+    ctx.log_msg(f"Raccolta [{tipo}]: pin_gather score={r.score:.3f} (soglia={soglia}) → {'OK' if r.found else 'NON trovato'}")
+
+    if not r.found:
+        # retry — a volte il popup impiega un attimo
+        ctx.log_msg(f"Raccolta [{tipo}]: GATHER non visibile — retry tap nodo")
+        ctx.device.tap(tap_nodo)
+        time.sleep(1.5)
+        screen2 = ctx.device.screenshot()
+        if screen2:
+            r2 = ctx.matcher.find_one(screen2, template_gather, threshold=soglia, zone=roi_gather)
+            ctx.log_msg(f"Raccolta [{tipo}]: pin_gather retry score={r2.score:.3f} → {'OK' if r2.found else 'NON trovato'}")
+            if r2.found:
+                return True
+        ctx.device.key("KEYCODE_BACK")
+        time.sleep(0.5)
+        return False
+
+    return True
 
 
 def _esegui_marcia(ctx: TaskContext, n_truppe: int) -> tuple[bool, Optional[float]]:
@@ -376,85 +437,42 @@ def _invia_squadra(ctx: TaskContext, tipo: str, blacklist: Blacklist,
     FIX 12/04/2026: ctx.matcher.find() → ctx.matcher.find_one() (1 occorrenza
     nella verifica gather visibile).
     """
-    _cerca_nodo(ctx, tipo)
-
-    coord = _leggi_coordinate_nodo(ctx)
-    if coord is None:
-        ctx.log_msg(f"Raccolta [{tipo}]: coordinate non leggibili — skip")
-        ctx.device.key("KEYCODE_BACK")
-        time.sleep(0.4)
+    # CERCA + verifica tipo selezionato
+    if not _cerca_nodo(ctx, tipo):
+        ctx.log_msg(f"Raccolta [{tipo}]: CERCA fallita (tipo non selezionato) — skip")
         return False, False
 
-    cx, cy = coord
-    chiave = f"{cx}_{cy}"
-
-    # Verifica blacklist
-    if blacklist.contiene(chiave):
-        ctx.log_msg(f"Raccolta [{tipo}]: nodo ({cx},{cy}) in blacklist — riprovo CERCA")
-        chiave_primo = chiave
-        _cerca_nodo(ctx, tipo)
-        coord2 = _leggi_coordinate_nodo(ctx)
-
-        if coord2 is None or f"{coord2[0]}_{coord2[1]}" == chiave_primo:
-            attesa = _cfg(ctx, "BLACKLIST_ATTESA_NODO")
-            eta_prev = blacklist.get_eta(chiave_primo)
-            if isinstance(eta_prev, (int, float)) and eta_prev > 0:
-                attesa = int(min(attesa, max(8, eta_prev + 5)))
-            ctx.log_msg(f"Raccolta [{tipo}]: nodo COMMITTED riproposto → cooldown {attesa}s")
-            cooldown_map[tipo] = time.time() + attesa
-            ctx.device.key("KEYCODE_BACK")
-            time.sleep(0.4)
-            return False, True
-
-        cx2, cy2 = coord2
-        chiave = f"{cx2}_{cy2}"
-        if blacklist.contiene(chiave):
-            ctx.log_msg(f"Raccolta [{tipo}]: nuovo nodo ({cx2},{cy2}) anche in blacklist — abbandono")
-            ctx.device.key("KEYCODE_BACK")
-            time.sleep(0.4)
-            return False, False
-
-    # Tap nodo
+    # Tap nodo + verifica GATHER visibile
+    # In V6 non abbiamo OCR coordinate — usiamo TAP_NODO fisso (centro lista)
+    # e verifichiamo che il popup si apra con GATHER visibile.
+    # La chiave blacklist è ricavata dalla posizione TAP_NODO (approssimazione).
     tap_nodo = _cfg(ctx, "TAP_NODO")
-    ctx.log_msg(f"Raccolta [{tipo}]: tap nodo ({cx},{cy})")
-    ctx.device.tap(tap_nodo)
-    time.sleep(0.7)
+    chiave   = f"{tap_nodo[0]}_{tap_nodo[1]}"  # chiave approssimata senza OCR
 
-    # Verifica gather visibile
-    screen_popup    = ctx.device.screenshot()
-    template_gather = _cfg(ctx, "TEMPLATE_GATHER")
-    soglia          = _cfg(ctx, "TEMPLATE_SOGLIA")
+    # Verifica blacklist sul nodo centrale
+    if blacklist.contiene(chiave):
+        ctx.log_msg(f"Raccolta [{tipo}]: nodo centrale in blacklist — skip tipo")
+        return False, True
 
-    if screen_popup:
-        gather = ctx.matcher.find_one(screen_popup, template_gather, threshold=soglia)
-        if not gather.found:
-            ctx.log_msg(f"Raccolta [{tipo}]: GATHER non visibile dopo tap nodo — retry")
-            ctx.device.tap(tap_nodo)
-            time.sleep(1.0)
-            screen_popup2 = ctx.device.screenshot()
-            if screen_popup2:
-                gather2 = ctx.matcher.find_one(screen_popup2, template_gather, threshold=soglia)
-                if not gather2.found:
-                    ctx.log_msg(f"Raccolta [{tipo}]: GATHER ancora non visibile — rollback")
-                    ctx.device.key("KEYCODE_BACK")
-                    time.sleep(0.4)
-                    blacklist.rollback(chiave)
-                    return False, False
+    # Tap nodo e verifica GATHER
+    if not _tap_nodo_e_verifica_gather(ctx, tipo):
+        ctx.log_msg(f"Raccolta [{tipo}]: popup nodo non aperto — skip")
+        return False, False
 
-    # RESERVED
+    # RESERVED con chiave approssimata
     blacklist.reserve(chiave)
-    ctx.log_msg(f"Raccolta [{tipo}]: nodo ({cx},{cy}) RESERVED")
+    ctx.log_msg(f"Raccolta [{tipo}]: nodo RESERVED")
 
     # Esegui marcia
     ok, eta_s = _esegui_marcia(ctx, n_truppe)
 
     if ok:
         blacklist.commit(chiave, eta_s)
-        ctx.log_msg(f"Raccolta [{tipo}]: marcia OK → nodo ({cx},{cy}) COMMITTED")
+        ctx.log_msg(f"Raccolta [{tipo}]: marcia OK → nodo COMMITTED")
         return True, False
     else:
         blacklist.rollback(chiave)
-        ctx.log_msg(f"Raccolta [{tipo}]: marcia FALLITA → rollback nodo ({cx},{cy})")
+        ctx.log_msg(f"Raccolta [{tipo}]: marcia FALLITA → rollback nodo")
         ctx.device.key("KEYCODE_BACK")
         time.sleep(0.5)
         return False, False
