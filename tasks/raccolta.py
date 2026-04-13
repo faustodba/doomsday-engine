@@ -126,6 +126,97 @@ _DEFAULTS: dict = {
 
 _TUTTI_I_TIPI = ["campo", "segheria", "petrolio", "acciaio"]
 
+# ==============================================================================
+# Allocation — logica gap V5 allocation.py
+# ==============================================================================
+
+import math as _math
+
+_RATIO_TARGET_DEFAULT = {
+    "campo":    0.3500,   # pomodoro 35%
+    "segheria": 0.3500,   # legno    35%
+    "petrolio": 0.1875,   #          18.75%
+    "acciaio":  0.1125,   #          11.25%
+}
+_TIPO_TO_RISORSA = {
+    "campo":    "pomodoro",
+    "segheria": "legno",
+    "petrolio": "petrolio",
+    "acciaio":  "acciaio",
+}
+_SOGLIA_OCR_MIN = 100_000   # 100K — sotto questa soglia OCR non affidabile
+
+
+def _calcola_sequenza_allocation(slot_liberi: int, deposito: dict,
+                                  ratio_target: dict | None = None) -> list[str]:
+    """
+    Sequenza ottimale tipi nodo in base al gap deposito/target.
+    Portato da V5 allocation.py — algoritmo gap proporzionale con cap per tipo.
+
+    Args:
+        slot_liberi:  slot raccoglitori liberi
+        deposito:     {"pomodoro":float, "legno":float, ...} — valori assoluti
+        ratio_target: override % target (default V5)
+
+    Returns:
+        Lista tipi es. ["campo","segheria","petrolio","campo"]
+    """
+    if slot_liberi <= 0:
+        return []
+
+    ratio = ratio_target or _RATIO_TARGET_DEFAULT
+
+    # Leggi valori deposito
+    valori = {}
+    for tipo, risorsa in _TIPO_TO_RISORSA.items():
+        v = deposito.get(risorsa, -1)
+        valori[tipo] = float(v) if (v is not None and v >= _SOGLIA_OCR_MIN) else 0.0
+
+    totale = sum(valori.values())
+
+    # Fallback: deposito non leggibile
+    if totale < 1_000:
+        base = ["campo","segheria","petrolio","campo","segheria",
+                "acciaio","campo","segheria","petrolio","campo",
+                "segheria","acciaio","campo","segheria","petrolio","campo"]
+        return base[:slot_liberi]
+
+    perc_att = {t: valori[t] / totale for t in ratio}
+    gap      = {t: ratio[t] - perc_att[t] for t in ratio}
+    tipi_ord = sorted(gap.keys(), key=lambda t: gap[t], reverse=True)
+    cap      = max(1, _math.floor(slot_liberi / 2))
+    contatori = {t: 0 for t in ratio}
+    sequenza  = []
+
+    # Prima passata: gap positivi in ordine priorità
+    for tipo in tipi_ord:
+        if len(sequenza) >= slot_liberi:
+            break
+        if gap[tipo] > 0:
+            gap_pos_tot = max(sum(g for g in gap.values() if g > 0), 0.001)
+            peso  = gap[tipo] / gap_pos_tot
+            n = min(cap, max(1, round(peso * slot_liberi)), slot_liberi - len(sequenza))
+            for _ in range(n):
+                if len(sequenza) < slot_liberi:
+                    sequenza.append(tipo)
+                    contatori[tipo] += 1
+
+    # Seconda passata: riempi slot residui
+    idx = 0
+    safety = 0
+    while len(sequenza) < slot_liberi:
+        tipo = tipi_ord[idx % len(tipi_ord)]
+        if contatori[tipo] < cap:
+            sequenza.append(tipo)
+            contatori[tipo] += 1
+        idx += 1
+        safety += 1
+        if safety > len(tipi_ord) * slot_liberi * 2:
+            cap = slot_liberi  # rilassa cap
+            safety = 0
+
+    return sequenza[:slot_liberi]
+
 # Verifica territorio alleanza — pixel check V5 verifica_ui.py
 _TERRITORIO_BUFF_ZONA = (250, 340, 420, 370)
 _TERRITORIO_SOGLIA_PX = 20
@@ -337,11 +428,15 @@ def _cerca_nodo(ctx: TaskContext, tipo: str) -> bool:
     return True
 
 
-def _tap_nodo_e_verifica_gather(ctx: TaskContext, tipo: str) -> bool:
+def _tap_nodo_e_verifica_gather(ctx: TaskContext, tipo: str) -> str:
     """
     Tappa il nodo al centro della lista risultati CERCA e verifica
-    che il popup si apra con il pulsante GATHER visibile.
-    Ritorna True se GATHER è visibile, False altrimenti.
+    che il popup si apra con il pulsante GATHER visibile e IN territorio.
+
+    Ritorna:
+      "ok"          — GATHER visibile + IN territorio
+      "fuori"       — GATHER visibile ma FUORI territorio (skip neutro)
+      "errore"      — GATHER non trovato (fallimento strutturale)
     """
     tap_nodo        = _cfg(ctx, "TAP_NODO")
     template_gather = _cfg(ctx, "TEMPLATE_GATHER")
@@ -384,9 +479,9 @@ def _tap_nodo_e_verifica_gather(ctx: TaskContext, tipo: str) -> bool:
         ctx.log_msg(f"Raccolta [{tipo}]: nodo FUORI territorio — BACK e skip")
         ctx.device.key("KEYCODE_BACK")
         time.sleep(0.5)
-        return False
+        return "fuori"
 
-    return True
+    return "ok"
 
 
 def _esegui_marcia(ctx: TaskContext, n_truppe: int) -> tuple[bool, Optional[float]]:
@@ -474,9 +569,10 @@ def _invia_squadra(ctx: TaskContext, tipo: str, blacklist: Blacklist,
     """
     Cerca nodo, verifica blacklist, invia marcia.
 
-    Ritorna (marcia_ok, tipo_bloccato):
+    Ritorna (marcia_ok, tipo_bloccato, skip_neutro):
       marcia_ok     = True se la marcia è partita
       tipo_bloccato = True se il tipo deve essere aggiunto a tipi_bloccati
+      skip_neutro   = True se il fallimento è neutro (territorio) — non conta
 
     FIX 12/04/2026: ctx.matcher.find() → ctx.matcher.find_one() (1 occorrenza
     nella verifica gather visibile).
@@ -484,7 +580,7 @@ def _invia_squadra(ctx: TaskContext, tipo: str, blacklist: Blacklist,
     # CERCA + verifica tipo selezionato
     if not _cerca_nodo(ctx, tipo):
         ctx.log_msg(f"Raccolta [{tipo}]: CERCA fallita (tipo non selezionato) — skip")
-        return False, False
+        return False, False, False
 
     # Tap nodo + verifica GATHER visibile
     # In V6 non abbiamo OCR coordinate — chiave blacklist basata sul tipo.
@@ -494,11 +590,14 @@ def _invia_squadra(ctx: TaskContext, tipo: str, blacklist: Blacklist,
     # Verifica blacklist per questo tipo
     if blacklist.contiene(chiave):
         ctx.log_msg(f"Raccolta [{tipo}]: tipo in cooldown blacklist — skip")
-        return False, True
+        return False, True, False
 
     # Tap nodo e verifica GATHER (log dettagliato dentro _tap_nodo_e_verifica_gather)
-    if not _tap_nodo_e_verifica_gather(ctx, tipo):
-        return False, False
+    esito_gather = _tap_nodo_e_verifica_gather(ctx, tipo)
+    if esito_gather == "fuori":
+        return False, False, True   # skip neutro — non conta come fallimento
+    if esito_gather != "ok":
+        return False, False, False  # errore strutturale
 
     # RESERVED per questo tipo
     blacklist.reserve(chiave)
@@ -510,13 +609,13 @@ def _invia_squadra(ctx: TaskContext, tipo: str, blacklist: Blacklist,
     if ok:
         blacklist.commit(chiave, eta_s)
         ctx.log_msg(f"Raccolta [{tipo}]: marcia OK → nodo COMMITTED")
-        return True, False
+        return True, False, False
     else:
         blacklist.rollback(chiave)
         ctx.log_msg(f"Raccolta [{tipo}]: marcia FALLITA → rollback nodo")
         ctx.device.key("KEYCODE_BACK")
         time.sleep(0.5)
-        return False, False
+        return False, False, False
 
 
 # ==============================================================================
@@ -529,9 +628,12 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
     Loop invio squadre fino a slot pieni o MAX_FALLIMENTI.
     Ritorna il numero di squadre effettivamente inviate.
     """
-    sequenza_base  = _cfg(ctx, "RACCOLTA_SEQUENZA")
     max_fallimenti = _cfg(ctx, "RACCOLTA_MAX_FALLIMENTI")
     n_truppe       = _cfg(ctx, "RACCOLTA_TRUPPE")
+
+    # Sequenza: usa allocation se deposito disponibile, altrimenti config
+    deposito_ocr   = getattr(ctx, "_deposito_ocr", {})
+    sequenza_base  = _cfg(ctx, "RACCOLTA_SEQUENZA")
 
     tipi_bloccati: set[str] = set()
     cooldown_map: dict[str, float] = {}
@@ -564,8 +666,13 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
             time.sleep(wait_s)
             continue
 
-        sequenza = _calcola_sequenza(obiettivo - attive_correnti, sequenza_base,
-                                      tipi_bloccati)
+        libere_ora = obiettivo - attive_correnti
+        if deposito_ocr:
+            sequenza = _calcola_sequenza_allocation(libere_ora, deposito_ocr)
+            # Esclude tipi bloccati
+            sequenza = [t for t in sequenza if t not in tipi_bloccati] or                        _calcola_sequenza(libere_ora, sequenza_base, tipi_bloccati)
+        else:
+            sequenza = _calcola_sequenza(libere_ora, sequenza_base, tipi_bloccati)
         if not sequenza:
             ctx.log_msg("Raccolta: sequenza vuota — abbandono")
             break
@@ -579,13 +686,16 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
             continue
 
         ctx.log_msg(f"Raccolta: invio squadra {attive_correnti + 1}/{obiettivo} → {tipo}")
-        ok, tipo_bloccato = _invia_squadra(ctx, tipo, blacklist, cooldown_map,
-                                            n_truppe, tipi_bloccati)
+        ok, tipo_bloccato, skip_neutro = _invia_squadra(ctx, tipo, blacklist,
+                                                        cooldown_map, n_truppe, tipi_bloccati)
         if ok:
             inviate         += 1
             attive_correnti += 1
             fallimenti_cons  = 0
             time.sleep(_cfg(ctx, "DELAY_POST_MARCIA"))
+        elif skip_neutro:
+            # Skip neutro (es. territorio FUORI) — non conta come fallimento
+            ctx.log_msg(f"Raccolta: skip neutro {tipo} — fallimenti_cons invariato ({fallimenti_cons})")
         else:
             if tipo_bloccato:
                 tipi_bloccati.add(tipo)
@@ -672,6 +782,25 @@ class RaccoltaTask(Task):
             except Exception as exc:
                 ctx.log_msg(f"Raccolta: OCR slot eccezione ({exc}) — uso default")
 
+        # Lettura risorse deposito per allocation sequenza ottimale
+        deposito_ocr: dict = {}
+        try:
+            from shared.ocr_helpers import ocr_risorse
+            screen_ris = ctx.device.screenshot() if ctx.device else None
+            if screen_ris is not None:
+                ris = ocr_risorse(screen_ris)
+                deposito_ocr = {
+                    "pomodoro": ris.pomodoro,
+                    "legno":    ris.legno,
+                    "acciaio":  ris.acciaio,
+                    "petrolio": ris.petrolio,
+                }
+                ctx.log_msg(f"Raccolta: deposito OCR pom={ris.pomodoro/1e6:.1f}M "
+                            f"leg={ris.legno/1e6:.1f}M acc={ris.acciaio/1e6:.1f}M "
+                            f"pet={ris.petrolio/1e6:.1f}M")
+        except Exception as exc:
+            ctx.log_msg(f"Raccolta: OCR deposito fallito ({exc}) — uso sequenza default")
+
         ctx.log_msg(f"Raccolta: start — attive={attive_inizio}/{obiettivo} libere={libere}")
 
         if blacklist is None:
@@ -679,6 +808,9 @@ class RaccoltaTask(Task):
                 committed_ttl=int(_cfg(ctx, "BLACKLIST_COMMITTED_TTL")),
                 reserved_ttl=int(_cfg(ctx, "BLACKLIST_RESERVED_TTL")),
             )
+
+        # Rendi il deposito OCR accessibile al loop marce
+        ctx._deposito_ocr = deposito_ocr  # type: ignore
 
         ctx.log_msg("Raccolta: navigazione → mappa")
         if ctx.navigator is not None:

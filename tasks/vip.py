@@ -100,7 +100,7 @@ class VipConfig:
     retry_sleep:     float = 1.0
 
     # ── Attese ────────────────────────────────────────────────────────────────
-    wait_open_badge:  float = 2.0
+    wait_open_badge:  float = 3.0   # aumentato da 2.0 — cassaforte carica dopo pannello
     wait_claim_cass:  float = 2.5
     wait_claim_free:  float = 2.0
     wait_gate_poll:   float = 1.0
@@ -274,6 +274,16 @@ class VipTask(Task):
                                     zone=cfg.roi_cass_chiusa) >= cfg.soglia_cass_chiusa
         cass_aperta = matcher.score(shot, cfg.tmpl_cass_aperta,
                                     zone=cfg.roi_cass_aperta) >= cfg.soglia_cass_aperta
+
+        # Retry: se nessun pin rilevato → pannello ancora in caricamento
+        if not cass_chiusa and not cass_aperta:
+            time.sleep(1.5)
+            shot = device.screenshot()
+            cass_chiusa = matcher.score(shot, cfg.tmpl_cass_chiusa,
+                                        zone=cfg.roi_cass_chiusa) >= cfg.soglia_cass_chiusa
+            cass_aperta = matcher.score(shot, cfg.tmpl_cass_aperta,
+                                        zone=cfg.roi_cass_aperta) >= cfg.soglia_cass_aperta
+            log(f"[1] Retry cassaforte: chiusa={cass_chiusa} aperta={cass_aperta}")
 
         if cass_aperta:
             log("[1] pin_vip_03 visibile — cassaforte già ritirata oggi → skip")
