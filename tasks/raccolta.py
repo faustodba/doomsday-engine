@@ -649,6 +649,29 @@ class RaccoltaTask(Task):
             ctx.log_msg(f"Raccolta: nessuna squadra libera ({attive_inizio}/{obiettivo}) — skip")
             return TaskResult(success=True, message="nessuna squadra libera", data={"inviate": 0})
 
+        # Lettura contatore slot reale da schermo (ocr_helpers.leggi_contatore_slot)
+        # Solo se attive_inizio == 0 (default) — parametro iniettato dai test prevale
+        if attive_inizio == 0 and slot_liberi < 0 and ctx.device is not None:
+            try:
+                from shared.ocr_helpers import leggi_contatore_slot
+                screen_home = ctx.device.screenshot()
+                if screen_home is not None:
+                    totale_noto = getattr(ctx.config, "max_squadre", obiettivo)
+                    attive_ocr, totale_ocr = leggi_contatore_slot(screen_home, totale_noto=totale_noto)
+                    if attive_ocr >= 0 and totale_ocr > 0:
+                        attive_inizio = attive_ocr
+                        obiettivo     = totale_ocr
+                        libere        = max(0, obiettivo - attive_inizio)
+                        ctx.log_msg(f"Raccolta: slot OCR — attive={attive_inizio}/{obiettivo} libere={libere}")
+                        if libere == 0:
+                            ctx.log_msg("Raccolta: nessuna squadra libera (OCR) — skip")
+                            return TaskResult(success=True, message="nessuna squadra libera",
+                                              data={"inviate": 0})
+                    else:
+                        ctx.log_msg(f"Raccolta: OCR slot fallito ({attive_ocr}/{totale_ocr}) — uso default {attive_inizio}/{obiettivo}")
+            except Exception as exc:
+                ctx.log_msg(f"Raccolta: OCR slot eccezione ({exc}) — uso default")
+
         ctx.log_msg(f"Raccolta: start — attive={attive_inizio}/{obiettivo} libere={libere}")
 
         if blacklist is None:
