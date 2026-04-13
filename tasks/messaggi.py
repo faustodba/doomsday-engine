@@ -3,6 +3,8 @@
 #
 #  Task: raccolta ricompense dalla sezione Messaggi (tab Alliance + System).
 #  SINCRONO (Step 25) — time.sleep, ctx.log_msg, navigator sincrono.
+#
+#  FIX (RT-08): tap_icona_messaggi corretto da (930,13) a (928,430) — da V5 config.
 # ==============================================================================
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ from core.task import Task, TaskContext, TaskResult
 
 @dataclass
 class MessaggiConfig:
-    tap_icona_messaggi: tuple[int, int] = (930, 13)
+    tap_icona_messaggi: tuple[int, int] = (928, 430)   # FIX: era (930,13)
     tap_tab_alliance:   tuple[int, int] = (325, 35)
     tap_tab_system:     tuple[int, int] = (453, 36)
     tap_read_all:       tuple[int, int] = (108, 511)
@@ -89,12 +91,15 @@ class MessaggiTask(Task):
 
         ok_open = self._verifica_pin(device, matcher, cfg.tmpl_alliance,
                                      cfg.soglia_alliance, cfg.roi_alliance,
-                                     retry=2, retry_sleep=cfg.retry_sleep_open, log=log, label="PRE-OPEN")
+                                     retry=2, retry_sleep=cfg.retry_sleep_open,
+                                     log=log, label="PRE-OPEN")
         if not ok_open:
             log("ANOMALIA: schermata non aperta — BACK + abort")
             device.back()
             time.sleep(cfg.wait_back)
             return _Esito.SCHERMATA_NON_APERTA, False, False
+
+        log("[PRE-OPEN] schermata messaggi aperta — OK")
 
         alliance_ok = self._gestisci_tab(device, matcher,
                                          cfg.tap_tab_alliance, cfg.tmpl_alliance,
@@ -126,6 +131,7 @@ class MessaggiTask(Task):
         if not ok_tab:
             log(f"ANOMALIA: tab {nome_tab} non attivo — skip")
             return False
+        log(f"[PRE-{nome_tab.upper()}] tab attivo — OK")
 
         ok_read = self._verifica_pin(device, matcher, cfg.tmpl_read, cfg.soglia_read,
                                      cfg.roi_read, retry=1, retry_sleep=cfg.retry_sleep_read,
@@ -134,6 +140,8 @@ class MessaggiTask(Task):
             log("Tap Read and claim all")
             device.tap(*cfg.tap_read_all)
             time.sleep(cfg.wait_read)
+        else:
+            log(f"[PRE-READ] bottone non visibile — nessun messaggio su {nome_tab}")
         return True
 
     def _verifica_pin(self, device, matcher, tmpl, soglia, roi,

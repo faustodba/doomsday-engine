@@ -3,6 +3,8 @@
 #
 #  Task: raccolta ricompense Alleanza → Dono.
 #  SINCRONO (Step 25) — time.sleep, ctx.log_msg, navigator sincrono.
+#
+#  FIX (RT-08): log per ogni tap Rivendica con indice + motivo stop esplicito.
 # ==============================================================================
 
 from __future__ import annotations
@@ -104,26 +106,34 @@ class AlleanzaTask(Task):
         for i in range(cfg.max_rivendica):
             shot = device.screenshot()
             if not self._rivendica_presente(shot, cfg):
-                log(f"Rivendica non visibile — stop a {i}")
+                log(f"Rivendica non visibile prima del tap — stop a {i}/{cfg.max_rivendica}")
                 break
             h_before = self._roi_hash(shot, cfg)
+            log(f"Rivendica tap {i+1}/{cfg.max_rivendica}")
             device.tap(*cfg.coord_rivendica)
             time.sleep(cfg.wait_rivendica)
             n_rivendiche += 1
             shot2   = device.screenshot()
             h_after = self._roi_hash(shot2, cfg)
-            no_change_streak = (no_change_streak + 1) if (h_before and h_after and h_before == h_after) else 0
+            if h_before and h_after and h_before == h_after:
+                no_change_streak += 1
+            else:
+                no_change_streak = 0
             if not self._rivendica_presente(shot2, cfg):
-                log(f"Rivendica sparito — stop a {i+1}")
+                log(f"Rivendica sparito dopo tap — stop a {i+1}/{cfg.max_rivendica}")
                 break
             if no_change_streak >= cfg.no_change_limit:
-                log(f"No-change streak={no_change_streak} — stop")
+                log(f"No-change streak={no_change_streak} — stop a {i+1}/{cfg.max_rivendica}")
                 break
+        else:
+            log(f"Rivendica completato: raggiunto limite {cfg.max_rivendica}")
 
-        log(f"Rivendica completato: {n_rivendiche} tap")
+        log(f"Rivendica totale: {n_rivendiche} tap")
 
+        log(f"Tab Attivita {cfg.coord_tab_attivita}")
         device.tap(*cfg.coord_tab_attivita)
         time.sleep(cfg.wait_tab)
+        log(f"Raccogli tutto {cfg.coord_raccogli}")
         device.tap(*cfg.coord_raccogli)
         time.sleep(cfg.wait_raccogli)
 
