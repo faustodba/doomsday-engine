@@ -375,12 +375,14 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int) -> tuple[bool, Optional[floa
     ctx.device.tap(tap_squadra)
     time.sleep(1.4)
 
-    # Verifica maschera invio aperta
+    # Verifica maschera invio aperta (pin_march.png)
     screen = ctx.device.screenshot()
     if screen:
         maschera = ctx.matcher.find_one(screen, template_marcia, threshold=soglia)
-        if not maschera.found:
-            ctx.log_msg("Raccolta: maschera invio NON aperta — retry")
+        if maschera.found:
+            ctx.log_msg(f"Raccolta: maschera invio aperta score={maschera.score:.3f} → OK")
+        else:
+            ctx.log_msg(f"Raccolta: maschera invio NON aperta score={maschera.score:.3f} — retry")
             ctx.device.tap(tap_squadra)
             time.sleep(1.8)
             screen = ctx.device.screenshot()
@@ -388,6 +390,7 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int) -> tuple[bool, Optional[floa
             if maschera2 is None or not maschera2.found:
                 ctx.log_msg("Raccolta: maschera invio ancora non aperta — FALLITO")
                 return False, None
+            ctx.log_msg(f"Raccolta: maschera invio aperta al retry score={maschera2.score:.3f} → OK")
 
     # Imposta truppe
     if n_truppe and n_truppe > 0:
@@ -415,7 +418,7 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int) -> tuple[bool, Optional[floa
     if screen_post:
         maschera_post = ctx.matcher.find_one(screen_post, template_marcia, threshold=soglia)
         if maschera_post.found:
-            ctx.log_msg("Raccolta: maschera ancora aperta dopo MARCIA — retry")
+            ctx.log_msg(f"Raccolta: maschera ancora aperta dopo MARCIA score={maschera_post.score:.3f} — retry")
             ctx.device.tap(tap_marcia)
             time.sleep(1.0)
             screen_post2 = ctx.device.screenshot()
@@ -424,6 +427,8 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int) -> tuple[bool, Optional[floa
                 if maschera_post2.found:
                     ctx.log_msg("Raccolta: maschera ancora aperta dopo retry — FALLITO")
                     return False, None
+        else:
+            ctx.log_msg(f"Raccolta: maschera chiusa score={maschera_post.score:.3f} → marcia partita OK")
     return True, None
 
 
