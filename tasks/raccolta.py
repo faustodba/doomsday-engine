@@ -127,8 +127,8 @@ _DEFAULTS: dict = {
 _TUTTI_I_TIPI = ["campo", "segheria", "petrolio", "acciaio"]
 
 # Verifica territorio alleanza — pixel check V5 verifica_ui.py
-_TERRITORIO_BUFF_ZONA = (250, 340, 420, 370)  # (x1,y1,x2,y2) riga "+30%"
-_TERRITORIO_SOGLIA_PX = 20                     # pixel verdi minimi
+_TERRITORIO_BUFF_ZONA = (250, 340, 420, 370)
+_TERRITORIO_SOGLIA_PX = 20
 
 
 def _cfg(ctx: TaskContext, key: str):
@@ -246,14 +246,11 @@ def _calcola_sequenza(obiettivo: int, sequenza_base: list[str],
 # ==============================================================================
 
 def _nodo_in_territorio(screen, tipo: str, ctx: TaskContext) -> bool:
-    """
-    Pixel check V5 verifica_ui.py: popup nodo mostra buff territorio (+30%)?
-    Ritorna True se IN territorio, True per fail-safe.
-    """
+    """Pixel check V5: popup nodo mostra buff territorio (+30%)? Fail-safe True."""
     try:
         frame = getattr(screen, "frame", None)
         if frame is None:
-            return True  # fail-safe: non scartare per dubbio
+            return True
         x1, y1, x2, y2 = _TERRITORIO_BUFF_ZONA
         zona = frame[y1:y2, x1:x2, :3].astype(int)
         r, g, b = zona[:, :, 0], zona[:, :, 1], zona[:, :, 2]
@@ -264,7 +261,7 @@ def _nodo_in_territorio(screen, tipo: str, ctx: TaskContext) -> bool:
                     f"(soglia={_TERRITORIO_SOGLIA_PX}) → {'IN' if in_territorio else 'FUORI'} territorio")
         return in_territorio
     except Exception:
-        return True  # fail-safe
+        return True
 
 
 def _verifica_tipo(ctx: TaskContext, tipo: str) -> bool:
@@ -499,9 +496,8 @@ def _invia_squadra(ctx: TaskContext, tipo: str, blacklist: Blacklist,
         ctx.log_msg(f"Raccolta [{tipo}]: tipo in cooldown blacklist — skip")
         return False, True
 
-    # Tap nodo e verifica GATHER
+    # Tap nodo e verifica GATHER (log dettagliato dentro _tap_nodo_e_verifica_gather)
     if not _tap_nodo_e_verifica_gather(ctx, tipo):
-        ctx.log_msg(f"Raccolta [{tipo}]: popup nodo non aperto — skip")
         return False, False
 
     # RESERVED per questo tipo
