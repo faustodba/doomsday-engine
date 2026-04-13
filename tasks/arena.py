@@ -62,6 +62,7 @@ _TAP_CONTINUE_VICTORY = (457, 462)  # "Tap to continue" su schermata Victory
 _TAP_CONTINUE_FAILURE = (469, 509)  # "Tap to continue" su schermata Failure
 _TAP_CENTRO           = (480, 270)  # centro schermo (fallback)
 _TAP_CENTRO_PAUSE     = 0.8         # pausa tra i due tap centro
+_TAP_SKIP_CHECKBOX    = (723, 488)  # checkbox Skip (salta animazione battaglia)
 
 # Parametri pixel per popup Congratulations generico
 _CONGRATS_CHECK_XY  = (480, 300)
@@ -98,6 +99,8 @@ _ARENA_PIN: dict[str, _PinSpec] = {
     "continue": _PinSpec("pin/pin_arena_05_continue.png",  (410, 443, 547, 487), 0.80),
     "purchase": _PinSpec("pin/pin_arena_06_purchase.png",  (334, 143, 586, 185), 0.80),
     "glory":    _PinSpec("pin/pin_arena_07_glory.png",     (379, 418, 564, 447), 0.80),
+    "skip_on":  _PinSpec("pin/pin_arena_check.png",        (700, 470, 760, 510), 0.75),
+    "skip_off": _PinSpec("pin/pin_arena_no_check.png",     (700, 470, 760, 510), 0.75),
 }
 
 
@@ -110,6 +113,7 @@ class _ArenaRun:
     sfide_eseguite:   int  = 0
     esaurite:         bool = False
     errore:           str | None = None
+    skip_verificato:  bool = False
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -331,6 +335,11 @@ class ArenaTask(Task):
             time.sleep(1.5)
             return "errore"
 
+        # SKIP-CHECKBOX: verifica una volta per sessione
+        if not run.skip_verificato:
+            self._assicura_skip(ctx)
+            run.skip_verificato = True
+
         ctx.log_msg("[ARENA] [PRE-CHALLENGE] START CHALLENGE — tap")
         ctx.device.tap(*_TAP_START_CHALLENGE)
 
@@ -379,6 +388,30 @@ class ArenaTask(Task):
         return "ok"
 
     # ── Popup helpers ─────────────────────────────────────────────────────────
+
+    def _assicura_skip(self, ctx: TaskContext) -> None:
+        """
+        Verifica che Skip sia attivo nella schermata START CHALLENGE.
+        Se non spuntato esegue il tap su (723,488) per attivarlo.
+        Chiamato una sola volta per sessione (run.skip_verificato).
+        """
+        screen = ctx.device.screenshot()
+        if screen is None:
+            ctx.log_msg("[ARENA] [SKIP] screenshot fallito — skip check")
+            return
+        on  = self._match(ctx, screen, "skip_on")
+        off = self._match(ctx, screen, "skip_off")
+        ctx.log_msg("[ARENA] [SKIP] check=%s  no_check=%s", on, off)
+        if on:
+            ctx.log_msg("[ARENA] [SKIP] Skip già attivo ✓")
+        else:
+            ctx.log_msg("[ARENA] [SKIP] Skip non attivo — tap %s", _TAP_SKIP_CHECKBOX)
+            ctx.device.tap(*_TAP_SKIP_CHECKBOX)
+            time.sleep(0.8)
+            screen2 = ctx.device.screenshot()
+            if screen2 is not None:
+                ok = self._match(ctx, screen2, "skip_on")
+                ctx.log_msg("[ARENA] [SKIP] post-tap skip_on=%s", ok)
 
     def _gestisci_popup_glory(self, ctx: TaskContext) -> bool:
         """
