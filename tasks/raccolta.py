@@ -299,9 +299,12 @@ def _cerca_nodo(ctx: TaskContext, tipo: str) -> bool:
     # Reset livello: 7× tap MENO (porta sicuro a Lv.1 da qualsiasi stato)
     for _ in range(7):
         ctx.device.tap(coord_lv["meno"])
+        time.sleep(0.15)
+    time.sleep(0.3)
     # Sale al livello target: (livello-1) × tap PIU
     for _ in range(livello - 1):
         ctx.device.tap(coord_lv["piu"])
+        time.sleep(0.2)
 
     # CERCA
     ctx.device.tap(coord_lv["search"])
