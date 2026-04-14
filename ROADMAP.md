@@ -47,7 +47,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | RT-17 | Rifornimento via membri | ✅ | 1/1 spedizione, navigazione lista alleanza, avatar trovato, btn risorse 0.986 |
 | RT-18 | Scheduling restart-safe | ⏳ | VIP daily OK (skip <24h, ISO string). Da testare: (1) periodic skip <interval; (2) --force daily; (3) restore_to_orchestrator al riavvio main.py |
 | RT-19 | Radar + RadarCensus | ✅ | badge OK (78,315), pallini 2/2, census 10 icone, map_annotated OK. Fix pendente: falso positivo "Complete All" zona basso-sx |
-| RT-20 | Zaino | ✅ | OCR deposito autonomo OK, gap calcolati, USE→Max→USE eseguiti, schedule ISO salvato |
+| RT-20 | Zaino BAG | ⏳ | OCR pannello destra 100% affidabile. Piano greedy corretto (dry-run OK su schermata statica). Bug: KeyboardInterrupt/timeout ADB durante screenshot() post-swipe in _bag_scan_ed_esegui |
 | RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo Priorità 1-3 |
 | RT-14 | Full farm 12 istanze | ⏳ | |
 
@@ -98,6 +98,10 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | Fix | File | Dettaglio |
 |-----|------|-----------|
 | Zaino OCR deposito | `tasks/zaino.py` | `_leggi_deposito_ocr()` autonomo via `ocr_risorse()` + tap args fix + swipe |
+| Zaino v5 modalità BAG | `tasks/zaino.py` | scan griglia BAG + OCR pannello destra + input qty + MAX se n==owned |
+| Zaino v5 modalità SVUOTA | `tasks/zaino.py` | svuota completamente zaino da HOME senza controllo soglie |
+| Zaino ZAINO_MODALITA | `config/config_loader.py` | nuova chiave "bag"\|"svuota" in GlobalConfig + _InstanceCfg |
+| test_bag_ocr.py | `test_bag_ocr.py` | script calibrazione OCR pannello BAG (coordinate reali 14/04) |
 | Radar coord V5 | `radar.py` | TAP_RADAR_ICONA (90,460)→(78,315), tutti parametri allineati V5 |
 | Radar log | `radar.py` | logger.* → ctx.log_msg() — log visibile in run_task |
 | RadarCensus V6 | `tasks/radar_census.py` | traduzione completa V5→V6: ctx.device, ctx.log_msg, Path da __file__ |
@@ -150,7 +154,19 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Prossima sessione
 
-### Priorità 0 — RT-18 completamento test scheduling
+### Priorità 0 — Fix zaino BAG scroll (bug KeyboardInterrupt)
+```
+Bug: KeyboardInterrupt/timeout ADB durante screenshot() post-swipe
+Causa probabile: swipe troppo veloce → ADB sovraccarico → timeout 15s
+Fix da provare:
+  1. Aumentare DELAY_SCROLL da 0.8s a 2.0s dopo swipe
+  2. Aggiungere time.sleep(1.5) prima del screenshot post-swipe
+  3. Verificare se il problema è riproducibile anche senza Ctrl+C
+     (potrebbe essere stata interazione manuale che ha causato il crash)
+File: tasks/zaino.py → _bag_scan_ed_esegui()
+```
+
+### Priorità 1 — RT-18 completamento test scheduling
 ```
 Test mancanti (in ordine):
 1. Task periodic — raccolta o rifornimento:

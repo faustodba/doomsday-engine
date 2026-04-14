@@ -85,6 +85,7 @@ _DEFAULTS: dict = {
     "BAG_OWNED_ZONA":      (664, 175, 796, 206),
     "BAG_GRANTS_ZONA":     (663, 206, 839, 246),
     "BAG_CAMPO_QTY":       (738, 445),
+    "BAG_MAX":             (883, 444),
     "BAG_OK":              (879, 509),
     "BAG_USE":             (806, 492),
     # Ritardi BAG
@@ -272,12 +273,23 @@ def _bag_scan_ed_esegui(ctx: TaskContext,
                         gap_residui: dict[str, float],
                         dry_run: bool = False) -> dict[str, list[dict]]:
     """
-    Scorre griglia BAG riga per riga.
-    Tap ogni icona → legge pannello → se risorsa target e n>0 → input qty → USE.
+    Scorre griglia BAG schermata per schermata.
+
+    Logica scroll corretta:
+      - Tappa tutte le N righe visibili nella schermata corrente
+      - Dopo aver processato tutte le righe → scroll di una schermata intera
+        (N_RIGHE × 104px) verso l'alto
+      - Ripete con la schermata successiva
+      - Stop quando icona già vista (ciclo) o 3 schermate vuote consecutive
+
+    Ottimizzazione USE:
+      - n == owned → tap MAX → tap USE
+      - n <  owned → tap campo → input_text(n) → tap OK → tap USE
     """
     col_x        = _cfg(ctx, "BAG_COL_X")
     riga_y       = _cfg(ctx, "BAG_RIGA_Y")
     campo_qty    = _cfg(ctx, "BAG_CAMPO_QTY")
+    max_btn      = _cfg(ctx, "BAG_MAX")
     ok_xy        = _cfg(ctx, "BAG_OK")
     use_xy       = _cfg(ctx, "BAG_USE")
     delay_icona  = _cfg(ctx, "BAG_DELAY_ICONA")
@@ -286,25 +298,24 @@ def _bag_scan_ed_esegui(ctx: TaskContext,
     delay_scroll = _cfg(ctx, "BAG_DELAY_SCROLL")
     modo         = "[DRY] " if dry_run else ""
 
+    # Scroll di una schermata intera = N_righe × (box + gap) = 4 × 104 = 416px
+    N_RIGHE      = len(riga_y)
+    SCROLL_SCHERMATA = N_RIGHE * 104   # 416px
+
     operazioni: dict[str, list[dict]] = {r: [] for r in gap_residui}
     icone_viste: set[tuple[str, int]] = set()
-    scroll_count = 0
-    max_scroll   = 15
+    scroll_count          = 0
+    max_scroll            = 10
+    schermate_vuote_consec = 0
 
     while scroll_count <= max_scroll:
         if all(g <= 0 for g in gap_residui.values()):
             ctx.log_msg(f"[ZAINO]{modo}Tutti i gap colmati — STOP")
             break
 
-        screen = ctx.device.screenshot()
-        if screen is None:
-            break
-        frame = _get_frame(screen)
-        if frame is None:
-            break
+        nuove_in_schermata = 0
 
-        nuove = 0
-
+        # Processa tutte le righe visibili
         for y in riga_y:
             for x in col_x:
                 ctx.device.tap(x, y)
@@ -333,9 +344,8 @@ def _bag_scan_ed_esegui(ctx: TaskContext,
                     ctx.log_msg(f"[ZAINO]{modo}Icona già vista — fine griglia")
                     return operazioni
                 icone_viste.add(chiave)
-                nuove += 1
+                nuove_in_schermata += 1
 
-                # Risorsa non da caricare
                 if risorsa not in gap_residui:
                     continue
 
@@ -353,35 +363,52 @@ def _bag_scan_ed_esegui(ctx: TaskContext,
 
                 ctx.log_msg(
                     f"[ZAINO]{modo}[{risorsa}] {pezzatura:,}: "
-                    f"uso {n} pezzi ({n*pezzatura/1e6:.3f}M)"
+                    f"uso {n}/{owned} pezzi ({n*pezzatura/1e6:.3f}M)"
+                    + (" [MAX]" if n == owned else "")
                 )
 
                 if not dry_run:
-                    ctx.device.tap(*campo_qty)
-                    time.sleep(delay_input)
-                    ctx.device.input_text(str(n))
-                    time.sleep(delay_input)
-                    ctx.device.tap(*ok_xy)
-                    time.sleep(delay_input)
+                    if n == owned:
+                        ctx.device.tap(*max_btn)
+                        time.sleep(delay_input)
+                    else:
+                        ctx.device.tap(*campo_qty)
+                        time.sleep(delay_input)
+                        ctx.device.input_text(str(n))
+                        time.sleep(delay_input)
+                        ctx.device.tap(*ok_xy)
+                        time.sleep(delay_input)
                     ctx.device.tap(*use_xy)
                     time.sleep(delay_use)
 
                 gap_residui[risorsa] -= n * pezzatura
                 operazioni[risorsa].append({
                     "pezzatura": pezzatura,
-                    "n": n,
-                    "quantita": n * pezzatura,
+                    "n":         n,
+                    "quantita":  n * pezzatura,
+                    "max":       n == owned,
                 })
                 ctx.log_msg(
                     f"[ZAINO]{modo}[{risorsa}]: gap residuo = "
                     f"{gap_residui[risorsa]/1e6:.3f}M"
                 )
 
-        if nuove == 0:
-            ctx.log_msg(f"[ZAINO]{modo}Nessuna nuova icona — fine griglia")
-            break
+        # Schermate vuote consecutive
+        if nuove_in_schermata == 0:
+            schermate_vuote_consec += 1
+            ctx.log_msg(
+                f"[ZAINO]{modo}Schermata vuota "
+                f"{schermate_vuote_consec}/3"
+            )
+            if schermate_vuote_consec >= 3:
+                ctx.log_msg(f"[ZAINO]{modo}3 schermate vuote — fine griglia")
+                break
+        else:
+            schermate_vuote_consec = 0
 
-        ctx.device.swipe(480, 420, 480, 180, duration_ms=400)
+        # Scroll di una schermata intera verso l'alto
+        ctx.device.swipe(480, riga_y[-1] + 52, 480, riga_y[0] - 52,
+                         duration_ms=400)
         time.sleep(delay_scroll)
         scroll_count += 1
 
