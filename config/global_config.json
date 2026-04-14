@@ -40,20 +40,21 @@
   },
 
   "rifornimento_mappa": {
-    "_note": "Navigazione via coordinate mappa — più veloce, dipende dalla posizione del rifugio",
+    "_note": "Navigazione via coordinate mappa",
     "abilitato":  true,
     "rifugio_x":  687,
     "rifugio_y":  532
   },
 
   "rifornimento_membri": {
-    "_note": "Navigazione via lista membri alleanza — backup, più lenta",
+    "_note": "Navigazione via lista membri alleanza",
     "abilitato":        false,
     "avatar_template":  "pin/avatar.png"
   },
 
   "zaino": {
-    "_note": "TEST dry-run legno: soglia 50M (attuale ~32.3M, gap ~17.7M). Pomodoro/acciaio/petrolio disabilitati.",
+    "_note": "modalita: bag=scarica fino a soglia via BAG | svuota=svuota tutto da HOME",
+    "modalita":           "bag",
     "usa_pomodoro":       false,
     "usa_legno":          true,
     "usa_petrolio":       false,

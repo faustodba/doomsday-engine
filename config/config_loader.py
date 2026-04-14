@@ -227,6 +227,7 @@ class GlobalConfig:
     avatar_template:               str  = "pin/avatar.png"
 
     # Zaino
+    zaino_modalita:          str   = "bag"   # "bag" | "svuota"
     zaino_usa_pomodoro:      bool  = True
     zaino_usa_legno:         bool  = True
     zaino_usa_petrolio:      bool  = True
@@ -301,6 +302,7 @@ class GlobalConfig:
             avatar_template               = str(rb.get("avatar_template",  "pin/avatar.png")),
 
             # Zaino
+            zaino_modalita          = str(z.get("modalita",          "bag")),
             zaino_usa_pomodoro      = bool(z.get("usa_pomodoro",      True)),
             zaino_usa_legno         = bool(z.get("usa_legno",         True)),
             zaino_usa_petrolio      = bool(z.get("usa_petrolio",      True)),
@@ -365,6 +367,7 @@ class GlobalConfig:
                 "avatar_template": self.avatar_template,
             },
             "zaino": {
+                "modalita":          self.zaino_modalita,
                 "usa_pomodoro":      self.zaino_usa_pomodoro,
                 "usa_legno":         self.zaino_usa_legno,
                 "usa_petrolio":      self.zaino_usa_petrolio,
@@ -450,6 +453,7 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         AVATAR_TEMPLATE               = gcfg.avatar_template
 
         # ── Zaino ─────────────────────────────────────────────────────────────
+        ZAINO_MODALITA          = gcfg.zaino_modalita
         ZAINO_ABILITATO         = gcfg.task_zaino
         ZAINO_USA_POMODORO      = gcfg.zaino_usa_pomodoro
         ZAINO_USA_LEGNO         = gcfg.zaino_usa_legno
