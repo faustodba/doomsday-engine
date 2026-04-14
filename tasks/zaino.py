@@ -49,6 +49,12 @@
 #    ZAINO_SOGLIA_LEGNO_M     float  default 10.0
 #    ZAINO_SOGLIA_ACCIAIO_M   float  default  7.0
 #    ZAINO_SOGLIA_PETROLIO_M  float  default  5.0
+#
+#  FIX 14/04/2026:
+#    - deposito letto autonomamente via ocr_risorse() se non iniettato
+#      (eliminata dipendenza dall'orchestrator — identico a pattern V5)
+#    - device.tap() chiamato con x, y separati invece di tupla
+#    - device.scroll() → device.swipe() per compatibilità API V6
 # ==============================================================================
 
 from __future__ import annotations
@@ -122,22 +128,26 @@ def _cfg(ctx: TaskContext, key: str):
 # Helper: analisi screenshot per rilevare righe con owned > 0
 # ------------------------------------------------------------------------------
 
-def _riga_ha_owned(screen_path: str, y_riga: int) -> bool:
+def _riga_ha_owned(screen, y_riga: int) -> bool:
     """
     Verifica se la riga a y_riga ha testo arancione "Owned: N" (owned > 0).
     Cerca pixel arancioni nella zona testo owned (x=155..350, y=y_riga+5..y_riga+40).
+    Accetta Screenshot V6 (con .frame) o numpy array.
     Fail-safe: True se non riesce a leggere (meglio tentare che saltare).
     """
     try:
-        from PIL import Image
-        img = Image.open(screen_path)
-        arr = np.array(img)
+        frame = getattr(screen, "frame", None)
+        if frame is None and isinstance(screen, np.ndarray):
+            frame = screen
+        if frame is None:
+            return True
+        arr = frame
         y1 = max(0, y_riga + 5)
         y2 = min(arr.shape[0], y_riga + 40)
-        roi = arr[y1:y2, 155:350, :3]
-        r = roi[:, :, 0].astype(int)
+        roi = arr[y1:y2, 155:350, :3]   # BGR
+        b = roi[:, :, 0].astype(int)
         g = roi[:, :, 1].astype(int)
-        b = roi[:, :, 2].astype(int)
+        r = roi[:, :, 2].astype(int)
         mask = (
             (r > _OWNED_R_MIN) &
             (g > _OWNED_G_MIN) &
@@ -146,22 +156,25 @@ def _riga_ha_owned(screen_path: str, y_riga: int) -> bool:
         )
         return int(mask.sum()) >= 3
     except Exception:
-        return True  # fail-safe: meglio tentare che saltare
+        return True  # fail-safe
 
 
-def _conta_righe_visibili(screen_path: str) -> int:
+def _conta_righe_visibili(screen) -> int:
     """
     Conta le righe visibili nella lista zaino contando i cluster
     di pixel gialli (pulsante USE) nella colonna x=700..780.
+    Accetta Screenshot V6 (con .frame) o numpy array.
     """
     try:
-        from PIL import Image
-        img = Image.open(screen_path)
-        arr = np.array(img)
-        col = arr[:, 700:780, :3]
-        r = col[:, :, 0].astype(int)
+        frame = getattr(screen, "frame", None)
+        if frame is None and isinstance(screen, np.ndarray):
+            frame = screen
+        if frame is None:
+            return 0
+        col = frame[:, 700:780, :3]   # BGR
+        b = col[:, :, 0].astype(int)
         g = col[:, :, 1].astype(int)
-        b = col[:, :, 2].astype(int)
+        r = col[:, :, 2].astype(int)
         gialli = (r > 180) & (g > 130) & (b < 80)
         righe_gialle = gialli.any(axis=1)
         count = 0
@@ -186,22 +199,22 @@ def _usa_riga(ctx: TaskContext, y_riga: int) -> bool:
     Esegue USE → Max → USE su una riga.
     Ritorna True se completato.
     """
-    tap_use_x = _cfg(ctx, "TAP_USE_X")
-    tap_max_x = _cfg(ctx, "TAP_MAX_X")
-    delay_use = _cfg(ctx, "DELAY_TAP_USE")
-    delay_max = _cfg(ctx, "DELAY_TAP_MAX")
+    tap_use_x  = _cfg(ctx, "TAP_USE_X")
+    tap_max_x  = _cfg(ctx, "TAP_MAX_X")
+    delay_use  = _cfg(ctx, "DELAY_TAP_USE")
+    delay_max  = _cfg(ctx, "DELAY_TAP_MAX")
     delay_conf = _cfg(ctx, "DELAY_CONFERMA")
 
-    ctx.log_msg(f"Zaino: tap USE ({tap_use_x},{y_riga})")
-    ctx.device.tap((tap_use_x, y_riga))
+    ctx.log_msg(f"[ZAINO] tap USE ({tap_use_x},{y_riga})")
+    ctx.device.tap(tap_use_x, y_riga)
     time.sleep(delay_use)
 
-    ctx.log_msg(f"Zaino: tap Max ({tap_max_x},{y_riga})")
-    ctx.device.tap((tap_max_x, y_riga))
+    ctx.log_msg(f"[ZAINO] tap Max ({tap_max_x},{y_riga})")
+    ctx.device.tap(tap_max_x, y_riga)
     time.sleep(delay_max)
 
-    ctx.log_msg(f"Zaino: tap USE conferma ({tap_use_x},{y_riga})")
-    ctx.device.tap((tap_use_x, y_riga))
+    ctx.log_msg(f"[ZAINO] tap USE conferma ({tap_use_x},{y_riga})")
+    ctx.device.tap(tap_use_x, y_riga)
     time.sleep(delay_conf)
 
     return True
@@ -210,7 +223,7 @@ def _usa_riga(ctx: TaskContext, y_riga: int) -> bool:
 def _scroll_to_top(ctx: TaskContext) -> None:
     """Scroll to top della lista zaino (3× swipe giù)."""
     for _ in range(3):
-        ctx.device.scroll(480, 200, 1, durata_ms=300)
+        ctx.device.swipe(480, 200, 480, 400, duration_ms=300)
         time.sleep(0.3)
     time.sleep(0.5)
 
@@ -219,11 +232,11 @@ def _naviga_sidebar(ctx: TaskContext, risorsa: str) -> bool:
     """Tap sulla tab sidebar per la risorsa. Ritorna False se non configurata."""
     sidebar_key = f"SIDEBAR_{risorsa.upper()}"
     if sidebar_key not in _DEFAULTS:
-        ctx.log_msg(f"Zaino [{risorsa}]: sidebar non configurata — skip")
+        ctx.log_msg(f"[ZAINO] [{risorsa}]: sidebar non configurata — skip")
         return False
     coord = _cfg(ctx, sidebar_key)
-    ctx.log_msg(f"Zaino [{risorsa}]: tap sidebar {coord}")
-    ctx.device.tap(coord)
+    ctx.log_msg(f"[ZAINO] [{risorsa}]: tap sidebar {coord}")
+    ctx.device.tap(*coord)
     time.sleep(_cfg(ctx, "DELAY_SIDEBAR"))
     return True
 
@@ -243,11 +256,11 @@ def _scarica_risorsa(ctx: TaskContext, risorsa: str, gap: float) -> float:
     Ritorna:
       quantità stimata scaricata (unità assolute)
     """
-    pezzature = PEZZATURE.get(risorsa, [])
+    pezzature   = PEZZATURE.get(risorsa, [])
     gap_residuo = gap
-    scaricato = 0.0
+    scaricato   = 0.0
 
-    ctx.log_msg(f"Zaino [{risorsa}]: gap da colmare = {gap / 1e6:.3f}M")
+    ctx.log_msg(f"[ZAINO] [{risorsa}]: gap da colmare = {gap / 1e6:.3f}M")
 
     _scroll_to_top(ctx)
 
@@ -255,61 +268,60 @@ def _scarica_risorsa(ctx: TaskContext, risorsa: str, gap: float) -> float:
 
     for pezzatura in pezzature:
         if gap_residuo <= 0:
-            ctx.log_msg(f"Zaino [{risorsa}]: gap colmato — stop")
+            ctx.log_msg(f"[ZAINO] [{risorsa}]: gap colmato — stop")
             break
 
         # Screenshot per verificare presenza owned
         screen = ctx.device.screenshot()
-        if not screen:
-            ctx.log_msg(f"Zaino [{risorsa}]: screenshot fallito — skip pezzatura {pezzatura:,}")
+        if screen is None:
+            ctx.log_msg(f"[ZAINO] [{risorsa}]: screenshot fallito — skip pezzatura {pezzatura:,}")
             continue
 
         # Conta righe visibili
         n_righe = _conta_righe_visibili(screen)
         if n_righe == 0:
-            ctx.log_msg(f"Zaino [{risorsa}]: nessuna riga visibile — fine lista")
+            ctx.log_msg(f"[ZAINO] [{risorsa}]: nessuna riga visibile — fine lista")
             break
 
         y_riga = prima_riga_y
 
         # Verifica owned > 0 dalla riga
         if not _riga_ha_owned(screen, y_riga):
-            ctx.log_msg(f"Zaino [{risorsa}]: pezzatura {pezzatura:,} owned=0 — skip")
+            ctx.log_msg(f"[ZAINO] [{risorsa}]: pezzatura {pezzatura:,} owned=0 — skip")
             continue
 
         # Skip se la singola pezzatura supera già il gap residuo
         if pezzatura > gap_residuo:
             ctx.log_msg(
-                f"Zaino [{risorsa}]: pezzatura {pezzatura:,} > gap residuo "
+                f"[ZAINO] [{risorsa}]: pezzatura {pezzatura:,} > gap residuo "
                 f"{gap_residuo / 1e6:.3f}M — skip (troppo grande)"
             )
             continue
 
         ctx.log_msg(
-            f"Zaino [{risorsa}]: uso pezzatura {pezzatura:,} "
+            f"[ZAINO] [{risorsa}]: uso pezzatura {pezzatura:,} "
             f"(gap residuo {gap_residuo / 1e6:.3f}M)"
         )
 
         if _usa_riga(ctx, y_riga):
-            # Stima conservativa: almeno 1 pezzo da questa pezzatura
-            scaricato += pezzatura
+            scaricato   += pezzatura
             gap_residuo -= pezzatura
 
         time.sleep(0.5)
 
-    ctx.log_msg(f"Zaino [{risorsa}]: scaricato stimato {scaricato / 1e6:.3f}M")
+    ctx.log_msg(f"[ZAINO] [{risorsa}]: scaricato stimato {scaricato / 1e6:.3f}M")
     return scaricato
 
 
 # ------------------------------------------------------------------------------
-# Calcolo gap da deposito OCR simulato
+# Calcolo gap da deposito OCR
 # ------------------------------------------------------------------------------
 
 def _calcola_gap(ctx: TaskContext,
                  deposito: dict[str, float]) -> dict[str, float]:
     """
     Ritorna il gap per ogni risorsa abilitata e sotto soglia.
-    deposito: dict risorsa → valore assoluto.
+    deposito: dict risorsa → valore assoluto (-1 = non letto).
     """
     usa_flags = {
         "pomodoro": _cfg(ctx, "ZAINO_USA_POMODORO"),
@@ -326,25 +338,68 @@ def _calcola_gap(ctx: TaskContext,
     gaps: dict[str, float] = {}
     for risorsa, tgt in target.items():
         if not usa_flags.get(risorsa, False):
-            ctx.log_msg(f"Zaino [{risorsa}]: disabilitato — skip")
+            ctx.log_msg(f"[ZAINO] [{risorsa}]: disabilitato — skip")
             continue
         valore = deposito.get(risorsa, -1.0)
         if valore < 0:
-            ctx.log_msg(f"Zaino [{risorsa}]: OCR non disponibile — skip")
+            ctx.log_msg(f"[ZAINO] [{risorsa}]: OCR non disponibile — skip")
             continue
         if valore < tgt:
             gap = tgt - valore
             ctx.log_msg(
-                f"Zaino [{risorsa}]: {valore / 1e6:.2f}M < target {tgt / 1e6:.2f}M "
+                f"[ZAINO] [{risorsa}]: {valore / 1e6:.2f}M < target {tgt / 1e6:.2f}M "
                 f"→ carico (gap={gap / 1e6:.3f}M)"
             )
             gaps[risorsa] = gap
         else:
             ctx.log_msg(
-                f"Zaino [{risorsa}]: {valore / 1e6:.2f}M >= target "
+                f"[ZAINO] [{risorsa}]: {valore / 1e6:.2f}M >= target "
                 f"{tgt / 1e6:.2f}M — ok"
             )
     return gaps
+
+
+# ------------------------------------------------------------------------------
+# Lettura deposito via OCR — come V5
+# ------------------------------------------------------------------------------
+
+def _leggi_deposito_ocr(ctx: TaskContext) -> dict[str, float]:
+    """
+    Legge le risorse correnti del deposito tramite OCR dalla barra superiore.
+    Identico al pattern V5: screenshot + ocr_risorse().
+    Ritorna dict {risorsa: valore_assoluto} con -1 per letture fallite.
+    """
+    try:
+        from shared.ocr_helpers import ocr_risorse
+    except ImportError as exc:
+        ctx.log_msg(f"[ZAINO] import ocr_helpers fallito: {exc}")
+        return {}
+
+    ctx.log_msg("[ZAINO] Lettura deposito via OCR...")
+    screen = ctx.device.screenshot()
+    if screen is None:
+        ctx.log_msg("[ZAINO] Screenshot fallito — deposito non disponibile")
+        return {}
+
+    try:
+        risorse = ocr_risorse(screen)
+        deposito = {
+            "pomodoro": risorse.pomodoro,
+            "legno":    risorse.legno,
+            "acciaio":  risorse.acciaio,
+            "petrolio": risorse.petrolio,
+        }
+        ctx.log_msg(
+            f"[ZAINO] Deposito OCR: "
+            f"pomodoro={risorse.pomodoro/1e6:.2f}M "
+            f"legno={risorse.legno/1e6:.2f}M "
+            f"acciaio={risorse.acciaio/1e6:.2f}M "
+            f"petrolio={risorse.petrolio/1e6:.2f}M"
+        )
+        return deposito
+    except Exception as exc:
+        ctx.log_msg(f"[ZAINO] OCR deposito errore: {exc}")
+        return {}
 
 
 # ------------------------------------------------------------------------------
@@ -366,10 +421,6 @@ class ZainoTask(Task):
     def interval_hours(self) -> float:
         return 168.0  # settimanale
 
-    # ------------------------------------------------------------------
-    # Interfaccia pubblica per i test — permette di iniettare il deposito
-    # ------------------------------------------------------------------
-
     def should_run(self, ctx) -> bool:
         if ctx.device is None or ctx.matcher is None:
             return False
@@ -384,37 +435,36 @@ class ZainoTask(Task):
 
         Parametri:
           ctx      : TaskContext con device, config, logger
-          deposito : dict risorsa→valore_assoluto (iniettato dai test;
-                     in produzione viene letto tramite ctx.device.screenshot
-                     + OCR esterno prima di chiamare run())
+          deposito : dict risorsa→valore_assoluto (iniettato dai test).
+                     Se None → letto autonomamente via ocr_risorse() (produzione).
 
         Ritorna TaskResult con data = {risorsa: scaricato_M, ...}
         """
         # --- Verifica abilitazione ---
         if not _cfg(ctx, "ZAINO_ABILITATO"):
-            ctx.log_msg("Zaino: modulo disabilitato (ZAINO_ABILITATO=False) — skip")
+            ctx.log_msg("[ZAINO] modulo disabilitato (ZAINO_ABILITATO=False) — skip")
             return TaskResult(
                 success=True,
                 message="disabilitato",
                 data={r: 0.0 for r in ["pomodoro", "legno", "acciaio", "petrolio"]},
             )
 
-        # --- Verifica deposito ---
+        # --- Lettura deposito OCR se non iniettato ---
         if deposito is None:
-            # Produzione: screenshot e OCR gestiti dall'orchestrator
-            # Qui usiamo un deposito vuoto (nessuna risorsa da caricare)
-            ctx.log_msg("Zaino: deposito non fornito — skip (usare orchestrator)")
-            return TaskResult(
-                success=False,
-                message="deposito non disponibile",
-                data={r: 0.0 for r in ["pomodoro", "legno", "acciaio", "petrolio"]},
-            )
+            deposito = _leggi_deposito_ocr(ctx)
+            if not deposito:
+                ctx.log_msg("[ZAINO] Deposito non disponibile — skip")
+                return TaskResult(
+                    success=False,
+                    message="deposito non disponibile",
+                    data={r: 0.0 for r in ["pomodoro", "legno", "acciaio", "petrolio"]},
+                )
 
         # --- Calcola gap ---
         gaps = _calcola_gap(ctx, deposito)
 
         if not gaps:
-            ctx.log_msg("Zaino: tutte le risorse sopra soglia — nessun carico necessario")
+            ctx.log_msg("[ZAINO] Tutte le risorse sopra soglia — nessun carico necessario")
             return TaskResult(
                 success=True,
                 message="nessun carico necessario",
@@ -423,8 +473,8 @@ class ZainoTask(Task):
 
         # --- Apri zaino ---
         tap_apri = _cfg(ctx, "TAP_ZAINO_APRI")
-        ctx.log_msg(f"Zaino: apertura (tap {tap_apri})")
-        ctx.device.tap(tap_apri)
+        ctx.log_msg(f"[ZAINO] Apertura zaino (tap {tap_apri})")
+        ctx.device.tap(*tap_apri)
         time.sleep(_cfg(ctx, "DELAY_APRI_ZAINO"))
 
         esiti: dict[str, float] = {
@@ -433,27 +483,27 @@ class ZainoTask(Task):
 
         try:
             for risorsa, gap in gaps.items():
-                ctx.log_msg(f"Zaino: === {risorsa.upper()} ===")
+                ctx.log_msg(f"[ZAINO] === {risorsa.upper()} ===")
                 if not _naviga_sidebar(ctx, risorsa):
                     continue
                 scaricato = _scarica_risorsa(ctx, risorsa, gap)
                 esiti[risorsa] = scaricato / 1e6  # in milioni
-        except Exception as e:
-            ctx.log_msg(f"Zaino: errore durante scarico: {e}")
+        except Exception as exc:
+            ctx.log_msg(f"[ZAINO] Errore durante scarico: {exc}")
             return TaskResult(
                 success=False,
-                message=f"errore: {e}",
+                message=f"errore: {exc}",
                 data=esiti,
             )
         finally:
             # Chiudi zaino sempre
             tap_chiudi = _cfg(ctx, "TAP_ZAINO_CHIUDI")
-            ctx.log_msg(f"Zaino: chiusura (tap {tap_chiudi})")
-            ctx.device.tap(tap_chiudi)
+            ctx.log_msg(f"[ZAINO] Chiusura zaino (tap {tap_chiudi})")
+            ctx.device.tap(*tap_chiudi)
             time.sleep(1.0)
 
         totale = sum(esiti.values())
-        ctx.log_msg(f"Zaino: completato — totale scaricato: {totale:.3f}M")
+        ctx.log_msg(f"[ZAINO] Completato — totale scaricato: {totale:.3f}M")
         return TaskResult(
             success=True,
             message=f"scaricato {totale:.3f}M totale",
