@@ -16,7 +16,14 @@
 #      6. Ripeti fino a saturazione slot o risorse esaurite
 #    Fine → ritorna in home, comunica eta_residua ultima spedizione
 #
-#  Logica coda_volo:
+#  FIX 14/04/2026 — da analisi V5 rifornimento_mappa.py + rifornimento_base.py:
+#    - _apri_resource_supply(): find() → find_one() (API V6 standard)
+#    - run(): deposito non più obbligatorio — se None, letto via OCR in mappa
+#             come V5 _leggi_risorse_mappa() (con retry 1 volta)
+#    - _compila_e_invia(): aggiunta verifica nome destinatario come V5
+#    - Navigazione ritorno HOME: ctx.navigator.vai_in_home() (con fallback key)
+#    - Navigazione vai in mappa: ctx.navigator.vai_in_mappa() (con fallback key)
+#    - Aggiunte _leggi_deposito_ocr() e _verifica_nome_destinatario_v6()
 #    coda_volo[0]  = prima spedizione partita = prima che rientra → libera 1 slot
 #    coda_volo[-1] = ultima spedizione partita = ultima che rientra
 #
@@ -317,10 +324,64 @@ def _centra_mappa(ctx: TaskContext) -> None:
     ctx.log_msg("Rifornimento: mappa centrata e castello tappato")
 
 
-def _apri_resource_supply(ctx: TaskContext) -> bool:
+def _leggi_deposito_ocr(ctx: TaskContext, risorse_lista: list) -> dict[str, float]:
+    """
+    Legge il deposito risorse via OCR dalla barra superiore (visibile anche in mappa).
+    Speculare a V5 _leggi_risorse_mappa() — usato quando il deposito non è iniettato.
+    Ritorna dict {risorsa: valore_assoluto} o {} se OCR fallisce.
+    Riprova una volta in caso di fallimento (come V5).
+    """
+    def _tenta() -> dict:
+        screen = ctx.device.screenshot()
+        if screen is None:
+            return {}
+        try:
+            from shared.ocr_risorse import leggi_risorse
+            return leggi_risorse(screen) or {}
+        except Exception:
+            return {}
+
+    risorse = _tenta()
+    if all(risorse.get(r, -1) < 0 for r in risorse_lista):
+        ctx.log_msg("Rifornimento: OCR deposito fallito — retry tra 3s")
+        time.sleep(3.0)
+        risorse = _tenta()
+    return risorse
+
+
+def _verifica_nome_destinatario_v6(ctx: TaskContext, screen, nome_atteso: str) -> tuple[bool, str]:
+    """
+    Verifica che il nome nella maschera corrisponda al destinatario atteso.
+    Speculare a V5 _verifica_nome_destinatario() da rifornimento_base.py.
+    Usa OCR sulla zona OCR_NOME_DEST della maschera aperta.
+    Ritorna (ok, testo_ocr).
+    """
+    if not nome_atteso:
+        return True, ""
+    try:
+        import pytesseract
+        from PIL import Image
+        import numpy as np
+        import cv2 as _cv2
+        ocr_box = _cfg(ctx, "OCR_NOME_DEST")
+        img = Image.fromarray(_cv2.cvtColor(screen.frame, _cv2.COLOR_BGR2RGB))
+        crop = img.crop(ocr_box)
+        c4x  = crop.resize((crop.width * 4, crop.height * 4), Image.LANCZOS)
+        gray = np.array(c4x.convert("L"))
+        _, bw = _cv2.threshold(gray, 0, 255, _cv2.THRESH_BINARY + _cv2.THRESH_OTSU)
+        testo = pytesseract.image_to_string(
+            Image.fromarray(bw), config="--psm 7"
+        ).strip()
+        testo = testo.replace("|", "").replace("_", "").replace("=", "").strip()
+        ok = nome_atteso.lower() in testo.lower()
+        return ok, testo
+    except Exception as exc:
+        ctx.log_msg(f"Rifornimento: OCR nome destinatario fallito: {exc} — procedo")
+        return True, ""
     """
     Cerca il pulsante RESOURCE SUPPLY via template matching e lo tappa.
     Ritorna True se trovato e tappato, False altrimenti.
+    API V6: find_one(screen, path, threshold, zone) — non esiste find().
     """
     screen = ctx.device.screenshot()
     if not screen:
@@ -329,13 +390,14 @@ def _apri_resource_supply(ctx: TaskContext) -> bool:
 
     template = _cfg(ctx, "TEMPLATE_RESOURCE_SUPPLY")
     soglia   = _cfg(ctx, "TEMPLATE_RESOURCE_SUPPLY_SOGLIA")
-    coord = ctx.matcher.find(template, screen, soglia)
-    if coord is None:
-        ctx.log_msg(f"Rifornimento: RESOURCE SUPPLY non trovato (soglia={soglia})")
+    result   = ctx.matcher.find_one(screen, template, threshold=soglia)
+    ctx.log_msg(f"Rifornimento: RESOURCE SUPPLY score={result.score:.3f} soglia={soglia}")
+    if not result.found:
+        ctx.log_msg("Rifornimento: RESOURCE SUPPLY non trovato")
         return False
 
-    ctx.log_msg(f"Rifornimento: RESOURCE SUPPLY trovato a {coord} → tap")
-    ctx.device.tap(coord)
+    ctx.log_msg(f"Rifornimento: RESOURCE SUPPLY trovato ({result.cx},{result.cy}) → tap")
+    ctx.device.tap(result.cx, result.cy)
     time.sleep(2.5)
     return True
 
@@ -353,6 +415,17 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
     screen = ctx.device.screenshot()
     if not screen:
         return False, 0, False, 0
+
+    # Verifica nome destinatario (come V5 _compila_e_invia in rifornimento_base.py)
+    if nome_rifugio:
+        ok_nome, testo_ocr = _verifica_nome_destinatario_v6(ctx, screen, nome_rifugio)
+        if not ok_nome:
+            ctx.log_msg(
+                f"Rifornimento: DEST MISMATCH — OCR='{testo_ocr}' atteso='{nome_rifugio}' → BACK"
+            )
+            ctx.device.back()
+            time.sleep(0.8)
+            return False, 0, False, 0
 
     vai_zona     = _cfg(ctx, "VAI_ZONA")
     soglia_vai   = _cfg(ctx, "VAI_SOGLIA_GIALLI")
@@ -517,13 +590,12 @@ class RifornimentoTask(Task):
             )
 
         # --- Verifica deposito ---
-        if deposito is None:
-            ctx.log_msg("Rifornimento: deposito non fornito — skip (usare orchestrator)")
-            return TaskResult(
-                success=False,
-                message="deposito non disponibile",
-                data={"spedizioni": 0, "eta_residua": 0.0},
-            )
+        # In produzione: se non iniettato dall'orchestrator, legge OCR direttamente
+        # come V5 _leggi_risorse_mappa(). L'OCR viene letto in mappa dopo vai_in_mappa().
+        # Il flag deposito_da_ocr indica che la lettura avverrà nel loop al passo 3.
+        deposito_da_ocr = deposito is None
+        if deposito_da_ocr:
+            ctx.log_msg("Rifornimento: deposito non iniettato — lettura OCR in mappa")
 
         max_sped   = int(_cfg(ctx, "RIFORNIMENTO_MAX_SPEDIZIONI_CICLO") or 5)
         margine    = int(_cfg(ctx, "MARGINE_ATTESA"))
@@ -565,9 +637,23 @@ class RifornimentoTask(Task):
                 # ── 2. Vai in mappa (solo prima volta) ──────────────────────
                 if not in_mappa:
                     ctx.log_msg("Rifornimento: navigazione → mappa")
-                    ctx.device.key("KEYCODE_MAP")   # segnale testabile
+                    if ctx.navigator is not None:
+                        ctx.navigator.vai_in_mappa()
+                    else:
+                        ctx.device.key("KEYCODE_MAP")
                     in_mappa = True
                     time.sleep(1.5)
+
+                # ── 3. Leggi deposito OCR se non iniettato ──────────────────
+                if deposito_da_ocr:
+                    deposito = _leggi_deposito_ocr(ctx, risorse_l)
+                    if all(deposito.get(r, -1) < 0 for r in risorse_l):
+                        ctx.log_msg("Rifornimento: OCR deposito fallito dopo retry — stop")
+                        break
+                    ctx.log_msg("Rifornimento: deposito OCR — " + " | ".join(
+                        f"{r}={max(0.0, deposito.get(r, -1))/1e6:.1f}M"
+                        for r in risorse_l if deposito.get(r, -1) >= 0
+                    ))
 
                 # ── 3. Seleziona risorsa ────────────────────────────────────
                 risorsa_scelta, idx_risorsa = _seleziona_risorsa(
@@ -613,7 +699,10 @@ class RifornimentoTask(Task):
 
         finally:
             ctx.log_msg("Rifornimento: ritorno in home")
-            ctx.device.key("KEYCODE_HOME")
+            if ctx.navigator is not None:
+                ctx.navigator.vai_in_home()
+            else:
+                ctx.device.key("KEYCODE_HOME")
 
         # ── ETA residua ultima spedizione (comunicata alla raccolta) ───────
         _aggiorna_coda(coda_volo)
