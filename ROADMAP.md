@@ -45,7 +45,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | RT-15 | Arena + ArenaMercato | ✅ | Arena: 5/5 sfide 8.4s/sfida; ArenaMercato: pack360=5; fix BACK×2 |
 | RT-16 | Rifornimento via mappa | ✅ | 5/5 spedizioni, qta reale 4M, provviste tracciate, soglia/abilitazione OK |
 | RT-17 | Rifornimento via membri | ✅ | 1/1 spedizione, navigazione lista alleanza, avatar trovato, btn risorse 0.986 |
-| RT-18 | Scheduling restart-safe | ✅ | ISO string in schedule, skip daily <24h, --force override |
+| RT-18 | Scheduling restart-safe | ⏳ | VIP daily OK (skip <24h, ISO string). Da testare: (1) periodic skip <interval; (2) --force daily; (3) restore_to_orchestrator al riavvio main.py |
 | RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo Priorità 1-3 |
 | RT-14 | Full farm 12 istanze | ⏳ | |
 
@@ -144,7 +144,27 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Prossima sessione
 
-### Priorità 0 — Ripristino config produzione rifornimento
+### Priorità 0 — RT-18 completamento test scheduling
+```
+Test mancanti (in ordine):
+1. Task periodic — raccolta o rifornimento:
+     python run_task.py --istanza FAU_00 --task raccolta
+     → deve eseguire e salvare ISO in schedule.raccolta
+     → rilancia subito: deve eseguire ancora (periodic non blocca in run_task)
+     → verifica schedule.raccolta aggiornato
+
+2. --force su task daily:
+     python run_task.py --istanza FAU_00 --task vip --force
+     → deve eseguire ignorando schedule (vip già eseguito oggi)
+     → log: "[SCHEDULE] --force attivo — schedule ignorato"
+
+3. restore_to_orchestrator al riavvio main.py:
+     python main.py --istanze FAU_00 --tick-sleep 10
+     → log: "Schedule ripristinato: {vip: 2026-04-14T..., ...}"
+     → verifica che VIP NON venga rieseguito nel primo tick
+```
+
+### Priorità 1 — Ripristino config produzione rifornimento
 ```
 global_config.json da ripristinare a produzione:
   rifornimento_mappa.abilitato  = true
