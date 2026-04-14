@@ -576,7 +576,8 @@ class RifornimentoTask(Task):
         if deposito_da_ocr:
             ctx.log_msg("Rifornimento: deposito non iniettato — lettura OCR in mappa")
 
-        max_sped   = int(_cfg(ctx, "RIFORNIMENTO_MAX_SPEDIZIONI_CICLO") or 5)
+        _max_sped_raw = _cfg(ctx, "RIFORNIMENTO_MAX_SPEDIZIONI_CICLO")
+        max_sped = int(_max_sped_raw) if _max_sped_raw is not None else 5
         margine    = int(_cfg(ctx, "MARGINE_ATTESA"))
         risorse_l  = list(risorse_config.keys())
 
@@ -586,6 +587,15 @@ class RifornimentoTask(Task):
         in_mappa = False
 
         ctx.log_msg(f"Rifornimento: start — risorse={risorse_l} max_sped={max_sped}")
+
+        # Guard: max_sped=0 → skip immediato senza entrare in mappa
+        if max_sped == 0:
+            ctx.log_msg("Rifornimento: max_spedizioni_ciclo=0 — skip")
+            return TaskResult(
+                success=True,
+                message="max_spedizioni=0",
+                data={"spedizioni": 0, "eta_residua": 0.0},
+            )
 
         try:
             while True:

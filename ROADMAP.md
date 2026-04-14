@@ -43,7 +43,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | RT-12 | Tick completo FAU_01 | ✅ | Tick completo funzionante |
 | RT-tap | tap_barra barra inferiore | ✅ | score=1.000 tutti 5 bottoni su FAU_01 |
 | RT-15 | Arena + ArenaMercato | ✅ | Arena: 5/5 sfide 8.4s/sfida; ArenaMercato: pack360=5; fix BACK×2 |
-| RT-16 | Rifornimento | ⏳ | fix applicati; prerequisiti: runtime.json con DOOMS_ACCOUNT + slot liberi FAU_00 |
+| RT-16 | Rifornimento | ✅ | 5/5 spedizioni, qta reale 4M/spedizione, provviste tracciate, statistiche state |
 | RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo fix issues aperti |
 | RT-14 | Full farm 12 istanze | ⏳ | |
 
@@ -108,7 +108,14 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | Config Step B | `run_task.py` | rimossa `_build_cfg` → usa `build_instance_cfg()` |
 | Rifornimento OCR fix | `rifornimento.py` | `_leggi_deposito_ocr` usa `ocr_helpers.ocr_risorse()` |
 | Rifornimento verifica fix | `rifornimento.py` | `_verifica_nome_destinatario_v6` usa `rifornimento_base.verifica_destinatario()` |
-| Rifornimento codice orphan | `rifornimento.py` | rimosso blocco codice duplicato in `_verifica_nome_destinatario_v6` |
+| Rifornimento codice orphan | `rifornimento.py` | rimosso blocco codice duplicato |
+| Rifornimento _vai_abilitato | `rifornimento.py` | usa `screen.frame` BGR invece di `Image.open(path)` |
+| Rifornimento OCR maschera | `rifornimento.py` | `_leggi_provviste/tassa/eta` usano `rifornimento_base.*()` |
+| Rifornimento sequenza tap | `rifornimento.py` | 300/300/600ms come V5 + tap(879,487) OK tastiera |
+| Rifornimento slot reale | `rifornimento.py` | `leggi_contatore_slot()` — slot=-1 → legge UI |
+| Rifornimento qta 999M | `global_config.json` | qta 1M → 999M, gioco adatta al massimo |
+| Rifornimento coordinate | `global_config.json` + `config_loader.py` | rifugio (687,532) allineato ovunque |
+| Rifornimento statistiche | `rifornimento.py` + `state.py` | snapshot pre/post VAI → qta reale, provviste residue, dettaglio giornaliero |
 
 ---
 
@@ -134,22 +141,22 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Prossima sessione
 
-### Priorità 0 — RT-16 Rifornimento (in corso)
-```
-1. Verificare che config/global_config.json abbia rifugio_x=687, rifugio_y=532
-2. Lanciare: python run_task.py --istanza FAU_00 --task rifornimento
-3. Atteso nei log: "tap VAI" → "spedizione 1"
-4. Caricare log e aggiornare ROADMAP
-```
+### Priorità 1 — Issue #3 Zaino
+- `ZainoTask.run()` non riceve deposito OCR
+- Fix: leggere `ocr_risorse()` in `ZainoTask.run()` direttamente (come rifornimento)
 
-### Priorità 1 — Rifornimento issue aperta
-- Issue #3 Zaino: deposito non passato dall'orchestrator
-- Issue #4 Radar: skip silenzioso
+### Priorità 2 — Issue #4 Radar skip silenzioso
+- Task esegue ma non logga nulla
+- Richiede istanza in MAPPA con radar aperto
 
-### Priorità 2 — RT-13 Multi-istanza
+### Priorità 3 — RT-13 Multi-istanza
 ```
 python main.py --istanze FAU_00,FAU_01 --tick-sleep 10
 ```
+
+### Priorità 4 — Dashboard statistiche rifornimento
+- Aggiungere sezione dashboard con `inviato_oggi`, `provviste_residue`, `dettaglio_oggi`
+- Leggere da `state/FAU_XX.json` via API dashboard
 
 ---
 
