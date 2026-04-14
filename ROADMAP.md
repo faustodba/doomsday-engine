@@ -43,6 +43,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | RT-12 | Tick completo FAU_01 | ✅ | Tick completo funzionante |
 | RT-tap | tap_barra barra inferiore | ✅ | score=1.000 tutti 5 bottoni su FAU_01 |
 | RT-15 | Arena + ArenaMercato | ✅ | Arena: 5/5 sfide 8.4s/sfida; ArenaMercato: pack360=5; fix BACK×2 |
+| RT-16 | Rifornimento | ⏳ | fix applicati; prerequisiti: runtime.json con DOOMS_ACCOUNT + slot liberi FAU_00 |
 | RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo fix issues aperti |
 | RT-14 | Full farm 12 istanze | ⏳ | |
 
@@ -51,10 +52,15 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 ## Issues aperti (priorità)
 
 ### 1. Rifornimento — da mettere a punto (ALTA)
-- **Stato:** task disabilitato in runtime. Da verificare con log reale.
-- **Azione:** abilitare `RIFORNIMENTO_ABILITATO=True` + `RIFORNIMENTO_MAPPA_ABILITATO=True`
-  in `runtime.json`, lanciare tick su FAU_00 (ha slot rifornimento), analizzare log.
-- **File V5:** `rifornimento_mappa.py` — leggere prima di qualsiasi modifica V6.
+- **Stato:** fix applicati 14/04/2026 — pronto per test runtime RT-16.
+- **Fix applicati:**
+  - `_apri_resource_supply()`: `find()` → `find_one()` (API V6)
+  - `run()`: deposito letto via OCR in mappa se non iniettato (come V5)
+  - `_compila_e_invia()`: aggiunta verifica nome destinatario (come V5)
+  - Navigazione HOME/MAPPA: `ctx.navigator.vai_in_home/mappa()` con fallback key
+- **Prerequisiti test:**
+  - Creare `runtime.json` con `DOOMS_ACCOUNT` e `RIFORNIMENTO_MAPPA_ABILITATO: true`
+  - FAU_00 deve avere slot liberi e risorse sopra soglia
 
 ### 2. Arena — timeout battaglia 38s → 60s (MEDIA)
 - **Problema:** sfide 2 e 4 timeout — battaglia ancora in corso (animazioni > 38s).
@@ -92,6 +98,10 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | Arena timeout | `arena.py` | `_MAX_BATTAGLIA_S` 30.0 → 15.0 (skip attivo, 23s totali sufficienti) |
 | ArenaMercato BACK | `arena_mercato.py` | `_torna_home()` BACK×3 → BACK×2 (percorso reale: Store→Lista→HOME) |
 | Runner isolato | `run_task.py` | nuovo file per test singolo task |
+| Rifornimento find_one | `rifornimento.py` | `find()` → `find_one()` in `_apri_resource_supply()` |
+| Rifornimento deposito OCR | `rifornimento.py` | deposito letto via OCR in mappa se non iniettato (come V5) |
+| Rifornimento verifica nome | `rifornimento.py` | aggiunta `_verifica_nome_destinatario_v6()` come V5 |
+| Rifornimento navigator | `rifornimento.py` | HOME/MAPPA via `ctx.navigator` con fallback key |
 
 ---
 
@@ -117,14 +127,19 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Prossima sessione
 
-### Priorità 1 — Rifornimento
+### Priorità 1 — RT-16 Rifornimento
 ```
-1. Abilitare in runtime.json:
-     "RIFORNIMENTO_ABILITATO": true
-     "RIFORNIMENTO_MAPPA_ABILITATO": true
-2. Lanciare: python main.py --istanze FAU_00 --tick-sleep 10
-3. Analizzare log rifornimento completo
-4. Upload rifornimento.py + rifornimento_mappa.py V6 se serve fix
+1. Creare runtime.json:
+     {
+       "globali": {
+         "RIFORNIMENTO_ABILITATO": true,
+         "RIFORNIMENTO_MAPPA_ABILITATO": true,
+         "DOOMS_ACCOUNT": "<nome_rifugio_destinatario>"
+       }
+     }
+2. Verificare che FAU_00 abbia slot liberi e risorse sopra soglia
+3. Lanciare: python run_task.py --istanza FAU_00 --task rifornimento
+4. Caricare log e aggiornare ROADMAP
 ```
 
 ### Priorità 2 — Arena timeout
