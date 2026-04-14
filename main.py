@@ -8,6 +8,11 @@
 #  FIX 12/04/2026 sessione 2:
 #    - _nav_log: logger.info(msg, module="navigator") -> logger.info("navigator", msg)
 #      StructuredLogger.info(module, message) — module e' il PRIMO argomento
+#  STEP B 14/04/2026 — config_loader:
+#    - Rimossa classe _Cfg hardcodata — sostituita da build_instance_cfg()
+#    - Rimossa _carica_runtime() — sostituita da load_global()
+#    - global_config.json letto ad ogni tick → modifiche dashboard senza restart
+#    - _carica_istanze() invariata — legge ancora instances.json
 # ==============================================================================
 from __future__ import annotations
 import argparse, json, os, signal, sys, threading, time
@@ -22,6 +27,7 @@ from core.orchestrator import Orchestrator
 from core.task import TaskContext, TaskResult
 from core.logger import StructuredLogger, get_logger, close_all_loggers
 from core.state import InstanceState
+from config.config_loader import load_global, build_instance_cfg
 
 
 def _import_tasks() -> dict:
@@ -63,14 +69,6 @@ def _carica_istanze(filtro=None) -> list[dict]:
         if not istanze:
             print(f"  [WARN] Nessuna istanza trovata per: {filtro}")
     return istanze
-
-
-def _carica_runtime() -> dict:
-    try:
-        with open(os.path.join(ROOT, "runtime.json"), "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception:
-        return {}
 
 
 # ---------------------------------------------------------------------------
@@ -140,84 +138,17 @@ def _log(nome: str, msg: str) -> None:
 
 
 # ---------------------------------------------------------------------------
-# Config istanza
-# ---------------------------------------------------------------------------
-def _build_cfg(ist: dict, rt: dict, nome: str):
-    g   = rt.get("globali", {})
-    ovr = rt.get("overrides", {}).get("mumu", {}).get(nome, {})
-
-    class _Cfg:
-        instance_name = nome
-        truppe        = ovr.get("truppe",      ist.get("truppe",      12000))
-        max_squadre   = ovr.get("max_squadre", ist.get("max_squadre", 4))
-        layout        = ovr.get("layout",      ist.get("layout",      1))
-        livello       = ovr.get("livello",     ist.get("livello",     6))
-        profilo       = ovr.get("profilo",     ist.get("profilo",     "full"))
-        fascia_oraria = ovr.get("fascia_oraria", ist.get("fascia_oraria", ""))
-        lingua        = ist.get("lingua", "en")
-        RIFORNIMENTO_ABILITATO           = g.get("RIFORNIMENTO_ABILITATO",           True)
-        RIFORNIMENTO_MAPPA_ABILITATO      = g.get("RIFORNIMENTO_MAPPA_ABILITATO",     False)
-        RIFORNIMENTO_SOGLIA_CAMPO_M       = g.get("RIFORNIMENTO_SOGLIA_CAMPO_M",      5.0)
-        RIFORNIMENTO_SOGLIA_LEGNO_M       = g.get("RIFORNIMENTO_SOGLIA_LEGNO_M",      5.0)
-        RIFORNIMENTO_SOGLIA_PETROLIO_M    = g.get("RIFORNIMENTO_SOGLIA_PETROLIO_M",   3.0)
-        RIFORNIMENTO_SOGLIA_ACCIAIO_M     = g.get("RIFORNIMENTO_SOGLIA_ACCIAIO_M",    3.0)
-        RIFORNIMENTO_CAMPO_ABILITATO      = g.get("RIFORNIMENTO_CAMPO_ABILITATO",     True)
-        RIFORNIMENTO_LEGNO_ABILITATO      = g.get("RIFORNIMENTO_LEGNO_ABILITATO",     True)
-        RIFORNIMENTO_PETROLIO_ABILITATO   = g.get("RIFORNIMENTO_PETROLIO_ABILITATO",  True)
-        RIFORNIMENTO_ACCIAIO_ABILITATO    = g.get("RIFORNIMENTO_ACCIAIO_ABILITATO",   True)
-        RIFORNIMENTO_MAX_SPEDIZIONI_CICLO = g.get("RIFORNIMENTO_MAX_SPEDIZIONI_CICLO", 5)
-        RIFUGIO_X                         = g.get("RIFUGIO_X",  684)
-        RIFUGIO_Y                         = g.get("RIFUGIO_Y",  532)
-        ZAINO_ABILITATO                   = g.get("ZAINO_ABILITATO",     True)
-        ZAINO_USA_POMODORO                = g.get("ZAINO_USA_POMODORO",  True)
-        ZAINO_USA_LEGNO                   = g.get("ZAINO_USA_LEGNO",     True)
-        ZAINO_USA_PETROLIO                = g.get("ZAINO_USA_PETROLIO",  True)
-        ZAINO_USA_ACCIAIO                 = g.get("ZAINO_USA_ACCIAIO",   True)
-        ZAINO_SOGLIA_POMODORO_M           = g.get("ZAINO_SOGLIA_POMODORO_M",  10.0)
-        ZAINO_SOGLIA_LEGNO_M              = g.get("ZAINO_SOGLIA_LEGNO_M",     10.0)
-        ZAINO_SOGLIA_PETROLIO_M           = g.get("ZAINO_SOGLIA_PETROLIO_M",   5.0)
-        ZAINO_SOGLIA_ACCIAIO_M            = g.get("ZAINO_SOGLIA_ACCIAIO_M",    5.0)
-        ALLEANZA_ABILITATO                = g.get("ALLEANZA_ABILITATO",   True)
-        MESSAGGI_ABILITATO                = g.get("MESSAGGI_ABILITATO",   True)
-        VIP_ABILITATO                     = g.get("VIP_ABILITATO",        True)
-        RADAR_ABILITATO                   = g.get("RADAR_ABILITATO",      True)
-        RADAR_CENSUS_ABILITATO            = g.get("RADAR_CENSUS_ABILITATO", False)
-        ARENA_OF_GLORY_ABILITATO          = g.get("ARENA_OF_GLORY_ABILITATO",  True)
-        ARENA_MERCATO_ABILITATO           = g.get("ARENA_MERCATO_ABILITATO",   True)
-        BOOST_ABILITATO                   = g.get("BOOST_ABILITATO",  True)
-        STORE_ABILITATO                   = g.get("STORE_ABILITATO",  True)
-
-        def get(self, key: str, default=None):
-            return getattr(self, key, default)
-
-        def task_abilitato(self, nome_task: str) -> bool:
-            mappa = {
-                "raccolta":      True,
-                "rifornimento":  self.RIFORNIMENTO_ABILITATO,
-                "zaino":         self.ZAINO_ABILITATO,
-                "vip":           self.VIP_ABILITATO,
-                "alleanza":      self.ALLEANZA_ABILITATO,
-                "messaggi":      self.MESSAGGI_ABILITATO,
-                "arena":         self.ARENA_OF_GLORY_ABILITATO,
-                "arena_mercato": self.ARENA_MERCATO_ABILITATO,
-                "boost":         self.BOOST_ABILITATO,
-                "store":         self.STORE_ABILITATO,
-                "radar":         self.RADAR_ABILITATO,
-                "radar_census":  self.RADAR_CENSUS_ABILITATO,
-            }
-            return mappa.get(nome_task, True)
-
-    return _Cfg()
-
-
-# ---------------------------------------------------------------------------
 # Build TaskContext
 # ---------------------------------------------------------------------------
-def _build_ctx(ist: dict, rt: dict, dry_run: bool) -> TaskContext:
+def _build_ctx(ist: dict, gcfg, dry_run: bool) -> TaskContext:
+    """
+    Costruisce il TaskContext per un'istanza.
+    gcfg: GlobalConfig da load_global() — letto ad ogni tick.
+    """
     nome  = ist["nome"]
     porta = ist.get("porta", 16384 + ist.get("indice", 0) * 32)
 
-    cfg    = _build_cfg(ist, rt, nome)
+    cfg    = build_instance_cfg(ist, gcfg)
     logger = get_logger(nome, log_dir=os.path.join(ROOT, "logs"), console=False)
     state  = InstanceState.load(nome, state_dir=os.path.join(ROOT, "state"))
 
@@ -324,9 +255,9 @@ def _thread_istanza(ist, tasks_cls, dry_run, tick_sleep, stop_event):
     with _contatori_lock:
         _contatori.setdefault(nome, {})
 
-    rt  = _carica_runtime()
-    ctx = _build_ctx(ist, rt, dry_run)
-    orc = Orchestrator(ctx)
+    gcfg = load_global()
+    ctx  = _build_ctx(ist, gcfg, dry_run)
+    orc  = Orchestrator(ctx)
 
     for class_name, priority, interval_h, schedule in _TASK_SETUP:
         Cls = tasks_cls.get(class_name)
@@ -342,8 +273,8 @@ def _thread_istanza(ist, tasks_cls, dry_run, tick_sleep, stop_event):
     _log(nome, f"Orchestrator pronto -- {len(orc)} task: {orc.task_names()}")
 
     while not stop_event.is_set():
-        rt  = _carica_runtime()
-        ctx = _build_ctx(ist, rt, dry_run)
+        gcfg = load_global()
+        ctx  = _build_ctx(ist, gcfg, dry_run)
         orc._ctx = ctx
 
         _aggiorna_stato_istanza(nome, {"stato": "running", "scheduler": _scheduler_prossimi(orc)})

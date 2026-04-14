@@ -102,6 +102,10 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | Rifornimento deposito OCR | `rifornimento.py` | deposito letto via OCR in mappa se non iniettato (come V5) |
 | Rifornimento verifica nome | `rifornimento.py` | aggiunta `_verifica_nome_destinatario_v6()` come V5 |
 | Rifornimento navigator | `rifornimento.py` | HOME/MAPPA via `ctx.navigator` con fallback key |
+| Config Step A | `config/global_config.json` | unica fonte verità parametri globali |
+| Config Step A | `config/config_loader.py` | `load_global()` + `build_instance_cfg()` |
+| Config Step B | `main.py` | rimossa `_Cfg` hardcodata → usa `build_instance_cfg()` |
+| Config Step B | `run_task.py` | rimossa `_build_cfg` → usa `build_instance_cfg()` |
 
 ---
 
@@ -127,19 +131,12 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Prossima sessione
 
-### Priorità 1 — RT-16 Rifornimento
+### Priorità 0 — RT-16 Rifornimento
 ```
-1. Creare runtime.json:
-     {
-       "globali": {
-         "RIFORNIMENTO_ABILITATO": true,
-         "RIFORNIMENTO_MAPPA_ABILITATO": true,
-         "DOOMS_ACCOUNT": "<nome_rifugio_destinatario>"
-       }
-     }
-2. Verificare che FAU_00 abbia slot liberi e risorse sopra soglia
-3. Lanciare: python run_task.py --istanza FAU_00 --task rifornimento
-4. Caricare log e aggiornare ROADMAP
+1. Aggiornare rifugio_x e rifugio_y in config/global_config.json
+   con le coordinate reali di FauMorfeus
+2. Lanciare: python run_task.py --istanza FAU_00 --task rifornimento
+3. Caricare log e aggiornare ROADMAP
 ```
 
 ### Priorità 2 — Arena timeout
@@ -208,10 +205,12 @@ Per sovrascrivere: creare `runtime.json` con sezione `globali`:
 ### Struttura directory
 ```
 C:\doomsday-engine\
-  main.py                    ← entry point + _build_cfg + _build_ctx
+  main.py                    ← entry point — usa load_global() + build_instance_cfg()
   run_task.py                ← runner isolato singolo task (test)
   config/
-    instances.json           ← lista istanze (nome, indice, porta, profilo...)
+    global_config.json       ← UNICA fonte di verità parametri globali (letto ad ogni tick)
+    config_loader.py         ← load_global(), build_instance_cfg(), save_global()
+    instances.json           ← parametri per-istanza (nome, porta, profilo, max_squadre...)
   core/
     task.py                  ← Task ABC + TaskContext + TaskResult
     orchestrator.py          ← Orchestrator (register, tick, stato)
