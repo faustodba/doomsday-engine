@@ -18,7 +18,7 @@
     "boost":         true,
     "store":         true,
     "radar":         true,
-    "radar_census":  false
+    "radar_census":  true
   },
 
   "rifornimento_comune": {
