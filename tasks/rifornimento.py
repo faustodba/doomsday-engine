@@ -328,17 +328,26 @@ def _leggi_deposito_ocr(ctx: TaskContext, risorse_lista: list) -> dict[str, floa
     """
     Legge il deposito risorse via OCR dalla barra superiore (visibile anche in mappa).
     Speculare a V5 _leggi_risorse_mappa() — usato quando il deposito non è iniettato.
+    Usa shared.ocr_helpers.ocr_risorse() — API V6 corretta.
     Ritorna dict {risorsa: valore_assoluto} o {} se OCR fallisce.
     Riprova una volta in caso di fallimento (come V5).
     """
+    from shared.ocr_helpers import ocr_risorse
+
     def _tenta() -> dict:
         screen = ctx.device.screenshot()
         if screen is None:
             return {}
         try:
-            from shared.ocr_risorse import leggi_risorse
-            return leggi_risorse(screen) or {}
-        except Exception:
+            risultato = ocr_risorse(screen)
+            return {
+                "pomodoro": risultato.pomodoro,
+                "legno":    risultato.legno,
+                "acciaio":  risultato.acciaio,
+                "petrolio": risultato.petrolio,
+            }
+        except Exception as exc:
+            ctx.log_msg(f"Rifornimento: OCR deposito eccezione: {exc}")
             return {}
 
     risorse = _tenta()
@@ -352,54 +361,17 @@ def _leggi_deposito_ocr(ctx: TaskContext, risorse_lista: list) -> dict[str, floa
 def _verifica_nome_destinatario_v6(ctx: TaskContext, screen, nome_atteso: str) -> tuple[bool, str]:
     """
     Verifica che il nome nella maschera corrisponda al destinatario atteso.
-    Speculare a V5 _verifica_nome_destinatario() da rifornimento_base.py.
-    Usa OCR sulla zona OCR_NOME_DEST della maschera aperta.
+    Usa shared.rifornimento_base.verifica_destinatario() — API V6 corretta.
     Ritorna (ok, testo_ocr).
     """
     if not nome_atteso:
         return True, ""
     try:
-        import pytesseract
-        from PIL import Image
-        import numpy as np
-        import cv2 as _cv2
-        ocr_box = _cfg(ctx, "OCR_NOME_DEST")
-        img = Image.fromarray(_cv2.cvtColor(screen.frame, _cv2.COLOR_BGR2RGB))
-        crop = img.crop(ocr_box)
-        c4x  = crop.resize((crop.width * 4, crop.height * 4), Image.LANCZOS)
-        gray = np.array(c4x.convert("L"))
-        _, bw = _cv2.threshold(gray, 0, 255, _cv2.THRESH_BINARY + _cv2.THRESH_OTSU)
-        testo = pytesseract.image_to_string(
-            Image.fromarray(bw), config="--psm 7"
-        ).strip()
-        testo = testo.replace("|", "").replace("_", "").replace("=", "").strip()
-        ok = nome_atteso.lower() in testo.lower()
-        return ok, testo
+        from shared.rifornimento_base import verifica_destinatario
+        return verifica_destinatario(screen, nome_atteso)
     except Exception as exc:
         ctx.log_msg(f"Rifornimento: OCR nome destinatario fallito: {exc} — procedo")
         return True, ""
-    """
-    Cerca il pulsante RESOURCE SUPPLY via template matching e lo tappa.
-    Ritorna True se trovato e tappato, False altrimenti.
-    API V6: find_one(screen, path, threshold, zone) — non esiste find().
-    """
-    screen = ctx.device.screenshot()
-    if not screen:
-        ctx.log_msg("Rifornimento: screenshot fallito dopo tap castello")
-        return False
-
-    template = _cfg(ctx, "TEMPLATE_RESOURCE_SUPPLY")
-    soglia   = _cfg(ctx, "TEMPLATE_RESOURCE_SUPPLY_SOGLIA")
-    result   = ctx.matcher.find_one(screen, template, threshold=soglia)
-    ctx.log_msg(f"Rifornimento: RESOURCE SUPPLY score={result.score:.3f} soglia={soglia}")
-    if not result.found:
-        ctx.log_msg("Rifornimento: RESOURCE SUPPLY non trovato")
-        return False
-
-    ctx.log_msg(f"Rifornimento: RESOURCE SUPPLY trovato ({result.cx},{result.cy}) → tap")
-    ctx.device.tap(result.cx, result.cy)
-    time.sleep(2.5)
-    return True
 
 
 def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,

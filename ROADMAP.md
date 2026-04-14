@@ -106,6 +106,9 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | Config Step A | `config/config_loader.py` | `load_global()` + `build_instance_cfg()` |
 | Config Step B | `main.py` | rimossa `_Cfg` hardcodata → usa `build_instance_cfg()` |
 | Config Step B | `run_task.py` | rimossa `_build_cfg` → usa `build_instance_cfg()` |
+| Rifornimento OCR fix | `rifornimento.py` | `_leggi_deposito_ocr` usa `ocr_helpers.ocr_risorse()` |
+| Rifornimento verifica fix | `rifornimento.py` | `_verifica_nome_destinatario_v6` usa `rifornimento_base.verifica_destinatario()` |
+| Rifornimento codice orphan | `rifornimento.py` | rimosso blocco codice duplicato in `_verifica_nome_destinatario_v6` |
 
 ---
 
@@ -214,10 +217,16 @@ C:\doomsday-engine\
   core/
     task.py                  ← Task ABC + TaskContext + TaskResult
     orchestrator.py          ← Orchestrator (register, tick, stato)
-    navigator.py             ← GameNavigator (vai_in_home, tap_barra)
-    device.py                ← AdbDevice + FakeDevice
-    logger.py                ← StructuredLogger + get_logger
+    navigator.py             ← GameNavigator (vai_in_home, vai_in_mappa, tap_barra)
+    device.py                ← AdbDevice + FakeDevice + Screenshot + MatchResult
+    logger.py                ← StructuredLogger + get_logger + close_all_loggers
     state.py                 ← InstanceState (load, save)
+  shared/
+    template_matcher.py      ← TemplateMatcher + TemplateCache + FakeMatcher + get_matcher()
+    ocr_helpers.py           ← ocr_risorse(), leggi_contatore_slot(), prepara_otsu/crema()
+    rifornimento_base.py     ← verifica_destinatario(), leggi_provviste/tassa/eta()
+                                vai_abilitato(), COORD_CAMPO, OCR_*, QTA_DEFAULT
+                                NOTA: compila_e_invia() è async — NON usare nei task V6
   tasks/
     arena.py                 ← ArenaTask (daily, priority=80)
     arena_mercato.py         ← ArenaMercatoTask (periodic 12h, priority=90)
@@ -231,13 +240,57 @@ C:\doomsday-engine\
     store.py                 ← StoreTask (periodic 8h, priority=70)
     radar.py                 ← RadarTask (periodic 12h, priority=100)
     radar_census.py          ← RadarCensusTask (periodic 24h, priority=110)
-  shared/
-    template_matcher.py      ← get_matcher(), find_one(), score()
-  templates/pin/             ← tutti i template PNG (47 file)
+  templates/pin/             ← tutti i template PNG (47 file + avatar.png)
   state/                     ← stato persistito per istanza (JSON)
-  logs/                      ← log JSONL per istanza
-  debug_task/<task>/         ← screenshot e log test runner isolato
+  logs/                      ← log JSONL per istanza (+ .bak)
+  debug_task/<task>/         ← screenshot e log run_task.py
+```
 
+### API shared — dettaglio
+
+**`shared/template_matcher.py`**
+```
+get_matcher(template_dir)          → TemplateMatcher (singleton per dir)
+matcher.find_one(screen, path,     → MatchResult(found, score, cx, cy)
+    threshold, zone)
+matcher.find_all(screen, path,     → list[MatchResult]
+    threshold, zone, cluster_px)
+matcher.exists(screen, path)       → bool
+matcher.score(screen, path)        → float (grezzo, ignora soglia)
+matcher.find_first_of(screen,      → (nome|None, MatchResult)
+    [path1, path2, ...])
+FakeMatcher                        → per test, set_result()/set_score()
+```
+
+**`shared/ocr_helpers.py`**
+```
+ocr_risorse(screenshot)            → RisorseDeposito(pomodoro,legno,acciaio,petrolio,diamanti)
+                                     valori float assoluti, -1 se OCR fallisce
+leggi_contatore_slot(screenshot,   → (attive, totale) — es. (2, 4)
+    totale_noto)                     (0, totale_noto) se nessuna squadra
+                                     (-1, -1) se lettura fallita
+ocr_zona(img, zone, config,        → str testo grezzo
+    preprocessor)
+prepara_otsu(img, zone, scale)     → np.ndarray binarizzato
+prepara_crema(img, zone, scale)    → np.ndarray binarizzato
+estrai_numero(testo)               → int | None (gestisce K/M/B)
+```
+
+**`shared/rifornimento_base.py`**
+```
+verifica_destinatario(screen,      → (ok: bool, testo_ocr: str)
+    nome_atteso)
+leggi_provviste(screen)            → int (≥0) | -1
+leggi_tassa(screen)                → float (0.0-1.0) | TASSA_DEFAULT
+leggi_eta(screen)                  → int secondi | 0
+leggi_capacita_camion(screen)      → int | 0
+vai_abilitato(screen)              → bool (True = VAI giallo)
+COORD_CAMPO                        → dict risorsa → (x, y) campi maschera
+OCR_NOME_DEST/PROVVISTE/TASSA/     → tuple zone OCR maschera
+    CAMION/TEMPO
+QTA_DEFAULT                        → dict risorsa → quantità default
+ATTENZIONE: compila_e_invia()      → async — NON usare in task V6 sincroni
+                                     usare _compila_e_invia() in rifornimento.py
 ```
 
 ### Interfacce chiave
