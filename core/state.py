@@ -5,6 +5,7 @@
 #
 #  Classi:
 #    RifornimentoState  — quota giornaliera spedizioni, reset automatico
+#    ScheduleState      — persistenza scheduling task (restart-safe)
 #    DailyTasksState    — flag completamento task giornalieri con timestamp
 #    MetricsState       — metriche produzione (risorse/ora, marce inviate)
 #    InstanceState      — contenitore principale, carica/salva JSON
@@ -15,6 +16,13 @@
 #    - Nessuna dipendenza da device.py o config.py — layer puro di dati
 #    - I timestamp sono sempre UTC (datetime.now(UTC))
 #    - Il reset giornaliero usa la data UTC, non l'ora locale
+#
+#  FIX 14/04/2026 — ScheduleState:
+#    - timestamps ora salvati come ISO string (es. "2026-04-14T16:45:39+00:00")
+#      invece di Unix float — leggibili direttamente nel JSON
+#    - get() converte ISO → float per compatibilità orchestrator
+#    - set() accetta float, converte in ISO per la persistenza
+#    - restore_to_orchestrator() converte ISO → float prima di set_last_run()
 # ==============================================================================
 
 from __future__ import annotations
@@ -43,6 +51,19 @@ def _today_utc() -> str:
 def _ts_now() -> str:
     """Timestamp corrente UTC come stringa ISO."""
     return _utc_now().isoformat()
+
+
+def _float_to_iso(ts: float) -> str:
+    """Converte Unix timestamp float in stringa ISO UTC."""
+    return datetime.fromtimestamp(ts, tz=timezone.utc).isoformat()
+
+
+def _iso_to_float(iso: str) -> float:
+    """Converte stringa ISO in Unix timestamp float. Ritorna 0.0 se non parsabile."""
+    try:
+        return datetime.fromisoformat(iso).timestamp()
+    except (ValueError, TypeError):
+        return 0.0
 
 
 # ==============================================================================
@@ -171,25 +192,37 @@ class ScheduleState:
     Sopravvive al restart — all'avvio main.py lo legge e ripristina
     i last_run nell'orchestrator tramite set_last_run().
 
-    Formato JSON:
+    I timestamp sono salvati come ISO string leggibili nel JSON:
       {
         "schedule": {
-          "raccolta":      1712345678.0,
-          "rifornimento":  1712345000.0,
-          "arena":         0.0,          ← mai eseguito
+          "raccolta":      "2026-04-14T12:00:00+00:00",
+          "rifornimento":  "2026-04-14T11:00:00+00:00",
+          "arena":         null,          ← mai eseguito
           ...
         }
       }
+
+    Internamente get() converte ISO → float per compatibilità con
+    l'orchestrator che usa time.time() (Unix float).
     """
-    timestamps: dict = field(default_factory=dict)  # {task_name: float}
+    timestamps: dict = field(default_factory=dict)  # {task_name: str ISO | None}
 
     def get(self, task_name: str) -> float:
-        """Ritorna timestamp ultimo run, 0.0 se mai eseguito."""
-        return float(self.timestamps.get(task_name, 0.0))
+        """
+        Ritorna timestamp ultimo run come Unix float.
+        0.0 se mai eseguito o valore non parsabile.
+        """
+        val = self.timestamps.get(task_name)
+        if not val:
+            return 0.0
+        return _iso_to_float(val)
 
     def set(self, task_name: str, ts: float) -> None:
-        """Aggiorna timestamp ultimo run."""
-        self.timestamps[task_name] = ts
+        """
+        Registra timestamp ultimo run.
+        Accetta Unix float (da time.time()), salva come ISO string leggibile.
+        """
+        self.timestamps[task_name] = _float_to_iso(ts)
 
     def update_from_stato(self, stato: dict) -> None:
         """
@@ -199,20 +232,36 @@ class ScheduleState:
         for name, info in stato.items():
             lr = info.get("last_run", 0.0)
             if lr and lr > 0.0:
-                self.timestamps[name] = lr
+                self.timestamps[name] = _float_to_iso(lr)
 
     def restore_to_orchestrator(self, orchestrator) -> None:
         """
         Ripristina i last_run nell'orchestrator all'avvio.
-        Chiama orchestrator.set_last_run(name, ts) per ogni task.
+        Converte ISO string → float prima di chiamare set_last_run().
         """
-        for name, ts in self.timestamps.items():
+        for name, iso in self.timestamps.items():
+            if not iso:
+                continue
+            ts = _iso_to_float(iso)
             if ts > 0.0:
                 orchestrator.set_last_run(name, ts)
 
     @classmethod
     def from_dict(cls, d: dict) -> "ScheduleState":
-        return cls(timestamps=dict(d))
+        """
+        Carica da dict JSON.
+        Compatibile con vecchio formato float: se trova un numero lo converte in ISO.
+        """
+        converted = {}
+        for k, v in d.items():
+            if v is None:
+                converted[k] = None
+            elif isinstance(v, (int, float)):
+                # retrocompatibilità: vecchio formato Unix float → converti in ISO
+                converted[k] = _float_to_iso(float(v))
+            else:
+                converted[k] = v  # già ISO string
+        return cls(timestamps=converted)
 
     def to_dict(self) -> dict:
         return dict(self.timestamps)

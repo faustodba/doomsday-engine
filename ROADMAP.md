@@ -29,7 +29,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
-## Piano test runtime — Stato al 13/04/2026
+## Piano test runtime — Stato al 14/04/2026
 
 | Test | Descrizione | Stato | Note |
 |------|-------------|-------|------|
@@ -45,8 +45,8 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | RT-15 | Arena + ArenaMercato | ✅ | Arena: 5/5 sfide 8.4s/sfida; ArenaMercato: pack360=5; fix BACK×2 |
 | RT-16 | Rifornimento via mappa | ✅ | 5/5 spedizioni, qta reale 4M, provviste tracciate, soglia/abilitazione OK |
 | RT-17 | Rifornimento via membri | ✅ | 1/1 spedizione, navigazione lista alleanza, avatar trovato, btn risorse 0.986 |
-| RT-18 | Scheduling restart-safe | ⏳ | ScheduleState implementato, da testare con stop/start reale |
-| RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo RT-18 |
+| RT-18 | Scheduling restart-safe | ✅ | ISO string in schedule, skip daily <24h, --force override |
+| RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo Priorità 1-3 |
 | RT-14 | Full farm 12 istanze | ⏳ | |
 
 ---
@@ -64,7 +64,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
   - Creare `runtime.json` con `DOOMS_ACCOUNT` e `RIFORNIMENTO_MAPPA_ABILITATO: true`
   - FAU_00 deve avere slot liberi e risorse sopra soglia
 
-### 2. Arena — timeout battaglia 38s → 60s (MEDIA)
+### 2. Arena — timeout battaglia (MEDIA)
 - **Problema:** sfide 2 e 4 timeout — battaglia ancora in corso (animazioni > 38s).
 - **Fix:** aumentare `_MAX_BATTAGLIA_S` da 30s a 52s (delay 8s + poll = 60s totali).
 - **TODO pin mancanti:**
@@ -73,8 +73,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ### 3. Zaino — deposito non passato dall'orchestrator (MEDIA)
 - **Problema:** `ZainoTask.run()` riceve `ctx` senza `deposito` OCR.
-- **Fix:** leggere `ocr_risorse()` nell'orchestrator PRIMA dei task, salvare in
-  `ctx.state`, passare a Zaino. Alternativa: leggere direttamente in `ZainoTask.run()`.
+- **Fix:** leggere `ocr_risorse()` direttamente in `ZainoTask.run()`.
 - **Priorità:** dopo rifornimento.
 
 ### 4. Radar — skip silenzioso (ALTA)
@@ -114,28 +113,12 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | Rifornimento tap Alliance | `tasks/rifornimento.py` | `tap_barra(ctx, "alliance")` invece di coordinata fissa |
 | Rifornimento fix defaults | `tasks/rifornimento.py` | `RIFORNIMENTO_MEMBRI_ABILITATO` + `AVATAR_TEMPLATE` in `_DEFAULTS` |
 | Scheduling restart-safe | `core/state.py` + `main.py` | `ScheduleState` persiste `last_run` su disco, ripristinato all'avvio |
+| Schedule ISO string | `core/state.py` | timestamps salvati come ISO string leggibile invece di Unix float |
+| Schedule retrocompat | `core/state.py` | `from_dict()` converte vecchi float in ISO automaticamente |
+| Schedule run_task | `run_task.py` | PASSO 4b: skip automatico task daily <24h; `--force` override; log ISO |
 | .gitignore | `.gitignore` | esclude logs, state, cache, debug, runtime |
-| Metodologia | `ROADMAP.md` | riscritta schematica con sezioni startup/codice/rilascio/ROADMAP |
-| ArenaMercato BACK | `arena_mercato.py` | `_torna_home()` BACK×3 → BACK×2 (percorso reale: Store→Lista→HOME) |
+| ArenaMercato BACK | `arena_mercato.py` | `_torna_home()` BACK×3 → BACK×2 |
 | Runner isolato | `run_task.py` | nuovo file per test singolo task |
-| Rifornimento find_one | `rifornimento.py` | `find()` → `find_one()` in `_apri_resource_supply()` |
-| Rifornimento deposito OCR | `rifornimento.py` | deposito letto via OCR in mappa se non iniettato (come V5) |
-| Rifornimento verifica nome | `rifornimento.py` | aggiunta `_verifica_nome_destinatario_v6()` come V5 |
-| Rifornimento navigator | `rifornimento.py` | HOME/MAPPA via `ctx.navigator` con fallback key |
-| Config Step A | `config/global_config.json` | unica fonte verità parametri globali |
-| Config Step A | `config/config_loader.py` | `load_global()` + `build_instance_cfg()` |
-| Config Step B | `main.py` | rimossa `_Cfg` hardcodata → usa `build_instance_cfg()` |
-| Config Step B | `run_task.py` | rimossa `_build_cfg` → usa `build_instance_cfg()` |
-| Rifornimento OCR fix | `rifornimento.py` | `_leggi_deposito_ocr` usa `ocr_helpers.ocr_risorse()` |
-| Rifornimento verifica fix | `rifornimento.py` | `_verifica_nome_destinatario_v6` usa `rifornimento_base.verifica_destinatario()` |
-| Rifornimento codice orphan | `rifornimento.py` | rimosso blocco codice duplicato |
-| Rifornimento _vai_abilitato | `rifornimento.py` | usa `screen.frame` BGR invece di `Image.open(path)` |
-| Rifornimento OCR maschera | `rifornimento.py` | `_leggi_provviste/tassa/eta` usano `rifornimento_base.*()` |
-| Rifornimento sequenza tap | `rifornimento.py` | 300/300/600ms come V5 + tap(879,487) OK tastiera |
-| Rifornimento slot reale | `rifornimento.py` | `leggi_contatore_slot()` — slot=-1 → legge UI |
-| Rifornimento qta 999M | `global_config.json` | qta 1M → 999M, gioco adatta al massimo |
-| Rifornimento coordinate | `global_config.json` + `config_loader.py` | rifugio (687,532) allineato ovunque |
-| Rifornimento statistiche | `rifornimento.py` + `state.py` | snapshot pre/post VAI → qta reale, provviste residue, dettaglio giornaliero |
 
 ---
 
@@ -161,18 +144,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Prossima sessione
 
-### Priorità 0 — RT-18 Scheduling restart-safe
-```
-1. Avviare bot: python main.py --istanze FAU_00 --tick-sleep 10
-2. Attendere almeno un tick completo
-3. Fermare il bot (Ctrl+C)
-4. Verificare che state/FAU_00.json contenga sezione "schedule" con timestamp
-5. Riavviare il bot
-6. Verificare nei log: "Schedule ripristinato: {task: ts, ...}"
-7. Verificare che i task daily già eseguiti NON vengano rieseguiti
-```
-
-### Priorità 1 — Ripristino config produzione rifornimento
+### Priorità 0 — Ripristino config produzione rifornimento
 ```
 global_config.json da ripristinare a produzione:
   rifornimento_mappa.abilitato  = true
@@ -182,17 +154,17 @@ global_config.json da ripristinare a produzione:
   soglie normali 5.0/5.0/2.5/3.5
 ```
 
-### Priorità 2 — Dashboard radiobutton mappa/membri
+### Priorità 1 — Dashboard radiobutton mappa/membri
 - Radiobutton che scrive `rifornimento_mappa.abilitato` / `rifornimento_membri.abilitato` su `global_config.json`
 - Sezione statistiche rifornimento: `inviato_oggi`, `provviste_residue`, `dettaglio_oggi`
 
-### Priorità 3 — Issue #3 Zaino
+### Priorità 2 — Issue #3 Zaino
 - `ZainoTask.run()` non riceve deposito OCR
 - Fix: leggere `ocr_risorse()` in `ZainoTask.run()` direttamente
 
-### Priorità 4 — Issue #4 Radar skip silenzioso
+### Priorità 3 — Issue #4 Radar skip silenzioso
 
-### Priorità 5 — RT-13 Multi-istanza FAU_00+FAU_01
+### Priorità 4 — RT-13 Multi-istanza FAU_00+FAU_01
 
 ---
 
@@ -201,6 +173,8 @@ global_config.json da ripristinare a produzione:
 ### Startup sessione
 1. Leggi sempre ROADMAP da GitHub: `https://raw.githubusercontent.com/faustodba/doomsday-engine/main/ROADMAP.md`
 2. Se non sei certo di avere l'ultima versione di un file → chiedi il file locale prima di modificare
+3. **Nota cache GitHub:** raw.githubusercontent.com può servire versioni cachate.
+   Se il contenuto sembra vecchio → chiedere upload diretto del file.
 
 ### Codice
 - Mai frammenti — solo file completi, coerenti, eseguibili
@@ -234,18 +208,20 @@ Ogni rilascio deve produrre un file `.bat` che esegue:
 - Verificare sempre compatibilità con V5
 - Se serve → richiedere classi/componenti V5 prima di implementare
 
-### Runner isolato — `run_task.py` (da usare per RT-15 e oltre)
+### Runner isolato — `run_task.py` (da usare per RT e test singoli task)
 ```
 cd C:\doomsday-engine
 python run_task.py --istanza FAU_01 --task arena
 python run_task.py --istanza FAU_01 --task arena_mercato
 python run_task.py --istanza FAU_00 --task raccolta
 python run_task.py --istanza FAU_00 --task rifornimento
+python run_task.py --istanza FAU_00 --task vip --force   ← forza ignorando schedule
 ```
 - Esegue un singolo task direttamente, senza orchestrator né scheduler
+- PASSO 4b: skip automatico se task daily già eseguito nelle ultime 24h
+- `--force`: ignora schedule, forza esecuzione
 - Log a schermo con timestamp + file in `debug_task/<task>/run_task.log`
-- Esito finale: exit code 0 = OK, 1 = FAIL
-- `should_run()` viene chiamato ma non blocca l'esecuzione
+- Esito finale: exit code 0 = OK/SKIP, 1 = FAIL
 
 ### Runner completo — `main.py` (per RT-13, RT-14)
 ```
@@ -279,98 +255,7 @@ Per modificare: editare `config/global_config.json` — effetto al prossimo tick
 
 ## Architettura V6 — Dettaglio classi
 
-### Struttura directory
-```
-C:\doomsday-engine\
-  main.py                    ← entry point — usa load_global() + build_instance_cfg()
-  run_task.py                ← runner isolato singolo task (test)
-  config/
-    global_config.json       ← UNICA fonte di verità parametri globali (letto ad ogni tick)
-    config_loader.py         ← load_global(), build_instance_cfg(), save_global()
-    instances.json           ← parametri per-istanza (nome, porta, profilo, max_squadre...)
-  core/
-    task.py                  ← Task ABC + TaskContext + TaskResult
-    orchestrator.py          ← Orchestrator (register, tick, stato)
-    navigator.py             ← GameNavigator (vai_in_home, vai_in_mappa, tap_barra)
-    device.py                ← AdbDevice + FakeDevice + Screenshot + MatchResult
-    logger.py                ← StructuredLogger + get_logger + close_all_loggers
-    state.py                 ← InstanceState (load, save) + RifornimentoState
-                                + DailyTasksState + MetricsState + ScheduleState
-  shared/
-    template_matcher.py      ← TemplateMatcher + TemplateCache + FakeMatcher + get_matcher()
-    ocr_helpers.py           ← ocr_risorse(), leggi_contatore_slot(), prepara_otsu/crema()
-    rifornimento_base.py     ← verifica_destinatario(), leggi_provviste/tassa/eta()
-                                vai_abilitato(), COORD_CAMPO, OCR_*, QTA_DEFAULT
-                                NOTA: compila_e_invia() è async — NON usare nei task V6
-  tasks/
-    arena.py                 ← ArenaTask (daily, priority=80)
-    arena_mercato.py         ← ArenaMercatoTask (periodic 12h, priority=90)
-    boost.py                 ← BoostTask (periodic 8h, priority=5)
-    raccolta.py              ← RaccoltaTask (periodic 4h, priority=10)
-    rifornimento.py          ← RifornimentoTask (periodic 1h, priority=20)
-    zaino.py                 ← ZainoTask (periodic 168h, priority=30)
-    vip.py                   ← VipTask (daily, priority=40)
-    messaggi.py              ← MessaggiTask (periodic 1h, priority=50)
-    alleanza.py              ← AlleanzaTask (periodic 1h, priority=60)
-    store.py                 ← StoreTask (periodic 8h, priority=70)
-    radar.py                 ← RadarTask (periodic 12h, priority=100)
-    radar_census.py          ← RadarCensusTask (periodic 24h, priority=110)
-  templates/pin/             ← tutti i template PNG (47 file + avatar.png)
-  state/                     ← stato persistito per istanza (JSON)
-  logs/                      ← log JSONL per istanza (+ .bak)
-  debug_task/<task>/         ← screenshot e log run_task.py
-```
-
-### API shared — dettaglio
-
-**`shared/template_matcher.py`**
-```
-get_matcher(template_dir)          → TemplateMatcher (singleton per dir)
-matcher.find_one(screen, path,     → MatchResult(found, score, cx, cy)
-    threshold, zone)
-matcher.find_all(screen, path,     → list[MatchResult]
-    threshold, zone, cluster_px)
-matcher.exists(screen, path)       → bool
-matcher.score(screen, path)        → float (grezzo, ignora soglia)
-matcher.find_first_of(screen,      → (nome|None, MatchResult)
-    [path1, path2, ...])
-FakeMatcher                        → per test, set_result()/set_score()
-```
-
-**`shared/ocr_helpers.py`**
-```
-ocr_risorse(screenshot)            → RisorseDeposito(pomodoro,legno,acciaio,petrolio,diamanti)
-                                     valori float assoluti, -1 se OCR fallisce
-leggi_contatore_slot(screenshot,   → (attive, totale) — es. (2, 4)
-    totale_noto)                     (0, totale_noto) se nessuna squadra
-                                     (-1, -1) se lettura fallita
-ocr_zona(img, zone, config,        → str testo grezzo
-    preprocessor)
-prepara_otsu(img, zone, scale)     → np.ndarray binarizzato
-prepara_crema(img, zone, scale)    → np.ndarray binarizzato
-estrai_numero(testo)               → int | None (gestisce K/M/B)
-```
-
-**`shared/rifornimento_base.py`**
-```
-verifica_destinatario(screen,      → (ok: bool, testo_ocr: str)
-    nome_atteso)
-leggi_provviste(screen)            → int (≥0) | -1
-leggi_tassa(screen)                → float (0.0-1.0) | TASSA_DEFAULT
-leggi_eta(screen)                  → int secondi | 0
-leggi_capacita_camion(screen)      → int | 0
-vai_abilitato(screen)              → bool (True = VAI giallo)
-COORD_CAMPO                        → dict risorsa → (x, y) campi maschera
-OCR_NOME_DEST/PROVVISTE/TASSA/     → tuple zone OCR maschera
-    CAMION/TEMPO
-QTA_DEFAULT                        → dict risorsa → quantità default
-ATTENZIONE: compila_e_invia()      → async — NON usare in task V6 sincroni
-                                     usare _compila_e_invia() in rifornimento.py
-```
-
-### Interfacce chiave
-
-**TaskContext** (`core/task.py`)
+### TaskContext (`core/task.py`)
 ```
 ctx.instance_name   str
 ctx.config          _Cfg (vedi flag sopra)
@@ -428,6 +313,15 @@ orc.tick()                     → list[TaskResult]
 orc.stato()                    → dict
 orc.task_names()               → list[str]
 orc.n_dovuti()                 → int
+```
+
+**InstanceState** (`core/state.py`)
+```
+state.schedule.get(task_name)  → float (Unix ts, 0.0 se mai eseguito)
+state.schedule.set(task_name, float) → salva come ISO string leggibile
+state.schedule.timestamps      → dict {task_name: "2026-04-14T16:45:39+00:00"}
+state.schedule.restore_to_orchestrator(orc) → ripristina last_run all'avvio
+state.schedule.update_from_stato(orc.stato()) → sync dopo ogni tick
 ```
 
 ### Scheduling task in main.py (_TASK_SETUP)
@@ -505,6 +399,7 @@ orc.n_dovuti()                 → int
 | Template matching | `matcher.find_one()`, `matcher.score()` | `matcher.match()`, `matcher.find()` |
 | Screenshot frame | `screen.frame` | `device.last_frame` |
 | Device costruttore | `AdbDevice(host=H, port=P, name=N)` | `AdbDevice(porta_int)` |
+| Schedule timestamp | ISO string `"2026-04-14T16:45:39+00:00"` | Unix float `1776177939.78` |
 
 **REGOLA ASSOLUTA:** Leggere SEMPRE il file V5 corrispondente prima di
 scrivere qualsiasi primitiva. Zone OCR, coordinate UI, template names,

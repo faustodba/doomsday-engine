@@ -22,6 +22,12 @@
 #  Prerequisiti:
 #    - Istanza MuMu avviata con Doomsday aperto sulla HOME del gioco
 #    - ADB connesso (verificare con: adb devices)
+#
+#  FIX 14/04/2026:
+#    - Schedule aggiornato con ISO string leggibile dopo run() con esito OK
+#    - Skip automatico se task daily già eseguito nelle ultime 24h
+#      (emula comportamento orchestrator per RT-18)
+#    - --force per forzare esecuzione ignorando lo schedule
 # ==============================================================================
 
 from __future__ import annotations
@@ -56,6 +62,10 @@ _TASK_CATALOGUE = {
     "radar":          ("tasks.radar",           "RadarTask"),
     "radar_census":   ("tasks.radar_census",    "RadarCensusTask"),
 }
+
+# Task con schedule daily (eseguiti una volta al giorno)
+_DAILY_TASKS = {"vip", "arena", "arena_mercato", "boost", "store",
+                "messaggi", "alleanza", "zaino", "radar"}
 
 # ---------------------------------------------------------------------------
 # Helpers log
@@ -174,7 +184,6 @@ def _build_ctx(ist: dict, gcfg, debug_dir: str):
 
     from core.task import TaskContext
 
-    # TaskContext con log_msg che scrive anche a schermo
     ctx = TaskContext(
         instance_name=nome,
         config=cfg,
@@ -221,6 +230,51 @@ def _carica_task(nome_task: str):
 
 
 # ---------------------------------------------------------------------------
+# Check schedule — emula logica orchestrator
+# ---------------------------------------------------------------------------
+def _check_schedule(ctx, nome_task: str, force: bool) -> bool:
+    """
+    Verifica se il task deve essere eseguito in base allo schedule persistito.
+    Ritorna True se il task deve girare, False se deve essere saltato.
+
+    - Task daily: skip se eseguito nelle ultime 24h
+    - Task periodic: nessun check (run_task è per test manuali)
+    - --force: ignora sempre lo schedule
+    """
+    if force:
+        log("[SCHEDULE] --force attivo — schedule ignorato")
+        return True
+
+    if ctx.state is None:
+        return True
+
+    ts = ctx.state.schedule.get(nome_task)
+    if ts == 0.0:
+        log("[SCHEDULE] Nessun run precedente registrato — procedo")
+        return True
+
+    elapsed_s = time.time() - ts
+    elapsed_h = elapsed_s / 3600.0
+    last_iso  = ctx.state.schedule.timestamps.get(nome_task, "?")
+
+    if nome_task in _DAILY_TASKS:
+        if elapsed_s < 86400:
+            log(f"[SCHEDULE] Task daily '{nome_task}' già eseguito "
+                f"{elapsed_h:.1f}h fa ({last_iso}) — SKIP")
+            log(f"           Usa --force per forzare l'esecuzione")
+            return False
+        else:
+            log(f"[SCHEDULE] Task daily '{nome_task}' ultimo run "
+                f"{elapsed_h:.1f}h fa ({last_iso}) — procedo")
+            return True
+
+    # Task periodic: log informativo, non blocca
+    log(f"[SCHEDULE] Task '{nome_task}' ultimo run "
+        f"{elapsed_h:.1f}h fa ({last_iso}) — procedo")
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
 def main():
@@ -232,6 +286,8 @@ def main():
                         help="Nome istanza (es. FAU_01)")
     parser.add_argument("--task",    required=True,
                         help=f"Task da eseguire: {', '.join(sorted(_TASK_CATALOGUE.keys()))}")
+    parser.add_argument("--force",   action="store_true", default=False,
+                        help="Forza esecuzione ignorando lo schedule")
     args = parser.parse_args()
 
     # Debug dir
@@ -283,9 +339,16 @@ def main():
         log(f"should_run() → {ok}")
         if not ok:
             log("[WARN] should_run() = False — il task potrebbe essere disabilitato")
-            log("       Verifica flag in runtime.json (sezione globali) o instances.json")
+            log("       Verifica flag in global_config.json sezione 'task'")
     except Exception as exc:
         log(f"[WARN] should_run() eccezione: {exc} — procedo comunque")
+
+    # 4b. Schedule check — emula logica orchestrator
+    separa("PASSO 4b — Schedule check")
+    if not _check_schedule(ctx, args.task, args.force):
+        log("Task saltato per schedule — uscita con codice 0")
+        salva_log()
+        sys.exit(0)
 
     # 5. Esecuzione
     separa(f"PASSO 5 — Esecuzione task '{args.task}'")
@@ -317,8 +380,12 @@ def main():
             for k, v in result.data.items():
                 log(f"  {k}: {v}")
 
-    # Salva state
+    # Salva state — aggiorna schedule restart-safe prima del save
     try:
+        if result and result.success:
+            ctx.state.schedule.set(args.task, time.time())
+            iso = ctx.state.schedule.timestamps.get(args.task, "?")
+            log(f"Schedule aggiornato: {args.task} → {iso}")
         ctx.state.save(state_dir=os.path.join(ROOT, "state"))
         log("State salvato OK")
     except Exception as exc:
