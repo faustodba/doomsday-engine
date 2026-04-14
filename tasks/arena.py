@@ -74,7 +74,7 @@ MAX_SFIDE = 5
 # Timing battaglia
 _DELAY_BATTAGLIA_S = 8.0    # sleep iniziale fisso post-tap START
 _POLL_BATTAGLIA_S  = 3.0    # intervallo polling
-_MAX_BATTAGLIA_S   = 30.0   # timeout polling
+_MAX_BATTAGLIA_S   = 15.0   # timeout polling
 
 MAX_TENTATIVI         = 3
 MAX_ERRORI_CONSEC     = 2

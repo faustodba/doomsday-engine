@@ -15,8 +15,8 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | 13 | `tasks/messaggi.py` | ✅ 27/27 | |
 | 14 | `tasks/alleanza.py` | ✅ 24/24 | |
 | 15 | `tasks/vip.py` | ✅ 30/30 | |
-| 16 | `tasks/arena.py` | ✅ 10/10 | |
-| 17 | `tasks/arena_mercato.py` | ✅ 10/10 | |
+| 16 | `tasks/arena.py` | ✅ 10/10 | tap_barra("campaign") |
+| 17 | `tasks/arena_mercato.py` | ✅ 10/10 | struttura V5+V6, tap_barra |
 | 18 | `tasks/radar.py` + `radar_census.py` | ✅ 16/16 | |
 | 19 | `tasks/zaino.py` | ✅ 39/39 | |
 | 20 | `tasks/rifornimento.py` | ✅ 47/47 | |
@@ -24,11 +24,12 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | 22 | `core/orchestrator.py` | ✅ 49/49 | |
 | 23 | `dashboard/` | ✅ 30/30 | |
 | 24-25 | Fix + refactoring | ✅ | |
+| **nav** | `core/navigator.py` | ✅ 20/20 | tap_barra() TM barra inferiore |
 | **main** | `main.py` + `smoke_test.py` | ✅ 61/61 | |
 
 ---
 
-## Piano test runtime — Stato al 13/04/2026
+## Piano test runtime — Stato al 14/04/2026
 
 | Test | Descrizione | Stato | Note |
 |------|-------------|-------|------|
@@ -39,80 +40,56 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | RT-09 | Store | ✅ | 18 acquistati + Free Refresh |
 | RT-10 | Arena | ✅ | 5 sfide + skip checkbox |
 | RT-11 | Raccolta | ✅ | 4/4 FAU_00; territorio FUORI FAU_01 OK |
-| RT-12 | Tick completo FAU_01 | ✅ | Tick completo funzionante — vedi issues sotto |
-| RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo fix issues RT-12 |
+| RT-12 | Tick completo FAU_01 | ✅ | Tick completo funzionante |
+| RT-tap | tap_barra barra inferiore | ✅ | score=1.000 tutti 5 bottoni su FAU_01 |
+| RT-15 | Arena + ArenaMercato | ⏳ | fix timeout 15s; da testare su FAU_01 |
+| RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo fix issues aperti |
 | RT-14 | Full farm 12 istanze | ⏳ | |
 
 ---
 
-## Issues aperti da RT-12 (priorità)
+## Issues aperti (priorità)
 
-### 1. Arena mercato — navigazione sbagliata (ALTA)
-- **Problema:** V6 `arena_mercato.py` usa `pin_arena_01_lista` per rilevare
-  l'arena store, ma quel template è per la lista sfide — score sempre -0.038.
-- **Fix:** Il mercato arena è accessibile con `TAP_CARRELLO=(905,68)` DENTRO
-  la schermata arena (già aperta dopo `_naviga_a_arena`). NON serve secondo
-  tentativo di navigazione. Riscrivere `arena_mercato.py` seguendo V5:
-  `_naviga_a_arena()` → `tap carrello (905,68)` → acquisto pack 360/15 → BACK.
-- **File V5 riferimento:** `arena_of_glory.py` → `run_mercato_arena()` +
-  `_visita_mercato_arena()`. Template: `btn_360_open/close`, `btn_15_open/close`.
-  Coordinate: `TAP_CARRELLO=(905,68)`, `TAP_PRIMO=(235,283)`,
-  `TAP_MAX=(451,286)`, `TAP_PACK15=(788,408)`, `TAP_PACK15_MAX=(654,408)`.
+### 1. Rifornimento — da mettere a punto (ALTA)
+- **Stato:** task disabilitato in runtime. Da verificare con log reale.
+- **Azione:** abilitare `RIFORNIMENTO_ABILITATO=True` + `RIFORNIMENTO_MAPPA_ABILITATO=True`
+  in `runtime.json`, lanciare tick su FAU_00 (ha slot rifornimento), analizzare log.
+- **File V5:** `rifornimento_mappa.py` — leggere prima di qualsiasi modifica V6.
 
-### 2. Arena — timeout battaglia sfide 2 e 4 (MEDIA)
-- **Problema:** Sfide 2 e 4 timeout dopo 38s — victory/failure non rilevati.
-  La battaglia è probabilmente ancora in corso (animazioni > 38s).
-- **Fix:** Aumentare `TIMEOUT_BATTAGLIA` da 38s a 60s. Verificare visivamente
-  quanto durano le battaglie più lunghe su FAU_01.
+### 2. Arena — timeout battaglia ~~38s → 60s~~ (CHIUSA)
+- **Risolto 14/04/2026:** skip checkbox attivo → animazione saltata → 8s delay sufficiente.
+- `_MAX_BATTAGLIA_S` portato a **15.0** (totale 8s+15s=23s, abbondante con skip).
 - **TODO pin mancanti:**
-  - `pin_arena_video.png` — popup video introduttivo primo accesso
+  - `pin_arena_video.png` — popup video primo accesso (non necessario: già skippato)
   - `pin_arena_categoria.png` — popup categoria settimanale (lunedì)
 
 ### 3. Zaino — deposito non passato dall'orchestrator (MEDIA)
 - **Problema:** `ZainoTask.run()` riceve `ctx` senza `deposito` OCR.
-  Il deposito viene letto in `RaccoltaTask` ma non condiviso.
-- **Fix:** Leggere `ocr_risorse()` nell'orchestrator PRIMA di eseguire i task,
-  salvarlo in `ctx.state` e passarlo a Zaino. Alternativa: leggere in `ZainoTask.run()`.
-- **Priorità:** dopo rifornimento e radar.
+- **Fix:** leggere `ocr_risorse()` nell'orchestrator PRIMA dei task, salvare in
+  `ctx.state`, passare a Zaino. Alternativa: leggere direttamente in `ZainoTask.run()`.
+- **Priorità:** dopo rifornimento.
 
-### 4. Rifornimento — da mettere a punto (ALTA)
-- **Stato:** task disabilitato in runtime. Da verificare con log reale.
-- **Azione:** abilitare `RIFORNIMENTO_ABILITATO=True` in `runtime.json`,
-  lanciare tick su FAU_00 (che ha slot rifornimento), analizzare log.
-- **File V5:** `rifornimento_mappa.py` — leggere prima di qualsiasi modifica V6.
+### 4. Radar — skip silenzioso (ALTA)
+- **Stato:** task esegue ma non logga nulla.
+- **Azione:** leggere `radar_census.py` V5 + `radar.py` V6. Richiede istanza
+  in MAPPA con radar aperto.
 
-### 5. Radar — da mettere a punto (ALTA)
-- **Stato:** task esegue ma non logga nulla (skip silenzioso).
-- **Azione:** leggere `radar_census.py` V5 + `radar.py` V6 per capire
-  cosa manca. Il radar richiede istanza in MAPPA con radar aperto.
-- **File V5:** `radar_census.py` — classifier Random Forest già trainato.
+### 5. Alleanza — tap_barra (BASSA)
+- `COORD_ALLEANZA=(760,505)` ancora hardcoded.
+- **Fix:** sostituire con `ctx.navigator.tap_barra(ctx, "alliance")` come
+  fatto per Campaign in arena.py e arena_mercato.py.
 
 ### 6. Store NMS cross-template (BASSA)
 - `pin_acciaio.png` = `pin_pomodoro.png` (stesso file) → stesso cx,cy.
-  Quando sarà disponibile il vero `pin_acciaio.png`, il NMS si risolve.
+  Risolvibile quando sarà disponibile il vero `pin_acciaio.png`.
 
 ---
 
-## Prossima sessione — Fix arena_mercato + rifornimento
+## Fix applicati in sessione 14/04/2026
 
-### Step 1: Fix arena_mercato.py
-Leggere `C:\doomsday-engine\tasks\arena_mercato.py` V6 attuale.
-Riscrivere seguendo V5 `arena_of_glory.py → run_mercato_arena()`.
-Flusso corretto:
-1. `HOME → Campaign → Arena of Doom` (riusa `_naviga_a_arena`)
-2. `tap carrello (905,68)` → attesa 2s → Arena Store aperto
-3. Loop acquisto pack 360: `btn_360_open/close` → `tap (235,283)` → `tap (451,286)`
-4. Se 360 esaurito → pack 15: `btn_15_open/close` → `tap (788,408)` → `tap (654,408) x34`
-5. BACK → home
-
-### Step 2: Rifornimento
-```
-Abilitare in runtime.json:
-  "RIFORNIMENTO_ABILITATO": true
-  "RIFORNIMENTO_MAPPA_ABILITATO": true
-Lanciare: python main.py --istanze FAU_00 --tick-sleep 10
-Analizzare log rifornimento.
-```
+| Fix | File | Dettaglio |
+|-----|------|-----------|
+| Arena timeout | `arena.py` | `_MAX_BATTAGLIA_S` 30.0 → 15.0 (skip attivo, 23s totali sufficienti) |
 
 ---
 
@@ -121,14 +98,66 @@ Analizzare log rifornimento.
 | Fix | File | Dettaglio |
 |-----|------|-----------|
 | Porta FAU_01 | `instances.json` | 16448 → 16416 |
-| VIP retry cassaforte | `vip.py` | wait_open_badge 2→3s + retry 1.5s se nessun pin |
-| Raccolta skip neutro | `raccolta.py` | territorio FUORI → skip_neutro=True → fallimenti_cons invariato |
-| Raccolta allocation | `raccolta.py` | logica gap V5 allocation.py integrata; OCR deposito → sequenza ottimale |
-| Raccolta OCR slot | `raccolta.py` | leggi_contatore_slot() in run() — lettura slot reale da schermo |
-| Raccolta pin_march | `raccolta.py` | pin_marcia → pin_march (nome corretto) |
+| VIP retry cassaforte | `vip.py` | wait_open_badge 2→3s + retry 1.5s |
+| Raccolta skip neutro | `raccolta.py` | territorio FUORI → skip_neutro=True |
+| Raccolta allocation | `raccolta.py` | logica gap V5; OCR deposito → sequenza ottimale |
+| Raccolta OCR slot | `raccolta.py` | leggi_contatore_slot() in run() |
+| Raccolta pin_march | `raccolta.py` | pin_marcia → pin_march |
 | Raccolta delay livello | `raccolta.py` | 0.15s/tap MENO + 0.2s/tap PIU |
-| Raccolta blacklist tipo | `raccolta.py` | chiave tipo_X invece di coordinate fisse |
-| Raccolta territorio | `raccolta.py` | pixel check V5 zona(250,340,420,370) soglia 20px verdi |
+| Raccolta blacklist tipo | `raccolta.py` | chiave tipo_X invece coordinate fisse |
+| Raccolta territorio | `raccolta.py` | pixel check V5 zona(250,340,420,370) soglia 20px |
+| arena_mercato struttura | `arena_mercato.py` | check lista + tap carrello in _loop_acquisti |
+| arena tap_barra | `arena.py` | _naviga_a_arena usa tap_barra("campaign") |
+| navigator tap_barra | `navigator.py` | TM ROI(546,456,910,529), 5 pin, fallback coord |
+| FakeMatcher test | `test_arena.py`, `test_arena_mercato.py` | find_one() delega a match(), _MatchResult stub |
+
+---
+
+## Prossima sessione
+
+### Priorità 0 — RT-15 Arena + ArenaMercato
+```
+1. Copiare arena.py in C:\doomsday-engine\tasks\
+2. Verificare runtime.json:
+     "ARENA_ABILITATO": true
+     "ARENA_MERCATO_ABILITATO": true
+3. Lanciare: python main.py --istanze FAU_01 --tick-sleep 10
+4. Monitorare log:
+     [ARENA] [SKIP] Skip già attivo ✓
+     [ARENA] fine battaglia in X.Xs totali
+     [MERCATO-ARENA] loop completato — pack360=X pack15=X
+5. Caricare log e aggiornare ROADMAP
+```
+
+### Priorità 1 — Rifornimento
+```
+1. Abilitare in runtime.json:
+     "RIFORNIMENTO_ABILITATO": true
+     "RIFORNIMENTO_MAPPA_ABILITATO": true
+2. Lanciare: python main.py --istanze FAU_00 --tick-sleep 10
+3. Analizzare log rifornimento completo
+4. Upload rifornimento.py + rifornimento_mappa.py V6 se serve fix
+```
+
+### Priorità 2 — Rifornimento mappa
+```
+arena.py: _MAX_BATTAGLIA_S già fixato → 15.0
+```
+
+---
+
+## Metodologia di lavoro (vincolante)
+
+| # | Regola | Dettaglio |
+|---|--------|-----------|
+| 1 | **Versione locale** | Chiedere sempre il file locale prima di modificare se non si è certi di avere l'ultima versione |
+| 2 | **Mai frammenti di codice** | Rilasciare sempre file completi, mai snippet parziali |
+| 3 | **Batch release** | Ogni rilascio = copia file in `C:\doomsday-engine\tasks\` + commit+push su `faustodba/doomsday-engine` |
+| 4 | **ROADMAP costante** | Aggiornare ROADMAP ad ogni sessione: fix applicati, stato RT, issues |
+| 5 | **Fasi semplici** | Scomporre ogni processo in passi elementari |
+| 6 | **Passo-passo** | Eseguire un passo alla volta, non anticipare |
+| 7 | **Feedback** | Chiedere conferma dopo ogni passo prima di procedere |
+| 8 | **Miglioramenti** | Proporre miglioramenti a fine sessione o quando rilevati |
 
 ---
 
@@ -137,6 +166,7 @@ Analizzare log rifornimento.
 | Costante | Valore | Task |
 |----------|--------|------|
 | `TAP_TOGGLE_HOME_MAPPA` | `(38, 505)` | navigator |
+| `_BARRA_ROI` | `(546,456,910,529)` | navigator tap_barra |
 | `_ZONA_TESTO_SLOT` | `(890,117,946,141)` | slot OCR |
 | `TAP_LENTE` | `(38, 325)` | raccolta |
 | `TAP_NODO` | `(480, 280)` | raccolta |
@@ -148,7 +178,7 @@ Analizzare log rifornimento.
 | `TAP_ICONA segheria` | `(535, 450)` | raccolta |
 | `TAP_ICONA acciaio` | `(672, 490)` | raccolta |
 | `TAP_ICONA petrolio` | `(820, 490)` | raccolta |
-| ARENA `tap_campaign` | `(584, 486)` | arena layout 1 |
+| ARENA `tap_campaign` | `tap_barra("campaign")` → `(584,507)` | arena/arena_mercato |
 | ARENA `tap_arena_of_doom` | `(321, 297)` | arena |
 | ARENA `tap_ultima_sfida` | `(745, 482)` | arena |
 | ARENA `tap_start_challenge` | `(730, 451)` | arena |
@@ -160,7 +190,12 @@ Analizzare log rifornimento.
 | ARENA `tap_pack15_max` | `(654, 408)` | arena_mercato |
 | MSG `tap_icona_messaggi` | `(928, 430)` | messaggi |
 | VIP `tap_badge` | `(85, 52)` | vip |
-| ALLEANZA `coord_alleanza` | `(760, 505)` | alleanza |
+| ALLEANZA `coord_alleanza` | `(760, 505)` | alleanza (TODO → tap_barra) |
+| BARRA `campaign` | `(584, 507)` | navigator tap_barra |
+| BARRA `bag` | `(656, 506)` | navigator tap_barra |
+| BARRA `alliance` | `(727, 506)` | navigator tap_barra |
+| BARRA `beast` | `(798, 506)` | navigator tap_barra |
+| BARRA `hero` | `(869, 504)` | navigator tap_barra |
 
 ---
 
@@ -172,8 +207,10 @@ Analizzare log rifornimento.
 | Attese | `time.sleep(n)` | `asyncio.sleep(n)` |
 | Logging | `ctx.log_msg(msg)` | `ctx.log(msg)` |
 | Navigator | `ctx.navigator.vai_in_home()` | `await ctx.navigator...` |
+| Barra inferiore | `ctx.navigator.tap_barra(ctx, "voce")` | coordinate fisse Campaign/Alliance/etc. |
 | Template matching | `matcher.find_one()`, `matcher.score()` | `matcher.match()`, `matcher.find()` |
 | Screenshot frame | `screen.frame` | `device.last_frame` |
+| Device costruttore | `AdbDevice(host=H, port=P, name=N)` | `AdbDevice(porta_int)` |
 
 **REGOLA ASSOLUTA:** Leggere SEMPRE il file V5 corrispondente prima di
 scrivere qualsiasi primitiva. Zone OCR, coordinate UI, template names,
@@ -181,7 +218,7 @@ logica di parsing — tutto è già calibrato in V5.
 
 ---
 
-## Template disponibili in templates/pin/ (42 file)
+## Template disponibili in templates/pin/ (47 file)
 
 ```
 pin_region, pin_shelter
@@ -198,10 +235,10 @@ pin_arena_check, pin_arena_no_check
 pin_360_open, pin_360_close, pin_15_open, pin_15_close
 pin_msg_02..04, pin_claim
 btn_resource_supply_map
+pin_campaign, pin_bag, pin_alliance, pin_beast, pin_hero  ← NUOVO (barra inferiore)
 ```
 
 **Template mancanti (TODO):**
 - `pin_acciaio.png` — reale (attuale = pin_pomodoro)
 - `pin_arena_video.png` — popup video primo accesso arena
-- `pin_arena_categoria.png` — popup categoria settimanale arena (lunedì)
-- Template arena mercato: `btn_360_open/close`, `btn_15_open/close`
+- `pin_arena_categoria.png` — popup categoria settimanale (lunedì)
