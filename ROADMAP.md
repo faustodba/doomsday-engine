@@ -47,6 +47,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | RT-17 | Rifornimento via membri | ✅ | 1/1 spedizione, navigazione lista alleanza, avatar trovato, btn risorse 0.986 |
 | RT-18 | Scheduling restart-safe | ⏳ | VIP daily OK (skip <24h, ISO string). Da testare: (1) periodic skip <interval; (2) --force daily; (3) restore_to_orchestrator al riavvio main.py |
 | RT-19 | Radar + RadarCensus | ✅ | badge OK (78,315), pallini 2/2, census 10 icone, map_annotated OK. Fix pendente: falso positivo "Complete All" zona basso-sx |
+| RT-20 | Zaino | ✅ | OCR deposito autonomo OK, gap calcolati, USE→Max→USE eseguiti, schedule ISO salvato |
 | RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo Priorità 1-3 |
 | RT-14 | Full farm 12 istanze | ⏳ | |
 
@@ -72,10 +73,9 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
   - `pin_arena_video.png` — popup video introduttivo primo accesso
   - `pin_arena_categoria.png` — popup categoria settimanale (lunedì)
 
-### 3. Zaino — deposito non passato dall'orchestrator (MEDIA)
-- **Problema:** `ZainoTask.run()` riceve `ctx` senza `deposito` OCR.
-- **Fix:** leggere `ocr_risorse()` direttamente in `ZainoTask.run()`.
-- **Priorità:** dopo rifornimento.
+### 3. Zaino — deposito OCR (CHIUSA ✅ 14/04/2026)
+- **Fix applicato:** `_leggi_deposito_ocr()` legge autonomamente via `ocr_risorse()`.
+- **RT-20 ✅:** OCR OK, gap calcolati, USE→Max→USE eseguiti.
 
 ### 4. Radar Census — falso positivo zona UI (BASSA)
 - **Problema:** bottone "Complete All" (basso-sx) riconosciuto come icona radar (`sconosciuto 0%`)
@@ -97,6 +97,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 | Fix | File | Dettaglio |
 |-----|------|-----------|
+| Zaino OCR deposito | `tasks/zaino.py` | `_leggi_deposito_ocr()` autonomo via `ocr_risorse()` + tap args fix + swipe |
 | Radar coord V5 | `radar.py` | TAP_RADAR_ICONA (90,460)→(78,315), tutti parametri allineati V5 |
 | Radar log | `radar.py` | logger.* → ctx.log_msg() — log visibile in run_task |
 | RadarCensus V6 | `tasks/radar_census.py` | traduzione completa V5→V6: ctx.device, ctx.log_msg, Path da __file__ |
@@ -149,12 +150,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Prossima sessione
 
-### Priorità 0 — Issue #3 Zaino
-- `ZainoTask.run()` non riceve deposito OCR
-- Fix: leggere `ocr_risorse()` in `ZainoTask.run()` direttamente
-- Richiedere `tasks/zaino.py` V6 prima di modificare
-
-### Priorità 1 — RT-18 completamento test scheduling
+### Priorità 0 — RT-18 completamento test scheduling
 ```
 Test mancanti (in ordine):
 1. Task periodic — raccolta o rifornimento:

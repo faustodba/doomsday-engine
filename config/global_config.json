@@ -9,7 +9,7 @@
   "task": {
     "raccolta":      true,
     "rifornimento":  true,
-    "zaino":         false,
+    "zaino":         true,
     "vip":           true,
     "alleanza":      true,
     "messaggi":      true,
