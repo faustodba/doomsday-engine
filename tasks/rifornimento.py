@@ -462,7 +462,9 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
     time.sleep(0.3)
     ctx.device.input_text(str(qta))
     time.sleep(0.5)
-    ctx.device.key("KEYCODE_ENTER")
+    # V5: tap TAP_OK_TASTIERA (879,487) — la tastiera Android del gioco
+    # non risponde a KEYCODE_ENTER ma ha un tasto OK fisico
+    ctx.device.tap(879, 487)
     time.sleep(0.5)
 
     # Verifica VAI
@@ -613,7 +615,27 @@ class RifornimentoTask(Task):
 
                 # ── 1. Slot liberi ──────────────────────────────────────────
                 _aggiorna_coda(coda_volo)
-                slot = slot_liberi  # iniettato o lettura reale
+                slot = slot_liberi  # -1 in produzione → legge dalla UI
+
+                if slot == -1:
+                    # Leggi slot reali dalla UI — contatore visibile solo
+                    # se almeno una squadra è attiva. Se assente → tutti liberi.
+                    try:
+                        from shared.ocr_helpers import leggi_contatore_slot
+                        max_sq = getattr(ctx.config, "max_squadre", 4)
+                        screen_slot = ctx.device.screenshot()
+                        if screen_slot is not None:
+                            attive, totale = leggi_contatore_slot(screen_slot, totale_noto=max_sq)
+                            if attive == -1:
+                                # lettura fallita → assume tutti liberi
+                                slot = max_sq
+                            else:
+                                slot = max(0, totale - attive)
+                        else:
+                            slot = max_sq
+                    except Exception:
+                        slot = getattr(ctx.config, "max_squadre", 4)
+
                 ctx.log_msg(f"Rifornimento: slot liberi={slot}")
 
                 if slot == 0:
