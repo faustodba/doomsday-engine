@@ -272,6 +272,15 @@ def _thread_istanza(ist, tasks_cls, dry_run, tick_sleep, stop_event):
 
     _log(nome, f"Orchestrator pronto -- {len(orc)} task: {orc.task_names()}")
 
+    # ── Ripristino scheduling dal disco (restart-safe) ────────────────────
+    # Ripristina i last_run dall'ultimo stato persistito su disco.
+    # Senza questo, ogni restart rieseguirebbe tutti i task immediatamente.
+    try:
+        ctx.state.schedule.restore_to_orchestrator(orc)
+        _log(nome, f"Schedule ripristinato: {dict(ctx.state.schedule.timestamps)}")
+    except Exception as exc:
+        _log(nome, f"[WARN] Ripristino schedule: {exc}")
+
     while not stop_event.is_set():
         gcfg = load_global()
         ctx  = _build_ctx(ist, gcfg, dry_run)
@@ -303,6 +312,8 @@ def _thread_istanza(ist, tasks_cls, dry_run, tick_sleep, stop_event):
         _aggiorna_stato_istanza(nome, {"stato": "waiting", "task_eseguiti": dict(cnts),
                                        "ultimo_task": ultimo, "scheduler": _scheduler_prossimi(orc), "errori": errori})
         try:
+            # Sync schedule → state prima del save (restart-safe)
+            ctx.state.schedule.update_from_stato(orc.stato())
             ctx.state.save(state_dir=os.path.join(ROOT, "state"))
         except Exception as exc:
             _log(nome, f"[WARN] save state: {exc}")

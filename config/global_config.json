@@ -47,7 +47,7 @@
   },
 
   "rifornimento_membri": {
-    "_note": "Navigazione via lista membri alleanza — indipendente dalla posizione",
+    "_note": "Navigazione via lista membri alleanza — backup, più lenta",
     "abilitato":        false,
     "avatar_template":  "pin/avatar.png"
   },

@@ -109,6 +109,8 @@ _DEFAULTS: dict = {
     "TASSA_DEFAULT":                    0.24,
     "MARGINE_ATTESA":                   8,
     "RIFORNIMENTO_MAPPA_ABILITATO":     False,
+    "RIFORNIMENTO_MEMBRI_ABILITATO":    False,
+    "AVATAR_TEMPLATE":                  "pin/avatar.png",
     "RIFORNIMENTO_CAMPO_ABILITATO":     True,
     "RIFORNIMENTO_LEGNO_ABILITATO":     True,
     "RIFORNIMENTO_ACCIAIO_ABILITATO":   False,
@@ -500,13 +502,450 @@ def _build_risorse_config(ctx: TaskContext) -> tuple[dict, dict, dict]:
 
 
 # ------------------------------------------------------------------------------
+# Navigazione via Membri — costanti (da V5 rifornimento.py)
+# ------------------------------------------------------------------------------
+
+_COORD_ALLEANZA_BTN  = (760, 505)   # pulsante Alleanza in home
+_COORD_MEMBRI        = (46, 188)    # tab Membri nel menu Alleanza
+
+# Swipe lista membri (960x540)
+# AVANZARE = swipe verso l'ALTO (dito sale: start basso → end alto)
+# SCROLL-TO-TOP = swipe verso il BASSO (dito scende: start alto → end basso)
+_SWIPE_SU_X    = 480
+_SWIPE_SU_Y1   = 430    # avanza lista: dito parte da basso
+_SWIPE_SU_Y2   = 240    # avanza lista: dito arriva in alto
+_SWIPE_GIU_X   = 480
+_SWIPE_GIU_Y1  = 240    # scroll-to-top: dito parte da alto
+_SWIPE_GIU_Y2  = 460    # scroll-to-top: dito arriva in basso
+
+_LISTA_ZONA    = (130, 165, 940, 540)  # zona lista membri (escluso sidebar e header)
+_AVATAR_ZONA   = (130, 155, 540, 490)  # zona ricerca avatar
+
+# Template paths (relativi a templates/)
+_TMPL_ARROW_DOWN = "pin/arrow_down.png"
+_TMPL_ARROW_UP   = "pin/arrow_up.png"
+_TMPL_BADGE = {
+    "R4": "pin/badge_R4.png",
+    "R3": "pin/badge_R3.png",
+    "R2": "pin/badge_R2.png",
+    "R1": "pin/badge_R1.png",
+}
+_TMPL_BTN_RISORSE = "pin/btn_risorse_approv.png"
+
+# Soglie template matching (da V5)
+_BADGE_SOGLIA       = 0.85
+_FRECCIA_SOGLIA     = 0.85
+_AVATAR_SOGLIA      = 0.75
+_BTN_RISORSE_SOGLIA = 0.75
+
+# Zone badge e freccia nella schermata (colonna badge e zona freccia toggle)
+_BADGE_X1      = 130
+_BADGE_X2      = 220
+_BADGE_Y_START = 165    # offset Y per la zona lista
+_BARRA_ALTEZZA = 43     # altezza barra R in pixel
+_FRECCIA_X1    = 860
+_FRECCIA_X2    = 930
+
+# Limiti scroll
+_MAX_SWIPE_TOP     = 6
+_MAX_SWIPE_TOGGLE  = 12
+_MAX_SWIPE_RICERCA = 25
+
+
+# ------------------------------------------------------------------------------
+# Navigazione via Membri — funzioni helper (traduzione fedele V5 in API V6)
+# ------------------------------------------------------------------------------
+
+def _membri_scroll_to_top(ctx: TaskContext) -> None:
+    """Porta la lista all'inizio con swipe verso il basso."""
+    for _ in range(_MAX_SWIPE_TOP):
+        ctx.device.swipe(_SWIPE_GIU_X, _SWIPE_GIU_Y1,
+                         _SWIPE_GIU_X, _SWIPE_GIU_Y2, duration_ms=350)
+        time.sleep(0.4)
+    time.sleep(0.8)
+
+
+def _membri_scroll_avanti(ctx: TaskContext) -> None:
+    """Avanza nella lista di un passo (swipe verso l'alto)."""
+    ctx.device.swipe(_SWIPE_SU_X, _SWIPE_SU_Y1,
+                     _SWIPE_SU_X, _SWIPE_SU_Y2, duration_ms=500)
+    time.sleep(1.0)
+
+
+def _membri_trova_badge(screen, ctx: TaskContext, rango: str) -> int:
+    """
+    Cerca il badge del rango nella colonna sinistra della lista.
+    Ritorna Y assoluta del centro, -1 se non trovato.
+    """
+    tmpl_name = _TMPL_BADGE.get(rango, "")
+    if not tmpl_name:
+        return -1
+    try:
+        zona = (_BADGE_X1, _BADGE_Y_START, _BADGE_X2, screen.height)
+        result = ctx.matcher.find_one(screen, tmpl_name,
+                                      threshold=_BADGE_SOGLIA, zone=zona)
+        if result.found:
+            return result.cy
+    except Exception:
+        pass
+    return -1
+
+
+def _membri_stato_toggle(screen, ctx: TaskContext, y_barra: int) -> str:
+    """
+    Determina se una barra R è aperta o chiusa tramite freccia su/giù.
+    Ritorna 'aperto' | 'chiuso' | 'sconosciuto'.
+    """
+    y1 = max(0, y_barra - _BARRA_ALTEZZA // 2)
+    y2 = min(screen.height, y_barra + _BARRA_ALTEZZA // 2)
+    zona = (_FRECCIA_X1, y1, _FRECCIA_X2, y2)
+    try:
+        score_down = ctx.matcher.score(screen, _TMPL_ARROW_DOWN, zone=zona)
+        score_up   = ctx.matcher.score(screen, _TMPL_ARROW_UP,   zone=zona)
+        if score_down < _FRECCIA_SOGLIA and score_up < _FRECCIA_SOGLIA:
+            return "sconosciuto"
+        return "aperto" if score_up > score_down else "chiuso"
+    except Exception:
+        return "sconosciuto"
+
+
+def _membri_trova_avatar(screen, ctx: TaskContext,
+                          avatar_template: str) -> tuple | None:
+    """
+    Cerca l'avatar nella zona lista.
+    Ritorna (tap_x, cy) se trovato, None altrimenti.
+    tap_x = 290 (metà sinistra) o 680 (metà destra) per non tappare l'avatar stesso.
+    """
+    try:
+        result = ctx.matcher.find_one(screen, avatar_template,
+                                      threshold=_AVATAR_SOGLIA,
+                                      zone=_LISTA_ZONA)
+        if result.found:
+            tap_x = 290 if result.cx < 490 else 680
+            return (tap_x, result.cy)
+    except Exception:
+        pass
+    return None
+
+
+def _membri_apri_tutti_toggle(ctx: TaskContext,
+                               avatar_template: str) -> tuple | None:
+    """
+    Scorre la lista aprendo tutti i toggle R4/R3/R2/R1 chiusi.
+    Cerca l'avatar in parallelo — se trovato ritorna subito (tap_x, cy).
+    Traduzione fedele V5 _apri_tutti_toggle().
+    """
+    ranghi_tutti   = {"R4", "R3", "R2", "R1"}
+    ranghi_gestiti = set()
+
+    ctx.log_msg("Rifornimento membri: scroll-to-top iniziale")
+    _membri_scroll_to_top(ctx)
+
+    for swipe_n in range(_MAX_SWIPE_TOGGLE):
+        screen = ctx.device.screenshot()
+        if screen is None:
+            time.sleep(1.0)
+            continue
+
+        # Cerca avatar in parallelo durante apertura toggle
+        coord_tap = _membri_trova_avatar(screen, ctx, avatar_template)
+        if coord_tap:
+            ctx.log_msg(f"Rifornimento membri: avatar trovato durante toggle swipe {swipe_n} → {coord_tap}")
+            time.sleep(1.2)
+            return coord_tap
+
+        # Cerca e gestisci badge
+        trovati_ora = {}
+        for rango in ranghi_tutti:
+            y = _membri_trova_badge(screen, ctx, rango)
+            if y >= 0:
+                trovati_ora[rango] = y
+
+        ctx.log_msg(f"Rifornimento membri: swipe {swipe_n} badge={list(trovati_ora.keys())}")
+
+        rescansiona = False
+        for rango, y_barra in list(trovati_ora.items()):
+            if rango in ranghi_gestiti:
+                continue
+            stato_r = _membri_stato_toggle(screen, ctx, y_barra)
+            ctx.log_msg(f"Rifornimento membri: {rango} y={y_barra} stato={stato_r}")
+
+            if stato_r == "chiuso":
+                ctx.log_msg(f"Rifornimento membri: apro toggle {rango}")
+                ctx.device.tap(480, y_barra)
+                time.sleep(0.8)
+                ranghi_gestiti.add(rango)
+                time.sleep(1.5)
+                screen2 = ctx.device.screenshot()
+                if screen2 is None:
+                    break
+                # Verifica avatar dopo apertura toggle
+                coord_tap = _membri_trova_avatar(screen2, ctx, avatar_template)
+                if coord_tap:
+                    ctx.log_msg(f"Rifornimento membri: avatar trovato post-{rango} → {coord_tap}")
+                    time.sleep(1.2)
+                    return coord_tap
+                rescansiona = True
+                break
+            elif stato_r == "aperto":
+                ranghi_gestiti.add(rango)
+
+        if rescansiona:
+            continue
+
+        if ranghi_tutti.issubset(ranghi_gestiti):
+            ctx.log_msg("Rifornimento membri: tutti i toggle aperti")
+            break
+
+        _membri_scroll_avanti(ctx)
+
+    ctx.log_msg("Rifornimento membri: scroll-to-top per ricerca avatar")
+    _membri_scroll_to_top(ctx)
+    return None
+
+
+def _membri_cerca_avatar_scroll(ctx: TaskContext,
+                                 avatar_template: str) -> tuple | None:
+    """
+    Scorre la lista cercando l'avatar con template matching.
+    Fine lista rilevata da screen identici consecutivi (frame hash).
+    Ritorna (tap_x, cy) o None.
+    Traduzione fedele V5 _cerca_avatar_scroll().
+    """
+    import hashlib
+    prev_hash = ""
+
+    for swipe_n in range(_MAX_SWIPE_RICERCA + 1):
+        screen = ctx.device.screenshot()
+        if screen is None:
+            time.sleep(1.0)
+            continue
+
+        coord_tap = _membri_trova_avatar(screen, ctx, avatar_template)
+        if coord_tap:
+            ctx.log_msg(f"Rifornimento membri: avatar trovato dopo {swipe_n} swipe → {coord_tap}")
+            time.sleep(1.2)
+            return coord_tap
+
+        # Rilevamento fine lista via hash del frame
+        try:
+            frame_hash = hashlib.md5(screen.frame.tobytes()).hexdigest()
+        except Exception:
+            frame_hash = ""
+
+        if frame_hash and frame_hash == prev_hash:
+            ctx.log_msg(f"Rifornimento membri: fine lista dopo {swipe_n} swipe — avatar non trovato")
+            return None
+        prev_hash = frame_hash
+
+        if swipe_n < _MAX_SWIPE_RICERCA:
+            ctx.log_msg(f"Rifornimento membri: swipe {swipe_n + 1}/{_MAX_SWIPE_RICERCA}")
+            _membri_scroll_avanti(ctx)
+
+    ctx.log_msg(f"Rifornimento membri: avatar non trovato dopo {_MAX_SWIPE_RICERCA} swipe")
+    return None
+
+
+def _membri_trova_pulsante_risorse(ctx: TaskContext) -> tuple | None:
+    """
+    Cerca il pulsante 'Risorse di approvvigionamento' nel popup azioni.
+    Usa template matching su btn_risorse_approv.png e btn_supply_resources.png.
+    Ritorna (cx, cy) o None.
+    """
+    templates_da_provare = [
+        ("pin/btn_risorse_approv.png",  _BTN_RISORSE_SOGLIA),
+        ("pin/btn_supply_resources.png", _BTN_RISORSE_SOGLIA),
+    ]
+    screen = ctx.device.screenshot()
+    if screen is None:
+        return None
+
+    for tmpl_name, soglia in templates_da_provare:
+        try:
+            result = ctx.matcher.find_one(screen, tmpl_name, threshold=soglia)
+            if result.found:
+                ctx.log_msg(f"Rifornimento membri: pulsante risorse trovato score={result.score:.3f}")
+                return (result.cx, result.cy)
+        except FileNotFoundError:
+            continue
+        except Exception:
+            continue
+
+    return None
+
+
+def _esegui_via_membri(ctx: TaskContext, risorse_config: dict,
+                        soglie: dict, nome_rifugio: str,
+                        max_sped: int, margine: int) -> tuple[int, float]:
+    """
+    Esegue il rifornimento via lista Membri alleanza.
+    Traduzione fedele V5 esegui_rifornimento() con navigazione lista.
+
+    Flusso per ogni spedizione:
+      HOME → Alleanza → Membri → toggle R4/R3/R2/R1 → avatar
+      → tap → popup → btn risorse → maschera → compila → VAI
+
+    Ritorna: (spedizioni, eta_residua)
+    """
+    avatar_template = _cfg(ctx, "AVATAR_TEMPLATE") or "pin/avatar.png"
+    risorse_l = list(risorse_config.keys())
+    spedizioni = 0
+    idx_risorsa = 0
+    coda_volo: deque = deque()
+
+    # Leggi deposito OCR dalla HOME prima di navigare
+    ctx.log_msg("Rifornimento membri: lettura deposito OCR da HOME")
+    deposito = _leggi_deposito_ocr(ctx, risorse_l)
+    if all(deposito.get(r, -1) < 0 for r in risorse_l):
+        ctx.log_msg("Rifornimento membri: OCR deposito fallito — stop")
+        return 0, 0.0
+
+    ctx.log_msg("Rifornimento membri: deposito OCR — " + " | ".join(
+        f"{r}={max(0.0, deposito.get(r, -1))/1e6:.1f}M"
+        for r in risorse_l if deposito.get(r, -1) >= 0
+    ))
+
+    while True:
+        if max_sped > 0 and spedizioni >= max_sped:
+            ctx.log_msg(f"Rifornimento membri: limite spedizioni ({spedizioni}/{max_sped})")
+            break
+
+        # ── Slot liberi ──────────────────────────────────────────────────────
+        _aggiorna_coda(coda_volo)
+        slot = _MAX_SWIPE_TOP  # assume slot liberi, non legge UI (siamo in HOME)
+        if slot == 0:
+            ctx.log_msg("Rifornimento membri: nessun slot — stop")
+            break
+
+        # ── Seleziona risorsa ────────────────────────────────────────────────
+        risorsa_scelta, idx_risorsa = _seleziona_risorsa(
+            deposito, risorse_config, soglie, idx_risorsa
+        )
+        if risorsa_scelta is None:
+            ctx.log_msg("Rifornimento membri: tutte le risorse sotto soglia — stop")
+            break
+
+        ctx.log_msg(f"Rifornimento membri: risorsa selezionata={risorsa_scelta}")
+        qta = risorse_config[risorsa_scelta]
+
+        # ── Naviga HOME → Alleanza → Membri → avatar ─────────────────────────
+        # Standard V6: usa tap_barra("alliance") come arena/arena_mercato
+        ctx.log_msg("Rifornimento membri: tap Alliance via tap_barra")
+        if ctx.navigator is not None:
+            ctx.navigator.tap_barra(ctx, "alliance")
+        else:
+            ctx.device.tap(_COORD_ALLEANZA_BTN)
+        time.sleep(1.5)
+        ctx.log_msg("Rifornimento membri: tap Membri")
+        ctx.device.tap(_COORD_MEMBRI)
+        time.sleep(2.5)   # attesa rendering lista badge R
+
+        # Apri toggle e cerca avatar
+        coord_tap = _membri_apri_tutti_toggle(ctx, avatar_template)
+        if not coord_tap:
+            coord_tap = _membri_cerca_avatar_scroll(ctx, avatar_template)
+        if not coord_tap:
+            ctx.log_msg("Rifornimento membri: avatar non trovato — BACK e stop")
+            ctx.device.back()
+            time.sleep(0.8)
+            break
+
+        # ── Tap membro → popup ───────────────────────────────────────────────
+        ctx.log_msg(f"Rifornimento membri: tap membro {coord_tap}")
+        ctx.device.tap(*coord_tap)
+        time.sleep(1.5)
+
+        # ── Trova pulsante risorse ───────────────────────────────────────────
+        btn_coord = None
+        for tentativo in range(3):
+            btn_coord = _membri_trova_pulsante_risorse(ctx)
+            if btn_coord:
+                break
+            time.sleep(0.8)
+
+        if not btn_coord:
+            ctx.log_msg("Rifornimento membri: pulsante risorse non trovato — BACK e stop")
+            ctx.device.back()
+            time.sleep(0.8)
+            break
+
+        ctx.log_msg(f"Rifornimento membri: tap pulsante risorse {btn_coord}")
+        ctx.device.tap(*btn_coord)
+        time.sleep(2.0)
+
+        # ── Snapshot PRE-VAI ─────────────────────────────────────────────────
+        snapshot_pre = dict(deposito)
+
+        # ── Compila e invia ──────────────────────────────────────────────────
+        ts_invio = time.time()
+        ok, eta_sec, quota_esaurita, qta_inviata, provviste_lette = _compila_e_invia(
+            ctx, risorsa_scelta, qta, nome_rifugio
+        )
+
+        if quota_esaurita:
+            ctx.log_msg("Rifornimento membri: quota giornaliera esaurita — stop")
+            break
+
+        if not ok:
+            ctx.log_msg("Rifornimento membri: invio fallito — stop")
+            break
+
+        # ── Snapshot POST-VAI ─────────────────────────────────────────────────
+        time.sleep(1.5)
+        ctx.navigator.vai_in_home()   # torna home per OCR deposito
+        time.sleep(1.0)
+
+        snapshot_post = _leggi_deposito_ocr(ctx, risorse_l)
+        qta_reale = 0
+        if snapshot_pre.get(risorsa_scelta, -1) >= 0 and \
+           snapshot_post.get(risorsa_scelta, -1) >= 0:
+            qta_reale = max(0, int(
+                snapshot_pre[risorsa_scelta] - snapshot_post[risorsa_scelta]
+            ))
+        else:
+            qta_reale = qta_inviata
+
+        # ── Registra ─────────────────────────────────────────────────────────
+        spedizioni += 1
+        eta_ar = float(eta_sec * 2)
+        coda_volo.append((ts_invio, eta_ar))
+
+        if ctx.state is not None:
+            ctx.state.rifornimento.registra_spedizione(
+                risorsa=risorsa_scelta,
+                qta_inviata=qta_reale,
+                provviste_residue=provviste_lette,
+            )
+
+        provv_str = f" | provviste={provviste_lette:,}" if provviste_lette >= 0 else ""
+        ctx.log_msg(
+            f"Rifornimento membri: spedizione {spedizioni} "
+            f"— {risorsa_scelta} {qta_reale:,} reali"
+            f" | ETA A/R={eta_ar:.0f}s{provv_str}"
+        )
+
+        # Aggiorna deposito con snapshot post
+        if all(snapshot_post.get(r, -1) >= 0 for r in risorse_l):
+            deposito = snapshot_post
+        time.sleep(0.5)
+
+    # ETA residua
+    _aggiorna_coda(coda_volo)
+    eta_residua = _attesa_ultima_spedizione(coda_volo, margine)
+    return spedizioni, eta_residua
+
+
+# ------------------------------------------------------------------------------
 # Task V6
 # ------------------------------------------------------------------------------
 
 class RifornimentoTask(Task):
     """
-    Task periodico (4h) che invia risorse al rifugio alleato via coordinate mappa.
-    Implementa il loop ottimizzato in mappa con coda_volo per la gestione degli slot.
+    Task periodico che invia risorse al rifugio alleato.
+    Modalità selezionabile da global_config.json:
+      rifornimento_mappa.abilitato   = true  → via coordinate mappa (default)
+      rifornimento_membri.abilitato  = true  → via lista Membri (backup)
+    Le due modalità sono mutualmente esclusive — ha precedenza la mappa.
     """
 
     def name(self) -> str:
@@ -529,19 +968,18 @@ class RifornimentoTask(Task):
             deposito: Optional[dict[str, float]] = None,
             slot_liberi: int = -1) -> TaskResult:
         """
-        Esegue il rifornimento risorse.
+        Esegue il rifornimento risorse nella modalità configurata.
 
         Parametri iniettabili per i test:
           deposito    : dict risorsa→valore_assoluto (evita screenshot OCR)
           slot_liberi : int ≥ 0 → salta la lettura reale degli slot UI
-
-        In produzione entrambi valgono i loro default (-1 / None):
-          l'orchestrator passa il deposito già letto, slot_liberi=-1
-          lascia la lettura al loop interno.
         """
-        # --- Verifica abilitazione ---
-        if not _cfg(ctx, "RIFORNIMENTO_MAPPA_ABILITATO"):
-            ctx.log_msg("Rifornimento: modulo disabilitato — skip")
+        # --- Selezione modalità ---
+        mappa_abilitata   = _cfg(ctx, "RIFORNIMENTO_MAPPA_ABILITATO")
+        membri_abilitati  = _cfg(ctx, "RIFORNIMENTO_MEMBRI_ABILITATO")
+
+        if not mappa_abilitata and not membri_abilitati:
+            ctx.log_msg("Rifornimento: nessuna modalità abilitata — skip")
             return TaskResult(
                 success=True,
                 message="disabilitato",
@@ -588,14 +1026,57 @@ class RifornimentoTask(Task):
 
         ctx.log_msg(f"Rifornimento: start — risorse={risorse_l} max_sped={max_sped}")
 
-        # Guard: max_sped=0 → skip immediato senza entrare in mappa
-        if max_sped == 0:
-            ctx.log_msg("Rifornimento: max_spedizioni_ciclo=0 — skip")
-            return TaskResult(
-                success=True,
-                message="max_spedizioni=0",
-                data={"spedizioni": 0, "eta_residua": 0.0},
+        # --- Selezione modalità di esecuzione ---
+        # Mappa ha precedenza su Membri (più veloce, è il default)
+        if mappa_abilitata:
+            ctx.log_msg("Rifornimento: modalità=MAPPA")
+            # Guard: max_sped=0 → skip immediato
+            if max_sped == 0:
+                ctx.log_msg("Rifornimento: max_spedizioni_ciclo=0 — skip")
+                return TaskResult(success=True, message="max_spedizioni=0",
+                                  data={"spedizioni": 0, "eta_residua": 0.0})
+            spedizioni, eta_residua = self._esegui_mappa(
+                ctx, deposito, deposito_da_ocr, slot_liberi,
+                risorse_config, soglie, nome_rifugio,
+                max_sped, margine, risorse_l
             )
+        else:
+            ctx.log_msg("Rifornimento: modalità=MEMBRI (backup)")
+            # Guard: max_sped=0 → skip immediato
+            if max_sped == 0:
+                ctx.log_msg("Rifornimento: max_spedizioni_ciclo=0 — skip")
+                return TaskResult(success=True, message="max_spedizioni=0",
+                                  data={"spedizioni": 0, "eta_residua": 0.0})
+            spedizioni, eta_residua = _esegui_via_membri(
+                ctx, risorse_config, soglie, nome_rifugio, max_sped, margine
+            )
+
+        # Riepilogo statistiche
+        if ctx.state is not None:
+            rif = ctx.state.rifornimento
+            if rif.inviato_oggi:
+                riepilogo = " | ".join(
+                    f"{r}={v/1e6:.1f}M" for r, v in rif.inviato_oggi.items()
+                )
+                ctx.log_msg(f"Rifornimento: inviato oggi — {riepilogo}")
+            if rif.provviste_residue >= 0:
+                ctx.log_msg(f"Rifornimento: provviste residue={rif.provviste_residue:,}")
+
+        ctx.log_msg(f"Rifornimento: completato — {spedizioni} spedizioni")
+        return TaskResult(
+            success=True,
+            message=f"{spedizioni} spedizioni",
+            data={"spedizioni": spedizioni, "eta_residua": eta_residua},
+        )
+
+    def _esegui_mappa(self, ctx, deposito, deposito_da_ocr, slot_liberi,
+                      risorse_config, soglie, nome_rifugio,
+                      max_sped, margine, risorse_l) -> tuple[int, float]:
+        """Loop rifornimento via coordinate mappa."""
+        spedizioni  = 0
+        idx_risorsa = 0
+        coda_volo: deque = deque()
+        in_mappa    = False
 
         try:
             while True:
@@ -605,22 +1086,16 @@ class RifornimentoTask(Task):
 
                 # ── 1. Slot liberi ──────────────────────────────────────────
                 _aggiorna_coda(coda_volo)
-                slot = slot_liberi  # -1 in produzione → legge dalla UI
+                slot = slot_liberi
 
                 if slot == -1:
-                    # Leggi slot reali dalla UI — contatore visibile solo
-                    # se almeno una squadra è attiva. Se assente → tutti liberi.
                     try:
                         from shared.ocr_helpers import leggi_contatore_slot
                         max_sq = getattr(ctx.config, "max_squadre", 4)
                         screen_slot = ctx.device.screenshot()
                         if screen_slot is not None:
                             attive, totale = leggi_contatore_slot(screen_slot, totale_noto=max_sq)
-                            if attive == -1:
-                                # lettura fallita → assume tutti liberi
-                                slot = max_sq
-                            else:
-                                slot = max(0, totale - attive)
+                            slot = max_sq if attive == -1 else max(0, totale - attive)
                         else:
                             slot = max_sq
                     except Exception:
@@ -631,15 +1106,12 @@ class RifornimentoTask(Task):
                 if slot == 0:
                     attesa = _attesa_prima_spedizione(coda_volo, margine)
                     if attesa > 0:
-                        ctx.log_msg(f"Rifornimento: slot 0 — attendo {attesa:.0f}s rientro prima sped.")
+                        ctx.log_msg(f"Rifornimento: slot 0 — attendo {attesa:.0f}s")
                         time.sleep(attesa)
                         _aggiorna_coda(coda_volo)
                     else:
                         ctx.log_msg("Rifornimento: slot 0, coda vuota — attendo 30s")
                         time.sleep(30)
-
-                    # Dopo attesa slot rimane 0 → stop
-                    # (nei test slot_liberi è fisso → uscita immediata)
                     ctx.log_msg("Rifornimento: nessun slot libero dopo attesa — stop")
                     break
 
@@ -653,7 +1125,7 @@ class RifornimentoTask(Task):
                     in_mappa = True
                     time.sleep(1.5)
 
-                # ── 3. Leggi deposito OCR se non iniettato ──────────────────
+                # ── 3. Leggi deposito OCR ───────────────────────────────────
                 if deposito_da_ocr:
                     deposito = _leggi_deposito_ocr(ctx, risorse_l)
                     if all(deposito.get(r, -1) < 0 for r in risorse_l):
@@ -664,7 +1136,7 @@ class RifornimentoTask(Task):
                         for r in risorse_l if deposito.get(r, -1) >= 0
                     ))
 
-                # ── 3. Seleziona risorsa ────────────────────────────────────
+                # ── 4. Seleziona risorsa ────────────────────────────────────
                 risorsa_scelta, idx_risorsa = _seleziona_risorsa(
                     deposito, risorse_config, soglie, idx_risorsa
                 )
@@ -675,17 +1147,14 @@ class RifornimentoTask(Task):
                 ctx.log_msg(f"Rifornimento: risorsa selezionata={risorsa_scelta}")
                 qta = risorse_config[risorsa_scelta]
 
-                # ── 4. Centra mappa + apri RESOURCE SUPPLY ──────────────────
+                # ── 5. Centra mappa + apri RESOURCE SUPPLY ──────────────────
                 _centra_mappa(ctx)
-
                 if not _apri_resource_supply(ctx):
                     ctx.log_msg("Rifornimento: RESOURCE SUPPLY non trovato — stop")
                     break
 
-                # ── 5. Compila e invia ──────────────────────────────────────
-                # Snapshot PRE-VAI: deposito attuale già letto al passo 3
+                # ── 6. Compila e invia ──────────────────────────────────────
                 snapshot_pre = dict(deposito) if deposito else {}
-
                 ts_invio = time.time()
                 ok, eta_sec, quota_esaurita, qta_inviata, provviste_lette = _compila_e_invia(
                     ctx, risorsa_scelta, qta, nome_rifugio
@@ -694,33 +1163,26 @@ class RifornimentoTask(Task):
                 if quota_esaurita:
                     ctx.log_msg("Rifornimento: quota giornaliera esaurita — stop")
                     break
-
                 if not ok:
                     ctx.log_msg("Rifornimento: invio fallito — stop")
                     break
 
-                # ── Snapshot POST-VAI: rileggi deposito per qta reale ────────
-                time.sleep(1.5)   # attesa UI post-VAI
+                # ── 7. Snapshot POST-VAI ────────────────────────────────────
+                time.sleep(1.5)
                 snapshot_post = _leggi_deposito_ocr(ctx, risorse_l)
-                qta_reale = 0
                 if snapshot_pre.get(risorsa_scelta, -1) >= 0 and \
                    snapshot_post.get(risorsa_scelta, -1) >= 0:
                     qta_reale = max(0, int(
                         snapshot_pre[risorsa_scelta] - snapshot_post[risorsa_scelta]
                     ))
                 else:
-                    # fallback: usa qta_inviata nominale
                     qta_reale = qta_inviata
 
-                # ── 6. Registra in coda e state ─────────────────────────────
+                # ── 8. Registra ─────────────────────────────────────────────
                 spedizioni += 1
-                eta_ar = float(eta_sec * 2)   # A/R = andata × 2
+                eta_ar = float(eta_sec * 2)
                 coda_volo.append((ts_invio, eta_ar))
 
-                # Leggi provviste residue dalla maschera successiva (già chiusa)
-                # Le provviste correnti sono state lette in _compila_e_invia
-                # ma non restituite — le rileveremo al ciclo successivo.
-                # Per ora usiamo -1 e aggiorneremo al prossimo _compila_e_invia.
                 if ctx.state is not None:
                     ctx.state.rifornimento.registra_spedizione(
                         risorsa=risorsa_scelta,
@@ -735,10 +1197,9 @@ class RifornimentoTask(Task):
                     f" | ETA A/R={eta_ar:.0f}s{provv_str}"
                 )
 
-                # Aggiorna deposito con snapshot post per il ciclo successivo
                 if all(snapshot_post.get(r, -1) >= 0 for r in risorse_l):
                     deposito = snapshot_post
-                time.sleep(0.5)   # pausa residua (totale ~2s post-VAI)
+                time.sleep(0.5)
 
         finally:
             ctx.log_msg("Rifornimento: ritorno in home")
@@ -747,26 +1208,8 @@ class RifornimentoTask(Task):
             else:
                 ctx.device.key("KEYCODE_HOME")
 
-        # ── ETA residua ultima spedizione (comunicata alla raccolta) ───────
         _aggiorna_coda(coda_volo)
         eta_residua = _attesa_ultima_spedizione(coda_volo, margine)
         if eta_residua > 0:
             ctx.log_msg(f"Rifornimento: ETA residua ultima sped. = {eta_residua:.0f}s")
-
-        ctx.log_msg(f"Rifornimento: completato — {spedizioni} spedizioni")
-
-        # Riepilogo statistiche giornaliere
-        if ctx.state is not None:
-            rif = ctx.state.rifornimento
-            if rif.inviato_oggi:
-                riepilogo = " | ".join(
-                    f"{r}={v/1e6:.1f}M" for r, v in rif.inviato_oggi.items()
-                )
-                ctx.log_msg(f"Rifornimento: inviato oggi — {riepilogo}")
-            if rif.provviste_residue >= 0:
-                ctx.log_msg(f"Rifornimento: provviste residue={rif.provviste_residue:,}")
-        return TaskResult(
-            success=True,
-            message=f"{spedizioni} spedizioni",
-            data={"spedizioni": spedizioni, "eta_residua": eta_residua},
-        )
+        return spedizioni, eta_residua

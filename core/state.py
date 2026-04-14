@@ -161,6 +161,64 @@ class RifornimentoState:
 
 
 # ==============================================================================
+# ScheduleState — persistenza scheduling task (restart-safe)
+# ==============================================================================
+
+@dataclass
+class ScheduleState:
+    """
+    Persiste i timestamp dell'ultimo run di ogni task su disco.
+    Sopravvive al restart — all'avvio main.py lo legge e ripristina
+    i last_run nell'orchestrator tramite set_last_run().
+
+    Formato JSON:
+      {
+        "schedule": {
+          "raccolta":      1712345678.0,
+          "rifornimento":  1712345000.0,
+          "arena":         0.0,          ← mai eseguito
+          ...
+        }
+      }
+    """
+    timestamps: dict = field(default_factory=dict)  # {task_name: float}
+
+    def get(self, task_name: str) -> float:
+        """Ritorna timestamp ultimo run, 0.0 se mai eseguito."""
+        return float(self.timestamps.get(task_name, 0.0))
+
+    def set(self, task_name: str, ts: float) -> None:
+        """Aggiorna timestamp ultimo run."""
+        self.timestamps[task_name] = ts
+
+    def update_from_stato(self, stato: dict) -> None:
+        """
+        Aggiorna da dict orchestrator.stato() dopo ogni tick.
+        stato = {task_name: {"last_run": float, ...}}
+        """
+        for name, info in stato.items():
+            lr = info.get("last_run", 0.0)
+            if lr and lr > 0.0:
+                self.timestamps[name] = lr
+
+    def restore_to_orchestrator(self, orchestrator) -> None:
+        """
+        Ripristina i last_run nell'orchestrator all'avvio.
+        Chiama orchestrator.set_last_run(name, ts) per ogni task.
+        """
+        for name, ts in self.timestamps.items():
+            if ts > 0.0:
+                orchestrator.set_last_run(name, ts)
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ScheduleState":
+        return cls(timestamps=dict(d))
+
+    def to_dict(self) -> dict:
+        return dict(self.timestamps)
+
+
+# ==============================================================================
 # DailyTasksState — completamento task giornalieri
 # ==============================================================================
 
@@ -349,6 +407,7 @@ class InstanceState:
     rifornimento: RifornimentoState = field(default_factory=RifornimentoState)
     daily_tasks: DailyTasksState = field(default_factory=DailyTasksState)
     metrics: MetricsState = field(default_factory=MetricsState)
+    schedule: ScheduleState = field(default_factory=ScheduleState)
 
     # Stato runtime non persistito (ricostruito all'avvio)
     attivo: bool = False
@@ -360,11 +419,12 @@ class InstanceState:
     def to_dict(self) -> dict:
         return {
             "instance_name": self.instance_name,
-            "rifornimento": self.rifornimento.to_dict(),
-            "daily_tasks": self.daily_tasks.to_dict(),
-            "metrics": self.metrics.to_dict(),
+            "rifornimento":  self.rifornimento.to_dict(),
+            "daily_tasks":   self.daily_tasks.to_dict(),
+            "metrics":       self.metrics.to_dict(),
+            "schedule":      self.schedule.to_dict(),
             "ultimo_errore": self.ultimo_errore,
-            "ultimo_avvio": self.ultimo_avvio,
+            "ultimo_avvio":  self.ultimo_avvio,
         }
 
     @classmethod
@@ -374,6 +434,7 @@ class InstanceState:
             rifornimento=RifornimentoState.from_dict(d.get("rifornimento", {})),
             daily_tasks=DailyTasksState.from_dict(d.get("daily_tasks", {})),
             metrics=MetricsState.from_dict(d.get("metrics", {})),
+            schedule=ScheduleState.from_dict(d.get("schedule", {})),
             ultimo_errore=d.get("ultimo_errore", None),
             ultimo_avvio=d.get("ultimo_avvio", None),
         )

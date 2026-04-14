@@ -43,8 +43,10 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | RT-12 | Tick completo FAU_01 | ✅ | Tick completo funzionante |
 | RT-tap | tap_barra barra inferiore | ✅ | score=1.000 tutti 5 bottoni su FAU_01 |
 | RT-15 | Arena + ArenaMercato | ✅ | Arena: 5/5 sfide 8.4s/sfida; ArenaMercato: pack360=5; fix BACK×2 |
-| RT-16 | Rifornimento | ✅ | 5/5 spedizioni, qta reale 4M/spedizione, provviste tracciate, statistiche state |
-| RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo fix issues aperti |
+| RT-16 | Rifornimento via mappa | ✅ | 5/5 spedizioni, qta reale 4M, provviste tracciate, soglia/abilitazione OK |
+| RT-17 | Rifornimento via membri | ✅ | 1/1 spedizione, navigazione lista alleanza, avatar trovato, btn risorse 0.986 |
+| RT-18 | Scheduling restart-safe | ⏳ | ScheduleState implementato, da testare con stop/start reale |
+| RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo RT-18 |
 | RT-14 | Full farm 12 istanze | ⏳ | |
 
 ---
@@ -95,7 +97,25 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 | Fix | File | Dettaglio |
 |-----|------|-----------|
-| Arena timeout | `arena.py` | `_MAX_BATTAGLIA_S` 30.0 → 15.0 (skip attivo, 23s totali sufficienti) |
+| Arena timeout | `arena.py` | `_MAX_BATTAGLIA_S` 30.0 → 15.0 |
+| Config centralizzata Step A | `config/global_config.json` + `config/config_loader.py` | unica fonte verità, `load_global()`, `build_instance_cfg()` |
+| Config centralizzata Step B | `main.py` + `run_task.py` | rimossa `_Cfg` hardcodata, usa `config_loader` |
+| Rifornimento OCR deposito | `tasks/rifornimento.py` | `_leggi_deposito_ocr` usa `ocr_helpers.ocr_risorse()` |
+| Rifornimento _vai_abilitato | `tasks/rifornimento.py` | usa `screen.frame` BGR invece di `Image.open(path)` |
+| Rifornimento OCR maschera | `tasks/rifornimento.py` | `_leggi_provviste/tassa/eta` delegano a `rifornimento_base.*()` |
+| Rifornimento sequenza tap | `tasks/rifornimento.py` | 300/300/600ms come V5 + `tap(879,487)` OK tastiera |
+| Rifornimento slot reale | `tasks/rifornimento.py` | `leggi_contatore_slot()` da `ocr_helpers` |
+| Rifornimento qta 999M | `config/global_config.json` | qta 1M → 999M, gioco adatta al massimo |
+| Rifornimento coordinate | `config/global_config.json` + `config/config_loader.py` | rifugio (687,532) in tutti i posti |
+| Rifornimento max_sped=0 | `tasks/rifornimento.py` | guard immediato per modalità selezionata |
+| Rifornimento statistiche | `tasks/rifornimento.py` + `core/state.py` | snapshot pre/post VAI → qta reale, provviste residue, dettaglio giornaliero |
+| Rifornimento modalità | `tasks/rifornimento.py` | architettura mappa/membri mutualmente esclusiva, mappa ha precedenza |
+| Rifornimento via membri | `tasks/rifornimento.py` | navigazione lista alleanza V5 tradotta in API V6 |
+| Rifornimento tap Alliance | `tasks/rifornimento.py` | `tap_barra(ctx, "alliance")` invece di coordinata fissa |
+| Rifornimento fix defaults | `tasks/rifornimento.py` | `RIFORNIMENTO_MEMBRI_ABILITATO` + `AVATAR_TEMPLATE` in `_DEFAULTS` |
+| Scheduling restart-safe | `core/state.py` + `main.py` | `ScheduleState` persiste `last_run` su disco, ripristinato all'avvio |
+| .gitignore | `.gitignore` | esclude logs, state, cache, debug, runtime |
+| Metodologia | `ROADMAP.md` | riscritta schematica con sezioni startup/codice/rilascio/ROADMAP |
 | ArenaMercato BACK | `arena_mercato.py` | `_torna_home()` BACK×3 → BACK×2 (percorso reale: Store→Lista→HOME) |
 | Runner isolato | `run_task.py` | nuovo file per test singolo task |
 | Rifornimento find_one | `rifornimento.py` | `find()` → `find_one()` in `_apri_resource_supply()` |
@@ -141,22 +161,38 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Prossima sessione
 
-### Priorità 1 — Issue #3 Zaino
+### Priorità 0 — RT-18 Scheduling restart-safe
+```
+1. Avviare bot: python main.py --istanze FAU_00 --tick-sleep 10
+2. Attendere almeno un tick completo
+3. Fermare il bot (Ctrl+C)
+4. Verificare che state/FAU_00.json contenga sezione "schedule" con timestamp
+5. Riavviare il bot
+6. Verificare nei log: "Schedule ripristinato: {task: ts, ...}"
+7. Verificare che i task daily già eseguiti NON vengano rieseguiti
+```
+
+### Priorità 1 — Ripristino config produzione rifornimento
+```
+global_config.json da ripristinare a produzione:
+  rifornimento_mappa.abilitato  = true
+  rifornimento_membri.abilitato = false
+  max_spedizioni_ciclo          = 5
+  petrolio_abilitato            = true
+  soglie normali 5.0/5.0/2.5/3.5
+```
+
+### Priorità 2 — Dashboard radiobutton mappa/membri
+- Radiobutton che scrive `rifornimento_mappa.abilitato` / `rifornimento_membri.abilitato` su `global_config.json`
+- Sezione statistiche rifornimento: `inviato_oggi`, `provviste_residue`, `dettaglio_oggi`
+
+### Priorità 3 — Issue #3 Zaino
 - `ZainoTask.run()` non riceve deposito OCR
-- Fix: leggere `ocr_risorse()` in `ZainoTask.run()` direttamente (come rifornimento)
+- Fix: leggere `ocr_risorse()` in `ZainoTask.run()` direttamente
 
-### Priorità 2 — Issue #4 Radar skip silenzioso
-- Task esegue ma non logga nulla
-- Richiede istanza in MAPPA con radar aperto
+### Priorità 4 — Issue #4 Radar skip silenzioso
 
-### Priorità 3 — RT-13 Multi-istanza
-```
-python main.py --istanze FAU_00,FAU_01 --tick-sleep 10
-```
-
-### Priorità 4 — Dashboard statistiche rifornimento
-- Aggiungere sezione dashboard con `inviato_oggi`, `provviste_residue`, `dettaglio_oggi`
-- Leggere da `state/FAU_XX.json` via API dashboard
+### Priorità 5 — RT-13 Multi-istanza FAU_00+FAU_01
 
 ---
 
@@ -258,7 +294,8 @@ C:\doomsday-engine\
     navigator.py             ← GameNavigator (vai_in_home, vai_in_mappa, tap_barra)
     device.py                ← AdbDevice + FakeDevice + Screenshot + MatchResult
     logger.py                ← StructuredLogger + get_logger + close_all_loggers
-    state.py                 ← InstanceState (load, save)
+    state.py                 ← InstanceState (load, save) + RifornimentoState
+                                + DailyTasksState + MetricsState + ScheduleState
   shared/
     template_matcher.py      ← TemplateMatcher + TemplateCache + FakeMatcher + get_matcher()
     ocr_helpers.py           ← ocr_risorse(), leggi_contatore_slot(), prepara_otsu/crema()
