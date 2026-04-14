@@ -134,22 +134,62 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Prossima sessione
 
-### Priorità 0 — RT-16 Rifornimento
+### Priorità 0 — RT-16 Rifornimento (in corso)
 ```
-1. Aggiornare rifugio_x e rifugio_y in config/global_config.json
-   con le coordinate reali di FauMorfeus
+1. Verificare che config/global_config.json abbia rifugio_x=687, rifugio_y=532
 2. Lanciare: python run_task.py --istanza FAU_00 --task rifornimento
-3. Caricare log e aggiornare ROADMAP
+3. Atteso nei log: "tap VAI" → "spedizione 1"
+4. Caricare log e aggiornare ROADMAP
 ```
 
-### Priorità 2 — Arena timeout
+### Priorità 1 — Rifornimento issue aperta
+- Issue #3 Zaino: deposito non passato dall'orchestrator
+- Issue #4 Radar: skip silenzioso
+
+### Priorità 2 — RT-13 Multi-istanza
 ```
-arena.py: _MAX_BATTAGLIA_S = 30.0 → 52.0  (8s delay + 52s poll = 60s totali)
+python main.py --istanze FAU_00,FAU_01 --tick-sleep 10
 ```
 
 ---
 
-## Modalità di test runtime
+## Metodologia di lavoro (vincolante)
+
+### Startup sessione
+1. Leggi sempre ROADMAP da GitHub: `https://raw.githubusercontent.com/faustodba/doomsday-engine/main/ROADMAP.md`
+2. Se non sei certo di avere l'ultima versione di un file → chiedi il file locale prima di modificare
+
+### Codice
+- Mai frammenti — solo file completi, coerenti, eseguibili
+- Prima di implementare qualsiasi primitiva → leggere SEMPRE il file V5 corrispondente
+- Non rompere funzionalità già testate e funzionanti in V5
+
+### Esecuzione
+- Scomponi in step semplici
+- Procedi step-by-step
+- Nessuna modifica complessa senza validazione sintassi (`ast.parse`)
+
+### Rilascio (batch obbligatorio)
+Ogni rilascio deve produrre un file `.bat` che esegue:
+1. Copia file nelle cartelle di progetto (`C:\doomsday-engine\`)
+2. `git add` dei file modificati
+3. `git commit -m "..."`
+4. `git push origin main`
+5. Il bat deve includere SEMPRE il `ROADMAP.md` aggiornato
+
+### ROADMAP
+- Aggiornare ad ogni sessione: fix applicati, stato RT, issues aperti
+- Il ROADMAP su GitHub è la fonte di verità — viene letto all'avvio di ogni sessione
+- Aggiornare anche l'albero architetturale quando cambiano classi/moduli
+
+### Interazione
+- Chiedere feedback dopo ogni fase rilevante
+- Attendere conferma prima di step critici
+- Proporre ottimizzazioni tecniche/architetturali quando rilevate
+
+### Regression
+- Verificare sempre compatibilità con V5
+- Se serve → richiedere classi/componenti V5 prima di implementare
 
 ### Runner isolato — `run_task.py` (da usare per RT-15 e oltre)
 ```
@@ -173,33 +213,24 @@ python main.py --istanze FAU_00,FAU_01 --tick-sleep 10
 - Tutti i task abilitati vengono eseguiti in sequenza per priorità
 
 ### Flag abilitazione task
-I flag sono in `main.py` nella classe `_Cfg` (sezione `_build_cfg`).
-Valori di default (tutti True salvo eccezioni):
+I flag sono in `config/global_config.json` sezione `task` — letti ad ogni tick.
 
 | Flag | Default | Task |
 |------|---------|------|
-| `ARENA_OF_GLORY_ABILITATO` | `True` | arena |
-| `ARENA_MERCATO_ABILITATO` | `True` | arena_mercato |
-| `RIFORNIMENTO_ABILITATO` | `True` | rifornimento |
-| `RIFORNIMENTO_MAPPA_ABILITATO` | `False` | rifornimento mappa |
-| `ZAINO_ABILITATO` | `True` | zaino |
-| `VIP_ABILITATO` | `True` | vip |
-| `ALLEANZA_ABILITATO` | `True` | alleanza |
-| `MESSAGGI_ABILITATO` | `True` | messaggi |
-| `RADAR_ABILITATO` | `True` | radar |
-| `RADAR_CENSUS_ABILITATO` | `False` | radar_census |
-| `BOOST_ABILITATO` | `True` | boost |
-| `STORE_ABILITATO` | `True` | store |
+| `raccolta` | `true` | raccolta |
+| `rifornimento` | `true` | rifornimento |
+| `zaino` | `false` | zaino |
+| `vip` | `true` | vip |
+| `alleanza` | `true` | alleanza |
+| `messaggi` | `true` | messaggi |
+| `arena` | `true` | arena |
+| `arena_mercato` | `true` | arena_mercato |
+| `boost` | `true` | boost |
+| `store` | `true` | store |
+| `radar` | `true` | radar |
+| `radar_census` | `false` | radar_census |
 
-Per sovrascrivere: creare `runtime.json` con sezione `globali`:
-```json
-{
-  "globali": {
-    "RIFORNIMENTO_MAPPA_ABILITATO": true,
-    "RADAR_CENSUS_ABILITATO": true
-  }
-}
-```
+Per modificare: editare `config/global_config.json` — effetto al prossimo tick senza restart.
 
 ---
 
@@ -400,6 +431,13 @@ orc.n_dovuti()                 → int
 | ARENA `tap_max_360` | `(451, 286)` | arena_mercato |
 | ARENA `tap_pack15` | `(788, 408)` | arena_mercato |
 | ARENA `tap_pack15_max` | `(654, 408)` | arena_mercato |
+| RIFORNIMENTO `rifugio` | `(687, 532)` | rifornimento mappa (FauMorfeus) |
+| RIFORNIMENTO `tap_lente_mappa` | `(334, 13)` | rifornimento mappa |
+| RIFORNIMENTO `tap_campo_x/y` | `(484,135)/(601,135)` | rifornimento mappa |
+| RIFORNIMENTO `tap_conferma_lente` | `(670, 135)` | rifornimento mappa |
+| RIFORNIMENTO `tap_castello_center` | `(480, 270)` | rifornimento mappa |
+| RIFORNIMENTO `tap_ok_tastiera` | `(879, 487)` | rifornimento compilazione |
+| RIFORNIMENTO `coord_vai` | `(480, 448)` | rifornimento VAI |
 | MSG `tap_icona_messaggi` | `(928, 430)` | messaggi |
 | VIP `tap_badge` | `(85, 52)` | vip |
 | ALLEANZA `coord_alleanza` | `(760, 505)` | alleanza (TODO → tap_barra) |
