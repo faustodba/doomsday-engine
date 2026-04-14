@@ -82,15 +82,15 @@ _DEFAULTS: dict[str, Any] = {
     "RIFORNIMENTO_LEGNO_ABILITATO":     True,
     "RIFORNIMENTO_PETROLIO_ABILITATO":  True,
     "RIFORNIMENTO_ACCIAIO_ABILITATO":   False,
-    "RIFORNIMENTO_QTA_POMODORO":        1_000_000,
-    "RIFORNIMENTO_QTA_LEGNO":           1_000_000,
-    "RIFORNIMENTO_QTA_PETROLIO":        0,
-    "RIFORNIMENTO_QTA_ACCIAIO":         0,
+    "RIFORNIMENTO_QTA_POMODORO":        999_000_000,
+    "RIFORNIMENTO_QTA_LEGNO":           999_000_000,
+    "RIFORNIMENTO_QTA_PETROLIO":        999_000_000,
+    "RIFORNIMENTO_QTA_ACCIAIO":         999_000_000,
 
     # Rifornimento — modalità mappa (coordinate fisse)
     "RIFORNIMENTO_ABILITATO":       False,
     "RIFORNIMENTO_MAPPA_ABILITATO": False,
-    "RIFUGIO_X":                    684,
+    "RIFUGIO_X":                    687,
     "RIFUGIO_Y":                    532,
 
     # Rifornimento — modalità membri (lista alleanza)
@@ -211,15 +211,15 @@ class GlobalConfig:
     rifornimento_legno_abilitato:     bool  = True
     rifornimento_petrolio_abilitato:  bool  = True
     rifornimento_acciaio_abilitato:   bool  = False
-    rifornimento_qta_pomodoro:        int   = 1_000_000
-    rifornimento_qta_legno:           int   = 1_000_000
-    rifornimento_qta_petrolio:        int   = 0
-    rifornimento_qta_acciaio:         int   = 0
+    rifornimento_qta_pomodoro:        int   = 999_000_000
+    rifornimento_qta_legno:           int   = 999_000_000
+    rifornimento_qta_petrolio:        int   = 999_000_000
+    rifornimento_qta_acciaio:         int   = 999_000_000
 
     # Rifornimento — modalità mappa
     rifornimento_abilitato:       bool = False
     rifornimento_mappa_abilitato: bool = False
-    rifugio_x:                    int  = 684
+    rifugio_x:                    int  = 687
     rifugio_y:                    int  = 532
 
     # Rifornimento — modalità membri
@@ -293,7 +293,7 @@ class GlobalConfig:
             # Rifornimento — mappa
             rifornimento_abilitato       = bool(rm.get("abilitato", False)),
             rifornimento_mappa_abilitato = bool(rm.get("abilitato", False)),
-            rifugio_x                    = int(rm.get("rifugio_x",  684)),
+            rifugio_x                    = int(rm.get("rifugio_x",  687)),
             rifugio_y                    = int(rm.get("rifugio_y",  532)),
 
             # Rifornimento — membri

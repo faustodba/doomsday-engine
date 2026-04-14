@@ -42,7 +42,7 @@
   "rifornimento_mappa": {
     "_note": "Navigazione via coordinate mappa — più veloce, dipende dalla posizione del rifugio",
     "abilitato":  true,
-    "rifugio_x":  684,
+    "rifugio_x":  687,
     "rifugio_y":  532
   },
 
