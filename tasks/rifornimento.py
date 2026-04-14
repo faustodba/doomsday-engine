@@ -139,89 +139,60 @@ def _cfg(ctx: TaskContext, key: str):
 # OCR helpers — puri (no ADB), testabili con immagini sintetiche
 # ------------------------------------------------------------------------------
 
-def _vai_abilitato(screen_path: str, vai_zona: tuple,
+def _vai_abilitato(screen, vai_zona: tuple,
                    soglia_gialli: int = 100) -> bool:
-    """True se il pulsante VAI è giallo (abilitato), False se grigio."""
+    """
+    True se il pulsante VAI è giallo (abilitato), False se grigio.
+    API V6: screen è Screenshot con .frame (BGR numpy array).
+    Logica identica a V5 rifornimento_base._vai_abilitato().
+    """
     try:
-        from PIL import Image
-        img = Image.open(screen_path)
-        arr = np.array(img)
+        # screen.frame = BGR numpy array (AdbDevice screenshot)
+        arr = screen.frame
         vai = arr[vai_zona[1]:vai_zona[3], vai_zona[0]:vai_zona[2]]
-        yellow = (vai[:, :, 0] > 160) & (vai[:, :, 1] > 120) & (vai[:, :, 2] < 90)
+        # BGR: B<90, G>120, R>160 → pixel gialli
+        yellow = (arr[vai_zona[1]:vai_zona[3], vai_zona[0]:vai_zona[2], 2] > 160) & \
+                 (arr[vai_zona[1]:vai_zona[3], vai_zona[0]:vai_zona[2], 1] > 120) & \
+                 (arr[vai_zona[1]:vai_zona[3], vai_zona[0]:vai_zona[2], 0] < 90)
         return int(yellow.sum()) > soglia_gialli
     except Exception:
         return False
 
 
-def _leggi_provviste(screen_path: str, ocr_box: tuple) -> int:
+def _leggi_provviste(screen, ocr_box: tuple) -> int:
     """
     Legge 'Provviste rimanenti di oggi' dalla maschera.
-    Ritorna intero, -1 se OCR fallisce.
+    Usa shared.rifornimento_base.leggi_provviste() — API V6 con Screenshot.
     """
     try:
-        import pytesseract
-        from PIL import Image
-        img = Image.open(screen_path)
-        crop = img.crop(ocr_box)
-        c4x = crop.resize((crop.width * 4, crop.height * 4), Image.LANCZOS)
-        gray = np.array(c4x.convert("L"))
-        import cv2
-        _, bw = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        testo = pytesseract.image_to_string(
-            Image.fromarray(bw),
-            config="--psm 7 -c tessedit_char_whitelist=0123456789,. "
-        ).strip()
-        testo = testo.replace(",", "").replace(".", "").replace(" ", "")
-        return int(testo)
+        from shared.rifornimento_base import leggi_provviste
+        return leggi_provviste(screen)
     except Exception:
         return -1
 
 
-def _leggi_tassa(screen_path: str, ocr_box: tuple,
-                 default: float = 0.24) -> float:
-    """Legge percentuale tassa dalla maschera (es. 'Tasse: 23.0%' → 0.23)."""
+def _leggi_tassa(screen, ocr_box: tuple, default: float = 0.24) -> float:
+    """
+    Legge percentuale tassa dalla maschera.
+    Usa shared.rifornimento_base.leggi_tassa() — API V6 con Screenshot.
+    """
     try:
-        import pytesseract
-        from PIL import Image
-        img = Image.open(screen_path)
-        crop = img.crop(ocr_box)
-        c4x = crop.resize((crop.width * 4, crop.height * 4), Image.LANCZOS)
-        gray = np.array(c4x.convert("L"))
-        import cv2
-        _, bw = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        testo = pytesseract.image_to_string(Image.fromarray(bw),
-                                            config="--psm 7").strip()
-        m = re.search(r'([0-9]+\.?[0-9]*)\s*%', testo)
-        if m:
-            return float(m.group(1)) / 100.0
+        from shared.rifornimento_base import leggi_tassa
+        return leggi_tassa(screen)
     except Exception:
-        pass
-    return default
+        return default
 
 
-def _leggi_eta(screen_path: str, ocr_box: tuple) -> int:
-    """Legge ETA viaggio dalla maschera (es. '00:00:54'). Ritorna secondi totali."""
+def _leggi_eta(screen, ocr_box: tuple) -> int:
+    """
+    Legge ETA viaggio dalla maschera.
+    Usa shared.rifornimento_base.leggi_eta() — API V6 con Screenshot.
+    """
     try:
-        import pytesseract
-        from PIL import Image
-        img = Image.open(screen_path)
-        crop = img.crop(ocr_box)
-        c4x = crop.resize((crop.width * 4, crop.height * 4), Image.LANCZOS)
-        gray = np.array(c4x.convert("L"))
-        import cv2
-        _, bw = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
-        testo = pytesseract.image_to_string(
-            Image.fromarray(bw),
-            config="--psm 7 -c tessedit_char_whitelist=0123456789:"
-        ).strip()
-        parti = testo.replace(".", ":").split(":")
-        if len(parti) == 3:
-            return int(parti[0]) * 3600 + int(parti[1]) * 60 + int(parti[2])
-        if len(parti) == 2:
-            return int(parti[0]) * 60 + int(parti[1])
+        from shared.rifornimento_base import leggi_eta
+        return leggi_eta(screen)
     except Exception:
-        pass
-    return 0
+        return 0
 
 
 # ------------------------------------------------------------------------------
@@ -454,16 +425,28 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
         return False, 0, False, 0
 
     ctx.log_msg(f"Rifornimento: compila {risorsa}={qta:,}")
-    for _ in range(3):
-        ctx.device.tap(coord)
-        time.sleep(0.3)
+    coord = coord_campo.get(risorsa)
+    if not coord:
+        ctx.log_msg(f"Rifornimento: campo {risorsa} non configurato")
+        return False, 0, False, 0
+
+    # Sequenza identica a V5 rifornimento_base._compila_e_invia():
+    #   tap1 delay=300ms, tap2 delay=300ms, tap3 delay=600ms → seleziona testo
+    ctx.device.tap(coord)
+    time.sleep(0.3)
+    ctx.device.tap(coord)
+    time.sleep(0.3)
+    ctx.device.tap(coord)
+    time.sleep(0.6)
+
+    # 12 DEL per cancellare valore precedente
     for _ in range(12):
         ctx.device.key("KEYCODE_DEL")
     time.sleep(0.3)
+
+    # Input testo + tap TAP_OK_TASTIERA (879,487) — come V5 config.TAP_OK_TASTIERA
     ctx.device.input_text(str(qta))
     time.sleep(0.5)
-    # V5: tap TAP_OK_TASTIERA (879,487) — la tastiera Android del gioco
-    # non risponde a KEYCODE_ENTER ma ha un tasto OK fisico
     ctx.device.tap(879, 487)
     time.sleep(0.5)
 
