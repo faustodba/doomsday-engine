@@ -46,6 +46,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | RT-16 | Rifornimento via mappa | ✅ | 5/5 spedizioni, qta reale 4M, provviste tracciate, soglia/abilitazione OK |
 | RT-17 | Rifornimento via membri | ✅ | 1/1 spedizione, navigazione lista alleanza, avatar trovato, btn risorse 0.986 |
 | RT-18 | Scheduling restart-safe | ⏳ | VIP daily OK (skip <24h, ISO string). Da testare: (1) periodic skip <interval; (2) --force daily; (3) restore_to_orchestrator al riavvio main.py |
+| RT-19 | Radar + RadarCensus | ✅ | badge OK (78,315), pallini 2/2, census 10 icone, map_annotated OK. Fix pendente: falso positivo "Complete All" zona basso-sx |
 | RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo Priorità 1-3 |
 | RT-14 | Full farm 12 istanze | ⏳ | |
 
@@ -76,10 +77,10 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 - **Fix:** leggere `ocr_risorse()` direttamente in `ZainoTask.run()`.
 - **Priorità:** dopo rifornimento.
 
-### 4. Radar — skip silenzioso (ALTA)
-- **Stato:** task esegue ma non logga nulla.
-- **Azione:** leggere `radar_census.py` V5 + `radar.py` V6. Richiede istanza
-  in MAPPA con radar aperto.
+### 4. Radar Census — falso positivo zona UI (BASSA)
+- **Problema:** bottone "Complete All" (basso-sx) riconosciuto come icona radar (`sconosciuto 0%`)
+- **Fix:** restringere `RADAR_MAPPA_ZONA` da `(0,100,860,460)` escludendo angolo `~(0,400,150,460)`
+- **Priorità:** dopo raccolta campioni aggiuntivi
 
 ### 5. Alleanza — tap_barra (BASSA)
 - `COORD_ALLEANZA=(760,505)` ancora hardcoded.
@@ -96,7 +97,11 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 | Fix | File | Dettaglio |
 |-----|------|-----------|
-| Arena timeout | `arena.py` | `_MAX_BATTAGLIA_S` 30.0 → 15.0 |
+| Radar coord V5 | `radar.py` | TAP_RADAR_ICONA (90,460)→(78,315), tutti parametri allineati V5 |
+| Radar log | `radar.py` | logger.* → ctx.log_msg() — log visibile in run_task |
+| RadarCensus V6 | `tasks/radar_census.py` | traduzione completa V5→V6: ctx.device, ctx.log_msg, Path da __file__ |
+| radar_tool integrato | `radar_tool/` | copia fisica da Bot-farm → doomsday-engine |
+| global_config census | `config/global_config.json` | radar_census: true per test |
 | Config centralizzata Step A | `config/global_config.json` + `config/config_loader.py` | unica fonte verità, `load_global()`, `build_instance_cfg()` |
 | Config centralizzata Step B | `main.py` + `run_task.py` | rimossa `_Cfg` hardcodata, usa `config_loader` |
 | Rifornimento OCR deposito | `tasks/rifornimento.py` | `_leggi_deposito_ocr` usa `ocr_helpers.ocr_risorse()` |
@@ -144,7 +149,12 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Prossima sessione
 
-### Priorità 0 — RT-18 completamento test scheduling
+### Priorità 0 — Issue #3 Zaino
+- `ZainoTask.run()` non riceve deposito OCR
+- Fix: leggere `ocr_risorse()` in `ZainoTask.run()` direttamente
+- Richiedere `tasks/zaino.py` V6 prima di modificare
+
+### Priorità 1 — RT-18 completamento test scheduling
 ```
 Test mancanti (in ordine):
 1. Task periodic — raccolta o rifornimento:
