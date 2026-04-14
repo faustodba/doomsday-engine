@@ -371,18 +371,19 @@ def _apri_resource_supply(ctx: TaskContext) -> bool:
 
 
 def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
-                      nome_rifugio: str) -> tuple[bool, int, bool, int]:
+                      nome_rifugio: str) -> tuple[bool, int, bool, int, int]:
     """
     Legge la maschera di invio, compila la risorsa e preme VAI.
 
-    Ritorna: (ok, eta_sec, quota_esaurita, qta_inviata)
+    Ritorna: (ok, eta_sec, quota_esaurita, qta_inviata, provviste_lette)
       ok=True          → spedizione inviata
       quota_esaurita   → provviste=0, non rientrare nel ciclo oggi
-      qta_inviata      → 0 se non inviata
+      qta_inviata      → quantità nominale compilata (0 se non inviata)
+      provviste_lette  → provviste rimanenti lette dalla maschera (-1 se OCR fallito)
     """
     screen = ctx.device.screenshot()
     if not screen:
-        return False, 0, False, 0
+        return False, 0, False, 0, -1
 
     # Verifica nome destinatario (come V5 _compila_e_invia in rifornimento_base.py)
     if nome_rifugio:
@@ -393,7 +394,7 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
             )
             ctx.device.back()
             time.sleep(0.8)
-            return False, 0, False, 0
+            return False, 0, False, 0, -1
 
     vai_zona     = _cfg(ctx, "VAI_ZONA")
     soglia_vai   = _cfg(ctx, "VAI_SOGLIA_GIALLI")
@@ -413,7 +414,7 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
         ctx.log_msg("Rifornimento: provviste esaurite → stop")
         ctx.device.key("KEYCODE_BACK")
         time.sleep(0.8)
-        return False, 0, True, 0
+        return False, 0, True, 0, 0
 
     eta_sec = _leggi_eta(screen, ocr_tempo)
     ctx.log_msg(f"Rifornimento: ETA viaggio={eta_sec}s")
@@ -422,13 +423,9 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
     coord = coord_campo.get(risorsa)
     if not coord:
         ctx.log_msg(f"Rifornimento: campo {risorsa} non configurato")
-        return False, 0, False, 0
+        return False, 0, False, 0, provviste
 
     ctx.log_msg(f"Rifornimento: compila {risorsa}={qta:,}")
-    coord = coord_campo.get(risorsa)
-    if not coord:
-        ctx.log_msg(f"Rifornimento: campo {risorsa} non configurato")
-        return False, 0, False, 0
 
     # Sequenza identica a V5 rifornimento_base._compila_e_invia():
     #   tap1 delay=300ms, tap2 delay=300ms, tap3 delay=600ms → seleziona testo
@@ -458,14 +455,14 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
         if provviste2 == 0:
             ctx.device.key("KEYCODE_BACK")
             time.sleep(0.8)
-            return False, 0, True, 0
+            return False, 0, True, 0, 0
         ctx.device.key("KEYCODE_BACK")
-        return False, 0, False, 0
+        return False, 0, False, 0, provviste
 
     ctx.log_msg("Rifornimento: tap VAI")
     ctx.device.tap(coord_vai)
     time.sleep(2.5)
-    return True, eta_sec, False, qta
+    return True, eta_sec, False, qta, provviste
 
 
 # ------------------------------------------------------------------------------
@@ -676,8 +673,11 @@ class RifornimentoTask(Task):
                     break
 
                 # ── 5. Compila e invia ──────────────────────────────────────
+                # Snapshot PRE-VAI: deposito attuale già letto al passo 3
+                snapshot_pre = dict(deposito) if deposito else {}
+
                 ts_invio = time.time()
-                ok, eta_sec, quota_esaurita, qta_inviata = _compila_e_invia(
+                ok, eta_sec, quota_esaurita, qta_inviata, provviste_lette = _compila_e_invia(
                     ctx, risorsa_scelta, qta, nome_rifugio
                 )
 
@@ -689,15 +689,46 @@ class RifornimentoTask(Task):
                     ctx.log_msg("Rifornimento: invio fallito — stop")
                     break
 
-                # ── 6. Registra in coda ─────────────────────────────────────
+                # ── Snapshot POST-VAI: rileggi deposito per qta reale ────────
+                time.sleep(1.5)   # attesa UI post-VAI
+                snapshot_post = _leggi_deposito_ocr(ctx, risorse_l)
+                qta_reale = 0
+                if snapshot_pre.get(risorsa_scelta, -1) >= 0 and \
+                   snapshot_post.get(risorsa_scelta, -1) >= 0:
+                    qta_reale = max(0, int(
+                        snapshot_pre[risorsa_scelta] - snapshot_post[risorsa_scelta]
+                    ))
+                else:
+                    # fallback: usa qta_inviata nominale
+                    qta_reale = qta_inviata
+
+                # ── 6. Registra in coda e state ─────────────────────────────
                 spedizioni += 1
                 eta_ar = float(eta_sec * 2)   # A/R = andata × 2
                 coda_volo.append((ts_invio, eta_ar))
+
+                # Leggi provviste residue dalla maschera successiva (già chiusa)
+                # Le provviste correnti sono state lette in _compila_e_invia
+                # ma non restituite — le rileveremo al ciclo successivo.
+                # Per ora usiamo -1 e aggiorneremo al prossimo _compila_e_invia.
+                if ctx.state is not None:
+                    ctx.state.rifornimento.registra_spedizione(
+                        risorsa=risorsa_scelta,
+                        qta_inviata=qta_reale,
+                        provviste_residue=provviste_lette,
+                    )
+
+                provv_str = f" | provviste={provviste_lette:,}" if provviste_lette >= 0 else ""
                 ctx.log_msg(
                     f"Rifornimento: spedizione {spedizioni} "
-                    f"— {risorsa_scelta} {qta_inviata:,} | ETA A/R={eta_ar:.0f}s"
+                    f"— {risorsa_scelta} {qta_reale:,} reali"
+                    f" | ETA A/R={eta_ar:.0f}s{provv_str}"
                 )
-                time.sleep(2.0)
+
+                # Aggiorna deposito con snapshot post per il ciclo successivo
+                if all(snapshot_post.get(r, -1) >= 0 for r in risorse_l):
+                    deposito = snapshot_post
+                time.sleep(0.5)   # pausa residua (totale ~2s post-VAI)
 
         finally:
             ctx.log_msg("Rifornimento: ritorno in home")
@@ -713,6 +744,17 @@ class RifornimentoTask(Task):
             ctx.log_msg(f"Rifornimento: ETA residua ultima sped. = {eta_residua:.0f}s")
 
         ctx.log_msg(f"Rifornimento: completato — {spedizioni} spedizioni")
+
+        # Riepilogo statistiche giornaliere
+        if ctx.state is not None:
+            rif = ctx.state.rifornimento
+            if rif.inviato_oggi:
+                riepilogo = " | ".join(
+                    f"{r}={v/1e6:.1f}M" for r, v in rif.inviato_oggi.items()
+                )
+                ctx.log_msg(f"Rifornimento: inviato oggi — {riepilogo}")
+            if rif.provviste_residue >= 0:
+                ctx.log_msg(f"Rifornimento: provviste residue={rif.provviste_residue:,}")
         return TaskResult(
             success=True,
             message=f"{spedizioni} spedizioni",

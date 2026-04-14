@@ -56,6 +56,11 @@ class RifornimentoState:
 
     La quota si resetta automaticamente all'inizio di ogni nuovo giorno UTC.
     Quando spedizioni_oggi >= quota_max, il rifornimento è bloccato.
+
+    Statistiche giornaliere (reset insieme alla quota):
+      provviste_residue  — ultime provviste lette dalla maschera (-1 = non lette)
+      inviato_oggi       — dict {risorsa: qta_totale_inviata_oggi} (quantità reali)
+      dettaglio_oggi     — lista [{ts, risorsa, qta_inviata, provviste_residue}]
     """
 
     spedizioni_oggi: int = 0
@@ -63,12 +68,20 @@ class RifornimentoState:
     data_riferimento: str = field(default_factory=_today_utc)
     ultima_spedizione: str | None = None   # timestamp ISO ultima spedizione
 
+    # Statistiche giornaliere
+    provviste_residue: int = -1
+    inviato_oggi: dict = field(default_factory=dict)   # {risorsa: int}
+    dettaglio_oggi: list = field(default_factory=list) # [{ts, risorsa, qta, provviste}]
+
     def _controlla_reset(self) -> None:
-        """Se siamo in un nuovo giorno UTC, azzera il contatore."""
+        """Se siamo in un nuovo giorno UTC, azzera il contatore e le statistiche."""
         oggi = _today_utc()
         if self.data_riferimento != oggi:
             self.spedizioni_oggi = 0
             self.data_riferimento = oggi
+            self.provviste_residue = -1
+            self.inviato_oggi = {}
+            self.dettaglio_oggi = []
 
     @property
     def quota_esaurita(self) -> bool:
@@ -82,17 +95,46 @@ class RifornimentoState:
         self._controlla_reset()
         return max(0, self.quota_max - self.spedizioni_oggi)
 
-    def registra_spedizione(self) -> None:
-        """Incrementa il contatore e aggiorna il timestamp."""
+    def registra_spedizione(self,
+                            risorsa: str = "",
+                            qta_inviata: int = 0,
+                            provviste_residue: int = -1) -> None:
+        """
+        Incrementa il contatore, aggiorna timestamp e registra statistiche.
+
+        Args:
+            risorsa:          nome risorsa inviata (es. "pomodoro")
+            qta_inviata:      quantità reale inviata (snapshot_pre - snapshot_post)
+            provviste_residue: provviste rimanenti lette dopo il VAI (-1 = non lette)
+        """
         self._controlla_reset()
         self.spedizioni_oggi += 1
         self.ultima_spedizione = _ts_now()
+
+        if provviste_residue >= 0:
+            self.provviste_residue = provviste_residue
+
+        if risorsa and qta_inviata > 0:
+            self.inviato_oggi[risorsa] = self.inviato_oggi.get(risorsa, 0) + qta_inviata
+            self.dettaglio_oggi.append({
+                "ts":               self.ultima_spedizione,
+                "risorsa":          risorsa,
+                "qta_inviata":      qta_inviata,
+                "provviste_residue": provviste_residue,
+            })
+
+    def totale_inviato(self) -> int:
+        """Totale risorse inviate oggi su tutte le risorse."""
+        return sum(self.inviato_oggi.values())
 
     def reset_forzato(self) -> None:
         """Azzera manualmente la quota (es. dopo cambio data manuale)."""
         self.spedizioni_oggi = 0
         self.data_riferimento = _today_utc()
         self.ultima_spedizione = None
+        self.provviste_residue = -1
+        self.inviato_oggi = {}
+        self.dettaglio_oggi = []
 
     @classmethod
     def from_dict(cls, d: dict) -> "RifornimentoState":
@@ -101,14 +143,20 @@ class RifornimentoState:
             quota_max=d.get("quota_max", 5),
             data_riferimento=d.get("data_riferimento", _today_utc()),
             ultima_spedizione=d.get("ultima_spedizione", None),
+            provviste_residue=d.get("provviste_residue", -1),
+            inviato_oggi=dict(d.get("inviato_oggi", {})),
+            dettaglio_oggi=list(d.get("dettaglio_oggi", [])),
         )
 
     def to_dict(self) -> dict:
         return {
-            "spedizioni_oggi": self.spedizioni_oggi,
-            "quota_max": self.quota_max,
-            "data_riferimento": self.data_riferimento,
-            "ultima_spedizione": self.ultima_spedizione,
+            "spedizioni_oggi":    self.spedizioni_oggi,
+            "quota_max":          self.quota_max,
+            "data_riferimento":   self.data_riferimento,
+            "ultima_spedizione":  self.ultima_spedizione,
+            "provviste_residue":  self.provviste_residue,
+            "inviato_oggi":       self.inviato_oggi,
+            "dettaglio_oggi":     self.dettaglio_oggi,
         }
 
 
