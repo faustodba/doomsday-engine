@@ -42,6 +42,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | RT-11 | Raccolta | ✅ | 4/4 FAU_00; territorio FUORI FAU_01 OK |
 | RT-12 | Tick completo FAU_01 | ✅ | Tick completo funzionante |
 | RT-tap | tap_barra barra inferiore | ✅ | score=1.000 tutti 5 bottoni su FAU_01 |
+| RT-15 | Arena + ArenaMercato | ✅ | Arena: 5/5 sfide 8.4s/sfida; ArenaMercato: pack360=5; fix BACK×2 |
 | RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo fix issues aperti |
 | RT-14 | Full farm 12 istanze | ⏳ | |
 
@@ -81,6 +82,16 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 ### 6. Store NMS cross-template (BASSA)
 - `pin_acciaio.png` = `pin_pomodoro.png` (stesso file) → stesso cx,cy.
   Risolvibile quando sarà disponibile il vero `pin_acciaio.png`.
+
+---
+
+## Fix applicati in sessione 14/04/2026
+
+| Fix | File | Dettaglio |
+|-----|------|-----------|
+| Arena timeout | `arena.py` | `_MAX_BATTAGLIA_S` 30.0 → 15.0 (skip attivo, 23s totali sufficienti) |
+| ArenaMercato BACK | `arena_mercato.py` | `_torna_home()` BACK×3 → BACK×2 (percorso reale: Store→Lista→HOME) |
+| Runner isolato | `run_task.py` | nuovo file per test singolo task |
 
 ---
 

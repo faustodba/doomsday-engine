@@ -22,7 +22,6 @@ Navigazione (analogo a arena.py V6 + V5 arena_of_glory.py)
   → tap Carrello (905,68)                 ← dentro _loop_acquisti, come V5 _visita_mercato_arena()
   → loop acquisti pack 360 / pack 15
   → BACK → HOME
-
 Logica acquisti (priorità)
 ─────────────────────────────────────────────────────────────────────────────
   FASE 1 — Pack 360 (Intermediate Resource Pack):
@@ -118,7 +117,7 @@ class ArenaMercatoTask(Task):
       - _loop_acquisti()        apre il carrello e acquista
                                 (come V5 _visita_mercato_arena — tap carrello è
                                  la prima azione del loop, non della navigazione)
-      - _torna_home()           BACK×3
+      - _torna_home()           BACK×2
     """
 
     # ── Task ABC ──────────────────────────────────────────────────────────────
@@ -237,9 +236,12 @@ class ArenaMercatoTask(Task):
         return ok
 
     def _torna_home(self, ctx: TaskContext) -> None:
-        """BACK × 3 per uscire da store → lista → campaign → home."""
-        ctx.log_msg("[MERCATO-ARENA] ritorno HOME — BACK×3")
-        for _ in range(3):
+        """BACK × 2 per uscire da store → lista → home.
+        Percorso reale: Arena Store → BACK → Lista Arena → BACK → HOME.
+        Campaign non costituisce schermata separata nel percorso di ritorno.
+        """
+        ctx.log_msg("[MERCATO-ARENA] ritorno HOME — BACK×2")
+        for _ in range(2):
             ctx.device.back()
             time.sleep(0.8)
 
@@ -322,7 +324,7 @@ class ArenaMercatoTask(Task):
             "[MERCATO-ARENA] loop completato — pack360=%d pack15=%d",
             acquisti_360, acquisti_15,
         )
-        # BACK → torna alla lista arena (poi _torna_home farà altri BACK×3)
+        # BACK → torna alla lista arena (poi _torna_home farà altri BACK×2)
         ctx.device.back()
         time.sleep(1.5)
         return acquisti_360, acquisti_15
