@@ -374,6 +374,31 @@ def _verifica_nome_destinatario_v6(ctx: TaskContext, screen, nome_atteso: str) -
         return True, ""
 
 
+def _apri_resource_supply(ctx: TaskContext) -> bool:
+    """
+    Cerca il pulsante RESOURCE SUPPLY via template matching e lo tappa.
+    Ritorna True se trovato e tappato, False altrimenti.
+    API V6: find_one(screen, path, threshold, zone) — non esiste find().
+    """
+    screen = ctx.device.screenshot()
+    if not screen:
+        ctx.log_msg("Rifornimento: screenshot fallito dopo tap castello")
+        return False
+
+    template = _cfg(ctx, "TEMPLATE_RESOURCE_SUPPLY")
+    soglia   = _cfg(ctx, "TEMPLATE_RESOURCE_SUPPLY_SOGLIA")
+    result   = ctx.matcher.find_one(screen, template, threshold=soglia)
+    ctx.log_msg(f"Rifornimento: RESOURCE SUPPLY score={result.score:.3f} soglia={soglia}")
+    if not result.found:
+        ctx.log_msg("Rifornimento: RESOURCE SUPPLY non trovato")
+        return False
+
+    ctx.log_msg(f"Rifornimento: RESOURCE SUPPLY trovato ({result.cx},{result.cy}) → tap")
+    ctx.device.tap(result.cx, result.cy)
+    time.sleep(2.5)
+    return True
+
+
 def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
                       nome_rifugio: str) -> tuple[bool, int, bool, int]:
     """
