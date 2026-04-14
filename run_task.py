@@ -7,27 +7,23 @@
 #  Uso:
 #    cd C:\doomsday-engine
 #    python run_task.py --istanza FAU_01 --task arena
-#    python run_task.py --istanza FAU_01 --task arena_mercato
-#    python run_task.py --istanza FAU_00 --task raccolta
+#    python run_task.py --istanza FAU_00 --task zaino --force
+#    python run_task.py --istanza FAU_00 --task zaino --force --dry-run
+#
+#  Opzioni:
+#    --force     Ignora schedule (forza esecuzione anche se già eseguito oggi)
+#    --dry-run   Solo simulazione: OCR + calcolo piano, nessun tap eseguito
+#                Supportato da: ZainoTask (scan inventario + piano greedy)
 #
 #  Task disponibili:
 #    boost, raccolta, rifornimento, zaino, vip, alleanza, messaggi,
 #    arena, arena_mercato, store, radar, radar_census
 #
-#  Output:
-#    - Log a schermo con timestamp
-#    - Screenshot di debug salvati in C:\doomsday-engine\debug_task\<task>\
-#    - Esito finale: OK / FAIL
-#
-#  Prerequisiti:
-#    - Istanza MuMu avviata con Doomsday aperto sulla HOME del gioco
-#    - ADB connesso (verificare con: adb devices)
-#
 #  FIX 14/04/2026:
-#    - Schedule aggiornato con ISO string leggibile dopo run() con esito OK
+#    - Schedule aggiornato con ISO string dopo run() OK
 #    - Skip automatico se task daily già eseguito nelle ultime 24h
-#      (emula comportamento orchestrator per RT-18)
-#    - --force per forzare esecuzione ignorando lo schedule
+#    - --force ignora schedule
+#    - --dry-run: solo simulazione (zaino: scan + piano, nessun tap)
 # ==============================================================================
 
 from __future__ import annotations
@@ -133,7 +129,6 @@ def _build_ctx(ist: dict, gcfg, debug_dir: str):
 
     cfg = build_instance_cfg(ist, gcfg)
 
-    # Logger — scrive su file in debug_dir
     try:
         from core.logger import get_logger
         logger = get_logger(nome, log_dir=debug_dir, console=False)
@@ -141,7 +136,6 @@ def _build_ctx(ist: dict, gcfg, debug_dir: str):
         log(f"[WARN] Logger: {exc} — logging disabilitato")
         logger = None
 
-    # State
     try:
         from core.state import InstanceState
         state = InstanceState.load(nome, state_dir=os.path.join(ROOT, "state"))
@@ -149,7 +143,6 @@ def _build_ctx(ist: dict, gcfg, debug_dir: str):
         log(f"[WARN] InstanceState: {exc}")
         state = None
 
-    # Device ADB
     try:
         from core.device import AdbDevice
         device = AdbDevice(host="127.0.0.1", port=porta)
@@ -158,7 +151,6 @@ def _build_ctx(ist: dict, gcfg, debug_dir: str):
         log(f"[ERRORE] AdbDevice: {exc}")
         device = None
 
-    # TemplateMatcher
     try:
         from shared.template_matcher import get_matcher
         matcher = get_matcher(template_dir=os.path.join(ROOT, "templates"))
@@ -167,7 +159,6 @@ def _build_ctx(ist: dict, gcfg, debug_dir: str):
         log(f"[ERRORE] TemplateMatcher: {exc}")
         matcher = None
 
-    # Navigator
     navigator = None
     try:
         from core.navigator import GameNavigator
@@ -194,7 +185,6 @@ def _build_ctx(ist: dict, gcfg, debug_dir: str):
         navigator=navigator,
     )
 
-    # Patch log_msg per stampare a schermo durante il test
     _orig_log_msg = ctx.log_msg
     def _log_msg_verbose(msg: str, *args, level: str = "info") -> None:
         try:
@@ -233,14 +223,6 @@ def _carica_task(nome_task: str):
 # Check schedule — emula logica orchestrator
 # ---------------------------------------------------------------------------
 def _check_schedule(ctx, nome_task: str, force: bool) -> bool:
-    """
-    Verifica se il task deve essere eseguito in base allo schedule persistito.
-    Ritorna True se il task deve girare, False se deve essere saltato.
-
-    - Task daily: skip se eseguito nelle ultime 24h
-    - Task periodic: nessun check (run_task è per test manuali)
-    - --force: ignora sempre lo schedule
-    """
     if force:
         log("[SCHEDULE] --force attivo — schedule ignorato")
         return True
@@ -268,7 +250,6 @@ def _check_schedule(ctx, nome_task: str, force: bool) -> bool:
                 f"{elapsed_h:.1f}h fa ({last_iso}) — procedo")
             return True
 
-    # Task periodic: log informativo, non blocca
     log(f"[SCHEDULE] Task '{nome_task}' ultimo run "
         f"{elapsed_h:.1f}h fa ({last_iso}) — procedo")
     return True
@@ -288,16 +269,20 @@ def main():
                         help=f"Task da eseguire: {', '.join(sorted(_TASK_CATALOGUE.keys()))}")
     parser.add_argument("--force",   action="store_true", default=False,
                         help="Forza esecuzione ignorando lo schedule")
+    parser.add_argument("--dry-run", action="store_true", default=False,
+                        help="Simulazione: OCR + piano, nessun tap eseguito (solo zaino)")
     args = parser.parse_args()
 
-    # Debug dir
     global _debug_dir
     _debug_dir = os.path.join(ROOT, "debug_task", args.task)
     os.makedirs(_debug_dir, exist_ok=True)
 
-    separa(f"RUN TASK — {args.task.upper()} su {args.istanza}")
+    modo = " [DRY-RUN]" if args.dry_run else ""
+    separa(f"RUN TASK — {args.task.upper()} su {args.istanza}{modo}")
     log(f"Avvio: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     log(f"Debug dir: {_debug_dir}")
+    if args.dry_run:
+        log("*** MODALITÀ DRY-RUN: nessun tap verrà eseguito ***")
 
     # 1. Carica istanza
     separa("PASSO 1 — Carica istanza")
@@ -343,7 +328,7 @@ def main():
     except Exception as exc:
         log(f"[WARN] should_run() eccezione: {exc} — procedo comunque")
 
-    # 4b. Schedule check — emula logica orchestrator
+    # 4b. Schedule check
     separa("PASSO 4b — Schedule check")
     if not _check_schedule(ctx, args.task, args.force):
         log("Task saltato per schedule — uscita con codice 0")
@@ -351,10 +336,18 @@ def main():
         sys.exit(0)
 
     # 5. Esecuzione
-    separa(f"PASSO 5 — Esecuzione task '{args.task}'")
+    separa(f"PASSO 5 — Esecuzione task '{args.task}'" +
+           (" [DRY-RUN]" if args.dry_run else ""))
     t_start = time.time()
     try:
-        result = task.run(ctx)
+        # Passa dry_run al task se lo supporta
+        if args.dry_run and hasattr(task, "run_dry"):
+            result = task.run_dry(ctx)
+        elif args.dry_run:
+            log("[WARN] Task non supporta dry-run — esecuzione normale")
+            result = task.run(ctx)
+        else:
+            result = task.run(ctx)
         durata = time.time() - t_start
     except Exception as exc:
         durata = time.time() - t_start
@@ -380,16 +373,19 @@ def main():
             for k, v in result.data.items():
                 log(f"  {k}: {v}")
 
-    # Salva state — aggiorna schedule restart-safe prima del save
-    try:
-        if result and result.success:
-            ctx.state.schedule.set(args.task, time.time())
-            iso = ctx.state.schedule.timestamps.get(args.task, "?")
-            log(f"Schedule aggiornato: {args.task} → {iso}")
-        ctx.state.save(state_dir=os.path.join(ROOT, "state"))
-        log("State salvato OK")
-    except Exception as exc:
-        log(f"[WARN] save state: {exc}")
+    # Salva state (solo se non dry-run)
+    if not args.dry_run:
+        try:
+            if result and result.success:
+                ctx.state.schedule.set(args.task, time.time())
+                iso = ctx.state.schedule.timestamps.get(args.task, "?")
+                log(f"Schedule aggiornato: {args.task} → {iso}")
+            ctx.state.save(state_dir=os.path.join(ROOT, "state"))
+            log("State salvato OK")
+        except Exception as exc:
+            log(f"[WARN] save state: {exc}")
+    else:
+        log("DRY-RUN: state non salvato")
 
     salva_log()
 

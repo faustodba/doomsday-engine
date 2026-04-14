@@ -53,14 +53,15 @@
   },
 
   "zaino": {
-    "usa_pomodoro":       true,
+    "_note": "TEST dry-run legno: soglia 50M (attuale ~32.3M, gap ~17.7M). Pomodoro/acciaio/petrolio disabilitati.",
+    "usa_pomodoro":       false,
     "usa_legno":          true,
-    "usa_petrolio":       true,
+    "usa_petrolio":       false,
     "usa_acciaio":        false,
     "soglia_pomodoro_m":  10.0,
-    "soglia_legno_m":     10.0,
-    "soglia_petrolio_m":   5.0,
-    "soglia_acciaio_m":    7.0
+    "soglia_legno_m":     50.0,
+    "soglia_petrolio_m":  5.0,
+    "soglia_acciaio_m":   7.0
   },
 
   "raccolta": {
