@@ -399,7 +399,8 @@ state.schedule.update_from_stato(orc.stato()) → sync dopo ogni tick
 | MSG `tap_icona_messaggi` | `(928, 430)` | messaggi |
 | VIP `tap_badge` | `(85, 52)` | vip |
 | ALLEANZA `coord_alleanza` | `(760, 505)` | alleanza (TODO → tap_barra) |
-| BARRA `campaign` | `(584, 507)` | navigator tap_barra |
+| RADAR `tap_icona` | `(78, 315)` | radar |
+| RADAR `mappa_zona` | `(0,100,860,460)` | radar |
 | BARRA `bag` | `(656, 506)` | navigator tap_barra |
 | BARRA `alliance` | `(727, 506)` | navigator tap_barra |
 | BARRA `beast` | `(798, 506)` | navigator tap_barra |

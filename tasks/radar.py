@@ -33,22 +33,23 @@
 #   Parametri: RADAR_PX_MIN, RADAR_W/H_MIN/MAX, RADAR_COMP_MIN, RADAR_ASPECT_MIN.
 #   Tutti i parametri letti da ctx.config (dizionario) con fallback ai default.
 #
-# Coordinate di default (960×540) — override via ctx.config
+# Coordinate di default (960×540) — calibrate da V5, override via ctx.config
 # ──────────────────────────────────────────────────────────────────────────────
-#   TAP_RADAR_ICONA   = (90, 460)
-#   RADAR_MAPPA_ZONA  = (0, 80, 960, 490)
-#   RADAR_BADGE_R_MIN = 160
-#   RADAR_BADGE_G_MAX = 80
-#   RADAR_BADGE_B_MAX = 80
-#   RADAR_PX_MIN      = 5
-#   RADAR_W_MIN / MAX = 6 / 40
-#   RADAR_H_MIN / MAX = 6 / 40
-#   RADAR_COMP_MIN    = 0.45
-#   RADAR_ASPECT_MIN  = 0.55
-#   RADAR_TIMEOUT_S   = 120
-#   RADAR_SCAN_DELAY_S= 2.0
-#   RADAR_TAP_DELAY_S = 0.4
+#   TAP_RADAR_ICONA   = (78, 315)
+#   RADAR_MAPPA_ZONA  = (0, 100, 860, 460)
+#   RADAR_BADGE_R_MIN = 150
+#   RADAR_BADGE_G_MAX = 85
+#   RADAR_BADGE_B_MAX = 85
+#   RADAR_PX_MIN      = 15
+#   RADAR_W_MIN / MAX = 8 / 22
+#   RADAR_H_MIN / MAX = 8 / 22
+#   RADAR_COMP_MIN    = 0.55
+#   RADAR_ASPECT_MIN  = 0.50
+#   RADAR_TIMEOUT_S   = 30
+#   RADAR_SCAN_DELAY_S= 1.0
+#   RADAR_TAP_DELAY_S = 1.2
 #   RADAR_CENSUS_ABILITATO = False
+#   RADAR_TOOL_THRESHOLD   = 0.65
 #
 # FIX 14/04/2026:
 #   - Sostituiti tutti i logger.* con ctx.log_msg() — log visibile in run_task
@@ -72,22 +73,23 @@ from tasks.radar_census import RadarCensusTask
 # ──────────────────────────────────────────────────────────────────────────────
 
 _DEFAULTS: dict = {
-    "TAP_RADAR_ICONA":        (90, 460),
-    "RADAR_MAPPA_ZONA":       (0, 80, 960, 490),
-    "RADAR_BADGE_R_MIN":      160,
-    "RADAR_BADGE_G_MAX":      80,
-    "RADAR_BADGE_B_MAX":      80,
-    "RADAR_PX_MIN":           5,
-    "RADAR_W_MIN":            6,
-    "RADAR_W_MAX":            40,
-    "RADAR_H_MIN":            6,
-    "RADAR_H_MAX":            40,
-    "RADAR_COMP_MIN":         0.45,
-    "RADAR_ASPECT_MIN":       0.55,
-    "RADAR_TIMEOUT_S":        120,
-    "RADAR_SCAN_DELAY_S":     2.0,
-    "RADAR_TAP_DELAY_S":      0.4,
+    "TAP_RADAR_ICONA":        (78, 315),         # V5 calibrato
+    "RADAR_MAPPA_ZONA":       (0, 100, 860, 460), # V5 calibrato
+    "RADAR_BADGE_R_MIN":      150,               # V5 calibrato
+    "RADAR_BADGE_G_MAX":      85,                # V5 calibrato
+    "RADAR_BADGE_B_MAX":      85,                # V5 calibrato
+    "RADAR_PX_MIN":           15,                # V5 calibrato
+    "RADAR_W_MIN":            8,                 # V5 calibrato
+    "RADAR_W_MAX":            22,                # V5 calibrato
+    "RADAR_H_MIN":            8,                 # V5 calibrato
+    "RADAR_H_MAX":            22,                # V5 calibrato
+    "RADAR_COMP_MIN":         0.55,              # V5 calibrato
+    "RADAR_ASPECT_MIN":       0.50,              # V5 calibrato
+    "RADAR_TIMEOUT_S":        30,                # V5 calibrato
+    "RADAR_SCAN_DELAY_S":     1.0,               # V5 calibrato
+    "RADAR_TAP_DELAY_S":      1.2,               # V5 calibrato
     "RADAR_CENSUS_ABILITATO": False,
+    "RADAR_TOOL_THRESHOLD":   0.65,              # V5 calibrato
 }
 
 
