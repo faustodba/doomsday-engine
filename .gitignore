@@ -1,0 +1,57 @@
+# ==============================================================================
+#  DOOMSDAY ENGINE V6 — .gitignore
+# ==============================================================================
+
+# ── Python ────────────────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+
+# ── Runtime engine ────────────────────────────────────────────────────────────
+# Generati a runtime — non tracciare
+bot.log
+bot.log.bak
+engine_status.json
+runtime.json
+
+# ── Logs istanze ─────────────────────────────────────────────────────────────
+logs/
+*.jsonl
+*.jsonl.bak
+
+# ── State persistito ─────────────────────────────────────────────────────────
+state/
+
+# ── Debug e test runtime ─────────────────────────────────────────────────────
+debug_nav/
+debug_task/
+*.png
+!templates/pin/*.png
+
+# ── Deploy bat locali ─────────────────────────────────────────────────────────
+deploy/
+
+# ── Test file temporanei ─────────────────────────────────────────────────────
+test_fau*.png
+tet.png
+test_lente.py
+test_livello.py
+test_tap_barra.py
+test_task_raccolta_FAU01.py
+test_navigator.py
+
+# ── Ambiente virtuale ─────────────────────────────────────────────────────────
+venv/
+.venv/
+env/
+
+# ── IDE ───────────────────────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.swp
+*.swo
