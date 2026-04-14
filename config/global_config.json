@@ -21,12 +21,9 @@
     "radar_census":  false
   },
 
-  "rifornimento": {
-    "abilitato":            true,
-    "mappa_abilitato":      true,
+  "rifornimento_comune": {
+    "_note": "Parametri condivisi da entrambe le modalità di rifornimento",
     "dooms_account":        "FauMorfeus",
-    "rifugio_x":            684,
-    "rifugio_y":            532,
     "max_spedizioni_ciclo": 5,
     "soglia_campo_m":       5.0,
     "soglia_legno_m":       5.0,
@@ -40,6 +37,19 @@
     "qta_legno":            1000000,
     "qta_petrolio":         0,
     "qta_acciaio":          0
+  },
+
+  "rifornimento_mappa": {
+    "_note": "Navigazione via coordinate mappa — più veloce, dipende dalla posizione del rifugio",
+    "abilitato":  true,
+    "rifugio_x":  684,
+    "rifugio_y":  532
+  },
+
+  "rifornimento_membri": {
+    "_note": "Navigazione via lista membri alleanza — indipendente dalla posizione",
+    "abilitato":        false,
+    "avatar_template":  "pin/avatar.png"
   },
 
   "zaino": {

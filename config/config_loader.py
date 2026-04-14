@@ -71,12 +71,8 @@ _DEFAULTS: dict[str, Any] = {
     "task_radar":         True,
     "task_radar_census":  False,
 
-    # Rifornimento
-    "RIFORNIMENTO_ABILITATO":           False,
-    "RIFORNIMENTO_MAPPA_ABILITATO":     False,
+    # Rifornimento — parametri comuni
     "DOOMS_ACCOUNT":                    "",
-    "RIFUGIO_X":                        684,
-    "RIFUGIO_Y":                        532,
     "RIFORNIMENTO_MAX_SPEDIZIONI_CICLO": 5,
     "RIFORNIMENTO_SOGLIA_CAMPO_M":      5.0,
     "RIFORNIMENTO_SOGLIA_LEGNO_M":      5.0,
@@ -90,6 +86,16 @@ _DEFAULTS: dict[str, Any] = {
     "RIFORNIMENTO_QTA_LEGNO":           1_000_000,
     "RIFORNIMENTO_QTA_PETROLIO":        0,
     "RIFORNIMENTO_QTA_ACCIAIO":         0,
+
+    # Rifornimento — modalità mappa (coordinate fisse)
+    "RIFORNIMENTO_ABILITATO":       False,
+    "RIFORNIMENTO_MAPPA_ABILITATO": False,
+    "RIFUGIO_X":                    684,
+    "RIFUGIO_Y":                    532,
+
+    # Rifornimento — modalità membri (lista alleanza)
+    "RIFORNIMENTO_MEMBRI_ABILITATO": False,
+    "AVATAR_TEMPLATE":               "pin/avatar.png",
 
     # Zaino
     "ZAINO_ABILITATO":          False,
@@ -194,12 +200,8 @@ class GlobalConfig:
     task_radar:         bool = True
     task_radar_census:  bool = False
 
-    # Rifornimento
-    rifornimento_abilitato:           bool  = False
-    rifornimento_mappa_abilitato:     bool  = False
+    # Rifornimento — parametri comuni
     dooms_account:                    str   = ""
-    rifugio_x:                        int   = 684
-    rifugio_y:                        int   = 532
     rifornimento_max_spedizioni_ciclo: int  = 5
     rifornimento_soglia_campo_m:      float = 5.0
     rifornimento_soglia_legno_m:      float = 5.0
@@ -213,6 +215,16 @@ class GlobalConfig:
     rifornimento_qta_legno:           int   = 1_000_000
     rifornimento_qta_petrolio:        int   = 0
     rifornimento_qta_acciaio:         int   = 0
+
+    # Rifornimento — modalità mappa
+    rifornimento_abilitato:       bool = False
+    rifornimento_mappa_abilitato: bool = False
+    rifugio_x:                    int  = 684
+    rifugio_y:                    int  = 532
+
+    # Rifornimento — modalità membri
+    rifornimento_membri_abilitato: bool = False
+    avatar_template:               str  = "pin/avatar.png"
 
     # Zaino
     zaino_usa_pomodoro:      bool  = True
@@ -236,7 +248,9 @@ class GlobalConfig:
         """Costruisce GlobalConfig da dict grezzo (global_config.json)."""
         s  = raw.get("sistema", {})
         t  = raw.get("task", {})
-        r  = raw.get("rifornimento", {})
+        rc = raw.get("rifornimento_comune", {})
+        rm = raw.get("rifornimento_mappa", {})
+        rb = raw.get("rifornimento_membri", {})
         z  = raw.get("zaino", {})
         ra = raw.get("raccolta", {})
         al = ra.get("allocazione", {})
@@ -260,25 +274,31 @@ class GlobalConfig:
             task_radar         = bool(t.get("radar",         True)),
             task_radar_census  = bool(t.get("radar_census",  False)),
 
-            # Rifornimento
-            rifornimento_abilitato           = bool(r.get("abilitato",            False)),
-            rifornimento_mappa_abilitato     = bool(r.get("mappa_abilitato",      False)),
-            dooms_account                    = str(r.get("dooms_account",         "")),
-            rifugio_x                        = int(r.get("rifugio_x",             684)),
-            rifugio_y                        = int(r.get("rifugio_y",             532)),
-            rifornimento_max_spedizioni_ciclo= int(r.get("max_spedizioni_ciclo",  5)),
-            rifornimento_soglia_campo_m      = float(r.get("soglia_campo_m",      5.0)),
-            rifornimento_soglia_legno_m      = float(r.get("soglia_legno_m",      5.0)),
-            rifornimento_soglia_petrolio_m   = float(r.get("soglia_petrolio_m",   2.5)),
-            rifornimento_soglia_acciaio_m    = float(r.get("soglia_acciaio_m",    3.5)),
-            rifornimento_campo_abilitato     = bool(r.get("campo_abilitato",      True)),
-            rifornimento_legno_abilitato     = bool(r.get("legno_abilitato",      True)),
-            rifornimento_petrolio_abilitato  = bool(r.get("petrolio_abilitato",   True)),
-            rifornimento_acciaio_abilitato   = bool(r.get("acciaio_abilitato",    False)),
-            rifornimento_qta_pomodoro        = int(r.get("qta_pomodoro",          1_000_000)),
-            rifornimento_qta_legno           = int(r.get("qta_legno",             1_000_000)),
-            rifornimento_qta_petrolio        = int(r.get("qta_petrolio",          0)),
-            rifornimento_qta_acciaio         = int(r.get("qta_acciaio",           0)),
+            # Rifornimento — comune
+            dooms_account                    = str(rc.get("dooms_account",        "")),
+            rifornimento_max_spedizioni_ciclo= int(rc.get("max_spedizioni_ciclo", 5)),
+            rifornimento_soglia_campo_m      = float(rc.get("soglia_campo_m",     5.0)),
+            rifornimento_soglia_legno_m      = float(rc.get("soglia_legno_m",     5.0)),
+            rifornimento_soglia_petrolio_m   = float(rc.get("soglia_petrolio_m",  2.5)),
+            rifornimento_soglia_acciaio_m    = float(rc.get("soglia_acciaio_m",   3.5)),
+            rifornimento_campo_abilitato     = bool(rc.get("campo_abilitato",     True)),
+            rifornimento_legno_abilitato     = bool(rc.get("legno_abilitato",     True)),
+            rifornimento_petrolio_abilitato  = bool(rc.get("petrolio_abilitato",  True)),
+            rifornimento_acciaio_abilitato   = bool(rc.get("acciaio_abilitato",   False)),
+            rifornimento_qta_pomodoro        = int(rc.get("qta_pomodoro",         1_000_000)),
+            rifornimento_qta_legno           = int(rc.get("qta_legno",            1_000_000)),
+            rifornimento_qta_petrolio        = int(rc.get("qta_petrolio",         0)),
+            rifornimento_qta_acciaio         = int(rc.get("qta_acciaio",          0)),
+
+            # Rifornimento — mappa
+            rifornimento_abilitato       = bool(rm.get("abilitato", False)),
+            rifornimento_mappa_abilitato = bool(rm.get("abilitato", False)),
+            rifugio_x                    = int(rm.get("rifugio_x",  684)),
+            rifugio_y                    = int(rm.get("rifugio_y",  532)),
+
+            # Rifornimento — membri
+            rifornimento_membri_abilitato = bool(rb.get("abilitato",       False)),
+            avatar_template               = str(rb.get("avatar_template",  "pin/avatar.png")),
 
             # Zaino
             zaino_usa_pomodoro      = bool(z.get("usa_pomodoro",      True)),
@@ -319,12 +339,8 @@ class GlobalConfig:
                 "radar":         self.task_radar,
                 "radar_census":  self.task_radar_census,
             },
-            "rifornimento": {
-                "abilitato":            self.rifornimento_abilitato,
-                "mappa_abilitato":      self.rifornimento_mappa_abilitato,
+            "rifornimento_comune": {
                 "dooms_account":        self.dooms_account,
-                "rifugio_x":            self.rifugio_x,
-                "rifugio_y":            self.rifugio_y,
                 "max_spedizioni_ciclo": self.rifornimento_max_spedizioni_ciclo,
                 "soglia_campo_m":       self.rifornimento_soglia_campo_m,
                 "soglia_legno_m":       self.rifornimento_soglia_legno_m,
@@ -338,6 +354,15 @@ class GlobalConfig:
                 "qta_legno":            self.rifornimento_qta_legno,
                 "qta_petrolio":         self.rifornimento_qta_petrolio,
                 "qta_acciaio":          self.rifornimento_qta_acciaio,
+            },
+            "rifornimento_mappa": {
+                "abilitato": self.rifornimento_mappa_abilitato,
+                "rifugio_x": self.rifugio_x,
+                "rifugio_y": self.rifugio_y,
+            },
+            "rifornimento_membri": {
+                "abilitato":       self.rifornimento_membri_abilitato,
+                "avatar_template": self.avatar_template,
             },
             "zaino": {
                 "usa_pomodoro":      self.zaino_usa_pomodoro,
@@ -398,12 +423,8 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         lingua        = ist.get("lingua", "en")
         abilitata     = ist.get("abilitata", True)
 
-        # ── Rifornimento ─────────────────────────────────────────────────────
-        RIFORNIMENTO_ABILITATO           = gcfg.rifornimento_abilitato
-        RIFORNIMENTO_MAPPA_ABILITATO     = gcfg.rifornimento_mappa_abilitato
+        # ── Rifornimento — comune ────────────────────────────────────────────
         DOOMS_ACCOUNT                    = gcfg.dooms_account
-        RIFUGIO_X                        = gcfg.rifugio_x
-        RIFUGIO_Y                        = gcfg.rifugio_y
         RIFORNIMENTO_MAX_SPEDIZIONI_CICLO= gcfg.rifornimento_max_spedizioni_ciclo
         RIFORNIMENTO_SOGLIA_CAMPO_M      = gcfg.rifornimento_soglia_campo_m
         RIFORNIMENTO_SOGLIA_LEGNO_M      = gcfg.rifornimento_soglia_legno_m
@@ -417,6 +438,16 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         RIFORNIMENTO_QTA_LEGNO           = gcfg.rifornimento_qta_legno
         RIFORNIMENTO_QTA_PETROLIO        = gcfg.rifornimento_qta_petrolio
         RIFORNIMENTO_QTA_ACCIAIO         = gcfg.rifornimento_qta_acciaio
+
+        # ── Rifornimento — modalità mappa ────────────────────────────────────
+        RIFORNIMENTO_ABILITATO       = gcfg.rifornimento_mappa_abilitato
+        RIFORNIMENTO_MAPPA_ABILITATO = gcfg.rifornimento_mappa_abilitato
+        RIFUGIO_X                    = gcfg.rifugio_x
+        RIFUGIO_Y                    = gcfg.rifugio_y
+
+        # ── Rifornimento — modalità membri ───────────────────────────────────
+        RIFORNIMENTO_MEMBRI_ABILITATO = gcfg.rifornimento_membri_abilitato
+        AVATAR_TEMPLATE               = gcfg.avatar_template
 
         # ── Zaino ─────────────────────────────────────────────────────────────
         ZAINO_ABILITATO         = gcfg.task_zaino
@@ -452,18 +483,20 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
 
         def task_abilitato(self, nome_task: str) -> bool:
             mappa = {
-                "raccolta":      gcfg.task_raccolta,
-                "rifornimento":  gcfg.rifornimento_abilitato,
-                "zaino":         gcfg.task_zaino,
-                "vip":           gcfg.task_vip,
-                "alleanza":      gcfg.task_alleanza,
-                "messaggi":      gcfg.task_messaggi,
-                "arena":         gcfg.task_arena,
-                "arena_mercato": gcfg.task_arena_mercato,
-                "boost":         gcfg.task_boost,
-                "store":         gcfg.task_store,
-                "radar":         gcfg.task_radar,
-                "radar_census":  gcfg.task_radar_census,
+                "raccolta":              gcfg.task_raccolta,
+                "rifornimento":          gcfg.rifornimento_mappa_abilitato or gcfg.rifornimento_membri_abilitato,
+                "rifornimento_mappa":    gcfg.rifornimento_mappa_abilitato,
+                "rifornimento_membri":   gcfg.rifornimento_membri_abilitato,
+                "zaino":                 gcfg.task_zaino,
+                "vip":                   gcfg.task_vip,
+                "alleanza":              gcfg.task_alleanza,
+                "messaggi":              gcfg.task_messaggi,
+                "arena":                 gcfg.task_arena,
+                "arena_mercato":         gcfg.task_arena_mercato,
+                "boost":                 gcfg.task_boost,
+                "store":                 gcfg.task_store,
+                "radar":                 gcfg.task_radar,
+                "radar_census":          gcfg.task_radar_census,
             }
             return mappa.get(nome_task, True)
 
