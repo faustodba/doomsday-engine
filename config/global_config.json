@@ -33,10 +33,10 @@
     "legno_abilitato":      true,
     "petrolio_abilitato":   true,
     "acciaio_abilitato":    false,
-    "qta_pomodoro":         1000000,
-    "qta_legno":            1000000,
-    "qta_petrolio":         0,
-    "qta_acciaio":          0
+    "qta_pomodoro":         999000000,
+    "qta_legno":            999000000,
+    "qta_petrolio":         999000000,
+    "qta_acciaio":          999000000
   },
 
   "rifornimento_mappa": {
