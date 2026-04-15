@@ -124,6 +124,12 @@ _DEFAULTS: dict = {
     # Stop scan/esecuzione
     "BAG_MAX_VUOTE":           3,
     "BAG_MAX_SCROLL":          12,
+    # Popup Caution (supero capacità warehouse) — compare una volta per sessione
+    "BAG_CAUTION_PIN":         "pin/pin_caution.png",
+    "BAG_CAUTION_CHECK":       (400, 319),   # "Do not show again"
+    "BAG_CAUTION_OK":          (585, 379),   # OK
+    "BAG_CAUTION_THRESHOLD":   0.80,
+    "BAG_CAUTION_DELAY":       0.5,
 
     # ── MODALITÀ SVUOTA ───────────────────────────────────────────────────────
     "SV_TAP_APRI":             (430, 18),
@@ -560,6 +566,54 @@ def _calcola_piano(
 
 
 # ------------------------------------------------------------------------------
+# CAUTION POPUP — compare una volta per sessione quando si supera il warehouse
+# ------------------------------------------------------------------------------
+
+def _gestisci_caution(ctx: TaskContext, caution_gestito: list) -> bool:
+    """
+    Controlla se e' comparso il popup Caution post-USE.
+    Se trovato: tap check "Do not show again" + tap OK.
+    caution_gestito e' una lista [bool] usata come flag mutabile per sessione.
+    Ritorna True se il popup e' stato gestito ora, False altrimenti.
+    """
+    if caution_gestito[0]:
+        return False  # gia' gestito in questa sessione
+
+    screen = ctx.device.screenshot()
+    if screen is None:
+        return False
+
+    pin       = _cfg(ctx, "BAG_CAUTION_PIN")
+    threshold = _cfg(ctx, "BAG_CAUTION_THRESHOLD")
+    delay     = _cfg(ctx, "BAG_CAUTION_DELAY")
+
+    try:
+        match = ctx.matcher.find_one(screen, pin, threshold=threshold)
+    except FileNotFoundError:
+        return False
+
+    if not match.found:
+        return False
+
+    ctx.log_msg(
+        f"[ZAINO] Popup Caution rilevato score={match.score:.3f} "
+        f"— confermo e disabilito"
+    )
+
+    # Tap "Do not show again"
+    ctx.device.tap(*_cfg(ctx, "BAG_CAUTION_CHECK"))
+    time.sleep(delay)
+
+    # Tap OK
+    ctx.device.tap(*_cfg(ctx, "BAG_CAUTION_OK"))
+    time.sleep(delay)
+
+    caution_gestito[0] = True
+    ctx.log_msg("[ZAINO] Caution gestito — non comparira' piu' in questa sessione")
+    return True
+
+
+# ------------------------------------------------------------------------------
 # FASE 3 — ESECUZIONE PIANO
 # ------------------------------------------------------------------------------
 
@@ -589,6 +643,8 @@ def _esegui_piano(
     piano_rim:   dict[tuple[str, int], int] = {}
     piano_short: dict[tuple[str, int], str] = {}
     esiti:       dict[str, float]           = {}
+    # Flag mutabile per gestione popup Caution (una volta per sessione)
+    caution_gestito: list = [False]
 
     for short, risorsa, pez, n, owned in piano:
         piano_rim[(risorsa, pez)]   = n
@@ -668,6 +724,11 @@ def _esegui_piano(
                 else:
                     ctx.device.tap(*campo_qty)
                     time.sleep(delay_input)
+                    # Seleziona tutto + cancella valore preesistente (default=1)
+                    ctx.device.key("KEYCODE_CTRL_A")
+                    time.sleep(0.1)
+                    ctx.device.key("KEYCODE_DEL")
+                    time.sleep(0.1)
                     ctx.device.input_text(str(n_finale))
                     time.sleep(delay_input)
                     ctx.device.tap(*ok_xy)
@@ -675,6 +736,10 @@ def _esegui_piano(
 
                 ctx.device.tap(*use_xy)
                 time.sleep(delay_use)
+
+                # Gestione popup Caution (supero warehouse) — una volta per sessione
+                if not dry_run:
+                    _gestisci_caution(ctx, caution_gestito)
             else:
                 n_finale = n_rim
 
