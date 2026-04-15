@@ -39,7 +39,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | RT-08 | Messaggi + Alleanza | ✅ | |
 | RT-09 | Store | ✅ | 18 acquistati + Free Refresh |
 | RT-10 | Arena | ✅ | 5 sfide + skip checkbox |
-| RT-11 | Raccolta | ✅ | 4/4 FAU_00; territorio FUORI FAU_01 OK |
+| RT-11 | Raccolta V6 upgrade | ✅ | OCR coord X_Y, ETA, interleaving, psm=6 fix 3/5→5/5. Test 2/5→3 marce + 5/5→skip. 15/04/2026 |
 | RT-12 | Tick completo FAU_01 | ✅ | Tick completo funzionante |
 | RT-tap | tap_barra barra inferiore | ✅ | score=1.000 tutti 5 bottoni su FAU_01 |
 | RT-15 | Arena + ArenaMercato | ✅ | Arena: 5/5 sfide 8.4s/sfida; ArenaMercato: pack360=5; fix BACK×2 |
@@ -101,6 +101,11 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 |-----|------|-----------|
 | Zaino TM-based | `tasks/zaino.py` | Architettura FASE1(scan TM)+FASE2(greedy)+FASE3(esecuzione). Eliminato bug icone_viste |
 | Zaino svuota validata | `tasks/zaino.py` | Modalità svuota: sidebar+USE MAX testata su FAU_00. RT-20 chiuso |
+| Raccolta upgrade V5 | `tasks/raccolta.py` | Step 1-6: OCR coord X_Y, ETA marcia, livello nodo, blacklist statica fuori territorio, interleaving sequenza, BlacklistFuori disco |
+| Raccolta fix slot OCR | `shared/ocr_helpers.py` | psm=6 scale=2 maschera_bianca — calibrato con calibra_slot_ocr.py (6183/29400 combinazioni corrette) |
+| Raccolta pin_return | `templates/pin/pin_return.png` | pin pulsante recall Squad Summary (futuro uso) |
+| Tool calibrazione OCR | `calibra_slot_ocr.py` | Testa 29400 combinazioni parametri Tesseract su screenshot reale |
+| device.py timeout | `core/device.py` | _run/_shell 15s→20s, screencap/pull 15s→30s |
 | Raccolta upgrade V5 | `tasks/raccolta.py` | Step 1: OCR coord reali X_Y; Step 2: OCR ETA; Step 3: contatore post-marcia; Step 4: fuori territorio→blacklist; Step 5: livello nodo OCR; Step 6: BlacklistFuori su disco |
 | Zaino pin catalogo | `templates/pin/` | pin_pom/leg/acc/pet tutte pezzature (26 file) + pin_caution.png |
 | Zaino caution popup | `tasks/zaino.py` | `_gestisci_caution()` — tap check+OK, flag sessione, una volta per sessione |
@@ -171,7 +176,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Prossima sessione
 
-### Priorità 0 — Raccolta upgrade V5 — test runtime
+### Priorità 0 — RT-18 completamento test scheduling
 ```
 Upgrade integrato 15/04/2026 (Step 1-6):
   Step 1: OCR coordinate nodo reali (chiave X_Y)

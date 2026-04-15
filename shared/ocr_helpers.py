@@ -326,24 +326,34 @@ def _ocr_zona_intera_slot(crop_pil: Image.Image) -> tuple[int, int]:
     """
     OCR X/Y sulla zona testo intera. Ritorna (attive, totale) o (-1,-1).
 
-    FIX 15/04/2026: multiple configurazioni psm sulla maschera bianca 4x.
-    La maschera bianca produce un'immagine pulita del pattern "5/5" — il
-    fallback su cifre separate causava confusione 3/5 per crop impreciso.
-    Prova psm=7, psm=6, psm=13 in sequenza fino al primo match valido.
+    FIX 15/04/2026 — calibrazione automatica con calibra_slot_ocr.py:
+    6183/29400 combinazioni leggono correttamente 5/5.
+    Configurazione vincente: psm=6, scale=2, maschera_bianca, taglio=0.
+    Retry automatico con psm=7 e psm=13 se psm=6 fallisce.
+    Salva debug/slot_ocr_debug.png per analisi in caso di fallimento.
     """
     try:
         w, h   = crop_pil.size
-        crop4x = crop_pil.resize((w*4, h*4), Image.LANCZOS)
-        mask   = _maschera_bianca(crop4x, taglio_sx=0)
-        wl     = "-c tessedit_char_whitelist=0123456789/"
+        crop2x = crop_pil.resize((w*2, h*2), Image.LANCZOS)
+        mask   = _maschera_bianca(crop2x, taglio_sx=0)
 
-        for psm in (7, 6, 13):
-            cfg = f"--psm {psm} {wl}"
+        for psm in (6, 7, 13):
+            cfg = f"--psm {psm} -c tessedit_char_whitelist=0123456789/"
             with _tesseract_lock:
                 testo = pytesseract.image_to_string(mask, config=cfg).strip()
-            m = re.search(r'(\d+)/(\d+)', testo)
+            m = re.search(r"(\d+)/(\d+)", testo)
             if m:
                 return (int(m.group(1)), int(m.group(2)))
+
+        # Tutti i psm falliti — salva debug su disco
+        try:
+            import os as _os_dbg
+            dbg_dir = r"C:\doomsday-engine\debug_task"
+            _os_dbg.makedirs(dbg_dir, exist_ok=True)
+            mask.save(_os_dbg.path.join(dbg_dir, "slot_ocr_debug.png"))
+            crop_pil.save(_os_dbg.path.join(dbg_dir, "slot_ocr_crop.png"))
+        except Exception:
+            pass
 
         return (-1, -1)
     except Exception:
