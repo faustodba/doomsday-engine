@@ -5,7 +5,10 @@
 #
 #  MODALITÀ "bag" (default):
 #    Usa interfaccia BAG (tap_barra "bag" → RESOURCE).
-#    Scan griglia → OCR pannello destra → calcolo quantità precisa → USE.
+#    FASE 1: scan griglia via TM (find_one per ogni pin catalogo) + tap + OCR
+#            pannello destra → inventario completo {(risorsa, pezzatura): owned}
+#    FASE 2: calcolo greedy ottimale sul inventario completo
+#    FASE 3: scroll to top + ricerca TM pin del piano + tap + input n + USE
 #    Rispetta soglie: carica solo quello che serve per raggiungere il target.
 #
 #  MODALITÀ "svuota":
@@ -45,13 +48,17 @@
 #    TAP_MAX_X    : 601
 #    PRIMA_RIGA_Y : 140
 #
-#  FIX 15/04/2026 — _wait_ui_stabile():
-#    Sostituisce time.sleep(BAG_DELAY_SCROLL) fisso post-swipe.
-#    Causa bug: ADB ancora occupato dalla swipe → screenshot() timeout 15s
-#    → subprocess.TimeoutExpired propagato come KeyboardInterrupt.
-#    Fix: polling leggero su diff pixel ROI griglia fino a frame stabile,
-#    poi sleep minimo di sicurezza. Adattivo: esce appena il device è pronto,
-#    timeout massimo configurabile.
+#  PIN CATALOGO (templates/pin/):
+#    Naming: pin_{risorsa}_{pezzatura}.png
+#    Risorse: pom, leg, acc, pet
+#    Pezzature per risorsa: vedi _PIN_CATALOGO
+#
+#  FIX/REFACTOR 15/04/2026 — architettura TM-based:
+#    Sostituisce scan per coordinate fisse con find_one() su pin catalogo.
+#    FASE 1: identifica icone via TM → tap → OCR pannello destra (100%)
+#    FASE 2: greedy su inventario completo
+#    FASE 3: rescansione TM per esecuzione
+#    Eliminato bug icone_viste. _wait_ui_stabile() post-swipe.
 # ==============================================================================
 
 from __future__ import annotations
@@ -69,14 +76,14 @@ from core.task import Task, TaskContext, TaskResult
 
 _DEFAULTS: dict = {
     # Modalità
-    "ZAINO_MODALITA":      "bag",       # "bag" | "svuota"
+    "ZAINO_MODALITA":          "bag",
 
     # Abilitazione risorse
-    "ZAINO_ABILITATO":     True,
-    "ZAINO_USA_POMODORO":  True,
-    "ZAINO_USA_LEGNO":     True,
-    "ZAINO_USA_ACCIAIO":   False,
-    "ZAINO_USA_PETROLIO":  True,
+    "ZAINO_ABILITATO":         True,
+    "ZAINO_USA_POMODORO":      True,
+    "ZAINO_USA_LEGNO":         True,
+    "ZAINO_USA_ACCIAIO":       False,
+    "ZAINO_USA_PETROLIO":      True,
 
     # Soglie target (milioni) — solo modalità bag
     "ZAINO_SOGLIA_POMODORO_M": 10.0,
@@ -85,59 +92,77 @@ _DEFAULTS: dict = {
     "ZAINO_SOGLIA_PETROLIO_M":  5.0,
 
     # ── MODALITÀ BAG ─────────────────────────────────────────────────────────
-    "BAG_RESOURCE_TAP":    (65, 110),   # tab RESOURCE nel BAG
-    "BAG_COL_X":           [191, 295, 399, 503, 607],
-    "BAG_RIGA_Y":          [176, 280, 384, 488],
+    "BAG_RESOURCE_TAP":        (65, 110),
     # Pannello destra
-    "BAG_TITOLO_ZONA":     (665,  80, 824, 124),
-    "BAG_OWNED_ZONA":      (664, 175, 796, 206),
-    "BAG_GRANTS_ZONA":     (663, 206, 839, 246),
-    "BAG_CAMPO_QTY":       (738, 445),
-    "BAG_MAX":             (883, 444),
-    "BAG_OK":              (879, 509),
-    "BAG_USE":             (806, 492),
-    # Ritardi BAG
-    "BAG_DELAY_APRI":      2.0,
-    "BAG_DELAY_ICONA":     0.8,
-    "BAG_DELAY_INPUT":     0.5,
-    "BAG_DELAY_USE":       1.0,
-    "BAG_DELAY_POST":      1.5,
-    # Parametri wait-UI-stabile post-swipe (sostituisce BAG_DELAY_SCROLL fisso)
-    "BAG_SCROLL_POLL_S":   0.3,   # intervallo polling screenshot
-    "BAG_SCROLL_SOGLIA":   50,    # diff pixel massima per considerare frame stabile
-    "BAG_SCROLL_TIMEOUT":  3.0,   # timeout massimo attesa stabilità (secondi)
-    "BAG_SCROLL_MIN_S":    0.3,   # sleep minimo post-stabilità (evita burst ADB)
+    "BAG_TITOLO_ZONA":         (665,  80, 824, 124),
+    "BAG_OWNED_ZONA":          (664, 175, 796, 206),
+    "BAG_GRANTS_ZONA":         (663, 206, 839, 246),
+    "BAG_CAMPO_QTY":           (738, 445),
+    "BAG_MAX":                 (883, 444),
+    "BAG_OK":                  (879, 509),
+    "BAG_USE":                 (806, 492),
+    # ROI griglia TM
+    "BAG_GRIGLIA_ROI":         (150, 100, 660, 530),
+    # Scroll
+    "BAG_SCROLL_X":            480,
+    "BAG_SCROLL_Y_START":      488,
+    "BAG_SCROLL_Y_END":        176,
+    "BAG_SCROLL_MS":           400,
+    # Ritardi
+    "BAG_DELAY_APRI":          2.0,
+    "BAG_DELAY_ICONA":         0.8,
+    "BAG_DELAY_INPUT":         0.5,
+    "BAG_DELAY_USE":           1.0,
+    "BAG_DELAY_POST":          1.5,
+    # Wait UI stabile post-swipe
+    "BAG_SCROLL_POLL_S":       0.3,
+    "BAG_SCROLL_SOGLIA":       50,
+    "BAG_SCROLL_TIMEOUT":      3.0,
+    "BAG_SCROLL_MIN_S":        0.3,
+    # TM
+    "BAG_PIN_THRESHOLD":       0.80,
+    # Stop scan/esecuzione
+    "BAG_MAX_VUOTE":           3,
+    "BAG_MAX_SCROLL":          12,
 
     # ── MODALITÀ SVUOTA ───────────────────────────────────────────────────────
-    "SV_TAP_APRI":         (430, 18),
-    "SV_TAP_CHIUDI":       (783, 68),
-    "SV_SIDEBAR_POMODORO": (80, 130),
-    "SV_SIDEBAR_LEGNO":    (80, 200),
-    "SV_SIDEBAR_ACCIAIO":  (80, 270),
-    "SV_SIDEBAR_PETROLIO": (80, 340),
-    "SV_TAP_USE_X":        722,
-    "SV_TAP_MAX_X":        601,
-    "SV_PRIMA_RIGA_Y":     140,
-    "SV_ALTEZZA_RIGA":     79,
-    "SV_MAX_RIGHE":        5,
-    "SV_DELAY_APRI":       2.0,
-    "SV_DELAY_SIDEBAR":    1.0,
-    "SV_DELAY_USE":        0.8,
-    "SV_DELAY_MAX":        0.3,
-    "SV_DELAY_CONF":       1.5,
+    "SV_TAP_APRI":             (430, 18),
+    "SV_TAP_CHIUDI":           (783, 68),
+    "SV_SIDEBAR_POMODORO":     (80, 130),
+    "SV_SIDEBAR_LEGNO":        (80, 200),
+    "SV_SIDEBAR_ACCIAIO":      (80, 270),
+    "SV_SIDEBAR_PETROLIO":     (80, 340),
+    "SV_TAP_USE_X":            722,
+    "SV_TAP_MAX_X":            601,
+    "SV_PRIMA_RIGA_Y":         140,
+    "SV_ALTEZZA_RIGA":         79,
+    "SV_MAX_RIGHE":            5,
+    "SV_DELAY_APRI":           2.0,
+    "SV_DELAY_SIDEBAR":        1.0,
+    "SV_DELAY_USE":            0.8,
+    "SV_DELAY_MAX":            0.3,
+    "SV_DELAY_CONF":           1.5,
 }
 
-# Mapping grants/titolo → risorsa interna
+# ------------------------------------------------------------------------------
+# Catalogo pin: {short: (risorsa_interna, [pezzature DESC])}
+# File: templates/pin/pin_{short}_{pezzatura}.png
+# Aggiungere nuove pezzature qui quando i pin diventano disponibili.
+# ------------------------------------------------------------------------------
+_PIN_CATALOGO: dict[str, tuple[str, list[int]]] = {
+    "pom": ("pomodoro", [5000000, 1500000, 500000, 150000, 50000, 10000, 1000]),
+    "leg": ("legno",    [1500000, 500000, 150000, 50000, 10000, 1000]),
+    "acc": ("acciaio",  [2500000, 750000, 250000, 75000, 25000, 5000, 500]),
+    "pet": ("petrolio", [300000, 100000, 30000, 10000, 2000, 200]),
+}
+
+# Mapping grants/titolo → risorsa interna (OCR pannello destra)
 _GRANTS_MAP = [
     ("food",  "pomodoro"),
     ("wood",  "legno"),
     ("steel", "acciaio"),
     ("oil",   "petrolio"),
 ]
-
-# ROI griglia usata per il diff pixel in _wait_ui_stabile
-# copre l'area delle icone (col_x min..max, riga_y min..max) con margine
-_GRIGLIA_ROI = (150, 135, 650, 530)
 
 
 def _cfg(ctx: TaskContext, key: str):
@@ -192,12 +217,16 @@ def _calcola_gap(ctx: TaskContext,
             ctx.log_msg(f"[ZAINO] [{risorsa}]: OCR N/D")
             continue
         if valore < target:
-            ctx.log_msg(f"[ZAINO] [{risorsa}]: {valore/1e6:.2f}M < "
-                        f"{target/1e6:.2f}M → carico (gap={( target-valore)/1e6:.3f}M)")
+            ctx.log_msg(
+                f"[ZAINO] [{risorsa}]: {valore/1e6:.2f}M < "
+                f"{target/1e6:.2f}M → carico (gap={(target-valore)/1e6:.3f}M)"
+            )
             da_caricare[risorsa] = (valore, target)
         else:
-            ctx.log_msg(f"[ZAINO] [{risorsa}]: {valore/1e6:.2f}M >= "
-                        f"{target/1e6:.2f}M — ok")
+            ctx.log_msg(
+                f"[ZAINO] [{risorsa}]: {valore/1e6:.2f}M >= "
+                f"{target/1e6:.2f}M — ok"
+            )
     return da_caricare
 
 
@@ -209,59 +238,46 @@ def _get_frame(screen):
 
 
 # ==============================================================================
-# WAIT UI STABILE — fix post-swipe ADB timeout
+# SCROLL + WAIT UI STABILE
 # ==============================================================================
 
 def _wait_ui_stabile(ctx: TaskContext) -> bool:
     """
-    Attende che la griglia BAG sia visivamente stabile dopo una swipe.
-
-    Strategia: polling screenshot ogni BAG_SCROLL_POLL_S secondi.
-    Confronta la ROI griglia (_GRIGLIA_ROI) tra frame consecutivi.
-    Esce appena la diff pixel scende sotto BAG_SCROLL_SOGLIA, oppure
-    allo scadere di BAG_SCROLL_TIMEOUT secondi (fallback sicuro).
-    Aggiunge BAG_SCROLL_MIN_S di sleep finale per evitare burst ADB.
-
-    Ritorna True se stabilizzato entro timeout, False se timeout scaduto.
+    Polling screenshot ogni BAG_SCROLL_POLL_S su ROI griglia.
+    Esce quando diff pixel < BAG_SCROLL_SOGLIA oppure timeout.
+    Aggiunge BAG_SCROLL_MIN_S di sleep finale.
     """
-    poll_s   = _cfg(ctx, "BAG_SCROLL_POLL_S")
-    soglia   = _cfg(ctx, "BAG_SCROLL_SOGLIA")
-    timeout  = _cfg(ctx, "BAG_SCROLL_TIMEOUT")
-    min_s    = _cfg(ctx, "BAG_SCROLL_MIN_S")
+    poll_s  = _cfg(ctx, "BAG_SCROLL_POLL_S")
+    soglia  = _cfg(ctx, "BAG_SCROLL_SOGLIA")
+    timeout = _cfg(ctx, "BAG_SCROLL_TIMEOUT")
+    min_s   = _cfg(ctx, "BAG_SCROLL_MIN_S")
 
-    x1, y1, x2, y2 = _GRIGLIA_ROI
-    t_start  = time.time()
+    x1, y1, x2, y2 = _cfg(ctx, "BAG_GRIGLIA_ROI")
+    t_start = time.time()
     frame_prec: Optional[np.ndarray] = None
 
     while True:
         elapsed = time.time() - t_start
-
         screen = ctx.device.screenshot()
         if screen is not None:
             frame = _get_frame(screen)
             if frame is not None:
                 roi = frame[y1:y2, x1:x2]
-
                 if frame_prec is not None and roi.shape == frame_prec.shape:
-                    diff = int(np.mean(np.abs(roi.astype(int) - frame_prec.astype(int))))
+                    diff = int(np.mean(
+                        np.abs(roi.astype(int) - frame_prec.astype(int))
+                    ))
                     if diff <= soglia:
-                        # UI ferma — sleep minimo poi esci
                         time.sleep(min_s)
                         ctx.log_msg(
-                            f"[ZAINO] UI stabile in {elapsed:.1f}s "
-                            f"(diff={diff})"
+                            f"[ZAINO] UI stabile in {elapsed:.1f}s (diff={diff})"
                         )
                         return True
-
                 frame_prec = roi.copy()
 
         if elapsed >= timeout:
-            # Timeout: UI non si è stabilizzata entro il limite.
-            # Procediamo comunque — meglio rischiare un OCR su frame in
-            # transizione che bloccarsi indefinitamente.
             ctx.log_msg(
-                f"[ZAINO] WARN: UI non stabilizzata entro {timeout:.1f}s "
-                f"— procedo comunque"
+                f"[ZAINO] WARN: UI non stabilizzata entro {timeout:.1f}s — procedo"
             )
             time.sleep(min_s)
             return False
@@ -269,8 +285,31 @@ def _wait_ui_stabile(ctx: TaskContext) -> bool:
         time.sleep(poll_s)
 
 
+def _scroll_su(ctx: TaskContext) -> None:
+    """Scroll griglia verso l'alto di una schermata + attesa stabilità."""
+    ctx.device.swipe(
+        _cfg(ctx, "BAG_SCROLL_X"), _cfg(ctx, "BAG_SCROLL_Y_START"),
+        _cfg(ctx, "BAG_SCROLL_X"), _cfg(ctx, "BAG_SCROLL_Y_END"),
+        duration_ms=_cfg(ctx, "BAG_SCROLL_MS"),
+    )
+    _wait_ui_stabile(ctx)
+
+
+def _scroll_top(ctx: TaskContext) -> None:
+    """Riporta la griglia in cima con scroll ripetuti verso il basso."""
+    ctx.log_msg("[ZAINO] Scroll to top...")
+    for _ in range(_cfg(ctx, "BAG_MAX_SCROLL")):
+        ctx.device.swipe(
+            _cfg(ctx, "BAG_SCROLL_X"), _cfg(ctx, "BAG_SCROLL_Y_END"),
+            _cfg(ctx, "BAG_SCROLL_X"), _cfg(ctx, "BAG_SCROLL_Y_START"),
+            duration_ms=_cfg(ctx, "BAG_SCROLL_MS"),
+        )
+        time.sleep(0.4)
+    time.sleep(0.5)
+
+
 # ==============================================================================
-# MODALITÀ BAG
+# OCR PANNELLO DESTRA BAG
 # ==============================================================================
 
 def _ocr_zona_bag(frame, zona: tuple) -> str:
@@ -296,10 +335,7 @@ def _ocr_zona_bag(frame, zona: tuple) -> str:
 
 
 def _parse_risorsa_pezzatura(testo: str) -> tuple[str, int]:
-    """
-    Estrae risorsa e pezzatura da testo titolo o grants.
-    Ritorna ('', 0) se misto o non leggibile.
-    """
+    """Estrae risorsa e pezzatura da testo titolo o grants."""
     tl = testo.lower()
     if " or " in tl:
         return ("misto", 0)
@@ -333,12 +369,10 @@ def _leggi_pannello_bag(ctx: TaskContext, frame) -> tuple[str, int, int]:
     t_owned  = _ocr_zona_bag(frame, _cfg(ctx, "BAG_OWNED_ZONA"))
     t_grants = _ocr_zona_bag(frame, _cfg(ctx, "BAG_GRANTS_ZONA"))
 
-    # Titolo come fonte primaria, grants come fallback
     risorsa, pezzatura = _parse_risorsa_pezzatura(t_titolo)
     if not risorsa:
         risorsa, pezzatura = _parse_risorsa_pezzatura(t_grants)
 
-    # Pack misto → ignora
     if risorsa == "misto":
         return ("misto", 0, 0)
 
@@ -346,56 +380,88 @@ def _leggi_pannello_bag(ctx: TaskContext, frame) -> tuple[str, int, int]:
     return (risorsa, pezzatura, owned)
 
 
-def _bag_scan_ed_esegui(ctx: TaskContext,
-                        gap_residui: dict[str, float],
-                        dry_run: bool = False) -> dict[str, list[dict]]:
+# ==============================================================================
+# MODALITÀ BAG
+# ==============================================================================
+
+def _pin_path(short: str, pezzatura: int) -> str:
+    return f"pin/pin_{short}_{pezzatura}.png"
+
+
+def _risorse_abilitate(ctx: TaskContext) -> set[str]:
+    mapping = {
+        "pomodoro": "ZAINO_USA_POMODORO",
+        "legno":    "ZAINO_USA_LEGNO",
+        "acciaio":  "ZAINO_USA_ACCIAIO",
+        "petrolio": "ZAINO_USA_PETROLIO",
+    }
+    return {r for r, k in mapping.items() if _cfg(ctx, k)}
+
+
+# ------------------------------------------------------------------------------
+# FASE 1 — SCAN INVENTARIO
+# ------------------------------------------------------------------------------
+
+def _scan_inventario(
+    ctx: TaskContext,
+    risorse_target: set[str],
+) -> dict[tuple[str, int], int]:
     """
-    Scorre griglia BAG schermata per schermata.
-
-    Logica scroll corretta:
-      - Tappa tutte le N righe visibili nella schermata corrente
-      - Dopo aver processato tutte le righe → scroll di una schermata intera
-        (N_RIGHE × 104px) verso l'alto
-      - Attende stabilizzazione UI via _wait_ui_stabile() invece di sleep fisso
-      - Ripete con la schermata successiva
-      - Stop quando icona già vista (ciclo) o 3 schermate vuote consecutive
-
-    Ottimizzazione USE:
-      - n == owned → tap MAX → tap USE
-      - n <  owned → tap campo → input_text(n) → tap OK → tap USE
+    Scorre la griglia BAG con TM.
+    Per ogni pin trovato → tap → OCR pannello destra → owned.
+    Ritorna: {(risorsa, pezzatura): owned}
     """
-    col_x        = _cfg(ctx, "BAG_COL_X")
-    riga_y       = _cfg(ctx, "BAG_RIGA_Y")
-    campo_qty    = _cfg(ctx, "BAG_CAMPO_QTY")
-    max_btn      = _cfg(ctx, "BAG_MAX")
-    ok_xy        = _cfg(ctx, "BAG_OK")
-    use_xy       = _cfg(ctx, "BAG_USE")
-    delay_icona  = _cfg(ctx, "BAG_DELAY_ICONA")
-    delay_input  = _cfg(ctx, "BAG_DELAY_INPUT")
-    delay_use    = _cfg(ctx, "BAG_DELAY_USE")
-    modo         = "[DRY] " if dry_run else ""
+    threshold   = _cfg(ctx, "BAG_PIN_THRESHOLD")
+    delay_icona = _cfg(ctx, "BAG_DELAY_ICONA")
+    max_vuote   = _cfg(ctx, "BAG_MAX_VUOTE")
+    max_scroll  = _cfg(ctx, "BAG_MAX_SCROLL")
+    griglia_roi = _cfg(ctx, "BAG_GRIGLIA_ROI")
 
-    # Scroll di una schermata intera = N_righe × (box + gap) = 4 × 104 = 416px
-    N_RIGHE           = len(riga_y)
-    SCROLL_SCHERMATA  = N_RIGHE * 104   # 416px
+    inventario: dict[tuple[str, int], int] = {}
+    vuote_consec = 0
+    scroll_count = 0
 
-    operazioni: dict[str, list[dict]] = {r: [] for r in gap_residui}
-    icone_viste: set[tuple[str, int]] = set()
-    scroll_count           = 0
-    max_scroll             = 10
-    schermate_vuote_consec = 0
+    ctx.log_msg("[ZAINO][SCAN] Avvio scan inventario...")
 
     while scroll_count <= max_scroll:
-        if all(g <= 0 for g in gap_residui.values()):
-            ctx.log_msg(f"[ZAINO]{modo}Tutti i gap colmati — STOP")
-            break
+        screen = ctx.device.screenshot()
+        if screen is None:
+            ctx.log_msg("[ZAINO][SCAN] screenshot None — scroll e riprova")
+            _scroll_su(ctx)
+            scroll_count += 1
+            continue
 
-        nuove_in_schermata = 0
+        nuovi = 0
 
-        # Processa tutte le righe visibili
-        for y in riga_y:
-            for x in col_x:
-                ctx.device.tap(x, y)
+        for short, (risorsa, pezzature) in _PIN_CATALOGO.items():
+            if risorsa not in risorse_target:
+                continue
+
+            for pezzatura in pezzature:
+                chiave = (risorsa, pezzatura)
+                if chiave in inventario:
+                    continue  # già trovato in schermata precedente
+
+                pin = _pin_path(short, pezzatura)
+                try:
+                    match = ctx.matcher.find_one(
+                        screen, pin,
+                        threshold=threshold,
+                        zone=griglia_roi,
+                    )
+                except FileNotFoundError:
+                    continue  # pin non ancora disponibile
+
+                if not match.found:
+                    continue
+
+                ctx.log_msg(
+                    f"[ZAINO][SCAN] pin_{short}_{pezzatura} "
+                    f"score={match.score:.3f} ({match.cx},{match.cy})"
+                )
+
+                # Tap → pannello destra → OCR owned
+                ctx.device.tap(match.cx, match.cy)
                 time.sleep(delay_icona)
 
                 screen2 = ctx.device.screenshot()
@@ -405,114 +471,263 @@ def _bag_scan_ed_esegui(ctx: TaskContext,
                 if frame2 is None:
                     continue
 
-                risorsa, pezzatura, owned = _leggi_pannello_bag(ctx, frame2)
-
-                if not risorsa or risorsa == "misto" or pezzatura <= 0:
+                _, _, owned = _leggi_pannello_bag(ctx, frame2)
+                if owned <= 0:
+                    ctx.log_msg("[ZAINO][SCAN] owned N/D — skip")
                     continue
 
+                inventario[chiave] = owned
+                nuovi += 1
                 ctx.log_msg(
-                    f"[ZAINO]{modo}({x},{y}): "
-                    f"{risorsa} {pezzatura:,} owned={owned}"
+                    f"[ZAINO][SCAN] [{risorsa}] {pezzatura:,} owned={owned:,}"
                 )
 
-                # Già vista → stiamo ciclando → stop
-                chiave = (risorsa, pezzatura)
-                if chiave in icone_viste:
-                    ctx.log_msg(f"[ZAINO]{modo}Icona già vista — fine griglia")
-                    return operazioni
-                icone_viste.add(chiave)
-                nuove_in_schermata += 1
+                # Riaggiorna screenshot dopo tap
+                screen = ctx.device.screenshot()
+                if screen is None:
+                    break
 
-                if risorsa not in gap_residui:
-                    continue
-
-                gap_r = gap_residui[risorsa]
-                if gap_r <= 0 or owned <= 0:
-                    continue
-
-                n = min(owned, int(gap_r // pezzatura))
-                if n <= 0:
-                    ctx.log_msg(
-                        f"[ZAINO]{modo}[{risorsa}] {pezzatura:,}: "
-                        f"pezzatura > gap {gap_r/1e6:.3f}M — skip"
-                    )
-                    continue
-
-                ctx.log_msg(
-                    f"[ZAINO]{modo}[{risorsa}] {pezzatura:,}: "
-                    f"uso {n}/{owned} pezzi ({n*pezzatura/1e6:.3f}M)"
-                    + (" [MAX]" if n == owned else "")
-                )
-
-                if not dry_run:
-                    if n == owned:
-                        ctx.device.tap(*max_btn)
-                        time.sleep(delay_input)
-                    else:
-                        ctx.device.tap(*campo_qty)
-                        time.sleep(delay_input)
-                        ctx.device.input_text(str(n))
-                        time.sleep(delay_input)
-                        ctx.device.tap(*ok_xy)
-                        time.sleep(delay_input)
-                    ctx.device.tap(*use_xy)
-                    time.sleep(delay_use)
-
-                gap_residui[risorsa] -= n * pezzatura
-                operazioni[risorsa].append({
-                    "pezzatura": pezzatura,
-                    "n":         n,
-                    "quantita":  n * pezzatura,
-                    "max":       n == owned,
-                })
-                ctx.log_msg(
-                    f"[ZAINO]{modo}[{risorsa}]: gap residuo = "
-                    f"{gap_residui[risorsa]/1e6:.3f}M"
-                )
-
-        # Schermate vuote consecutive
-        if nuove_in_schermata == 0:
-            schermate_vuote_consec += 1
+        if nuovi == 0:
+            vuote_consec += 1
             ctx.log_msg(
-                f"[ZAINO]{modo}Schermata vuota "
-                f"{schermate_vuote_consec}/3"
+                f"[ZAINO][SCAN] Schermata vuota {vuote_consec}/{max_vuote}"
             )
-            if schermate_vuote_consec >= 3:
-                ctx.log_msg(f"[ZAINO]{modo}3 schermate vuote — fine griglia")
+            if vuote_consec >= max_vuote:
+                ctx.log_msg("[ZAINO][SCAN] Fine griglia — stop scan")
                 break
         else:
-            schermate_vuote_consec = 0
+            vuote_consec = 0
 
-        # Scroll di una schermata intera verso l'alto
-        # FIX 15/04/2026: _wait_ui_stabile() sostituisce time.sleep(BAG_DELAY_SCROLL)
-        # Evita subprocess.TimeoutExpired su screenshot() immediatamente post-swipe
-        ctx.device.swipe(480, riga_y[-1] + 52, 480, riga_y[0] - 52,
-                         duration_ms=400)
-        _wait_ui_stabile(ctx)
+        _scroll_su(ctx)
         scroll_count += 1
 
-    return operazioni
+    ctx.log_msg(
+        f"[ZAINO][SCAN] Completato: {len(inventario)} pezzature trovate"
+    )
+    return inventario
 
 
-def _esegui_bag(ctx: TaskContext,
-                da_caricare: dict[str, tuple[float, float]],
-                dry_run: bool = False) -> dict[str, float]:
-    """Esegue modalità BAG. Ritorna {risorsa: scaricato_reale_M}."""
-    modo    = "[DRY] " if dry_run else ""
+# ------------------------------------------------------------------------------
+# FASE 2 — CALCOLO GREEDY
+# ------------------------------------------------------------------------------
+
+def _calcola_piano(
+    ctx: TaskContext,
+    gap_residui: dict[str, float],
+    inventario: dict[tuple[str, int], int],
+) -> list[tuple[str, str, int, int, int]]:
+    """
+    Greedy DESC per pezzatura.
+    Ritorna: [(short, risorsa, pezzatura, n_usare, owned), ...]
+    """
+    risorsa_to_short = {v[0]: k for k, v in _PIN_CATALOGO.items()}
+    piano: list[tuple[str, str, int, int, int]] = []
+
+    for risorsa, gap in gap_residui.items():
+        if gap <= 0:
+            continue
+        short = risorsa_to_short.get(risorsa)
+        if not short:
+            continue
+
+        pezzature_ord = sorted(
+            [pez for (r, pez) in inventario if r == risorsa],
+            reverse=True,
+        )
+
+        gap_rim = gap
+        for pez in pezzature_ord:
+            if gap_rim <= 0:
+                break
+            owned = inventario.get((risorsa, pez), 0)
+            if owned <= 0:
+                continue
+            n = min(owned, int(gap_rim // pez))
+            if n <= 0:
+                ctx.log_msg(
+                    f"[ZAINO][GREEDY] [{risorsa}] {pez:,}: "
+                    f"pezzatura > gap {gap_rim/1e6:.3f}M — skip"
+                )
+                continue
+            piano.append((short, risorsa, pez, n, owned))
+            gap_rim -= n * pez
+            ctx.log_msg(
+                f"[ZAINO][GREEDY] [{risorsa}] {pez:,} × {n} "
+                f"= {n*pez/1e6:.3f}M | gap_rim={gap_rim/1e6:.3f}M"
+            )
+
+    return piano
+
+
+# ------------------------------------------------------------------------------
+# FASE 3 — ESECUZIONE PIANO
+# ------------------------------------------------------------------------------
+
+def _esegui_piano(
+    ctx: TaskContext,
+    piano: list[tuple[str, str, int, int, int]],
+    dry_run: bool = False,
+) -> dict[str, float]:
+    """
+    Scroll to top + ricerca TM pin del piano + tap + input n + USE.
+    Ritorna {risorsa: quantita_usata_totale}.
+    """
+    threshold   = _cfg(ctx, "BAG_PIN_THRESHOLD")
+    delay_icona = _cfg(ctx, "BAG_DELAY_ICONA")
+    delay_input = _cfg(ctx, "BAG_DELAY_INPUT")
+    delay_use   = _cfg(ctx, "BAG_DELAY_USE")
+    max_vuote   = _cfg(ctx, "BAG_MAX_VUOTE")
+    max_scroll  = _cfg(ctx, "BAG_MAX_SCROLL")
+    griglia_roi = _cfg(ctx, "BAG_GRIGLIA_ROI")
+    campo_qty   = _cfg(ctx, "BAG_CAMPO_QTY")
+    max_btn     = _cfg(ctx, "BAG_MAX")
+    ok_xy       = _cfg(ctx, "BAG_OK")
+    use_xy      = _cfg(ctx, "BAG_USE")
+    modo        = "[DRY] " if dry_run else ""
+
+    # Stato esecuzione: quanti pezzi restano da usare per ogni voce del piano
+    piano_rim:   dict[tuple[str, int], int] = {}
+    piano_short: dict[tuple[str, int], str] = {}
+    esiti:       dict[str, float]           = {}
+
+    for short, risorsa, pez, n, owned in piano:
+        piano_rim[(risorsa, pez)]   = n
+        piano_short[(risorsa, pez)] = short
+        esiti.setdefault(risorsa, 0.0)
+
+    _scroll_top(ctx)
+    time.sleep(0.5)
+
+    vuote_consec = 0
+    scroll_count = 0
+
+    ctx.log_msg(f"[ZAINO]{modo}Esecuzione piano ({len(piano)} voci)...")
+
+    while scroll_count <= max_scroll:
+        if all(n <= 0 for n in piano_rim.values()):
+            ctx.log_msg(f"[ZAINO]{modo}Piano completato — STOP")
+            break
+
+        screen = ctx.device.screenshot()
+        if screen is None:
+            _scroll_su(ctx)
+            scroll_count += 1
+            continue
+
+        nuovi = 0
+
+        for (risorsa, pez), n_rim in list(piano_rim.items()):
+            if n_rim <= 0:
+                continue
+
+            short = piano_short[(risorsa, pez)]
+            pin   = _pin_path(short, pez)
+
+            try:
+                match = ctx.matcher.find_one(
+                    screen, pin,
+                    threshold=threshold,
+                    zone=griglia_roi,
+                )
+            except FileNotFoundError:
+                continue
+
+            if not match.found:
+                continue
+
+            ctx.log_msg(
+                f"[ZAINO]{modo}[{risorsa}] {pez:,} trovato "
+                f"score={match.score:.3f} — uso {n_rim}"
+            )
+
+            if not dry_run:
+                ctx.device.tap(match.cx, match.cy)
+                time.sleep(delay_icona)
+
+                # Verifica owned reale dal pannello (aggiusta se serve)
+                screen_pan = ctx.device.screenshot()
+                n_finale = n_rim
+                owned_reale = n_rim
+                if screen_pan is not None:
+                    frame_pan = _get_frame(screen_pan)
+                    if frame_pan is not None:
+                        _, _, owned_ocr = _leggi_pannello_bag(ctx, frame_pan)
+                        if owned_ocr > 0:
+                            owned_reale = owned_ocr
+                            if owned_reale < n_rim:
+                                ctx.log_msg(
+                                    f"[ZAINO]{modo}[{risorsa}] {pez:,}: "
+                                    f"owned reale {owned_reale} < piano {n_rim}"
+                                    f" — aggiusto"
+                                )
+                                n_finale = owned_reale
+
+                if n_finale == owned_reale:
+                    ctx.device.tap(*max_btn)
+                    time.sleep(delay_input)
+                else:
+                    ctx.device.tap(*campo_qty)
+                    time.sleep(delay_input)
+                    ctx.device.input_text(str(n_finale))
+                    time.sleep(delay_input)
+                    ctx.device.tap(*ok_xy)
+                    time.sleep(delay_input)
+
+                ctx.device.tap(*use_xy)
+                time.sleep(delay_use)
+            else:
+                n_finale = n_rim
+
+            quantita = n_finale * pez
+            esiti[risorsa] = esiti.get(risorsa, 0.0) + quantita
+            piano_rim[(risorsa, pez)] = 0
+            nuovi += 1
+
+            ctx.log_msg(
+                f"[ZAINO]{modo}[{risorsa}] {pez:,} × {n_finale} "
+                f"= {quantita/1e6:.3f}M eseguito"
+            )
+
+            # Riaggiorna screenshot dopo USE
+            screen = ctx.device.screenshot()
+            if screen is None:
+                break
+
+        if nuovi == 0:
+            vuote_consec += 1
+            ctx.log_msg(
+                f"[ZAINO]{modo}Schermata senza match: {vuote_consec}/{max_vuote}"
+            )
+            if vuote_consec >= max_vuote:
+                ctx.log_msg(f"[ZAINO]{modo}Fine griglia — stop esecuzione")
+                break
+        else:
+            vuote_consec = 0
+
+        _scroll_su(ctx)
+        scroll_count += 1
+
+    return esiti
+
+
+def _esegui_bag(
+    ctx: TaskContext,
+    da_caricare: dict[str, tuple[float, float]],
+    dry_run: bool = False,
+) -> dict[str, float]:
+    """Coordina FASE 1 + FASE 2 + FASE 3."""
+    modo     = "[DRY] " if dry_run else ""
     snap_pre = {r: v for r, (v, _) in da_caricare.items()}
-
-    gap_residui = {
-        r: tgt - val for r, (val, tgt) in da_caricare.items()
-    }
+    gap_residui   = {r: tgt - val for r, (val, tgt) in da_caricare.items()}
+    risorse_target = set(da_caricare.keys())
 
     # Apri BAG → RESOURCE
     ctx.log_msg(f"[ZAINO]{modo}Apertura BAG...")
     ctx.navigator.tap_barra(ctx, "bag")
     time.sleep(_cfg(ctx, "BAG_DELAY_APRI"))
 
-    tap_res = _cfg(ctx, "BAG_RESOURCE_TAP")
-    ctx.log_msg(f"[ZAINO]{modo}tap RESOURCE {tap_res}")
-    ctx.device.tap(*tap_res)
+    ctx.log_msg(f"[ZAINO]{modo}tap RESOURCE {_cfg(ctx, 'BAG_RESOURCE_TAP')}")
+    ctx.device.tap(*_cfg(ctx, "BAG_RESOURCE_TAP"))
     time.sleep(1.0)
 
     esiti: dict[str, float] = {
@@ -520,16 +735,27 @@ def _esegui_bag(ctx: TaskContext,
     }
 
     try:
-        operazioni = _bag_scan_ed_esegui(ctx, gap_residui, dry_run=dry_run)
+        # FASE 1
+        inventario = _scan_inventario(ctx, risorse_target)
+        if not inventario:
+            ctx.log_msg(f"[ZAINO]{modo}Inventario vuoto — nessuna pezzatura trovata")
+            return esiti
 
-        for risorsa, ops in operazioni.items():
-            if ops:
-                dettaglio = ", ".join(f"{o['pezzatura']:,}×{o['n']}" for o in ops)
-                totale_ops = sum(o["quantita"] for o in ops)
-                ctx.log_msg(
-                    f"[ZAINO]{modo}[{risorsa}]: {dettaglio} = "
-                    f"{totale_ops/1e6:.3f}M"
-                )
+        # FASE 2
+        piano = _calcola_piano(ctx, gap_residui, inventario)
+        if not piano:
+            ctx.log_msg(f"[ZAINO]{modo}Piano vuoto — nessuna azione necessaria")
+            return esiti
+
+        ctx.log_msg(f"[ZAINO]{modo}Piano ({len(piano)} voci):")
+        for short, risorsa, pez, n, owned in piano:
+            ctx.log_msg(
+                f"[ZAINO]{modo}  [{risorsa}] {pez:,} × {n}/{owned} "
+                f"= {n*pez/1e6:.3f}M"
+            )
+
+        # FASE 3
+        esiti_piano = _esegui_piano(ctx, piano, dry_run=dry_run)
 
         if not dry_run:
             time.sleep(_cfg(ctx, "BAG_DELAY_POST"))
@@ -544,8 +770,8 @@ def _esegui_bag(ctx: TaskContext,
                         f"POST={val_post/1e6:.2f}M → reale={reale/1e6:.3f}M"
                     )
         else:
-            for risorsa, ops in operazioni.items():
-                esiti[risorsa] = sum(o["quantita"] for o in ops) / 1e6
+            for risorsa, qtot in esiti_piano.items():
+                esiti[risorsa] = qtot / 1e6
 
     finally:
         ctx.log_msg(f"[ZAINO]{modo}Torna HOME")
@@ -559,7 +785,6 @@ def _esegui_bag(ctx: TaskContext,
 # ==============================================================================
 
 def _svuota_riga(ctx: TaskContext, y_riga: int) -> None:
-    """USE → Max → USE su una riga."""
     use_x = _cfg(ctx, "SV_TAP_USE_X")
     max_x = _cfg(ctx, "SV_TAP_MAX_X")
     ctx.log_msg(f"[ZAINO][SV] USE→Max→USE ({use_x},{y_riga})")
@@ -572,7 +797,6 @@ def _svuota_riga(ctx: TaskContext, y_riga: int) -> None:
 
 
 def _riga_ha_use_giallo(screen, y_riga: int) -> bool:
-    """Verifica presenza pulsante USE giallo nella riga."""
     try:
         frame = _get_frame(screen)
         if frame is None:
@@ -589,7 +813,6 @@ def _riga_ha_use_giallo(screen, y_riga: int) -> bool:
 
 
 def _svuota_sidebar(ctx: TaskContext, risorsa: str) -> None:
-    """Naviga sidebar e svuota completamente la risorsa."""
     sidebar_map = {
         "pomodoro": "SV_SIDEBAR_POMODORO",
         "legno":    "SV_SIDEBAR_LEGNO",
@@ -631,10 +854,6 @@ def _svuota_sidebar(ctx: TaskContext, risorsa: str) -> None:
 
 
 def _esegui_svuota(ctx: TaskContext) -> dict[str, float]:
-    """
-    Modalità SVUOTA: apre zaino da HOME e svuota completamente
-    le risorse abilitate senza controllo soglie.
-    """
     usa = {
         "pomodoro": _cfg(ctx, "ZAINO_USA_POMODORO"),
         "legno":    _cfg(ctx, "ZAINO_USA_LEGNO"),
@@ -647,7 +866,6 @@ def _esegui_svuota(ctx: TaskContext) -> dict[str, float]:
         ctx.log_msg("[ZAINO][SV] Nessuna risorsa abilitata")
         return {r: 0.0 for r in ["pomodoro", "legno", "acciaio", "petrolio"]}
 
-    # OCR PRE
     snap_pre = _ocr_deposito(ctx)
     ctx.log_msg(
         f"[ZAINO][SV] PRE: "
@@ -657,7 +875,6 @@ def _esegui_svuota(ctx: TaskContext) -> dict[str, float]:
         f"petrolio={snap_pre.get('petrolio',-1)/1e6:.2f}M"
     )
 
-    # Apri zaino
     tap_apri = _cfg(ctx, "SV_TAP_APRI")
     ctx.log_msg(f"[ZAINO][SV] Apertura zaino {tap_apri}")
     ctx.device.tap(*tap_apri)
@@ -677,7 +894,6 @@ def _esegui_svuota(ctx: TaskContext) -> dict[str, float]:
         ctx.device.tap(*tap_chiudi)
         time.sleep(1.0)
 
-    # OCR POST
     snap_post = _ocr_deposito(ctx)
     for risorsa in risorse_da_svuotare:
         pre  = snap_pre.get(risorsa, -1.0)
@@ -702,7 +918,7 @@ class ZainoTask(Task):
     Task settimanale (168h) — scarica risorse al deposito.
 
     Modalità selezionabile via global_config.json → zaino.modalita:
-      "bag"    → scan griglia BAG + input quantità precisa (default)
+      "bag"    → scan TM + greedy + esecuzione (default)
       "svuota" → svuota completamente tutte le pezzature abilitate
     """
 
@@ -723,7 +939,7 @@ class ZainoTask(Task):
         return True
 
     def run_dry(self, ctx: TaskContext) -> TaskResult:
-        """Simulazione modalità bag: scan + calcolo, nessun USE."""
+        """Simulazione: scan + calcolo, nessun USE."""
         return self._esegui(ctx, dry_run=True)
 
     def run(self, ctx: TaskContext,
@@ -753,7 +969,7 @@ class ZainoTask(Task):
                 ctx.log_msg("[ZAINO][DRY] modalità svuota non supporta dry-run")
                 return TaskResult(success=True, message="dry-run N/A per svuota",
                                   data={})
-            esiti = _esegui_svuota(ctx)
+            esiti  = _esegui_svuota(ctx)
             totale = sum(esiti.values())
             ctx.log_msg(f"[ZAINO][SV] Completato — {totale:.3f}M totale")
             return TaskResult(
@@ -801,6 +1017,6 @@ class ZainoTask(Task):
             )
 
         totale = sum(esiti.values())
-        msg = f"{'[DRY] ' if dry_run else ''}scaricato {totale:.3f}M totale"
+        msg    = f"{'[DRY] ' if dry_run else ''}scaricato {totale:.3f}M totale"
         ctx.log_msg(f"[ZAINO]{modo}Completato — {msg}")
         return TaskResult(success=True, message=msg, data=esiti)
