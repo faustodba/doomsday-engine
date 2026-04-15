@@ -366,6 +366,42 @@ class BlacklistFuori:
 # Selezione sequenza risorse
 # ==============================================================================
 
+def _interleave(sequenza: list) -> list:
+    """
+    Trasforma una sequenza con tipi consecutivi uguali in una sequenza
+    interleaved che alterna i tipi il più possibile.
+
+    Algoritmo greedy: ad ogni posizione sceglie il tipo con più occorrenze
+    rimanenti che NON sia uguale all'ultimo inserito.
+
+    Esempi:
+      [campo, campo, petrolio, petrolio] → [petrolio, campo, petrolio, campo]
+      [campo, campo, campo, segheria]    → [campo, segheria, campo, campo]
+      [campo, campo, campo, campo]       → invariata (impossibile alternare)
+
+    Motivazione: evita di inviare due squadre consecutive dello stesso tipo
+    riducendo l'attesa sul nodo (il gioco propone lo stesso nodo finché non
+    è fisicamente occupato — con l'alternanza il nodo è già occupato quando
+    ci si ritorna).
+    """
+    from collections import Counter
+    if not sequenza:
+        return []
+    conteggi = Counter(sequenza)
+    risultato = []
+    ultimo = None
+    for _ in range(len(sequenza)):
+        candidati = [(cnt, tipo) for tipo, cnt in conteggi.items()
+                     if cnt > 0 and tipo != ultimo]
+        if not candidati:
+            candidati = [(cnt, tipo) for tipo, cnt in conteggi.items() if cnt > 0]
+        _, scelto = max(candidati)
+        risultato.append(scelto)
+        conteggi[scelto] -= 1
+        ultimo = scelto
+    return risultato
+
+
 def _calcola_sequenza(obiettivo: int, sequenza_base: list[str],
                        tipi_bloccati: set[str]) -> list[str]:
     disponibili = [t for t in sequenza_base if t not in tipi_bloccati]
@@ -423,7 +459,8 @@ def _cerca_nodo(ctx: TaskContext, tipo: str) -> bool:
     """
     tap_lente   = _cfg(ctx, "TAP_LENTE")
     coord_lv    = _cfg(ctx, "COORD_LIVELLO").get(tipo, _cfg(ctx, "COORD_LIVELLO")["campo"])
-    livello     = max(1, min(7, int(_cfg(ctx, "RACCOLTA_LIVELLO"))))
+    # Livello nodo dall'istanza (instances.json → livello), fallback a RACCOLTA_LIVELLO
+    livello     = max(1, min(7, int(ctx.config.get("livello", _cfg(ctx, "RACCOLTA_LIVELLO")))))
     delay_cerca = _cfg(ctx, "DELAY_CERCA")
     tap_icona   = _cfg(ctx, "TAP_ICONA_TIPO").get(tipo, _cfg(ctx, "TAP_ICONA_TIPO")["campo"])
 
@@ -872,34 +909,24 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
         ctx.log_msg(f"Raccolta [{tipo}]: CERCA fallita — skip")
         return False, False, False
 
-    # Tap nodo + verifica GATHER
-    esito = _tap_nodo_e_verifica_gather(ctx, tipo)
-
-    # _tap_nodo_e_verifica_gather ora ritorna (str, screen) o stringa semplice
-    if isinstance(esito, tuple):
-        esito_str, screen_popup = esito
-    else:
-        esito_str, screen_popup = esito, None
-
-    if esito_str == "errore":
-        return False, False, False
-
-    # Step 1: OCR coordinate nodo reali
+    # Step 1: OCR coordinate nodo PRIMA del tap nodo (popup lista risultati ancora aperto).
+    # Sequenza V5: CERCA → lente piccola coord → OCR X/Y → tap nodo → GATHER → marcia.
+    # Il tap lente coordinate NON chiude il popup lista risultati.
     chiave = _leggi_coord_nodo(ctx)
-    # chiave può essere None se OCR fallisce — in quel caso procediamo senza blacklist
+    # chiave può essere None se OCR fallisce — procediamo senza blacklist
 
-    # Step 6: check blacklist statica fuori territorio (disco) — pre-verifica rapida
+    # Step 6: check blacklist statica fuori territorio (disco) — skip immediato
     if chiave and blacklist_fuori.contiene(chiave):
-        ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} in blacklist statica fuori territorio — skip")
+        ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} in blacklist statica fuori — skip")
         ctx.device.key("KEYCODE_BACK")
         time.sleep(0.5)
         return False, False, True   # skip neutro
 
-    # Check blacklist dinamica RAM
+    # Check blacklist dinamica RAM — nodo già occupato da nostra squadra
     if chiave and blacklist.contiene(chiave):
         eta_prev = blacklist.get_eta(chiave)
         if isinstance(eta_prev, (int, float)) and eta_prev > 0:
-            marg   = int(_cfg(ctx, "ETA_MARGINE_S"))
+            marg    = int(_cfg(ctx, "ETA_MARGINE_S"))
             att_min = int(_cfg(ctx, "ETA_MIN_S"))
             attesa  = int(min(_cfg(ctx, "BLACKLIST_ATTESA_NODO"),
                               max(att_min, eta_prev + marg)))
@@ -912,15 +939,8 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
         cooldown_map[tipo] = time.time() + attesa
         ctx.device.key("KEYCODE_BACK")
         time.sleep(0.5)
-        # Esegue nuova CERCA per trovare nodo diverso
+        # Nuova CERCA per trovare nodo diverso
         if not _cerca_nodo(ctx, tipo):
-            return False, False, False
-        esito2 = _tap_nodo_e_verifica_gather(ctx, tipo)
-        if isinstance(esito2, tuple):
-            esito_str2, screen_popup = esito2
-        else:
-            esito_str2, screen_popup = esito2, None
-        if esito_str2 == "errore":
             return False, False, False
         chiave2 = _leggi_coord_nodo(ctx)
         if chiave2 == chiave or (chiave2 and blacklist.contiene(chiave2)):
@@ -929,6 +949,16 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
             time.sleep(0.5)
             return False, True, False
         chiave = chiave2
+
+    # Tap nodo + verifica GATHER (popup lista risultati → popup nodo)
+    esito = _tap_nodo_e_verifica_gather(ctx, tipo)
+    if isinstance(esito, tuple):
+        esito_str, screen_popup = esito
+    else:
+        esito_str, screen_popup = esito, None
+
+    if esito_str == "errore":
+        return False, False, False
 
     # Step 5: verifica livello nodo via OCR
     if screen_popup is not None:
@@ -971,27 +1001,101 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
         time.sleep(0.5)
         return False, False, False
 
-    # Step 3: conferma contatore post-marcia
+    # Step 3: lettura contatore post-marcia (solo informativa).
+    # La marcia è già confermata visivamente dalla chiusura della maschera.
+    # Il contatore in mappa può richiedere qualche secondo per aggiornarsi
+    # — non usiamo il fallback OCR come criterio di successo/fallimento.
     time.sleep(1.5)
     attive_dopo = _leggi_attive_post_marcia(ctx, obiettivo)
+    if attive_dopo >= 0:
+        ctx.log_msg(f"Raccolta [{tipo}]: marcia OK — attive post={attive_dopo}")
+    else:
+        ctx.log_msg(f"Raccolta [{tipo}]: marcia OK — contatore N/D (marcia confermata visivamente)")
 
-    if attive_dopo == -1:
-        # OCR fallito — considera fallimento prudenziale (V5 pattern)
-        ctx.log_msg(f"Raccolta [{tipo}]: OCR contatore post-marcia N/D — rollback prudenziale")
-        if chiave:
-            blacklist.rollback(chiave)
-        return False, False, False
-
-    # Calcola attive prima della marcia (non disponibile qui — usiamo obiettivo come riferimento)
-    # Il chiamante (_loop_invio_marce) traccia attive_correnti
-    # Qui salviamo l'ETA e committiamo sempre se ok=True e contatore >= 0
+    # COMMITTED con ETA dinamica (Step 2)
     if chiave:
         blacklist.commit(chiave, eta_s=eta_s)
         ttl_log = f"ETA={eta_s}s" if eta_s else f"TTL={_cfg(ctx, 'BLACKLIST_COMMITTED_TTL')}s"
         ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} COMMITTED ({ttl_log})")
 
-    ctx.log_msg(f"Raccolta [{tipo}]: marcia OK — attive post={attive_dopo}")
     return True, False, False
+
+
+# ==============================================================================
+# Squad Summary — conteggio slot attivi reali
+# ==============================================================================
+
+# Coordinate pulsante frecce slot (mappa) — tap apre Squad Summary
+_TAP_SLOT_BTN    = (877, 126)
+# Zona righe Squad Summary — ogni riga ha altezza ~90px a partire da y≈180
+# Verifica presenza testo "Gathering" o "Deploying" per riga occupata
+# In mancanza di OCR robusto, conta le righe visibili via pixel check
+# sulla colonna sinistra dove appare l'immagine del nodo (x≈165, y variabile)
+_SUMMARY_ROI     = (140, 160, 820, 520)   # area popup Squad Summary
+_SUMMARY_CLOSE   = (795,  68)              # X chiusura popup
+
+def _leggi_slot_da_summary(ctx: TaskContext) -> int:
+    """
+    Apre il popup Squad Summary (tap frecce slot) e conta le righe occupate.
+    Ritorna numero di slot attivi (int >= 0) oppure -1 se popup non aperto.
+
+    Il pulsante frecce (877,126) è visibile SOLO se almeno uno slot è attivo.
+    Se non visibile → 0 slot attivi.
+
+    Strategia conteggio: il popup mostra una riga per slot attivo, ciascuna
+    con un'immagine nodo sulla sinistra. Contiamo le righe tramite TM su
+    pin_gather.png (icona GATHER/frecce nodo) oppure via pixel check.
+    In assenza di pin dedicato, usiamo il numero di separatori "Total Squads"
+    come proxy — uno per riga.
+    """
+    template_gather = _cfg(ctx, "TEMPLATE_GATHER")
+    soglia          = _cfg(ctx, "TEMPLATE_SOGLIA")
+
+    # Screenshot iniziale — verifica se il pulsante frecce è visibile
+    screen = ctx.device.screenshot()
+    if screen is None:
+        return -1
+
+    # Il pulsante è presente solo se almeno uno slot è attivo
+    # Verifica pixel nella zona del pulsante — se schermata mappa con slot:
+    # l'area (860,110,900,145) contiene il pulsante frecce
+    frame = getattr(screen, "frame", None)
+    if frame is not None:
+        zona_btn = frame[110:145, 860:900]
+        # Pixel non uniformemente scuri → pulsante presente
+        media = int(zona_btn.mean())
+        if media < 20:
+            ctx.log_msg("[SUMMARY] pulsante slot non visibile — 0 slot attivi")
+            return 0
+
+    # Tap sul pulsante frecce → apre Squad Summary
+    ctx.device.tap(*_TAP_SLOT_BTN)
+    time.sleep(1.5)
+
+    screen2 = ctx.device.screenshot()
+    if screen2 is None:
+        return -1
+
+    # Conta match di pin_gather nella ROI del popup — ogni riga ha un'icona
+    # Usiamo find_all() per contare tutte le occorrenze
+    try:
+        matches = ctx.matcher.find_all(
+            screen2, template_gather,
+            threshold=soglia,
+            zone=_SUMMARY_ROI,
+            cluster_px=60,   # cluster 60px per separare righe diverse
+        )
+        n_slot = len(matches)
+        ctx.log_msg(f"[SUMMARY] slot attivi rilevati: {n_slot}")
+    except Exception as exc:
+        ctx.log_msg(f"[SUMMARY] errore conteggio: {exc} — uso fallback")
+        n_slot = -1
+
+    # Chiude popup
+    ctx.device.tap(*_SUMMARY_CLOSE)
+    time.sleep(0.8)
+
+    return n_slot
 
 
 # ==============================================================================
@@ -1042,10 +1146,12 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
         libere_ora = obiettivo - attive_correnti
         if deposito_ocr:
             sequenza = _calcola_sequenza_allocation(libere_ora, deposito_ocr)
-            sequenza = [t for t in sequenza if t not in tipi_bloccati] or \
-                       _calcola_sequenza(libere_ora, sequenza_base, tipi_bloccati)
+            sequenza = [t for t in sequenza if t not in tipi_bloccati] or                        _calcola_sequenza(libere_ora, sequenza_base, tipi_bloccati)
         else:
             sequenza = _calcola_sequenza(libere_ora, sequenza_base, tipi_bloccati)
+
+        # Interleave: alterna i tipi per evitare attese sul nodo stesso tipo
+        sequenza = _interleave(sequenza)
 
         if not sequenza:
             ctx.log_msg("Raccolta: sequenza vuota — abbandono")
@@ -1121,7 +1227,9 @@ class RaccoltaTask(Task):
             ctx.log_msg("Raccolta: modulo disabilitato — skip")
             return TaskResult(success=True, message="disabilitato", data={"inviate": 0})
 
-        obiettivo = int(_cfg(ctx, "RACCOLTA_OBIETTIVO"))
+        # Legge max_squadre dall'istanza (instances.json) come obiettivo reale.
+        # Fallback a RACCOLTA_OBIETTIVO se non disponibile.
+        obiettivo = int(ctx.config.get("max_squadre", _cfg(ctx, "RACCOLTA_OBIETTIVO")))
 
         if slot_liberi < 0:
             libere = max(0, obiettivo - attive_inizio)
@@ -1132,27 +1240,55 @@ class RaccoltaTask(Task):
             ctx.log_msg(f"Raccolta: nessuna squadra libera ({attive_inizio}/{obiettivo}) — skip")
             return TaskResult(success=True, message="nessuna squadra libera", data={"inviate": 0})
 
-        # OCR slot reali da schermo
+        # Lettura slot attivi reali.
+        # Metodo primario: Squad Summary popup via pin_return TM (bypass bug OCR font 3/5).
+        # Fallback: OCR barra contatore.
         if attive_inizio == 0 and slot_liberi < 0 and ctx.device is not None:
+            totale_noto = int(ctx.config.get("max_squadre", obiettivo))
+            obiettivo   = totale_noto  # usa sempre il totale da instances.json
             try:
-                from shared.ocr_helpers import leggi_contatore_slot
-                screen_home = ctx.device.screenshot()
-                if screen_home is not None:
-                    totale_noto = getattr(ctx.config, "max_squadre", obiettivo)
-                    attive_ocr, totale_ocr = leggi_contatore_slot(screen_home, totale_noto=totale_noto)
-                    if attive_ocr >= 0 and totale_ocr > 0:
-                        attive_inizio = attive_ocr
-                        obiettivo     = totale_ocr
-                        libere        = max(0, obiettivo - attive_inizio)
-                        ctx.log_msg(f"Raccolta: slot OCR — attive={attive_inizio}/{obiettivo} libere={libere}")
-                        if libere == 0:
-                            ctx.log_msg("Raccolta: nessuna squadra libera (OCR) — skip")
-                            return TaskResult(success=True, message="nessuna squadra libera",
-                                              data={"inviate": 0})
-                    else:
-                        ctx.log_msg(f"Raccolta: OCR slot fallito — uso default {attive_inizio}/{obiettivo}")
+                from shared.ocr_helpers import leggi_slot_da_summary
+                n_summary = leggi_slot_da_summary(
+                    ctx.device, ctx.matcher,
+                    log_fn=ctx.log_msg,
+                    totale_noto=totale_noto,
+                )
+                if n_summary >= 0:
+                    attive_inizio = n_summary
+                    libere        = max(0, obiettivo - attive_inizio)
+                    ctx.log_msg(
+                        f"Raccolta: slot Summary — attive={attive_inizio}/{obiettivo} "
+                        f"libere={libere}"
+                    )
+                    if libere == 0:
+                        ctx.log_msg("Raccolta: nessuna squadra libera — skip")
+                        return TaskResult(success=True, message="nessuna squadra libera",
+                                          data={"inviate": 0})
+                else:
+                    raise ValueError("Summary N/D")
             except Exception as exc:
-                ctx.log_msg(f"Raccolta: OCR slot eccezione ({exc}) — uso default")
+                ctx.log_msg(f"Raccolta: Summary fallito ({exc}) — fallback OCR barra")
+                try:
+                    from shared.ocr_helpers import leggi_contatore_slot
+                    screen_home = ctx.device.screenshot()
+                    if screen_home is not None:
+                        attive_ocr, totale_ocr = leggi_contatore_slot(
+                            screen_home, totale_noto=totale_noto)
+                        if attive_ocr >= 0:
+                            attive_inizio = attive_ocr
+                            if totale_ocr > 0:
+                                obiettivo = totale_ocr
+                            libere = max(0, obiettivo - attive_inizio)
+                            ctx.log_msg(
+                                f"Raccolta: slot OCR — attive={attive_inizio}/{obiettivo} "
+                                f"libere={libere}"
+                            )
+                            if libere == 0:
+                                ctx.log_msg("Raccolta: nessuna squadra libera (OCR) — skip")
+                                return TaskResult(success=True, message="nessuna squadra libera",
+                                                  data={"inviate": 0})
+                except Exception as exc2:
+                    ctx.log_msg(f"Raccolta: OCR slot fallito ({exc2}) — uso default")
 
         # OCR deposito per allocation
         deposito_ocr: dict = {}

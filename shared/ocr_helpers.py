@@ -51,10 +51,13 @@ _DIGITS_CFG = "--psm 7 -c tessedit_char_whitelist=0123456789KkMm.,"
 
 # ==============================================================================
 # Zone contatore slot — calibrate da ocr.py V5
+# FIX 15/04/2026: zone cifre ricalibrate da analisi pixel colonna su screen reale.
+#   Analisi pixel 5/5: cifra SX a x=908-913, slash a x=915-918, cifra DX a x=921-926.
+#   Le zone precedenti (890-919 e 922-946) includevano troppo contesto → OCR confuso.
 # ==============================================================================
 _ZONA_TESTO_SLOT  = (890, 117, 946, 141)  # testo X/Y intero — psm=7 priorità
-_ZONA_CIFRA_SX    = (890, 117, 919, 141)  # cifra attive (sinistra slash) — fallback psm=10
-_ZONA_CIFRA_DX    = (922, 117, 946, 141)  # cifra totale (destra slash) — fallback psm=8
+_ZONA_CIFRA_SX    = (906, 117, 916, 141)  # cifra attive — ricalibrata (era 890-919)
+_ZONA_CIFRA_DX    = (919, 117, 929, 141)  # cifra totale — ricalibrata (era 922-946)
 _SOGLIA_PX_BIANCHI = 15                   # pixel bianchi minimi per considerare slot attivi
 
 
@@ -320,17 +323,28 @@ def ocr_risorse(img: "Screenshot | np.ndarray") -> RisorseDeposito:
 # ==============================================================================
 
 def _ocr_zona_intera_slot(crop_pil: Image.Image) -> tuple[int, int]:
-    """OCR X/Y sulla zona testo intera con psm=7. Ritorna (attive, totale) o (-1,-1)."""
+    """
+    OCR X/Y sulla zona testo intera. Ritorna (attive, totale) o (-1,-1).
+
+    FIX 15/04/2026: multiple configurazioni psm sulla maschera bianca 4x.
+    La maschera bianca produce un'immagine pulita del pattern "5/5" — il
+    fallback su cifre separate causava confusione 3/5 per crop impreciso.
+    Prova psm=7, psm=6, psm=13 in sequenza fino al primo match valido.
+    """
     try:
         w, h   = crop_pil.size
         crop4x = crop_pil.resize((w*4, h*4), Image.LANCZOS)
         mask   = _maschera_bianca(crop4x, taglio_sx=0)
-        cfg    = "--psm 7 -c tessedit_char_whitelist=0123456789/"
-        with _tesseract_lock:
-            testo = pytesseract.image_to_string(mask, config=cfg).strip()
-        m = re.search(r'(\d+)/(\d+)', testo)
-        if m:
-            return (int(m.group(1)), int(m.group(2)))
+        wl     = "-c tessedit_char_whitelist=0123456789/"
+
+        for psm in (7, 6, 13):
+            cfg = f"--psm {psm} {wl}"
+            with _tesseract_lock:
+                testo = pytesseract.image_to_string(mask, config=cfg).strip()
+            m = re.search(r'(\d+)/(\d+)', testo)
+            if m:
+                return (int(m.group(1)), int(m.group(2)))
+
         return (-1, -1)
     except Exception:
         return (-1, -1)
@@ -353,6 +367,145 @@ def _ocr_cifra_singola_slot(crop_pil: Image.Image, psm: int = 10) -> int:
         return int(m.group(1)) if m else -1
     except Exception:
         return -1
+
+
+# ==============================================================================
+# Contatore slot via Squad Summary popup — pin_return TM (bypass OCR font bug)
+#
+# Il popup Squad Summary mostra una riga per ogni slot attivo con un pulsante
+# ↩ (pin_return.png) in posizione fissa. find_all() conta le occorrenze.
+# Mostra max 3 righe per schermata — swipe up per vedere le altre.
+#
+# Coordinate popup (960x540):
+#   TAP_SLOT_BTN    = (877, 126)   apre popup (visibile solo se slot > 0)
+#   SUMMARY_CLOSE   = (795, 68)    X chiusura popup
+#   SUMMARY_SWIPE   = swipe (480,450,480,200) per scroll
+#   SUMMARY_ROI     = (700,100,820,530) zona pin_return
+#   PIN_RETURN      = "pin/pin_return.png"
+#   SOGLIA_RETURN   = 0.75
+#   RIGHE_PER_SCH   = 3   max righe visibili per schermata
+# ==============================================================================
+
+_TAP_SLOT_BTN   = (877, 126)
+_SUMMARY_CLOSE  = (795, 68)
+_SUMMARY_SWIPE_START = (480, 420)
+_SUMMARY_SWIPE_END   = (480, 180)
+_SUMMARY_ROI    = (700, 100, 820, 530)
+_PIN_RETURN     = "pin/pin_return.png"
+_SOGLIA_RETURN  = 0.75
+_RIGHE_PER_SCH  = 3
+
+
+def leggi_slot_da_summary(
+    device,
+    matcher,
+    log_fn=None,
+    totale_noto: int = -1,
+) -> int:
+    """
+    Conta gli slot attivi aprendo il popup Squad Summary e contando
+    le occorrenze di pin_return.png (pulsante ↩ per ogni riga attiva).
+
+    Procedura:
+      1. Verifica pixel zona pulsante (877,126) — se buio → 0 slot
+      2. Tap → apre popup Squad Summary
+      3. find_all(pin_return) su prima schermata → conta righe
+      4. Se righe == RIGHE_PER_SCH (3) → swipe + seconda schermata
+      5. Chiude popup (tap X)
+
+    Args:
+        device:      AdbDevice
+        matcher:     TemplateMatcher
+        log_fn:      callable(msg) per logging
+        totale_noto: max slot istanza (da instances.json)
+
+    Returns:
+        int >= 0  slot attivi
+        -1        popup non aperto o errore
+    """
+    import time
+
+    def log(msg):
+        if log_fn:
+            log_fn(msg)
+
+    # 1. Screenshot iniziale — verifica pulsante visibile
+    screen = device.screenshot()
+    if screen is None:
+        return -1
+
+    frame = getattr(screen, "frame", None)
+    if frame is not None:
+        zona_btn = frame[110:145, 860:900]
+        media = int(zona_btn.mean())
+        if media < 20:
+            log("[SUMMARY] pulsante slot non visibile — 0 slot attivi")
+            return 0
+
+    # 2. Tap pulsante → apre popup
+    device.tap(*_TAP_SLOT_BTN)
+    time.sleep(1.5)
+
+    screen2 = device.screenshot()
+    if screen2 is None:
+        return -1
+
+    # 3. Conta pin_return nella prima schermata
+    try:
+        matches1 = matcher.find_all(
+            screen2, _PIN_RETURN,
+            threshold=_SOGLIA_RETURN,
+            zone=_SUMMARY_ROI,
+            cluster_px=50,
+        )
+        n1 = len(matches1)
+        log(f"[SUMMARY] prima schermata: {n1} righe")
+    except Exception as exc:
+        log(f"[SUMMARY] errore find_all: {exc}")
+        device.tap(*_SUMMARY_CLOSE)
+        time.sleep(0.5)
+        return -1
+
+    totale = n1
+
+    # 4. Se schermata piena (3 righe) → potrebbe esserci una seconda schermata
+    if n1 >= _RIGHE_PER_SCH:
+        device.swipe(
+            _SUMMARY_SWIPE_START[0], _SUMMARY_SWIPE_START[1],
+            _SUMMARY_SWIPE_END[0],   _SUMMARY_SWIPE_END[1],
+            duration_ms=400,
+        )
+        time.sleep(1.0)
+
+        screen3 = device.screenshot()
+        if screen3 is not None:
+            try:
+                matches2 = matcher.find_all(
+                    screen3, _PIN_RETURN,
+                    threshold=_SOGLIA_RETURN,
+                    zone=_SUMMARY_ROI,
+                    cluster_px=50,
+                )
+                n2 = len(matches2)
+                log(f"[SUMMARY] seconda schermata: {n2} righe")
+                # Somma solo le righe nuove (non già conteggiate)
+                # Le ultime righe della prima schermata si sovrappongono
+                # con le prime della seconda — contiamo solo il delta
+                totale = n1 + max(0, n2 - 1)
+            except Exception:
+                pass  # usa solo n1
+
+        # Sanity check con totale_noto
+        if totale_noto > 0:
+            totale = min(totale, totale_noto)
+
+    log(f"[SUMMARY] slot attivi: {totale}/{totale_noto if totale_noto > 0 else '?'}")
+
+    # 5. Chiude popup
+    device.tap(*_SUMMARY_CLOSE)
+    time.sleep(0.8)
+
+    return totale
 
 
 def leggi_contatore_slot(
