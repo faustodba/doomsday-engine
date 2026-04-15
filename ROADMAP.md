@@ -101,6 +101,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 |-----|------|-----------|
 | Zaino TM-based | `tasks/zaino.py` | Architettura FASE1(scan TM)+FASE2(greedy)+FASE3(esecuzione). Eliminato bug icone_viste |
 | Zaino svuota validata | `tasks/zaino.py` | Modalità svuota: sidebar+USE MAX testata su FAU_00. RT-20 chiuso |
+| Raccolta upgrade V5 | `tasks/raccolta.py` | Step 1: OCR coord reali X_Y; Step 2: OCR ETA; Step 3: contatore post-marcia; Step 4: fuori territorio→blacklist; Step 5: livello nodo OCR; Step 6: BlacklistFuori su disco |
 | Zaino pin catalogo | `templates/pin/` | pin_pom/leg/acc/pet tutte pezzature (26 file) + pin_caution.png |
 | Zaino caution popup | `tasks/zaino.py` | `_gestisci_caution()` — tap check+OK, flag sessione, una volta per sessione |
 | Zaino campo qty | `tasks/zaino.py` | KEYCODE_CTRL_A+DEL prima di input_text — azzera valore default=1 |
@@ -170,18 +171,39 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Prossima sessione
 
-### Priorità 0 — RT-18 completamento test scheduling
+### Priorità 0 — Raccolta upgrade V5 — test runtime
+```
+Upgrade integrato 15/04/2026 (Step 1-6):
+  Step 1: OCR coordinate nodo reali (chiave X_Y)
+  Step 2: OCR ETA marcia (TTL dinamico)
+  Step 3: Conferma contatore post-marcia
+  Step 4: Fuori territorio → blacklist dinamica
+  Step 5: Verifica livello nodo OCR
+  Step 6: Blacklist statica fuori territorio su disco
+
+Test:
+  python run_task.py --istanza FAU_00 --task raccolta --force
+Monitorare:
+  [COORD] coordinate nodo: (X,Y) → chiave=X_Y
+  [COORD] pin_enter score=0.9xx
+  Raccolta [campo]: nodo Lv.6 ✓
+  Raccolta [campo]: territorio pixel_verdi=N → IN territorio
+  Raccolta: ETA marcia=XXs
+  [POST-MARCIA] OCR contatore N/D o attive=N
+  Raccolta: nodo X_Y COMMITTED (ETA=XXs)
+  Blacklist statica: data/blacklist_fuori_FAU_00.json
+```
+
+### Priorità 1 — RT-18 completamento test scheduling
 ```
 Test mancanti (in ordine):
 1. Task periodic — raccolta o rifornimento:
      python run_task.py --istanza FAU_00 --task raccolta
      → deve eseguire e salvare ISO in schedule.raccolta
      → rilancia subito: deve eseguire ancora (periodic non blocca in run_task)
-     → verifica schedule.raccolta aggiornato
 
 2. --force su task daily:
      python run_task.py --istanza FAU_00 --task vip --force
-     → deve eseguire ignorando schedule (vip già eseguito oggi)
      → log: "[SCHEDULE] --force attivo — schedule ignorato"
 
 3. restore_to_orchestrator al riavvio main.py:

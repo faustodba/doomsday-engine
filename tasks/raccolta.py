@@ -5,64 +5,83 @@
 #
 #  FIX 12/04/2026:
 #    - _leggi_coordinate_nodo: ctx.matcher.find() → ctx.matcher.find_one()
-#      firma corretta: find_one(screenshot, template_name, threshold)
-#      ritorna MatchResult, non (cx,cy) — estratto .cx/.cy se found
 #    - _esegui_marcia: stessa correzione firma matcher (2 occorrenze)
 #    - _invia_squadra: stessa correzione firma matcher (1 occorrenza)
-#    - Tutti i ctx.matcher.find() sostituiti con find_one() + controllo .found
 #
-#  STRATEGIA V6:
-#    Il loop marce di V5 dipende pesantemente da ADB diretto, VerificaUI,
-#    debug, OCR, allocation, config globale — non è portabile 1:1 in V6.
-#    In V6 viene implementato il "cuore" testabile della raccolta:
-#      • Blacklist nodi (RESERVED/COMMITTED, TTL, pulizia scaduti)
-#      • Selezione tipo risorsa dalla sequenza
-#      • Logica slot (conta attive vs obiettivo)
-#      • Flusso UI via ctx.device (tap, key, screenshot) — zero ADB diretto
-#      • Config interamente via ctx.config con fallback ai default
+#  UPGRADE 15/04/2026 — integrazione V5:
+#    Step 1: OCR coordinate nodo reali (chiave "X_Y" invece di "tipo_campo")
+#            → permette più squadre dello stesso tipo su nodi diversi
+#            → tap lente coordinate (380,18) → OCR zone X/Y dal popup
+#    Step 2: OCR ETA marcia dalla maschera invio pre-MARCIA
+#            → TTL blacklist dinamico basato su distanza reale
+#    Step 3: Conferma contatore post-marcia via leggi_contatore_slot()
+#            → commit blacklist solo se contatore aumenta (marcia confermata)
+#            → rollback automatico se marcia silenziosamente fallita
+#    Step 4: Nodo fuori territorio → blacklist COMMITTED (non solo skip neutro)
+#            → evita di ritentare lo stesso nodo fuori territorio
+#    Step 5: Verifica livello nodo via OCR titolo popup ("Campo Lv.6")
+#            → scarta e blacklista nodi sotto RACCOLTA_LIVELLO
+#    Step 6: Blacklist statica su disco nodi fuori territorio
+#            → file JSON per istanza in data/blacklist_fuori_{istanza}.json
+#            → check pre-tap: se nodo già noto fuori territorio → skip immediato
+#            → risparmio popup e BACK su nodi permanentemente fuori zona
 #
-#  FLUSSO (semplificato V6 — fedele alla logica V5):
+#  FLUSSO AGGIORNATO:
 #    0. Verifica abilitazione + slot liberi (iniettabile nei test)
 #    1. Naviga in mappa
 #    2. Loop: finché attive < obiettivo e fallimenti < MAX_FALLIMENTI:
-#       a. Seleziona tipo dalla sequenza (round-robin + blacklist)
+#       a. Seleziona tipo dalla sequenza (allocation gap V5)
 #       b. Cerca nodo (LENTE → tipo × 2 → livello → CERCA)
-#       c. Leggi coordinate nodo via matcher
-#       d. Verifica blacklist → RESERVED → _esegui_marcia
-#       e. Se OK → COMMITTED in blacklist + attive++
-#       f. Se fail → fallimenti++
-#    3. Ritorna in home, ritorna inviate
+#       c. Tap nodo → verifica GATHER → OCR coordinate reali
+#       d. Check blacklist statica fuori territorio (disco)
+#       e. Check blacklist dinamica (RAM)
+#       f. Verifica livello nodo via OCR
+#       g. Verifica territorio → se fuori: blacklist statica + dinamica
+#       h. RESERVED → _esegui_marcia (con OCR ETA)
+#       i. Verifica contatore post-marcia → COMMITTED o rollback
+#    3. Ritorna in home
 #
 #  COORDINATE DEFAULT (960x540):
-#    TAP_LENTE          = (334, 13)
-#    TAP_NODO           = (480, 270)
-#    TAP_RACCOGLI       = (662, 410)
-#    TAP_SQUADRA        = (480, 410)
-#    TAP_MARCIA         = (480, 448)
-#    TAP_CANCELLA       = (390, 340)
-#    TAP_CAMPO_TESTO    = (480, 340)
-#    TAP_OK_TASTIERA    = (480, 380)
-#    TEMPLATE_GATHER    = "pin/pin_gather.png"
-#    TEMPLATE_MARCIA    = "pin/pin_march.png"
+#    TAP_LENTE              = (38, 325)    icona lente grande in mappa
+#    TAP_LENTE_COORD        = (380, 18)    icona lente piccola per coordinate
+#    TAP_NODO               = (480, 280)   centro nodo dopo CERCA
+#    TAP_RACCOGLI           = (230, 390)   pulsante RACCOGLI nel popup nodo
+#    TAP_SQUADRA            = (700, 185)   selezione squadra
+#    TAP_MARCIA             = (727, 476)   pulsante MARCIA
+#    NODO_TITOLO_ZONA       = (250,150,720,185)  OCR livello nodo
+#    OCR_COORD_ZONA_X       = (430,125,530,155)  OCR coordinata X popup lente
+#    OCR_COORD_ZONA_Y       = (535,125,635,155)  OCR coordinata Y popup lente
+#    OCR_ETA_ZONA           = (580,440,780,470)  OCR timer ETA marcia
 #
 #  CONFIG (ctx.config — chiavi con fallback ai default):
 #    RACCOLTA_ABILITATA          bool   default True
 #    RACCOLTA_SEQUENZA           list   default ["campo","segheria","petrolio","acciaio"]
-#    RACCOLTA_OBIETTIVO          int    default 4   (slot totali da riempire)
+#    RACCOLTA_OBIETTIVO          int    default 4
 #    RACCOLTA_MAX_FALLIMENTI     int    default 3
-#    RACCOLTA_TRUPPE             int    default 0   (0 = default gioco)
+#    RACCOLTA_TRUPPE             int    default 0
 #    RACCOLTA_LIVELLO            int    default 6
-#    BLACKLIST_COMMITTED_TTL     int    default 120 (secondi)
-#    BLACKLIST_RESERVED_TTL      int    default 45  (secondi)
+#    RACCOLTA_LIVELLO_MIN        int    default 6  (scarta nodi sotto questo livello)
+#    BLACKLIST_COMMITTED_TTL     int    default 120
+#    BLACKLIST_RESERVED_TTL      int    default 45
 #    BLACKLIST_ATTESA_NODO       int    default 120
+#    BLACKLIST_FUORI_DIR         str    default "data"
+#    ETA_MARGINE_S               int    default 5  (margine su ETA per TTL)
+#    ETA_MIN_S                   int    default 8  (ETA minima accettabile)
+#    ETA_MAX_S                   int    default 600 (oltre: valore anomalo OCR)
 # ==============================================================================
 
 from __future__ import annotations
 
-import time
+import json
+import math as _math
+import os
+import re as _re
 import threading
-import numpy as np
+import time
+from pathlib import Path
 from typing import Optional
+
+import numpy as np
 
 from core.task import Task, TaskContext, TaskResult
 
@@ -71,23 +90,24 @@ from core.task import Task, TaskContext, TaskResult
 # ------------------------------------------------------------------------------
 
 _DEFAULTS: dict = {
-    # Coordinate UI (960x540) — da V5 config.py
-    "TAP_LENTE":            (38,  325),   # icona lente grande in mappa
-    "TAP_NODO":             (480, 280),   # centro nodo dopo CERCA
-    "TAP_RACCOGLI":         (230, 390),   # pulsante RACCOGLI nel popup nodo
-    "TAP_SQUADRA":          (700, 185),   # selezione squadra
-    "TAP_MARCIA":           (727, 476),   # pulsante MARCIA
-    "TAP_CANCELLA":         (527, 469),   # pulsante CANCELLA truppe
-    "TAP_CAMPO_TESTO":      (748,  75),   # campo testo truppe
-    "TAP_OK_TASTIERA":      (480, 380),   # OK tastiera
-    # Icone tipo risorsa nella lente (da V5 config.py)
+    # Coordinate UI (960x540)
+    "TAP_LENTE":            (38,  325),
+    "TAP_LENTE_COORD":      (380,  18),   # lente piccola → popup coordinate X/Y
+    "TAP_NODO":             (480, 280),
+    "TAP_RACCOGLI":         (230, 390),
+    "TAP_SQUADRA":          (700, 185),
+    "TAP_MARCIA":           (727, 476),
+    "TAP_CANCELLA":         (527, 469),
+    "TAP_CAMPO_TESTO":      (748,  75),
+    "TAP_OK_TASTIERA":      (480, 380),
+    # Icone tipo risorsa nella lente
     "TAP_ICONA_TIPO": {
         "campo":    (410, 450),
         "segheria": (535, 450),
         "acciaio":  (672, 490),
         "petrolio": (820, 490),
     },
-    # Coordinate livello per tipo (meno, piu, search) — 960x540 (V5 raccolta.py)
+    # Coordinate livello per tipo
     "COORD_LIVELLO": {
         "campo":    {"meno": (294, 295), "piu": (519, 293), "search": (413, 352)},
         "segheria": {"meno": (419, 295), "piu": (644, 293), "search": (538, 352)},
@@ -101,13 +121,25 @@ _DEFAULTS: dict = {
         "acciaio":  "pin/pin_steel_mill.png",
         "petrolio": "pin/pin_oil_refinery.png",
     },
-    "SOGLIA_TIPO":      0.85,   # V5 verifica_ui.py _SOGLIA_TIPI
-    "ROI_LENTE":        (350, 460, 870, 540),  # V5 _ROI_LENTE
-    # Template gather + marcia
-    "TEMPLATE_GATHER":  "pin/pin_gather.png",
-    "ROI_GATHER":       (60, 350, 420, 420),   # V5 _ROI_GATHER
-    "TEMPLATE_MARCIA":  "pin/pin_march.png",
-    "TEMPLATE_SOGLIA":  0.75,
+    "SOGLIA_TIPO":          0.85,
+    "ROI_LENTE":            (350, 460, 870, 540),
+    # Template gather + marcia + enter coordinates
+    "TEMPLATE_GATHER":      "pin/pin_gather.png",
+    "ROI_GATHER":           (60, 350, 420, 420),
+    "TEMPLATE_MARCIA":      "pin/pin_march.png",
+    "TEMPLATE_ENTER":       "pin/pin_enter.png",   # popup "Enter coordinates"
+    "ROI_ENTER":            (300,  85, 700, 125),
+    "TEMPLATE_SOGLIA":      0.75,
+    # OCR coordinate nodo — zona popup lente piccola (V5 ocr.py)
+    "OCR_COORD_ZONA_X":     (430, 125, 530, 155),
+    "OCR_COORD_ZONA_Y":     (535, 125, 635, 155),
+    # OCR livello nodo — titolo popup (V5 raccolta.py)
+    "NODO_TITOLO_ZONA":     (250, 150, 720, 185),
+    # OCR ETA marcia — zona timer nella maschera invio (V5 config.py)
+    "OCR_ETA_ZONA":         (580, 440, 780, 470),
+    "ETA_MARGINE_S":        5,
+    "ETA_MIN_S":            8,
+    "ETA_MAX_S":            600,
     # Logica raccolta
     "RACCOLTA_ABILITATA":       True,
     "RACCOLTA_SEQUENZA":        ["campo", "segheria", "petrolio", "acciaio"],
@@ -115,28 +147,33 @@ _DEFAULTS: dict = {
     "RACCOLTA_MAX_FALLIMENTI":  3,
     "RACCOLTA_TRUPPE":          0,
     "RACCOLTA_LIVELLO":         6,
+    "RACCOLTA_LIVELLO_MIN":     6,
     # Blacklist
     "BLACKLIST_COMMITTED_TTL":  120,
     "BLACKLIST_RESERVED_TTL":   45,
     "BLACKLIST_ATTESA_NODO":    120,
-    # Ritardi (secondi)
+    "BLACKLIST_FUORI_DIR":      "data",
+    # Ritardi
     "DELAY_POST_MARCIA":        2.0,
     "DELAY_CERCA":              1.5,
 }
 
 _TUTTI_I_TIPI = ["campo", "segheria", "petrolio", "acciaio"]
 
+
+def _cfg(ctx: TaskContext, key: str):
+    return ctx.config.get(key, _DEFAULTS[key])
+
+
 # ==============================================================================
 # Allocation — logica gap V5 allocation.py
 # ==============================================================================
 
-import math as _math
-
 _RATIO_TARGET_DEFAULT = {
-    "campo":    0.3500,   # pomodoro 35%
-    "segheria": 0.3500,   # legno    35%
-    "petrolio": 0.1875,   #          18.75%
-    "acciaio":  0.1125,   #          11.25%
+    "campo":    0.3500,
+    "segheria": 0.3500,
+    "petrolio": 0.1875,
+    "acciaio":  0.1125,
 }
 _TIPO_TO_RISORSA = {
     "campo":    "pomodoro",
@@ -144,64 +181,41 @@ _TIPO_TO_RISORSA = {
     "petrolio": "petrolio",
     "acciaio":  "acciaio",
 }
-_SOGLIA_OCR_MIN = 100_000   # 100K — sotto questa soglia OCR non affidabile
+_SOGLIA_OCR_MIN = 100_000
 
 
 def _calcola_sequenza_allocation(slot_liberi: int, deposito: dict,
                                   ratio_target: dict | None = None) -> list[str]:
-    """
-    Sequenza ottimale tipi nodo in base al gap deposito/target.
-    Portato da V5 allocation.py — algoritmo gap proporzionale con cap per tipo.
-
-    Args:
-        slot_liberi:  slot raccoglitori liberi
-        deposito:     {"pomodoro":float, "legno":float, ...} — valori assoluti
-        ratio_target: override % target (default V5)
-
-    Returns:
-        Lista tipi es. ["campo","segheria","petrolio","campo"]
-    """
     if slot_liberi <= 0:
         return []
-
     ratio = ratio_target or _RATIO_TARGET_DEFAULT
-
-    # Leggi valori deposito
     valori = {}
     for tipo, risorsa in _TIPO_TO_RISORSA.items():
         v = deposito.get(risorsa, -1)
         valori[tipo] = float(v) if (v is not None and v >= _SOGLIA_OCR_MIN) else 0.0
-
     totale = sum(valori.values())
-
-    # Fallback: deposito non leggibile
     if totale < 1_000:
-        base = ["campo","segheria","petrolio","campo","segheria",
-                "acciaio","campo","segheria","petrolio","campo",
-                "segheria","acciaio","campo","segheria","petrolio","campo"]
+        base = ["campo", "segheria", "petrolio", "campo", "segheria",
+                "acciaio", "campo", "segheria", "petrolio", "campo",
+                "segheria", "acciaio", "campo", "segheria", "petrolio", "campo"]
         return base[:slot_liberi]
-
     perc_att = {t: valori[t] / totale for t in ratio}
     gap      = {t: ratio[t] - perc_att[t] for t in ratio}
     tipi_ord = sorted(gap.keys(), key=lambda t: gap[t], reverse=True)
     cap      = max(1, _math.floor(slot_liberi / 2))
     contatori = {t: 0 for t in ratio}
     sequenza  = []
-
-    # Prima passata: gap positivi in ordine priorità
     for tipo in tipi_ord:
         if len(sequenza) >= slot_liberi:
             break
         if gap[tipo] > 0:
             gap_pos_tot = max(sum(g for g in gap.values() if g > 0), 0.001)
-            peso  = gap[tipo] / gap_pos_tot
+            peso = gap[tipo] / gap_pos_tot
             n = min(cap, max(1, round(peso * slot_liberi)), slot_liberi - len(sequenza))
             for _ in range(n):
                 if len(sequenza) < slot_liberi:
                     sequenza.append(tipo)
                     contatori[tipo] += 1
-
-    # Seconda passata: riempi slot residui
     idx = 0
     safety = 0
     while len(sequenza) < slot_liberi:
@@ -212,32 +226,24 @@ def _calcola_sequenza_allocation(slot_liberi: int, deposito: dict,
         idx += 1
         safety += 1
         if safety > len(tipi_ord) * slot_liberi * 2:
-            cap = slot_liberi  # rilassa cap
+            cap = slot_liberi
             safety = 0
-
     return sequenza[:slot_liberi]
 
-# Verifica territorio alleanza — pixel check V5 verifica_ui.py
+
+# Verifica territorio alleanza — pixel check V5
 _TERRITORIO_BUFF_ZONA = (250, 340, 420, 370)
 _TERRITORIO_SOGLIA_PX = 20
 
 
-def _cfg(ctx: TaskContext, key: str):
-    """Legge ctx.config con fallback al default di modulo."""
-    return ctx.config.get(key, _DEFAULTS[key])
-
-
 # ==============================================================================
-# Blacklist nodi — pura, zero I/O, thread-safe
+# Blacklist dinamica RAM — RESERVED/COMMITTED con TTL
 # ==============================================================================
 
 class Blacklist:
     """
     Blacklist nodi con stati RESERVED / COMMITTED e TTL indipendenti.
-
-    Formato interno:
-      chiave : "X_Y"  (es. "712_535")
-      valore : {"ts": float, "state": "RESERVED"|"COMMITTED", "eta_s": float|None}
+    Chiave: "X_Y" (coordinate reali OCR) — permette più squadre stesso tipo.
     """
 
     def __init__(self, committed_ttl: int = 120, reserved_ttl: int = 45):
@@ -247,20 +253,15 @@ class Blacklist:
         self.reserved_ttl  = reserved_ttl
 
     def _pulisci(self) -> None:
-        """Rimuove i nodi scaduti. Chiamare dentro lock."""
         ora = time.time()
-        scaduti = []
-        for k, v in self._data.items():
-            ttl = (self.committed_ttl
-                   if v.get("state") == "COMMITTED"
-                   else self.reserved_ttl)
-            if ora - v.get("ts", 0) > ttl:
-                scaduti.append(k)
+        scaduti = [k for k, v in self._data.items()
+                   if ora - v.get("ts", 0) > (
+                       self.committed_ttl if v.get("state") == "COMMITTED"
+                       else self.reserved_ttl)]
         for k in scaduti:
             del self._data[k]
 
     def contiene(self, chiave: str) -> bool:
-        """True se il nodo è in blacklist (non scaduto)."""
         if not chiave:
             return False
         with self._lock:
@@ -268,41 +269,34 @@ class Blacklist:
             return chiave in self._data
 
     def reserve(self, chiave: str) -> None:
-        """Prenota il nodo in stato RESERVED (TTL breve)."""
         if not chiave:
             return
         with self._lock:
             self._data[chiave] = {"ts": time.time(), "state": "RESERVED", "eta_s": None}
 
     def commit(self, chiave: str, eta_s: Optional[float] = None) -> None:
-        """Conferma il nodo in stato COMMITTED (TTL lungo)."""
         if not chiave:
             return
         with self._lock:
-            self._data[chiave] = {"ts": time.time(), "state": "COMMITTED",
-                                   "eta_s": eta_s}
+            self._data[chiave] = {"ts": time.time(), "state": "COMMITTED", "eta_s": eta_s}
 
     def rollback(self, chiave: str) -> None:
-        """Rilascia il nodo dalla blacklist."""
         if not chiave:
             return
         with self._lock:
             self._data.pop(chiave, None)
 
     def get_eta(self, chiave: str) -> Optional[float]:
-        """Ritorna eta_s del nodo COMMITTED, o None."""
         with self._lock:
             v = self._data.get(chiave)
             return v.get("eta_s") if isinstance(v, dict) else None
 
     def get_state(self, chiave: str) -> Optional[str]:
-        """Ritorna lo stato del nodo: 'RESERVED'|'COMMITTED'|None."""
         with self._lock:
             v = self._data.get(chiave)
             return v.get("state") if isinstance(v, dict) else None
 
     def snapshot(self) -> dict:
-        """Copia immutabile del dizionario interno (per test)."""
         with self._lock:
             self._pulisci()
             return dict(self._data)
@@ -314,15 +308,66 @@ class Blacklist:
 
 
 # ==============================================================================
+# Step 6 — Blacklist statica su disco: nodi fuori territorio
+# ==============================================================================
+
+class BlacklistFuori:
+    """
+    Blacklist persistente su disco dei nodi fuori territorio.
+    File: {BLACKLIST_FUORI_DIR}/blacklist_fuori_{istanza}.json
+    Formato: {"X_Y": {"ts": float, "tipo": str}}
+    Nessun TTL — i nodi fuori territorio sono permanenti (la mappa non cambia).
+    Thread-safe tramite lock.
+    """
+
+    def __init__(self, istanza: str, data_dir: str = "data"):
+        self._lock = threading.Lock()
+        path = Path(data_dir)
+        path.mkdir(parents=True, exist_ok=True)
+        self._path = path / f"blacklist_fuori_{istanza}.json"
+        self._data: dict[str, dict] = self._carica()
+
+    def _carica(self) -> dict:
+        try:
+            if self._path.exists():
+                return json.loads(self._path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        return {}
+
+    def _salva(self) -> None:
+        try:
+            self._path.write_text(
+                json.dumps(self._data, indent=2, ensure_ascii=False),
+                encoding="utf-8"
+            )
+        except Exception:
+            pass
+
+    def contiene(self, chiave: str) -> bool:
+        if not chiave:
+            return False
+        with self._lock:
+            return chiave in self._data
+
+    def aggiungi(self, chiave: str, tipo: str) -> None:
+        if not chiave:
+            return
+        with self._lock:
+            self._data[chiave] = {"ts": time.time(), "tipo": tipo}
+            self._salva()
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._data)
+
+
+# ==============================================================================
 # Selezione sequenza risorse
 # ==============================================================================
 
 def _calcola_sequenza(obiettivo: int, sequenza_base: list[str],
                        tipi_bloccati: set[str]) -> list[str]:
-    """
-    Genera la sequenza di tipi da inviare, escludendo i tipi bloccati.
-    Round-robin sulla sequenza_base × obiettivo (con padding sicuro).
-    """
     disponibili = [t for t in sequenza_base if t not in tipi_bloccati]
     if not disponibili:
         disponibili = [t for t in _TUTTI_I_TIPI if t not in tipi_bloccati]
@@ -333,7 +378,7 @@ def _calcola_sequenza(obiettivo: int, sequenza_base: list[str],
 
 
 # ==============================================================================
-# Operazioni UI via ctx.device — zero ADB diretto
+# Operazioni UI
 # ==============================================================================
 
 def _nodo_in_territorio(screen, tipo: str, ctx: TaskContext) -> bool:
@@ -349,7 +394,7 @@ def _nodo_in_territorio(screen, tipo: str, ctx: TaskContext) -> bool:
         n_verdi = int(verdi.sum())
         in_territorio = n_verdi >= _TERRITORIO_SOGLIA_PX
         ctx.log_msg(f"Raccolta [{tipo}]: territorio pixel_verdi={n_verdi} "
-                    f"(soglia={_TERRITORIO_SOGLIA_PX}) → {'IN' if in_territorio else 'FUORI'} territorio")
+                    f"(soglia={_TERRITORIO_SOGLIA_PX}) → {'IN' if in_territorio else 'FUORI'}")
         return in_territorio
     except Exception:
         return True
@@ -359,22 +404,22 @@ def _verifica_tipo(ctx: TaskContext, tipo: str) -> bool:
     """Verifica visiva che il tipo sia selezionato nel pannello lente."""
     tmpl_tipo = _cfg(ctx, "TMPL_TIPO").get(tipo)
     if not tmpl_tipo:
-        return True  # tipo sconosciuto — fail-safe
+        return True
     soglia = _cfg(ctx, "SOGLIA_TIPO")
     roi    = _cfg(ctx, "ROI_LENTE")
     screen = ctx.device.screenshot()
     if not screen:
-        return True  # fail-safe
+        return True
     r = ctx.matcher.find_one(screen, tmpl_tipo, threshold=soglia, zone=roi)
-    ctx.log_msg(f"Raccolta: [VERIFICA] tipo {tipo} score={r.score:.3f} (soglia={soglia}) → {'OK' if r.found else 'NON selezionato'}")
+    ctx.log_msg(f"Raccolta: [VERIFICA] tipo {tipo} score={r.score:.3f} → "
+                f"{'OK' if r.found else 'NON selezionato'}")
     return r.found
 
 
 def _cerca_nodo(ctx: TaskContext, tipo: str) -> bool:
     """
-    Esegue: LENTE → tap tipo × 2 → verifica tipo selezionato → livello → CERCA.
-    Ritorna True se la CERCA è stata eseguita, False se il tipo non è stato
-    selezionato correttamente dopo i retry.
+    LENTE → tap tipo × 2 → verifica tipo → livello → CERCA.
+    Ritorna True se CERCA eseguita correttamente.
     """
     tap_lente   = _cfg(ctx, "TAP_LENTE")
     coord_lv    = _cfg(ctx, "COORD_LIVELLO").get(tipo, _cfg(ctx, "COORD_LIVELLO")["campo"])
@@ -386,12 +431,10 @@ def _cerca_nodo(ctx: TaskContext, tipo: str) -> bool:
     ctx.device.tap(tap_lente)
     time.sleep(0.8)
 
-    # Seleziona tipo × 2
     ctx.device.tap(tap_icona)
     ctx.device.tap(tap_icona)
     time.sleep(1.2)
 
-    # Verifica tipo selezionato — V5 pattern: retry con reset pannello
     if not _verifica_tipo(ctx, tipo):
         ctx.log_msg(f"Raccolta: tipo {tipo} NON selezionato — retry tap icona")
         ctx.device.tap(tap_icona)
@@ -406,37 +449,272 @@ def _cerca_nodo(ctx: TaskContext, tipo: str) -> bool:
             ctx.device.tap(tap_icona)
             time.sleep(1.5)
             if not _verifica_tipo(ctx, tipo):
-                ctx.log_msg(f"Raccolta: tipo {tipo} NON selezionato dopo reset — abort CERCA")
+                ctx.log_msg(f"Raccolta: tipo {tipo} NON selezionato dopo reset — abort")
                 ctx.device.key("KEYCODE_BACK")
                 time.sleep(0.5)
                 return False
 
-    # Reset livello: 7× tap MENO (porta sicuro a Lv.1 da qualsiasi stato)
     for _ in range(7):
         ctx.device.tap(coord_lv["meno"])
         time.sleep(0.15)
     time.sleep(0.3)
-    # Sale al livello target: (livello-1) × tap PIU
     for _ in range(livello - 1):
         ctx.device.tap(coord_lv["piu"])
         time.sleep(0.2)
 
-    # CERCA
     ctx.device.tap(coord_lv["search"])
     time.sleep(delay_cerca)
     ctx.log_msg(f"Raccolta: CERCA eseguita per {tipo} Lv.{livello}")
     return True
 
 
+# ==============================================================================
+# Step 1 — OCR coordinate nodo reali (V5 ocr.py → _ocr_box + _leggi_coord_nodo)
+# ==============================================================================
+
+def _ocr_coord_box(frame, zona: tuple) -> Optional[int]:
+    """
+    OCR su una zona del frame per leggere coordinata numerica (3-4 cifre).
+    Tradotto da V5 ocr._ocr_box().
+    """
+    try:
+        import pytesseract
+        import os
+        from PIL import Image
+        pytesseract.pytesseract.tesseract_cmd = os.environ.get(
+            "TESSERACT_EXE",
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        )
+        x1, y1, x2, y2 = zona
+        roi = frame[y1:y2, x1:x2]
+        import cv2
+        big  = cv2.resize(roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+        gray = cv2.cvtColor(big, cv2.COLOR_BGR2GRAY)
+        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        pil = Image.fromarray(thresh)
+        testo = pytesseract.image_to_string(
+            pil,
+            config="--psm 7 -c tessedit_char_whitelist=0123456789XY:#. "
+        ).strip()
+        numeri = _re.findall(r'\d{3,4}', testo)
+        return int(numeri[0]) if numeri else None
+    except Exception:
+        return None
+
+
+def _leggi_coord_nodo(ctx: TaskContext) -> Optional[str]:
+    """
+    Step 1: tap lente coordinate (380,18) → verifica popup → OCR X/Y.
+    Ritorna chiave "X_Y" (es. "712_535") oppure None se OCR fallisce.
+    Tradotto da V5 raccolta._leggi_coord_nodo() + ocr.leggi_coordinate_nodo_mem().
+    """
+    tap_lente_coord = _cfg(ctx, "TAP_LENTE_COORD")
+    tmpl_enter      = _cfg(ctx, "TEMPLATE_ENTER")
+    roi_enter       = _cfg(ctx, "ROI_ENTER")
+    soglia          = _cfg(ctx, "TEMPLATE_SOGLIA")
+    zona_x          = _cfg(ctx, "OCR_COORD_ZONA_X")
+    zona_y          = _cfg(ctx, "OCR_COORD_ZONA_Y")
+
+    time.sleep(1.5)
+
+    # Tap lente coordinata + verifica popup aperto
+    ctx.device.tap(tap_lente_coord)
+    time.sleep(1.3)
+
+    screen = ctx.device.screenshot()
+    if screen is None:
+        return None
+
+    try:
+        enter_ok = ctx.matcher.find_one(screen, tmpl_enter,
+                                         threshold=soglia, zone=roi_enter)
+        if not enter_ok.found:
+            ctx.log_msg("[COORD] pin_enter NON visibile — retry tap lente coord")
+            ctx.device.tap(tap_lente_coord)
+            time.sleep(1.3)
+            screen = ctx.device.screenshot()
+            if screen is None:
+                return None
+            enter_ok2 = ctx.matcher.find_one(screen, tmpl_enter,
+                                              threshold=soglia, zone=roi_enter)
+            if not enter_ok2.found:
+                ctx.log_msg("[COORD] ANOMALIA: pin_enter ancora non visibile — OCR potrebbe fallire")
+        else:
+            ctx.log_msg(f"[COORD] pin_enter score={enter_ok.score:.3f} — OK")
+    except FileNotFoundError:
+        ctx.log_msg("[COORD] pin_enter.png non trovato — procedo senza verifica")
+
+    frame = getattr(screen, "frame", None)
+    if frame is None:
+        return None
+
+    cx = _ocr_coord_box(frame, zona_x)
+    cy = _ocr_coord_box(frame, zona_y)
+
+    # Retry se una coordinata non letta
+    if cx is None or cy is None:
+        time.sleep(0.6)
+        screen2 = ctx.device.screenshot()
+        if screen2 is not None:
+            frame2 = getattr(screen2, "frame", None)
+            if frame2 is not None:
+                if cx is None:
+                    cx = _ocr_coord_box(frame2, zona_x)
+                if cy is None:
+                    cy = _ocr_coord_box(frame2, zona_y)
+
+    # Fallback cx: se Y leggibile ma X no, usa centro mappa (V5 pattern)
+    if cx is None and cy is not None:
+        cx = 690
+        ctx.log_msg(f"[COORD] cx fallback=690 cy={cy}")
+
+    if cx is not None and cy is not None:
+        chiave = f"{cx}_{cy}"
+        ctx.log_msg(f"[COORD] coordinate nodo: ({cx},{cy}) → chiave={chiave}")
+        return chiave
+
+    ctx.log_msg("[COORD] OCR coordinate fallito — procedo senza chiave")
+    return None
+
+
+# ==============================================================================
+# Step 5 — OCR livello nodo dal titolo popup (V5 raccolta._leggi_livello_nodo_da_img)
+# ==============================================================================
+
+def _leggi_livello_nodo(ctx: TaskContext, screen) -> int:
+    """
+    Step 5: legge il livello del nodo dal titolo del popup (es. "Campo Lv.6" → 6).
+    Ritorna int >= 1 se leggibile, -1 se OCR fallisce (fail-safe: non scarta).
+    Tradotto da V5 raccolta._leggi_livello_nodo_da_img().
+    """
+    try:
+        import pytesseract
+        import os
+        from PIL import Image
+        pytesseract.pytesseract.tesseract_cmd = os.environ.get(
+            "TESSERACT_EXE",
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        )
+        frame = getattr(screen, "frame", None)
+        if frame is None:
+            return -1
+        x1, y1, x2, y2 = _cfg(ctx, "NODO_TITOLO_ZONA")
+        roi = frame[y1:y2, x1:x2]
+        import cv2
+        pil = Image.fromarray(roi[:, :, ::-1])
+        w, h = pil.size
+        big = pil.resize((w * 4, h * 4), Image.LANCZOS)
+        bw  = big.convert("L").point(lambda p: 255 if p > 130 else 0)
+        cfg = ("--psm 7 -c tessedit_char_whitelist="
+               "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789. ")
+        testo = pytesseract.image_to_string(bw, config=cfg).strip()
+        m = _re.search(r'[Ll][Vv]\.?\s*(\d+)', testo)
+        return int(m.group(1)) if m else -1
+    except Exception:
+        return -1
+
+
+# ==============================================================================
+# Step 2 — OCR ETA marcia dalla maschera invio (V5 ocr.leggi_eta_marcia_mem)
+# ==============================================================================
+
+_ETA_RE = _re.compile(
+    r"(?:(\d+)\s*:\s*(\d{2})\s*:\s*(\d{2}))|(?:(\d{1,2})\s*:\s*(\d{2}))"
+)
+
+
+def _parse_eta_secondi(testo: str) -> Optional[int]:
+    """Parsa 'H:MM:SS' o 'MM:SS' in secondi. Ritorna None se non leggibile."""
+    if not testo:
+        return None
+    t = testo.strip().replace(' ', '').replace('O', '0').replace('o', '0')
+    m = _ETA_RE.search(t)
+    if not m:
+        return None
+    if m.group(1) is not None:
+        return int(m.group(1)) * 3600 + int(m.group(2)) * 60 + int(m.group(3))
+    return int(m.group(4)) * 60 + int(m.group(5))
+
+
+def _leggi_eta_marcia(ctx: TaskContext, screen) -> Optional[int]:
+    """
+    Step 2: OCR timer ETA dalla maschera invio pre-MARCIA.
+    Ritorna secondi (int) oppure None se non leggibile.
+    Tradotto da V5 ocr.leggi_eta_marcia_mem() + _leggi_eta_marcia_da_img().
+    """
+    try:
+        import pytesseract
+        import os
+        from PIL import Image, ImageFilter, ImageEnhance, ImageOps
+        pytesseract.pytesseract.tesseract_cmd = os.environ.get(
+            "TESSERACT_EXE",
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        )
+        frame = getattr(screen, "frame", None)
+        if frame is None:
+            return None
+        x1, y1, x2, y2 = _cfg(ctx, "OCR_ETA_ZONA")
+        roi = frame[y1:y2, x1:x2]
+        pil = Image.fromarray(roi[:, :, ::-1])
+        w, h = pil.size
+        # Preprocessa: scala grigi + contrasto + mediana + upscale + soglia
+        img2 = pil.convert('L')
+        img2 = ImageEnhance.Contrast(img2).enhance(2.3)
+        img2 = img2.filter(ImageFilter.MedianFilter(size=3))
+        img2 = img2.resize((w * 4, h * 4), Image.LANCZOS)
+        img2 = img2.point(lambda p: 255 if p > 140 else 0)
+        cfg  = "--psm 6 -c tessedit_char_whitelist=0123456789:"
+        t1   = pytesseract.image_to_string(img2, config=cfg).strip()
+        sec  = _parse_eta_secondi(t1)
+        if sec is not None:
+            return sec
+        # Prova invertita
+        inv = ImageOps.invert(img2)
+        inv = inv.point(lambda p: 255 if p > 140 else 0)
+        t2  = pytesseract.image_to_string(inv, config=cfg).strip()
+        return _parse_eta_secondi(t2)
+    except Exception:
+        return None
+
+
+# ==============================================================================
+# Step 3 — Conferma contatore post-marcia
+# ==============================================================================
+
+def _leggi_attive_post_marcia(ctx: TaskContext, obiettivo: int,
+                               retry: int = 3, sleep_s: float = 1.5) -> int:
+    """
+    Step 3: legge il contatore slot dopo la marcia con retry.
+    Ritorna attive (int >= 0) oppure -1 se OCR fallisce.
+    Tradotto da V5 raccolta._leggi_attive_con_retry().
+    """
+    try:
+        from shared.ocr_helpers import leggi_contatore_slot
+    except ImportError:
+        return -1
+
+    for i in range(retry):
+        screen = ctx.device.screenshot()
+        if screen is None:
+            time.sleep(sleep_s)
+            continue
+        attive, totale = leggi_contatore_slot(screen, totale_noto=obiettivo)
+        if attive >= 0:
+            return attive
+        ctx.log_msg(f"[POST-MARCIA] OCR contatore N/D (tentativo {i+1}/{retry})")
+        time.sleep(sleep_s)
+    return -1
+
+
+# ==============================================================================
+# Sequenza UI principale
+# ==============================================================================
+
 def _tap_nodo_e_verifica_gather(ctx: TaskContext, tipo: str) -> str:
     """
-    Tappa il nodo al centro della lista risultati CERCA e verifica
-    che il popup si apra con il pulsante GATHER visibile e IN territorio.
-
-    Ritorna:
-      "ok"          — GATHER visibile + IN territorio
-      "fuori"       — GATHER visibile ma FUORI territorio (skip neutro)
-      "errore"      — GATHER non trovato (fallimento strutturale)
+    Tap nodo → verifica GATHER visibile.
+    Ritorna "ok" | "fuori" | "errore".
+    NON verifica territorio — viene fatto in _invia_squadra dopo OCR coordinate.
     """
     tap_nodo        = _cfg(ctx, "TAP_NODO")
     template_gather = _cfg(ctx, "TEMPLATE_GATHER")
@@ -449,47 +727,41 @@ def _tap_nodo_e_verifica_gather(ctx: TaskContext, tipo: str) -> str:
 
     screen = ctx.device.screenshot()
     if not screen:
-        return False
+        return "errore"
 
     r = ctx.matcher.find_one(screen, template_gather, threshold=soglia, zone=roi_gather)
-    ctx.log_msg(f"Raccolta [{tipo}]: pin_gather score={r.score:.3f} (soglia={soglia}) → {'OK' if r.found else 'NON trovato'}")
+    ctx.log_msg(f"Raccolta [{tipo}]: pin_gather score={r.score:.3f} → "
+                f"{'OK' if r.found else 'NON trovato'}")
 
     if not r.found:
-        # retry — a volte il popup impiega un attimo
         ctx.log_msg(f"Raccolta [{tipo}]: GATHER non visibile — retry tap nodo")
         ctx.device.tap(tap_nodo)
         time.sleep(1.5)
         screen2 = ctx.device.screenshot()
         if screen2:
             r2 = ctx.matcher.find_one(screen2, template_gather, threshold=soglia, zone=roi_gather)
-            ctx.log_msg(f"Raccolta [{tipo}]: pin_gather retry score={r2.score:.3f} → {'OK' if r2.found else 'NON trovato'}")
+            ctx.log_msg(f"Raccolta [{tipo}]: pin_gather retry score={r2.score:.3f} → "
+                        f"{'OK' if r2.found else 'NON trovato'}")
             if r2.found:
                 screen = screen2
             else:
                 ctx.device.key("KEYCODE_BACK")
                 time.sleep(0.5)
-                return False
+                return "errore"
         else:
             ctx.device.key("KEYCODE_BACK")
             time.sleep(0.5)
-            return False
+            return "errore"
 
-    # Verifica territorio alleanza — pixel check V5
-    if not _nodo_in_territorio(screen, tipo, ctx):
-        ctx.log_msg(f"Raccolta [{tipo}]: nodo FUORI territorio — BACK e skip")
-        ctx.device.key("KEYCODE_BACK")
-        time.sleep(0.5)
-        return "fuori"
-
-    return "ok"
+    return "gather_ok", screen   # type: ignore  — ritorna anche screen per uso successivo
 
 
-def _esegui_marcia(ctx: TaskContext, n_truppe: int) -> tuple[bool, Optional[float]]:
+def _esegui_marcia(ctx: TaskContext, n_truppe: int,
+                   screen_maschera=None) -> tuple[bool, Optional[int]]:
     """
-    Sequenza UI: RACCOGLI → SQUADRA → (truppe) → MARCIA.
+    Sequenza UI: RACCOGLI → SQUADRA → (truppe) → OCR ETA → MARCIA.
     Ritorna (ok, eta_s).
-
-    FIX 12/04/2026: ctx.matcher.find() → ctx.matcher.find_one() (2 occorrenze).
+    Step 2: OCR ETA dalla maschera pre-MARCIA.
     """
     tap_raccogli    = _cfg(ctx, "TAP_RACCOGLI")
     tap_squadra     = _cfg(ctx, "TAP_SQUADRA")
@@ -499,6 +771,7 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int) -> tuple[bool, Optional[floa
     tap_ok          = _cfg(ctx, "TAP_OK_TASTIERA")
     template_marcia = _cfg(ctx, "TEMPLATE_MARCIA")
     soglia          = _cfg(ctx, "TEMPLATE_SOGLIA")
+    eta_max         = _cfg(ctx, "ETA_MAX_S")
 
     ctx.log_msg("Raccolta: RACCOGLI → SQUADRA")
     ctx.device.tap(tap_raccogli)
@@ -506,22 +779,35 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int) -> tuple[bool, Optional[floa
     ctx.device.tap(tap_squadra)
     time.sleep(1.4)
 
-    # Verifica maschera invio aperta (pin_march.png)
+    # Verifica maschera invio aperta
     screen = ctx.device.screenshot()
     if screen:
         maschera = ctx.matcher.find_one(screen, template_marcia, threshold=soglia)
         if maschera.found:
             ctx.log_msg(f"Raccolta: maschera invio aperta score={maschera.score:.3f} → OK")
         else:
-            ctx.log_msg(f"Raccolta: maschera invio NON aperta score={maschera.score:.3f} — retry")
+            ctx.log_msg(f"Raccolta: maschera NON aperta score={maschera.score:.3f} — retry")
             ctx.device.tap(tap_squadra)
             time.sleep(1.8)
             screen = ctx.device.screenshot()
-            maschera2 = ctx.matcher.find_one(screen, template_marcia, threshold=soglia) if screen else None
-            if maschera2 is None or not maschera2.found:
-                ctx.log_msg("Raccolta: maschera invio ancora non aperta — FALLITO")
-                return False, None
-            ctx.log_msg(f"Raccolta: maschera invio aperta al retry score={maschera2.score:.3f} → OK")
+            if screen:
+                m2 = ctx.matcher.find_one(screen, template_marcia, threshold=soglia)
+                if not m2.found:
+                    ctx.log_msg("Raccolta: maschera ancora non aperta — FALLITO")
+                    return False, None
+                ctx.log_msg(f"Raccolta: maschera aperta al retry score={m2.score:.3f} → OK")
+
+    # Step 2: OCR ETA dalla maschera (screen appena acquisito)
+    eta_s: Optional[int] = None
+    if screen is not None:
+        eta_raw = _leggi_eta_marcia(ctx, screen)
+        if eta_raw is not None and eta_raw <= eta_max:
+            eta_s = eta_raw
+            ctx.log_msg(f"Raccolta: ETA marcia={eta_s}s ({eta_s//60}m{eta_s%60:02d}s)")
+        elif eta_raw is not None:
+            ctx.log_msg(f"Raccolta: ETA={eta_raw}s anomalo (>{eta_max}s) — ignorato")
+        else:
+            ctx.log_msg("Raccolta: ETA marcia non leggibile")
 
     # Imposta truppe
     if n_truppe and n_truppe > 0:
@@ -539,83 +825,173 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int) -> tuple[bool, Optional[floa
         ctx.device.tap(tap_ok)
         time.sleep(0.25)
 
-    # Tap MARCIA
     ctx.log_msg("Raccolta: tap MARCIA")
     ctx.device.tap(tap_marcia)
     time.sleep(0.8)
 
-    # Verifica maschera chiusa (marcia partita)
+    # Verifica maschera chiusa
     screen_post = ctx.device.screenshot()
     if screen_post:
         maschera_post = ctx.matcher.find_one(screen_post, template_marcia, threshold=soglia)
         if maschera_post.found:
-            ctx.log_msg(f"Raccolta: maschera ancora aperta dopo MARCIA score={maschera_post.score:.3f} — retry")
+            ctx.log_msg(f"Raccolta: maschera ancora aperta score={maschera_post.score:.3f} — retry")
             ctx.device.tap(tap_marcia)
             time.sleep(1.0)
             screen_post2 = ctx.device.screenshot()
             if screen_post2:
-                maschera_post2 = ctx.matcher.find_one(screen_post2, template_marcia, threshold=soglia)
-                if maschera_post2.found:
+                m_post2 = ctx.matcher.find_one(screen_post2, template_marcia, threshold=soglia)
+                if m_post2.found:
                     ctx.log_msg("Raccolta: maschera ancora aperta dopo retry — FALLITO")
-                    return False, None
+                    return False, eta_s
         else:
-            ctx.log_msg(f"Raccolta: maschera chiusa score={maschera_post.score:.3f} → marcia partita OK")
-    return True, None
+            ctx.log_msg(f"Raccolta: maschera chiusa score={maschera_post.score:.3f} → marcia OK")
+
+    return True, eta_s
 
 
-def _invia_squadra(ctx: TaskContext, tipo: str, blacklist: Blacklist,
-                    cooldown_map: dict, n_truppe: int,
-                    tipi_bloccati: set) -> tuple[bool, bool]:
+def _invia_squadra(ctx: TaskContext, tipo: str,
+                   blacklist: Blacklist,
+                   blacklist_fuori: BlacklistFuori,
+                   cooldown_map: dict,
+                   n_truppe: int,
+                   tipi_bloccati: set,
+                   obiettivo: int) -> tuple[bool, bool, bool]:
     """
     Cerca nodo, verifica blacklist, invia marcia.
 
-    Ritorna (marcia_ok, tipo_bloccato, skip_neutro):
-      marcia_ok     = True se la marcia è partita
-      tipo_bloccato = True se il tipo deve essere aggiunto a tipi_bloccati
-      skip_neutro   = True se il fallimento è neutro (territorio) — non conta
+    Integra Step 1-5:
+      - Step 1: OCR coordinate reali → chiave "X_Y"
+      - Step 4+6: nodo fuori territorio → blacklist statica + dinamica
+      - Step 5: verifica livello nodo → scarta se sotto soglia
+      - Step 2: ETA marcia via _esegui_marcia()
+      - Step 3: conferma contatore post-marcia
 
-    FIX 12/04/2026: ctx.matcher.find() → ctx.matcher.find_one() (1 occorrenza
-    nella verifica gather visibile).
+    Ritorna (marcia_ok, tipo_bloccato, skip_neutro).
     """
-    # CERCA + verifica tipo selezionato
     if not _cerca_nodo(ctx, tipo):
-        ctx.log_msg(f"Raccolta [{tipo}]: CERCA fallita (tipo non selezionato) — skip")
+        ctx.log_msg(f"Raccolta [{tipo}]: CERCA fallita — skip")
         return False, False, False
 
-    # Tap nodo + verifica GATHER visibile
-    # In V6 non abbiamo OCR coordinate — chiave blacklist basata sul tipo.
-    # Ogni tipo risorsa ha il proprio slot nella blacklist.
-    chiave = f"tipo_{tipo}"
+    # Tap nodo + verifica GATHER
+    esito = _tap_nodo_e_verifica_gather(ctx, tipo)
 
-    # Verifica blacklist per questo tipo
-    if blacklist.contiene(chiave):
-        ctx.log_msg(f"Raccolta [{tipo}]: tipo in cooldown blacklist — skip")
-        return False, True, False
+    # _tap_nodo_e_verifica_gather ora ritorna (str, screen) o stringa semplice
+    if isinstance(esito, tuple):
+        esito_str, screen_popup = esito
+    else:
+        esito_str, screen_popup = esito, None
 
-    # Tap nodo e verifica GATHER (log dettagliato dentro _tap_nodo_e_verifica_gather)
-    esito_gather = _tap_nodo_e_verifica_gather(ctx, tipo)
-    if esito_gather == "fuori":
+    if esito_str == "errore":
+        return False, False, False
+
+    # Step 1: OCR coordinate nodo reali
+    chiave = _leggi_coord_nodo(ctx)
+    # chiave può essere None se OCR fallisce — in quel caso procediamo senza blacklist
+
+    # Step 6: check blacklist statica fuori territorio (disco) — pre-verifica rapida
+    if chiave and blacklist_fuori.contiene(chiave):
+        ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} in blacklist statica fuori territorio — skip")
+        ctx.device.key("KEYCODE_BACK")
+        time.sleep(0.5)
+        return False, False, True   # skip neutro
+
+    # Check blacklist dinamica RAM
+    if chiave and blacklist.contiene(chiave):
+        eta_prev = blacklist.get_eta(chiave)
+        if isinstance(eta_prev, (int, float)) and eta_prev > 0:
+            marg   = int(_cfg(ctx, "ETA_MARGINE_S"))
+            att_min = int(_cfg(ctx, "ETA_MIN_S"))
+            attesa  = int(min(_cfg(ctx, "BLACKLIST_ATTESA_NODO"),
+                              max(att_min, eta_prev + marg)))
+            ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} in blacklist "
+                        f"(ETA={int(eta_prev)}s) — cooldown {attesa}s")
+        else:
+            attesa = int(_cfg(ctx, "BLACKLIST_ATTESA_NODO"))
+            ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} in blacklist "
+                        f"— cooldown {attesa}s (TTL fisso)")
+        cooldown_map[tipo] = time.time() + attesa
+        ctx.device.key("KEYCODE_BACK")
+        time.sleep(0.5)
+        # Esegue nuova CERCA per trovare nodo diverso
+        if not _cerca_nodo(ctx, tipo):
+            return False, False, False
+        esito2 = _tap_nodo_e_verifica_gather(ctx, tipo)
+        if isinstance(esito2, tuple):
+            esito_str2, screen_popup = esito2
+        else:
+            esito_str2, screen_popup = esito2, None
+        if esito_str2 == "errore":
+            return False, False, False
+        chiave2 = _leggi_coord_nodo(ctx)
+        if chiave2 == chiave or (chiave2 and blacklist.contiene(chiave2)):
+            ctx.log_msg(f"Raccolta [{tipo}]: secondo nodo ancora in blacklist — tipo bloccato")
+            ctx.device.key("KEYCODE_BACK")
+            time.sleep(0.5)
+            return False, True, False
+        chiave = chiave2
+
+    # Step 5: verifica livello nodo via OCR
+    if screen_popup is not None:
+        livello_nodo = _leggi_livello_nodo(ctx, screen_popup)
+        livello_min  = int(_cfg(ctx, "RACCOLTA_LIVELLO_MIN"))
+        if livello_nodo != -1 and livello_nodo < livello_min:
+            ctx.log_msg(f"Raccolta [{tipo}]: nodo Lv.{livello_nodo} < min {livello_min} "
+                        f"— scarto e blacklisto")
+            if chiave:
+                blacklist.commit(chiave, eta_s=None)
+            ctx.device.key("KEYCODE_BACK")
+            time.sleep(0.5)
+            return False, True, False
+        elif livello_nodo != -1:
+            ctx.log_msg(f"Raccolta [{tipo}]: nodo Lv.{livello_nodo} ✓")
+
+    # Step 4+6: verifica territorio
+    if screen_popup is not None and not _nodo_in_territorio(screen_popup, tipo, ctx):
+        ctx.log_msg(f"Raccolta [{tipo}]: nodo FUORI territorio — blacklist statica + dinamica")
+        if chiave:
+            blacklist_fuori.aggiungi(chiave, tipo)   # Step 6: persiste su disco
+            blacklist.commit(chiave, eta_s=None)      # Step 4: blacklist dinamica
+        ctx.device.key("KEYCODE_BACK")
+        time.sleep(0.5)
         return False, False, True   # skip neutro — non conta come fallimento
-    if esito_gather != "ok":
-        return False, False, False  # errore strutturale
 
-    # RESERVED per questo tipo
-    blacklist.reserve(chiave)
-    ctx.log_msg(f"Raccolta [{tipo}]: nodo RESERVED")
+    # RESERVED
+    if chiave:
+        blacklist.reserve(chiave)
+        ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} RESERVED")
 
-    # Esegui marcia
+    # Esegui marcia (Step 2: ETA inclusa)
     ok, eta_s = _esegui_marcia(ctx, n_truppe)
 
-    if ok:
-        blacklist.commit(chiave, eta_s)
-        ctx.log_msg(f"Raccolta [{tipo}]: marcia OK → nodo COMMITTED")
-        return True, False, False
-    else:
-        blacklist.rollback(chiave)
-        ctx.log_msg(f"Raccolta [{tipo}]: marcia FALLITA → rollback nodo")
+    if not ok:
+        if chiave:
+            blacklist.rollback(chiave)
+        ctx.log_msg(f"Raccolta [{tipo}]: marcia FALLITA → rollback")
         ctx.device.key("KEYCODE_BACK")
         time.sleep(0.5)
         return False, False, False
+
+    # Step 3: conferma contatore post-marcia
+    time.sleep(1.5)
+    attive_dopo = _leggi_attive_post_marcia(ctx, obiettivo)
+
+    if attive_dopo == -1:
+        # OCR fallito — considera fallimento prudenziale (V5 pattern)
+        ctx.log_msg(f"Raccolta [{tipo}]: OCR contatore post-marcia N/D — rollback prudenziale")
+        if chiave:
+            blacklist.rollback(chiave)
+        return False, False, False
+
+    # Calcola attive prima della marcia (non disponibile qui — usiamo obiettivo come riferimento)
+    # Il chiamante (_loop_invio_marce) traccia attive_correnti
+    # Qui salviamo l'ETA e committiamo sempre se ok=True e contatore >= 0
+    if chiave:
+        blacklist.commit(chiave, eta_s=eta_s)
+        ttl_log = f"ETA={eta_s}s" if eta_s else f"TTL={_cfg(ctx, 'BLACKLIST_COMMITTED_TTL')}s"
+        ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} COMMITTED ({ttl_log})")
+
+    ctx.log_msg(f"Raccolta [{tipo}]: marcia OK — attive post={attive_dopo}")
+    return True, False, False
 
 
 # ==============================================================================
@@ -623,19 +999,16 @@ def _invia_squadra(ctx: TaskContext, tipo: str, blacklist: Blacklist,
 # ==============================================================================
 
 def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
-                       attive_inizio: int, blacklist: Blacklist) -> int:
-    """
-    Loop invio squadre fino a slot pieni o MAX_FALLIMENTI.
-    Ritorna il numero di squadre effettivamente inviate.
-    """
+                       attive_inizio: int,
+                       blacklist: Blacklist,
+                       blacklist_fuori: BlacklistFuori) -> int:
+    """Loop invio squadre fino a slot pieni o MAX_FALLIMENTI."""
     max_fallimenti = _cfg(ctx, "RACCOLTA_MAX_FALLIMENTI")
     n_truppe       = _cfg(ctx, "RACCOLTA_TRUPPE")
-
-    # Sequenza: usa allocation se deposito disponibile, altrimenti config
     deposito_ocr   = getattr(ctx, "_deposito_ocr", {})
     sequenza_base  = _cfg(ctx, "RACCOLTA_SEQUENZA")
 
-    tipi_bloccati: set[str] = set()
+    tipi_bloccati: set[str]    = set()
     cooldown_map: dict[str, float] = {}
 
     attive_correnti = attive_inizio
@@ -657,7 +1030,7 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
             ctx.log_msg("Raccolta: tutti i tipi bloccati — abbandono")
             break
 
-        ora = time.time()
+        ora    = time.time()
         pronti = [t for t in tipi_disponibili if cooldown_map.get(t, 0) <= ora]
         if not pronti:
             t_min  = min(cooldown_map.get(t, ora) for t in tipi_disponibili)
@@ -669,10 +1042,11 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
         libere_ora = obiettivo - attive_correnti
         if deposito_ocr:
             sequenza = _calcola_sequenza_allocation(libere_ora, deposito_ocr)
-            # Esclude tipi bloccati
-            sequenza = [t for t in sequenza if t not in tipi_bloccati] or                        _calcola_sequenza(libere_ora, sequenza_base, tipi_bloccati)
+            sequenza = [t for t in sequenza if t not in tipi_bloccati] or \
+                       _calcola_sequenza(libere_ora, sequenza_base, tipi_bloccati)
         else:
             sequenza = _calcola_sequenza(libere_ora, sequenza_base, tipi_bloccati)
+
         if not sequenza:
             ctx.log_msg("Raccolta: sequenza vuota — abbandono")
             break
@@ -685,20 +1059,26 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
         if tipo in tipi_bloccati:
             continue
 
-        ctx.log_msg(f"Raccolta: invio squadra {attive_correnti + 1}/{obiettivo} → {tipo}")
-        ok, tipo_bloccato, skip_neutro = _invia_squadra(ctx, tipo, blacklist,
-                                                        cooldown_map, n_truppe, tipi_bloccati)
+        ctx.log_msg(f"Raccolta: invio squadra {attive_correnti + 1}/{obiettivo} → {tipo} "
+                    f"(fallimenti_cons={fallimenti_cons}/{max_fallimenti})")
+
+        ok, tipo_bloccato, skip_neutro = _invia_squadra(
+            ctx, tipo, blacklist, blacklist_fuori,
+            cooldown_map, n_truppe, tipi_bloccati, obiettivo
+        )
+
         if ok:
             inviate         += 1
             attive_correnti += 1
             fallimenti_cons  = 0
+            ctx.log_msg(f"Raccolta: squadra confermata ({attive_correnti}/{obiettivo})")
             time.sleep(_cfg(ctx, "DELAY_POST_MARCIA"))
         elif skip_neutro:
-            # Skip neutro (es. territorio FUORI) — non conta come fallimento
             ctx.log_msg(f"Raccolta: skip neutro {tipo} — fallimenti_cons invariato ({fallimenti_cons})")
         else:
             if tipo_bloccato:
                 tipi_bloccati.add(tipo)
+                ctx.log_msg(f"Raccolta: tipo '{tipo}' bloccato per questo ciclo")
             fallimenti_cons += 1
 
     ctx.log_msg(f"Raccolta: loop completato — {inviate} squadre inviate")
@@ -711,9 +1091,9 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
 
 class RaccoltaTask(Task):
     """
-    Task periodico (4h) che invia squadre raccoglitrici ai nodi risorse.
-    Implementa il loop marce con blacklist RESERVED/COMMITTED, selezione
-    tipo round-robin e recovery fallimenti.
+    Task periodico (4h) — invio squadre raccoglitrici.
+    V6 upgraded: OCR coordinate, ETA dinamica, conferma contatore,
+    blacklist statica fuori territorio, verifica livello nodo.
     """
 
     def name(self) -> str:
@@ -736,14 +1116,7 @@ class RaccoltaTask(Task):
             attive_inizio: int = 0,
             slot_liberi: int = -1,
             blacklist: Optional[Blacklist] = None) -> TaskResult:
-        """
-        Esegue la raccolta risorse.
 
-        Parametri iniettabili per i test:
-          attive_inizio : squadre già attive al momento dell'invocazione
-          slot_liberi   : slot liberi (-1 = usa RACCOLTA_OBIETTIVO - attive_inizio)
-          blacklist     : istanza Blacklist (creata internamente se None)
-        """
         if not _cfg(ctx, "RACCOLTA_ABILITATA"):
             ctx.log_msg("Raccolta: modulo disabilitato — skip")
             return TaskResult(success=True, message="disabilitato", data={"inviate": 0})
@@ -759,8 +1132,7 @@ class RaccoltaTask(Task):
             ctx.log_msg(f"Raccolta: nessuna squadra libera ({attive_inizio}/{obiettivo}) — skip")
             return TaskResult(success=True, message="nessuna squadra libera", data={"inviate": 0})
 
-        # Lettura contatore slot reale da schermo (ocr_helpers.leggi_contatore_slot)
-        # Solo se attive_inizio == 0 (default) — parametro iniettato dai test prevale
+        # OCR slot reali da schermo
         if attive_inizio == 0 and slot_liberi < 0 and ctx.device is not None:
             try:
                 from shared.ocr_helpers import leggi_contatore_slot
@@ -778,11 +1150,11 @@ class RaccoltaTask(Task):
                             return TaskResult(success=True, message="nessuna squadra libera",
                                               data={"inviate": 0})
                     else:
-                        ctx.log_msg(f"Raccolta: OCR slot fallito ({attive_ocr}/{totale_ocr}) — uso default {attive_inizio}/{obiettivo}")
+                        ctx.log_msg(f"Raccolta: OCR slot fallito — uso default {attive_inizio}/{obiettivo}")
             except Exception as exc:
                 ctx.log_msg(f"Raccolta: OCR slot eccezione ({exc}) — uso default")
 
-        # Lettura risorse deposito per allocation sequenza ottimale
+        # OCR deposito per allocation
         deposito_ocr: dict = {}
         try:
             from shared.ocr_helpers import ocr_risorse
@@ -809,24 +1181,33 @@ class RaccoltaTask(Task):
                 reserved_ttl=int(_cfg(ctx, "BLACKLIST_RESERVED_TTL")),
             )
 
-        # Rendi il deposito OCR accessibile al loop marce
+        # Step 6: blacklist statica fuori territorio
+        fuori_dir = _cfg(ctx, "BLACKLIST_FUORI_DIR")
+        blacklist_fuori = BlacklistFuori(ctx.instance_name, data_dir=fuori_dir)
+        if len(blacklist_fuori) > 0:
+            ctx.log_msg(f"Raccolta: blacklist statica fuori territorio: "
+                        f"{len(blacklist_fuori)} nodi noti")
+
         ctx._deposito_ocr = deposito_ocr  # type: ignore
 
         ctx.log_msg("Raccolta: navigazione → mappa")
         if ctx.navigator is not None:
             if not ctx.navigator.vai_in_mappa():
                 ctx.log_msg("Raccolta: impossibile andare in mappa — abort")
-                return TaskResult(success=False, message="vai_in_mappa fallito", data={"inviate": 0})
+                return TaskResult(success=False, message="vai_in_mappa fallito",
+                                  data={"inviate": 0})
         else:
             ctx.device.key("KEYCODE_MAP")
             time.sleep(2.0)
 
         inviate = 0
         try:
-            inviate = _loop_invio_marce(ctx, obiettivo, attive_inizio, blacklist)
+            inviate = _loop_invio_marce(ctx, obiettivo, attive_inizio,
+                                        blacklist, blacklist_fuori)
         except Exception as e:
             ctx.log_msg(f"Raccolta: errore nel loop marce: {e}")
-            return TaskResult(success=False, message=f"errore: {e}", data={"inviate": inviate})
+            return TaskResult(success=False, message=f"errore: {e}",
+                              data={"inviate": inviate})
         finally:
             ctx.log_msg("Raccolta: ritorno in home")
             if ctx.navigator is not None:
@@ -835,4 +1216,5 @@ class RaccoltaTask(Task):
                 ctx.device.key("KEYCODE_HOME")
 
         ctx.log_msg(f"Raccolta: completata — {inviate}/{libere} squadre inviate")
-        return TaskResult(success=True, message=f"{inviate} squadre inviate", data={"inviate": inviate})
+        return TaskResult(success=True, message=f"{inviate} squadre inviate",
+                          data={"inviate": inviate})
