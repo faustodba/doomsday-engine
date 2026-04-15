@@ -47,7 +47,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | RT-17 | Rifornimento via membri | ✅ | 1/1 spedizione, navigazione lista alleanza, avatar trovato, btn risorse 0.986 |
 | RT-18 | Scheduling restart-safe | ⏳ | VIP daily OK (skip <24h, ISO string). Da testare: (1) periodic skip <interval; (2) --force daily; (3) restore_to_orchestrator al riavvio main.py |
 | RT-19 | Radar + RadarCensus | ✅ | badge OK (78,315), pallini 2/2, census 10 icone, map_annotated OK. Fix pendente: falso positivo "Complete All" zona basso-sx |
-| RT-20 | Zaino BAG | ✅ | TM-based scan+greedy+esecuzione. Caution popup gestito. Fix KEYCODE_CTRL_A+DEL campo qty. PRE/POST OCR confermato su legno e acciaio |
+| RT-20 | Zaino BAG + SVUOTA | ✅ | bag: TM-based scan+greedy+esecuzione, caution popup, fix campo qty. svuota: sidebar+USE MAX validata. Entrambe le modalità chiuse |
 | RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo Priorità 1-3 |
 | RT-14 | Full farm 12 istanze | ⏳ | |
 
@@ -100,6 +100,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | Fix | File | Dettaglio |
 |-----|------|-----------|
 | Zaino TM-based | `tasks/zaino.py` | Architettura FASE1(scan TM)+FASE2(greedy)+FASE3(esecuzione). Eliminato bug icone_viste |
+| Zaino svuota validata | `tasks/zaino.py` | Modalità svuota: sidebar+USE MAX testata su FAU_00. RT-20 chiuso |
 | Zaino pin catalogo | `templates/pin/` | pin_pom/leg/acc/pet tutte pezzature (26 file) + pin_caution.png |
 | Zaino caution popup | `tasks/zaino.py` | `_gestisci_caution()` — tap check+OK, flag sessione, una volta per sessione |
 | Zaino campo qty | `tasks/zaino.py` | KEYCODE_CTRL_A+DEL prima di input_text — azzera valore default=1 |
@@ -169,12 +170,24 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Prossima sessione
 
-### Priorità 0 — Zaino modalità SVUOTA (da testare)
+### Priorità 0 — RT-18 completamento test scheduling
 ```
-Modalità: global_config.json → zaino.modalita = "svuota"
-Logica: apre zaino da HOME → sidebar per risorsa → USE MAX su ogni pezzatura
-Test: python run_task.py --istanza FAU_00 --task zaino --force
-Monitorare: [ZAINO][SV] righe nel log
+Test mancanti (in ordine):
+1. Task periodic — raccolta o rifornimento:
+     python run_task.py --istanza FAU_00 --task raccolta
+     → deve eseguire e salvare ISO in schedule.raccolta
+     → rilancia subito: deve eseguire ancora (periodic non blocca in run_task)
+     → verifica schedule.raccolta aggiornato
+
+2. --force su task daily:
+     python run_task.py --istanza FAU_00 --task vip --force
+     → deve eseguire ignorando schedule (vip già eseguito oggi)
+     → log: "[SCHEDULE] --force attivo — schedule ignorato"
+
+3. restore_to_orchestrator al riavvio main.py:
+     python main.py --istanze FAU_00 --tick-sleep 10
+     → log: "Schedule ripristinato: {vip: 2026-04-14T..., ...}"
+     → verifica che VIP NON venga rieseguito nel primo tick
 ```
 
 ### Priorità 1 — RT-18 completamento test scheduling
