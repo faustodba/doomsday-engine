@@ -44,6 +44,14 @@
 #    TAP_USE_X    : 722
 #    TAP_MAX_X    : 601
 #    PRIMA_RIGA_Y : 140
+#
+#  FIX 15/04/2026 — _wait_ui_stabile():
+#    Sostituisce time.sleep(BAG_DELAY_SCROLL) fisso post-swipe.
+#    Causa bug: ADB ancora occupato dalla swipe → screenshot() timeout 15s
+#    → subprocess.TimeoutExpired propagato come KeyboardInterrupt.
+#    Fix: polling leggero su diff pixel ROI griglia fino a frame stabile,
+#    poi sleep minimo di sicurezza. Adattivo: esce appena il device è pronto,
+#    timeout massimo configurabile.
 # ==============================================================================
 
 from __future__ import annotations
@@ -93,8 +101,12 @@ _DEFAULTS: dict = {
     "BAG_DELAY_ICONA":     0.8,
     "BAG_DELAY_INPUT":     0.5,
     "BAG_DELAY_USE":       1.0,
-    "BAG_DELAY_SCROLL":    0.8,
     "BAG_DELAY_POST":      1.5,
+    # Parametri wait-UI-stabile post-swipe (sostituisce BAG_DELAY_SCROLL fisso)
+    "BAG_SCROLL_POLL_S":   0.3,   # intervallo polling screenshot
+    "BAG_SCROLL_SOGLIA":   50,    # diff pixel massima per considerare frame stabile
+    "BAG_SCROLL_TIMEOUT":  3.0,   # timeout massimo attesa stabilità (secondi)
+    "BAG_SCROLL_MIN_S":    0.3,   # sleep minimo post-stabilità (evita burst ADB)
 
     # ── MODALITÀ SVUOTA ───────────────────────────────────────────────────────
     "SV_TAP_APRI":         (430, 18),
@@ -122,6 +134,10 @@ _GRANTS_MAP = [
     ("steel", "acciaio"),
     ("oil",   "petrolio"),
 ]
+
+# ROI griglia usata per il diff pixel in _wait_ui_stabile
+# copre l'area delle icone (col_x min..max, riga_y min..max) con margine
+_GRIGLIA_ROI = (150, 135, 650, 530)
 
 
 def _cfg(ctx: TaskContext, key: str):
@@ -190,6 +206,67 @@ def _get_frame(screen):
     if frame is None and isinstance(screen, np.ndarray):
         frame = screen
     return frame
+
+
+# ==============================================================================
+# WAIT UI STABILE — fix post-swipe ADB timeout
+# ==============================================================================
+
+def _wait_ui_stabile(ctx: TaskContext) -> bool:
+    """
+    Attende che la griglia BAG sia visivamente stabile dopo una swipe.
+
+    Strategia: polling screenshot ogni BAG_SCROLL_POLL_S secondi.
+    Confronta la ROI griglia (_GRIGLIA_ROI) tra frame consecutivi.
+    Esce appena la diff pixel scende sotto BAG_SCROLL_SOGLIA, oppure
+    allo scadere di BAG_SCROLL_TIMEOUT secondi (fallback sicuro).
+    Aggiunge BAG_SCROLL_MIN_S di sleep finale per evitare burst ADB.
+
+    Ritorna True se stabilizzato entro timeout, False se timeout scaduto.
+    """
+    poll_s   = _cfg(ctx, "BAG_SCROLL_POLL_S")
+    soglia   = _cfg(ctx, "BAG_SCROLL_SOGLIA")
+    timeout  = _cfg(ctx, "BAG_SCROLL_TIMEOUT")
+    min_s    = _cfg(ctx, "BAG_SCROLL_MIN_S")
+
+    x1, y1, x2, y2 = _GRIGLIA_ROI
+    t_start  = time.time()
+    frame_prec: Optional[np.ndarray] = None
+
+    while True:
+        elapsed = time.time() - t_start
+
+        screen = ctx.device.screenshot()
+        if screen is not None:
+            frame = _get_frame(screen)
+            if frame is not None:
+                roi = frame[y1:y2, x1:x2]
+
+                if frame_prec is not None and roi.shape == frame_prec.shape:
+                    diff = int(np.mean(np.abs(roi.astype(int) - frame_prec.astype(int))))
+                    if diff <= soglia:
+                        # UI ferma — sleep minimo poi esci
+                        time.sleep(min_s)
+                        ctx.log_msg(
+                            f"[ZAINO] UI stabile in {elapsed:.1f}s "
+                            f"(diff={diff})"
+                        )
+                        return True
+
+                frame_prec = roi.copy()
+
+        if elapsed >= timeout:
+            # Timeout: UI non si è stabilizzata entro il limite.
+            # Procediamo comunque — meglio rischiare un OCR su frame in
+            # transizione che bloccarsi indefinitamente.
+            ctx.log_msg(
+                f"[ZAINO] WARN: UI non stabilizzata entro {timeout:.1f}s "
+                f"— procedo comunque"
+            )
+            time.sleep(min_s)
+            return False
+
+        time.sleep(poll_s)
 
 
 # ==============================================================================
@@ -279,6 +356,7 @@ def _bag_scan_ed_esegui(ctx: TaskContext,
       - Tappa tutte le N righe visibili nella schermata corrente
       - Dopo aver processato tutte le righe → scroll di una schermata intera
         (N_RIGHE × 104px) verso l'alto
+      - Attende stabilizzazione UI via _wait_ui_stabile() invece di sleep fisso
       - Ripete con la schermata successiva
       - Stop quando icona già vista (ciclo) o 3 schermate vuote consecutive
 
@@ -295,17 +373,16 @@ def _bag_scan_ed_esegui(ctx: TaskContext,
     delay_icona  = _cfg(ctx, "BAG_DELAY_ICONA")
     delay_input  = _cfg(ctx, "BAG_DELAY_INPUT")
     delay_use    = _cfg(ctx, "BAG_DELAY_USE")
-    delay_scroll = _cfg(ctx, "BAG_DELAY_SCROLL")
     modo         = "[DRY] " if dry_run else ""
 
     # Scroll di una schermata intera = N_righe × (box + gap) = 4 × 104 = 416px
-    N_RIGHE      = len(riga_y)
-    SCROLL_SCHERMATA = N_RIGHE * 104   # 416px
+    N_RIGHE           = len(riga_y)
+    SCROLL_SCHERMATA  = N_RIGHE * 104   # 416px
 
     operazioni: dict[str, list[dict]] = {r: [] for r in gap_residui}
     icone_viste: set[tuple[str, int]] = set()
-    scroll_count          = 0
-    max_scroll            = 10
+    scroll_count           = 0
+    max_scroll             = 10
     schermate_vuote_consec = 0
 
     while scroll_count <= max_scroll:
@@ -407,9 +484,11 @@ def _bag_scan_ed_esegui(ctx: TaskContext,
             schermate_vuote_consec = 0
 
         # Scroll di una schermata intera verso l'alto
+        # FIX 15/04/2026: _wait_ui_stabile() sostituisce time.sleep(BAG_DELAY_SCROLL)
+        # Evita subprocess.TimeoutExpired su screenshot() immediatamente post-swipe
         ctx.device.swipe(480, riga_y[-1] + 52, 480, riga_y[0] - 52,
                          duration_ms=400)
-        time.sleep(delay_scroll)
+        _wait_ui_stabile(ctx)
         scroll_count += 1
 
     return operazioni

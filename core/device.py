@@ -320,17 +320,24 @@ class AdbDevice:
                  auto_connect: bool = True):
         """
         Args:
-            host         : indirizzo ADB (tipicamente 127.0.0.1)
-            port         : porta ADB dell'istanza MuMu
+            host         : indirizzo ADB oppure "127.0.0.1:16384" (serial completo)
+            port         : porta ADB dell'istanza MuMu (ignorato se host contiene ":")
             name         : nome istanza (es. "FAU_01") — solo per logging
             index        : indice istanza (0-based)
             auto_connect : esegue 'adb connect' automaticamente (default True)
         """
-        self.host  = host
-        self.port  = port
+        # Supporta sia AdbDevice("127.0.0.1:16384") che AdbDevice("127.0.0.1", 16384)
+        if ":" in str(host):
+            self._serial = host
+            parts = host.rsplit(":", 1)
+            self.host = parts[0]
+            self.port = int(parts[1])
+        else:
+            self.host    = host
+            self.port    = int(port)
+            self._serial = f"{host}:{port}"
         self.name  = name
         self.index = index
-        self._serial = f"{host}:{port}"
 
         # FIX: connect automatico come in V5 — MuMu TCP richiede connect esplicito
         if auto_connect:
@@ -363,12 +370,12 @@ class AdbDevice:
 
     # ── Esecuzione comandi ADB ────────────────────────────────────────────────
 
-    def _run(self, *args: str, timeout: int = 15) -> subprocess.CompletedProcess:
+    def _run(self, *args: str, timeout: int = 20) -> subprocess.CompletedProcess:
         """Esegue un comando ADB contro l'istanza corrente."""
         cmd = [self.ADB, "-s", self._serial] + list(args)
         return subprocess.run(cmd, capture_output=True, timeout=timeout)
 
-    def _shell(self, *args: str, timeout: int = 15) -> subprocess.CompletedProcess:
+    def _shell(self, *args: str, timeout: int = 20) -> subprocess.CompletedProcess:
         """Esegue un comando ADB shell contro l'istanza corrente."""
         return self._run("shell", *args, timeout=timeout)
 
@@ -395,12 +402,12 @@ class AdbDevice:
                 subprocess.run(
                     [self.ADB, "-s", self._serial,
                      "shell", f"screencap -p {remote}"],
-                    capture_output=True, timeout=15,
+                    capture_output=True, timeout=30,
                 )
                 # V5: subprocess.run([ADB_EXE, "-s", serial, "pull", remote, local])
                 r2 = subprocess.run(
                     [self.ADB, "-s", self._serial, "pull", remote, local],
-                    capture_output=True, timeout=15,
+                    capture_output=True, timeout=30,
                 )
                 if r2.returncode != 0:
                     return None
