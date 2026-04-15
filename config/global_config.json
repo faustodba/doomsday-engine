@@ -1,77 +1,70 @@
 {
   "_note": "Doomsday Engine V6 — Configurazione globale. Letto ad ogni tick. Modificabile dalla dashboard.",
-
   "sistema": {
-    "tick_sleep":   300,
+    "tick_sleep": 300,
     "max_parallel": 2
   },
-
   "task": {
-    "raccolta":      true,
-    "rifornimento":  true,
-    "zaino":         true,
-    "vip":           true,
-    "alleanza":      true,
-    "messaggi":      true,
-    "arena":         true,
+    "raccolta": true,
+    "rifornimento": true,
+    "zaino": true,
+    "vip": true,
+    "alleanza": true,
+    "messaggi": true,
+    "arena": true,
     "arena_mercato": true,
-    "boost":         true,
-    "store":         true,
-    "radar":         true,
-    "radar_census":  true
+    "boost": true,
+    "store": true,
+    "radar": true,
+    "radar_census": true
   },
-
   "rifornimento_comune": {
     "_note": "Parametri condivisi da entrambe le modalità di rifornimento",
-    "dooms_account":        "FauMorfeus",
+    "dooms_account": "FauMorfeus",
     "max_spedizioni_ciclo": 5,
-    "soglia_campo_m":       5.0,
-    "soglia_legno_m":       5.0,
-    "soglia_petrolio_m":    2.5,
-    "soglia_acciaio_m":     3.5,
-    "campo_abilitato":      true,
-    "legno_abilitato":      true,
-    "petrolio_abilitato":   true,
-    "acciaio_abilitato":    false,
-    "qta_pomodoro":         999000000,
-    "qta_legno":            999000000,
-    "qta_petrolio":         999000000,
-    "qta_acciaio":          999000000
+    "soglia_campo_m": 5.0,
+    "soglia_legno_m": 5.0,
+    "soglia_petrolio_m": 2.5,
+    "soglia_acciaio_m": 3.5,
+    "campo_abilitato": true,
+    "legno_abilitato": true,
+    "petrolio_abilitato": true,
+    "acciaio_abilitato": false,
+    "qta_pomodoro": 999000000,
+    "qta_legno": 999000000,
+    "qta_petrolio": 999000000,
+    "qta_acciaio": 999000000
   },
-
   "rifornimento_mappa": {
     "_note": "Navigazione via coordinate mappa",
-    "abilitato":  true,
-    "rifugio_x":  687,
-    "rifugio_y":  532
+    "abilitato": true,
+    "rifugio_x": 687,
+    "rifugio_y": 532
   },
-
   "rifornimento_membri": {
     "_note": "Navigazione via lista membri alleanza",
-    "abilitato":        false,
-    "avatar_template":  "pin/avatar.png"
+    "abilitato": false,
+    "avatar_template": "pin/avatar.png"
   },
-
   "zaino": {
     "_note": "modalita: bag=scarica fino a soglia via BAG | svuota=svuota tutto da HOME",
-    "modalita":           "bag",
-    "usa_pomodoro":       false,
-    "usa_legno":          true,
-    "usa_petrolio":       false,
-    "usa_acciaio":        false,
-    "soglia_pomodoro_m":  10.0,
-    "soglia_legno_m":     50.0,
-    "soglia_petrolio_m":  5.0,
-    "soglia_acciaio_m":   7.0
+    "modalita": "bag",
+    "usa_pomodoro": false,
+    "usa_legno": true,
+    "usa_petrolio": false,
+    "usa_acciaio": false,
+    "soglia_pomodoro_m": 10.0,
+    "soglia_legno_m": 50.0,
+    "soglia_petrolio_m": 5.0,
+    "soglia_acciaio_m": 7.0
   },
-
   "raccolta": {
     "livello_nodo": 6,
     "allocazione": {
       "pomodoro": 0.4,
-      "legno":    0.3,
+      "legno": 0.3,
       "petrolio": 0.2,
-      "acciaio":  0.1
+      "acciaio": 0.1
     }
   }
 }

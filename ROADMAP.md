@@ -47,7 +47,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | RT-17 | Rifornimento via membri | ✅ | 1/1 spedizione, navigazione lista alleanza, avatar trovato, btn risorse 0.986 |
 | RT-18 | Scheduling restart-safe | ⏳ | VIP daily OK (skip <24h, ISO string). Da testare: (1) periodic skip <interval; (2) --force daily; (3) restore_to_orchestrator al riavvio main.py |
 | RT-19 | Radar + RadarCensus | ✅ | badge OK (78,315), pallini 2/2, census 10 icone, map_annotated OK. Fix pendente: falso positivo "Complete All" zona basso-sx |
-| RT-20 | Zaino BAG | ⏳ | OCR pannello destra 100% affidabile. Piano greedy corretto (dry-run OK su schermata statica). Bug: KeyboardInterrupt/timeout ADB durante screenshot() post-swipe in _bag_scan_ed_esegui |
+| RT-20 | Zaino BAG | ✅ | TM-based scan+greedy+esecuzione. Caution popup gestito. Fix KEYCODE_CTRL_A+DEL campo qty. PRE/POST OCR confermato su legno e acciaio |
 | RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo Priorità 1-3 |
 | RT-14 | Full farm 12 istanze | ⏳ | |
 
@@ -75,7 +75,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ### 3. Zaino — deposito OCR (CHIUSA ✅ 14/04/2026)
 - **Fix applicato:** `_leggi_deposito_ocr()` legge autonomamente via `ocr_risorse()`.
-- **RT-20 ✅:** OCR OK, gap calcolati, USE→Max→USE eseguiti.
+- **RT-20 ✅ 15/04/2026:** Architettura TM-based completa. Scan inventario via pin catalogo + greedy ottimale + esecuzione. Fix ADB timeout (device.py 20/30s). Fix KEYCODE_CTRL_A+DEL campo qty. Caution popup gestito. Test legno 20.9M e acciaio (gap 2M) confermati.
 
 ### 4. Radar Census — falso positivo zona UI (BASSA)
 - **Problema:** bottone "Complete All" (basso-sx) riconosciuto come icona radar (`sconosciuto 0%`)
@@ -90,6 +90,21 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 ### 6. Store NMS cross-template (BASSA)
 - `pin_acciaio.png` = `pin_pomodoro.png` (stesso file) → stesso cx,cy.
   Risolvibile quando sarà disponibile il vero `pin_acciaio.png`.
+
+---
+
+---
+
+## Fix applicati in sessione 15/04/2026
+
+| Fix | File | Dettaglio |
+|-----|------|-----------|
+| Zaino TM-based | `tasks/zaino.py` | Architettura FASE1(scan TM)+FASE2(greedy)+FASE3(esecuzione). Eliminato bug icone_viste |
+| Zaino pin catalogo | `templates/pin/` | pin_pom/leg/acc/pet tutte pezzature (26 file) + pin_caution.png |
+| Zaino caution popup | `tasks/zaino.py` | `_gestisci_caution()` — tap check+OK, flag sessione, una volta per sessione |
+| Zaino campo qty | `tasks/zaino.py` | KEYCODE_CTRL_A+DEL prima di input_text — azzera valore default=1 |
+| Zaino _wait_ui_stabile | `tasks/zaino.py` | Polling diff pixel post-swipe — sostituisce sleep fisso, fix ADB timeout |
+| ADB timeout | `core/device.py` | `_run/_shell` 15s→20s, screencap/pull 15s→30s |
 
 ---
 
@@ -154,16 +169,12 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Prossima sessione
 
-### Priorità 0 — Fix zaino BAG scroll (bug KeyboardInterrupt)
+### Priorità 0 — Zaino modalità SVUOTA (da testare)
 ```
-Bug: KeyboardInterrupt/timeout ADB durante screenshot() post-swipe
-Causa probabile: swipe troppo veloce → ADB sovraccarico → timeout 15s
-Fix da provare:
-  1. Aumentare DELAY_SCROLL da 0.8s a 2.0s dopo swipe
-  2. Aggiungere time.sleep(1.5) prima del screenshot post-swipe
-  3. Verificare se il problema è riproducibile anche senza Ctrl+C
-     (potrebbe essere stata interazione manuale che ha causato il crash)
-File: tasks/zaino.py → _bag_scan_ed_esegui()
+Modalità: global_config.json → zaino.modalita = "svuota"
+Logica: apre zaino da HOME → sidebar per risorsa → USE MAX su ogni pezzatura
+Test: python run_task.py --istanza FAU_00 --task zaino --force
+Monitorare: [ZAINO][SV] righe nel log
 ```
 
 ### Priorità 1 — RT-18 completamento test scheduling
@@ -468,6 +479,9 @@ pin_360_open, pin_360_close, pin_15_open, pin_15_close
 pin_msg_02..04, pin_claim
 btn_resource_supply_map
 pin_campaign, pin_bag, pin_alliance, pin_beast, pin_hero  ← NUOVO (barra inferiore)
+pin_caution  ← NUOVO (popup warehouse)
+pin_pom_1000..5000000 (7 file), pin_leg_1000..1500000 (6 file)  ← NUOVO (zaino BAG)
+pin_acc_500..2500000 (7 file), pin_pet_200..300000 (6 file)  ← NUOVO (zaino BAG)
 ```
 
 **Template mancanti (TODO):**
