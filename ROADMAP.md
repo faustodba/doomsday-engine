@@ -48,7 +48,8 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | RT-18 | Scheduling restart-safe | ⏳ | VIP daily OK (skip <24h, ISO string). Da testare: (1) periodic skip <interval; (2) --force daily; (3) restore_to_orchestrator al riavvio main.py |
 | RT-19 | Radar + RadarCensus | ✅ | badge OK (78,315), pallini 2/2, census 10 icone, map_annotated OK. Fix pendente: falso positivo "Complete All" zona basso-sx |
 | RT-20 | Zaino BAG + SVUOTA | ✅ | bag: TM-based scan+greedy+esecuzione, caution popup, fix campo qty. svuota: sidebar+USE MAX validata. Entrambe le modalità chiuse |
-| RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo Priorità 1-3 |
+| RT-21 | Pytest aggiornato 258/258 | ✅ | BoostState/VipState/ArenaState/RifornimentoState + gate should_run() orchestrator. 16/04/2026 |
+| RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo RT-18 + RT-22..24 |
 | RT-14 | Full farm 12 istanze | ⏳ | |
 
 ---
@@ -108,6 +109,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | Gate should_run() | `core/orchestrator.py` | tick() chiama should_run() come gate dopo e_dovuto() e prima del gate HOME. Flag abilitazione + guard stato ora effettivi in produzione |
 | _TASK_SETUP riordino | `main.py` | Nuovo ordine priorità: Raccolta ultima (110), Rifornimento penultima (100). interval=0.0 per Boost/Vip/Arena/Rifornimento/Raccolta (always-run con guard). Messaggi/Alleanza/Store→4h. ArenaMercato/Radar/RadarCensus→12h |
 | Architettura documentata | `ROADMAP.md` | Catena di comando 5 livelli: Config→Scheduling→should_run()→HOME gate→run() |
+| Pytest 258/258 | `tests/unit/` + `tests/tasks/` | Aggiornati test_state, test_orchestrator, test_boost, test_vip, test_arena, test_rifornimento. FakeMatcher.find_one, FakeNavigator, FakeState con BoostState/VipState, _MatchResult, gate should_run stub |
 
 ---
 
@@ -192,23 +194,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Prossima sessione
 
-### Priorità 0 — RifornimentoState.provviste_esaurite (TODO)
-```
-Aggiungere a RifornimentoState:
-  - campo provviste_esaurite: bool = False
-  - metodo segna_provviste_esaurite()
-  - _controlla_reset() resetta anche provviste_esaurite
-
-Aggiornare RifornimentoTask.should_run():
-  if ctx.state.rifornimento.provviste_esaurite:
-      return False
-
-Aggiornare _esegui_mappa():
-  quando _compila_e_invia() ritorna quota_esaurita=True:
-      ctx.state.rifornimento.segna_provviste_esaurite()
-```
-
-### Priorità 1 — RT-18 completamento test scheduling
+### Priorità 0 — RT-18 completamento test scheduling
 ```
 Test mancanti (in ordine):
 1. Task periodic — raccolta o rifornimento:
