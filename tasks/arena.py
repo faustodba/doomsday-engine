@@ -300,8 +300,10 @@ class ArenaTask(Task):
 
     def _torna_home(self, ctx: TaskContext) -> None:
         """
-        Doppio tap centro + 4x BACK.
+        Doppio tap centro + 4x BACK + vai_in_home() come verifica finale.
         Il doppio tap chiude overlay/risultati persistenti (fix FAU_07).
+        vai_in_home() garantisce il ritorno effettivo in HOME anche quando
+        la sequenza BACK non è sufficiente.
         """
         ctx.log_msg("[ARENA] ritorno HOME — doppio tap centro + BACK×4")
         self._doppio_tap_centro(ctx)
@@ -309,6 +311,10 @@ class ArenaTask(Task):
         for _ in range(4):
             ctx.device.back()
             time.sleep(0.8)
+
+        if ctx.navigator is not None:
+            ok = ctx.navigator.vai_in_home()
+            ctx.log_msg("[ARENA] vai_in_home() post-BACK → %s", "OK" if ok else "FALLITO")
 
     # ── Sfida ─────────────────────────────────────────────────────────────────
 

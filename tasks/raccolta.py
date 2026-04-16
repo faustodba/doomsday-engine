@@ -1186,6 +1186,30 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
                 tipi_bloccati.add(tipo)
                 ctx.log_msg(f"Raccolta: tipo '{tipo}' bloccato per questo ciclo")
             fallimenti_cons += 1
+            # Dopo ogni fallimento/rollback: torna in HOME per lettura OCR
+            # contatore slot affidabile, poi rientra in mappa per la prossima
+            # iterazione. Riallinea attive_correnti con lo stato reale.
+            if ctx.navigator is not None:
+                ctx.navigator.vai_in_home()
+                time.sleep(1.0)
+            try:
+                from shared.ocr_helpers import leggi_contatore_slot
+                screen_home = ctx.device.screenshot()
+                if screen_home is not None:
+                    attive_reali, _ = leggi_contatore_slot(
+                        screen_home, totale_noto=obiettivo
+                    )
+                    if attive_reali >= 0 and attive_reali != attive_correnti:
+                        ctx.log_msg(
+                            f"Raccolta: [RIALLINEA] attive {attive_correnti}→{attive_reali} "
+                            f"(OCR post-rollback da HOME)"
+                        )
+                        attive_correnti = attive_reali
+            except Exception as exc:
+                ctx.log_msg(f"Raccolta: OCR slot post-rollback fallito ({exc})")
+            if ctx.navigator is not None:
+                ctx.navigator.vai_in_mappa()
+                time.sleep(1.5)
 
     ctx.log_msg(f"Raccolta: loop completato — {inviate} squadre inviate")
     return inviate
