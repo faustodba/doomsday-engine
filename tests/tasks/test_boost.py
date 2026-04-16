@@ -88,6 +88,14 @@ class FakeDevice:
         return sum(1 for c in self.calls if c[0] == "back")
 
 
+@dataclass
+class _MatchResult:
+    found: bool
+    score: float
+    cx: int = 700
+    cy: int = 300
+
+
 class FakeMatcher:
     """
     Template matcher configurabile per i test.
