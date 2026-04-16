@@ -268,6 +268,161 @@ class ScheduleState:
 
 
 # ==============================================================================
+# BoostState — stato e scheduling intelligente del Gathering Speed Boost
+# ==============================================================================
+
+# Durate boost in secondi
+_BOOST_DURATE: dict[str, float] = {
+    "8h": 8  * 3600.0,
+    "1d": 24 * 3600.0,
+}
+
+# Margine di anticipo prima della scadenza (secondi) — entra 5 minuti prima
+_BOOST_ANTICIPO_S: float = 5 * 60.0
+
+
+@dataclass
+class BoostState:
+    """
+    Stato persistente del Gathering Speed Boost per istanza.
+
+    Logica di scheduling:
+      - tipo:         "8h" | "1d" | None  (ultimo boost attivato)
+      - attivato_il:  ISO UTC attivazione  (None = mai attivato)
+      - scadenza:     ISO UTC scadenza     (None = mai attivato)
+      - disponibile:  True  = boost trovato e attivato
+                      False = nessun boost disponibile in quel tick
+
+    Regole should_run():
+      1. Mai attivato (scadenza=None)              → entra sempre
+      2. disponibile=False                          → entra sempre (riprova)
+      3. now >= scadenza - ANTICIPO                 → entra (boost scaduto/in scadenza)
+      4. now <  scadenza - ANTICIPO                 → skip
+
+    Tempo 0 (primo avvio, nessuno storico):
+      Il task entra, trova boost GIÀ ATTIVO (pin_50_), chiama
+      registra_attivo("8h") con attivato_il=now → scadenza = now + 8h.
+
+    Formato JSON in state/<ISTANZA>.json:
+      "boost": {
+        "tipo":        "8h",
+        "attivato_il": "2026-04-16T08:00:00+00:00",
+        "scadenza":    "2026-04-16T16:00:00+00:00",
+        "disponibile": true
+      }
+    """
+
+    tipo:        str | None = None   # "8h" | "1d" | None
+    attivato_il: str | None = None   # ISO UTC
+    scadenza:    str | None = None   # ISO UTC
+    disponibile: bool       = True   # False = nessun boost trovato nell'ultimo run
+
+    # ── Proprietà derivate ────────────────────────────────────────────────────
+
+    @property
+    def scadenza_dt(self) -> datetime | None:
+        """Scadenza come datetime UTC. None se non impostata."""
+        if not self.scadenza:
+            return None
+        try:
+            return datetime.fromisoformat(self.scadenza)
+        except (ValueError, TypeError):
+            return None
+
+    @property
+    def secondi_alla_scadenza(self) -> float:
+        """
+        Secondi mancanti alla scadenza (negativo = già scaduto).
+        Ritorna -1.0 se scadenza non impostata.
+        """
+        dt = self.scadenza_dt
+        if dt is None:
+            return -1.0
+        return (dt - _utc_now()).total_seconds()
+
+    @property
+    def is_attivo(self) -> bool:
+        """True se il boost è ancora attivo (scadenza nel futuro con margine)."""
+        return self.secondi_alla_scadenza > _BOOST_ANTICIPO_S
+
+    # ── Business logic ────────────────────────────────────────────────────────
+
+    def should_run(self) -> bool:
+        """
+        True se BoostTask deve essere eseguito.
+
+        Ritorna True se:
+          - mai attivato (nessuna scadenza)
+          - ultimo run senza boost disponibile (riprova)
+          - boost scaduto o in scadenza (entro ANTICIPO)
+        """
+        if self.scadenza is None:
+            return True          # mai attivato → entra
+        if not self.disponibile:
+            return True          # nessun boost trovato → riprova sempre
+        return not self.is_attivo  # scaduto/in scadenza → entra
+
+    def registra_attivo(self, tipo: str, riferimento: datetime | None = None) -> None:
+        """
+        Registra attivazione boost (o boost già attivo trovato).
+
+        Args:
+            tipo:        "8h" | "1d"
+            riferimento: datetime UTC di riferimento per il calcolo scadenza.
+                         None = ora corrente. Usare ora corrente anche quando
+                         il boost è già attivo (approssimazione conservativa).
+        """
+        durata = _BOOST_DURATE.get(tipo, _BOOST_DURATE["8h"])
+        t0     = riferimento or _utc_now()
+        self.tipo        = tipo
+        self.attivato_il = t0.isoformat()
+        self.scadenza    = (t0 + __import__("datetime").timedelta(seconds=durata)).isoformat()
+        self.disponibile = True
+
+    def registra_non_disponibile(self) -> None:
+        """
+        Nessun boost gratuito trovato. Non altera tipo/scadenza esistenti.
+        Al prossimo tick should_run() tornerà True (riprova).
+        """
+        self.disponibile = False
+
+    def log_stato(self) -> str:
+        """Stringa descrittiva per il log."""
+        if self.scadenza is None:
+            return "mai attivato"
+        rimasti = self.secondi_alla_scadenza
+        segno   = "+" if rimasti >= 0 else "-"
+        minuti  = abs(int(rimasti)) // 60
+        ore     = minuti // 60
+        min_r   = minuti % 60
+        stato   = "ATTIVO" if self.is_attivo else "SCADUTO"
+        disp    = "" if self.disponibile else " [nessun boost]"
+        return (
+            f"tipo={self.tipo}  scadenza={self.scadenza}  "
+            f"{stato} ({segno}{ore}h{min_r:02d}m){disp}"
+        )
+
+    # ── Serializzazione ───────────────────────────────────────────────────────
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "BoostState":
+        return cls(
+            tipo        = d.get("tipo",        None),
+            attivato_il = d.get("attivato_il", None),
+            scadenza    = d.get("scadenza",    None),
+            disponibile = d.get("disponibile", True),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "tipo":        self.tipo,
+            "attivato_il": self.attivato_il,
+            "scadenza":    self.scadenza,
+            "disponibile": self.disponibile,
+        }
+
+
+# ==============================================================================
 # DailyTasksState — completamento task giornalieri
 # ==============================================================================
 
@@ -454,9 +609,10 @@ class InstanceState:
 
     instance_name: str
     rifornimento: RifornimentoState = field(default_factory=RifornimentoState)
-    daily_tasks: DailyTasksState = field(default_factory=DailyTasksState)
-    metrics: MetricsState = field(default_factory=MetricsState)
-    schedule: ScheduleState = field(default_factory=ScheduleState)
+    daily_tasks:  DailyTasksState   = field(default_factory=DailyTasksState)
+    metrics:      MetricsState      = field(default_factory=MetricsState)
+    schedule:     ScheduleState     = field(default_factory=ScheduleState)
+    boost:        BoostState        = field(default_factory=BoostState)
 
     # Stato runtime non persistito (ricostruito all'avvio)
     attivo: bool = False
@@ -472,6 +628,7 @@ class InstanceState:
             "daily_tasks":   self.daily_tasks.to_dict(),
             "metrics":       self.metrics.to_dict(),
             "schedule":      self.schedule.to_dict(),
+            "boost":         self.boost.to_dict(),
             "ultimo_errore": self.ultimo_errore,
             "ultimo_avvio":  self.ultimo_avvio,
         }
@@ -484,6 +641,7 @@ class InstanceState:
             daily_tasks=DailyTasksState.from_dict(d.get("daily_tasks", {})),
             metrics=MetricsState.from_dict(d.get("metrics", {})),
             schedule=ScheduleState.from_dict(d.get("schedule", {})),
+            boost=BoostState.from_dict(d.get("boost", {})),
             ultimo_errore=d.get("ultimo_errore", None),
             ultimo_avvio=d.get("ultimo_avvio", None),
         )

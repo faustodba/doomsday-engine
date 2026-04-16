@@ -13,6 +13,10 @@
 #    - Rimossa _carica_runtime() — sostituita da load_global()
 #    - global_config.json letto ad ogni tick → modifiche dashboard senza restart
 #    - _carica_istanze() invariata — legge ancora instances.json
+#  REFACTORING 16/04/2026 — _TASK_SETUP:
+#    - Nuovo ordine priorità task (Raccolta ultima, Rifornimento penultima)
+#    - BoostTask: interval_hours=0.0, scheduling delegato a BoostState
+#    - RaccoltaTask: interval_hours=0.0, always-run se slot liberi
 # ==============================================================================
 from __future__ import annotations
 import argparse, json, os, signal, sys, threading, time
@@ -219,18 +223,39 @@ class _TaskWrapper:
 # Thread istanza
 # ---------------------------------------------------------------------------
 _TASK_SETUP = [
-    ("BoostTask",         5,   8.0,   "periodic"),
-    ("RaccoltaTask",      10,  4.0,   "periodic"),
-    ("RifornimentoTask",  20,  1.0,   "periodic"),
-    ("ZainoTask",         30,  168.0, "periodic"),
-    ("VipTask",           40,  24.0,  "daily"),
-    ("MessaggiTask",      50,  1.0,   "periodic"),
-    ("AlleanzaTask",      60,  1.0,   "periodic"),
-    ("StoreTask",         70,  8.0,   "periodic"),
-    ("ArenaTask",         80,  24.0,  "daily"),
-    ("ArenaMercatoTask",  90,  24.0,  "daily"),
-    ("RadarTask",         100, 12.0,  "periodic"),
-    ("RadarCensusTask",   110, 24.0,  "periodic"),
+    # (class_name, priority, interval_hours, schedule_type)
+    #
+    # Ordine esecuzione per priorità crescente:
+    #   1. Boost        — scheduling intelligente via BoostState (nessun interval fisso)
+    #   2. VIP          — daily, una volta al giorno
+    #   3. Messaggi     — ogni ora
+    #   4. Alleanza     — ogni ora
+    #   5. Store        — ogni 8h
+    #   6. Arena        — daily
+    #   7. ArenaMercato — daily
+    #   8. Zaino        — settimanale
+    #   9. Radar        — ogni 12h
+    #  10. RadarCensus  — ogni 24h (disabilitato di default)
+    #  11. Rifornimento — ogni ora (penultimo: consuma slot squadre)
+    #  12. Raccolta     — nessuna schedulazione: eseguita sempre se slot liberi
+    #
+    # NOTA BoostTask: interval_hours=0.0 è un placeholder — il timing reale
+    # è governato da ctx.state.boost.should_run() in BoostTask.should_run().
+    # L'orchestrator non blocca mai BoostTask per interval — la decisione è
+    # interamente delegata a BoostState.
+    #
+    ("BoostTask",         5,   0.0,   "periodic"),   # scheduling via BoostState
+    ("VipTask",           10,  24.0,  "daily"),
+    ("MessaggiTask",      20,  1.0,   "periodic"),
+    ("AlleanzaTask",      30,  1.0,   "periodic"),
+    ("StoreTask",         40,  8.0,   "periodic"),
+    ("ArenaTask",         50,  24.0,  "daily"),
+    ("ArenaMercatoTask",  60,  24.0,  "daily"),
+    ("ZainoTask",         70,  168.0, "periodic"),
+    ("RadarTask",         80,  12.0,  "periodic"),
+    ("RadarCensusTask",   90,  24.0,  "periodic"),
+    ("RifornimentoTask",  100, 1.0,   "periodic"),
+    ("RaccoltaTask",      110, 0.0,   "periodic"),   # nessun interval: always-run se slot liberi
 ]
 
 _contatori: dict[str, dict[str, int]] = {}
