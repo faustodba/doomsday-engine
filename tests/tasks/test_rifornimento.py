@@ -65,8 +65,6 @@ def make_ctx(config_overrides: dict | None = None) -> TaskContext:
         device=device,
         matcher=matcher,
         navigator=navigator,
-        instance_name="FAU_00",
-        log=None,
     )
 
 
