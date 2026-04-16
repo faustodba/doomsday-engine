@@ -70,16 +70,18 @@ class _FakeCfg:
     def get(self, k, default=None): return default
 
 def make_ctx() -> TaskContext:
+    from core.state import InstanceState
     device  = FakeDevice()
     matcher = FakeMatcher()
     nav     = GameNavigator(device, matcher)
     return TaskContext(
+        instance_name="FAU_00",
+        config=_FakeCfg(),
+        state=InstanceState("FAU_00"),
+        log=None,
         device=device,
         matcher=matcher,
         navigator=nav,
-        config={},
-        instance_id="FAU_00",
-        logger=None,
     )
 
 

@@ -142,12 +142,14 @@ class FakeTaskContext:
                  device: FakeDevice | None = None,
                  matcher: FakeMatcher | None = None,
                  navigator: FakeNavigator | None = None) -> None:
-        self.device    = device    or FakeDevice()
-        self.matcher   = matcher   or FakeMatcher()
-        self.navigator = navigator or FakeNavigator(home=True)
-        self.instance_id = "FAU_00"
-        self.config      = type('Cfg', (), {'task_abilitato': lambda self, n: True})()
-        self.log         = None
+        from core.state import InstanceState
+        self.device       = device    or FakeDevice()
+        self.matcher      = matcher   or FakeMatcher()
+        self.navigator    = navigator or FakeNavigator(home=True)
+        self.instance_name = "FAU_00"
+        self.config        = type('Cfg', (), {'task_abilitato': lambda self, n: True})()
+        self.log           = None
+        self.state         = InstanceState("FAU_00")
 
     def log_msg(self, *args, **kwargs) -> None:
         pass  # silenzioso nei test

@@ -39,17 +39,18 @@ class _DictCfg:
         return self._d.get(k, None)
 
 def make_ctx(config_overrides: dict | None = None) -> TaskContext:
+    from core.state import InstanceState
     device = FakeDevice()
     matcher = FakeMatcher()
     navigator = GameNavigator(device, matcher)
-    config = dict(config_overrides or {})
     return TaskContext(
+        instance_name="FAU_00",
+        config=_DictCfg(config_overrides or {}),
+        state=InstanceState("FAU_00"),
+        log=None,
         device=device,
         matcher=matcher,
         navigator=navigator,
-        config=config,
-        instance_id="FAU_00",
-        logger=None,
     )
 
 
@@ -104,10 +105,10 @@ class TestRifornimentoProperties:
         assert RifornimentoTask().name() == "rifornimento"
 
     def test_schedule_type(self):
-        assert RifornimentoTask().schedule_type == "periodic"  # proprietà del _TaskWrapper, non del task
+        assert RifornimentoTask().schedule_type() == "periodic"  # metodo del task
 
     def test_interval_hours(self):
-        assert RifornimentoTask().interval_hours == 4.0  # proprietà del _TaskWrapper, non del task
+        assert RifornimentoTask().interval_hours() == 4.0  # metodo del task
 
 
 # ==============================================================================

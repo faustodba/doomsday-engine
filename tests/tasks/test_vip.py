@@ -103,10 +103,14 @@ class FakeLogger:
 def _make_ctx(device=None, matcher=None, navigator=None, abilitato=True,
     vip_should_run: bool = True):
     from core.task import TaskContext
+    from core.state import InstanceState
+    state = InstanceState("FAKE_00")
+    if not vip_should_run:
+        state.vip.segna_completato()
     return TaskContext(
         instance_name="FAKE_00",
         config=FakeConfig(abilitato),
-        state=object(),
+        state=state,
         log=FakeLogger(),
         device=device,
         matcher=matcher,
