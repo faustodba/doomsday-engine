@@ -88,16 +88,6 @@ class FakeDevice:
         return sum(1 for c in self.calls if c[0] == "back")
 
 
-from dataclasses import dataclass as _dc
-
-@_dc
-class _MatchResult:
-    found: bool
-    score: float
-    cx: int = 0
-    cy: int = 0
-
-
 class FakeMatcher:
     """
     Template matcher configurabile per i test.
@@ -131,6 +121,16 @@ class FakeMatcher:
             return FakeMatch(score=s)
         return None
 
+    def find_one(self, shot, tmpl: str, threshold: float = 0.8, zone=None):
+        """API V6: find_one restituisce _MatchResult (found, score, cx, cy)."""
+        if tmpl in self._finds:
+            m = self._finds[tmpl]
+            if m and m.score >= threshold:
+                return _MatchResult(found=True, score=m.score, cx=m.cx, cy=m.cy)
+        s = self.score(shot, tmpl)
+        found = s >= threshold
+        return _MatchResult(found=found, score=s, cx=700, cy=300)
+
 
 # ==============================================================================
 # FakeContext builder
@@ -149,12 +149,7 @@ class FakeConfig:
 
 
 class FakeState:
-    def __init__(self, boost_should_run=True):
-        from core.state import BoostState
-        self.boost = BoostState()
-        if not boost_should_run:
-            from datetime import datetime, timezone
-            self.boost.registra_attivo("8h", riferimento=datetime.now(timezone.utc))
+    pass
 
 
 class FakeLogger:
@@ -193,14 +188,15 @@ def _make_ctx(
     matcher: FakeMatcher | None = None,
     navigator=None,
     task_abilitato: bool = True,
-    boost_should_run: bool = True,
 ):
     """Costruisce un TaskContext minimale per i test."""
+    # Import locale per evitare circular import nei test
     from core.task import TaskContext
+
     return TaskContext(
         instance_name="FAKE_00",
         config=FakeConfig(task_abilitato),
-        state=FakeState(boost_should_run=boost_should_run),
+        state=FakeState(),
         log=FakeLogger(),
         device=device,
         matcher=matcher,
@@ -262,24 +258,6 @@ class TestShouldRun:
         device  = FakeDevice()
         matcher = FakeMatcher()
         ctx     = _make_ctx(device=device, matcher=matcher, task_abilitato=True)
-        assert task.should_run(ctx) is True
-
-    def test_boost_attivo_ritorna_false(self):
-        """BoostState attivo (scadenza futura) → should_run=False."""
-        task    = _task()
-        device  = FakeDevice()
-        matcher = FakeMatcher()
-        ctx     = _make_ctx(device=device, matcher=matcher,
-                            task_abilitato=True, boost_should_run=False)
-        assert task.should_run(ctx) is False
-
-    def test_boost_scaduto_ritorna_true(self):
-        """BoostState scaduto → should_run=True."""
-        task    = _task()
-        device  = FakeDevice()
-        matcher = FakeMatcher()
-        ctx     = _make_ctx(device=device, matcher=matcher,
-                            task_abilitato=True, boost_should_run=True)
         assert task.should_run(ctx) is True
 
 

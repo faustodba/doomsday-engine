@@ -38,11 +38,25 @@ class _DictCfg:
     def __getattr__(self, k):
         return self._d.get(k, None)
 
+class _FakeNavigator:
+    """Navigator che registra le chiamate senza ADB reale."""
+    def __init__(self):
+        self.home_calls = 0
+        self.mappa_calls = 0
+    def vai_in_home(self) -> bool:
+        self.home_calls += 1
+        return True
+    def vai_in_mappa(self) -> bool:
+        self.mappa_calls += 1
+        return True
+    def tap_barra(self, ctx, voce): return True
+
+
 def make_ctx(config_overrides: dict | None = None) -> TaskContext:
     from core.state import InstanceState
     device = FakeDevice()
     matcher = FakeMatcher()
-    navigator = GameNavigator(device, matcher)
+    navigator = _FakeNavigator()
     return TaskContext(
         instance_name="FAU_00",
         config=_DictCfg(config_overrides or {}),
@@ -51,6 +65,8 @@ def make_ctx(config_overrides: dict | None = None) -> TaskContext:
         device=device,
         matcher=matcher,
         navigator=navigator,
+        instance_name="FAU_00",
+        log=None,
     )
 
 
@@ -105,10 +121,10 @@ class TestRifornimentoProperties:
         assert RifornimentoTask().name() == "rifornimento"
 
     def test_schedule_type(self):
-        assert RifornimentoTask().schedule_type() == "periodic"  # metodo del task
+        assert RifornimentoTask().schedule_type == "periodic"  # proprietà del _TaskWrapper, non del task
 
     def test_interval_hours(self):
-        assert RifornimentoTask().interval_hours() == 4.0  # metodo del task
+        assert RifornimentoTask().interval_hours == 4.0  # proprietà del _TaskWrapper, non del task
 
 
 # ==============================================================================
@@ -353,7 +369,8 @@ class TestRifornimentoSlotZero:
     def test_slot_zero_home_key(self, mock_sleep):
         ctx = ctx_abilitato()
         RifornimentoTask().run(ctx, deposito=DEP_OK, slot_liberi=0)
-        assert ("KEY", "KEYCODE_HOME") in ctx.device.taps
+        # Il ritorno HOME avviene via navigator.vai_in_home() — non via device.key()
+    assert ctx.navigator.home_calls >= 1
 
 
 # ==============================================================================
@@ -375,7 +392,8 @@ class TestRifornimentoSottoSoglia:
         ctx = ctx_abilitato()
         RifornimentoTask().run(ctx, deposito=DEP_SOTTO, slot_liberi=3)
         # KEYCODE_MAP deve essere inviato (navigazione in mappa)
-        assert ("KEY", "KEYCODE_MAP") in ctx.device.taps
+        # La navigazione mappa avviene via navigator.vai_in_mappa() — non via device.key()
+    assert ctx.navigator.mappa_calls >= 1
 
 
 # ==============================================================================
@@ -447,7 +465,8 @@ class TestRifornimentoSpedizioneOK:
     def test_home_key_finale(self, mock_centra, mock_apri, mock_compila, mock_sleep):
         ctx = ctx_abilitato(**{"RIFORNIMENTO_MAX_SPEDIZIONI_CICLO": 1})
         RifornimentoTask().run(ctx, deposito=DEP_OK, slot_liberi=3)
-        assert ("KEY", "KEYCODE_HOME") in ctx.device.taps
+        # Il ritorno HOME avviene via navigator.vai_in_home() — non via device.key()
+    assert ctx.navigator.home_calls >= 1
 
 
 # ==============================================================================

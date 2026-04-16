@@ -69,11 +69,18 @@ class _FakeCfg:
     def task_abilitato(self, n): return True
     def get(self, k, default=None): return default
 
+
+class _FakeNavigator:
+    """Navigator che restituisce sempre True senza ADB reale."""
+    def vai_in_home(self) -> bool: return True
+    def vai_in_mappa(self) -> bool: return True
+    def tap_barra(self, ctx, voce): return True
+
+
 def make_ctx() -> TaskContext:
     from core.state import InstanceState
     device  = FakeDevice()
     matcher = FakeMatcher()
-    nav     = GameNavigator(device, matcher)
     return TaskContext(
         instance_name="FAU_00",
         config=_FakeCfg(),
@@ -81,7 +88,7 @@ def make_ctx() -> TaskContext:
         log=None,
         device=device,
         matcher=matcher,
-        navigator=nav,
+        navigator=_FakeNavigator(),
     )
 
 
