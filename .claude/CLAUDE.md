@@ -7,13 +7,16 @@
 
 ## Startup
 
-All'inizio di ogni sessione:
+All'inizio di ogni sessione, in questo ordine:
+1. Leggere la ROADMAP locale: `C:\doomsday-engine\ROADMAP.md`
+2. Leggere il file di handoff: `C:\doomsday-engine\.claude\SESSION.md`
+3. Verificare la versione locale dei file coinvolti prima di operare.
+4. Se la versione locale non è allineata alla ROADMAP → chiedere prima di procedere.
+5. Non operare mai su versioni non allineate.
+6. Riferire all'utente: obiettivo sessione, stato attuale, prossimo step.
 
-1. Leggere sempre la ROADMAP aggiornata:
-   `https://raw.githubusercontent.com/faustodba/doomsday-engine/main/ROADMAP.md`
-2. Verificare la versione locale dei file coinvolti prima di operare.
-3. Se la versione locale non è allineata alla ROADMAP → chiedere prima di procedere.
-4. Non operare mai su versioni non allineate.
+> La ROADMAP locale è la fonte di verità del progetto.
+> SESSION.md è il ponte di contesto tra sessione browser e sessione VS Code.
 
 ---
 
@@ -51,6 +54,60 @@ All'inizio di ogni sessione:
 
 ---
 
+## Regole speciali per task
+
+- **RaccoltaTask** non ha schedulazione: deve essere eseguito per ogni istanza
+  a patto che ci siano slot liberi. Non aggiungere mai `interval` o `schedule`.
+- Il contatore slot squadre X/Y è leggibile via OCR sia da HOME che da MAPPA.
+  Non assumere mai che si legga solo in mappa.
+
+---
+
+## Regole bat di rilascio
+
+- Usare **path assoluti espliciti** per i file sorgente nei `.bat`.
+- Vietato: `%~dp0`, `%USERNAME%\Downloads` o path relativi.
+- Il bat deve dichiarare una variabile `FILE_DIR` configurabile in cima al file,
+  con istruzione chiara per l'utente, oppure copiare i file direttamente
+  in `C:\doomsday-engine` prima dell'esecuzione.
+
+---
+
+## Issues aperti (stato al 14/04/2026)
+
+| # | Issue | Priorità | Stato |
+|---|-------|----------|-------|
+| RT-15 | Arena + ArenaMercato — da testare su FAU_01 | ALTA | ⏳ in attesa |
+| 1 | Rifornimento — task disabilitato, da abilitare e testare | ALTA | ⏳ in attesa |
+| 3 | Zaino — `deposito` OCR non passato dall'orchestrator a `ZainoTask.run()` | MEDIA | ⏳ in attesa |
+| 4 | Radar — skip silenzioso, nessun log prodotto | ALTA | ⏳ in attesa |
+| 5 | Alleanza — `COORD_ALLEANZA=(760,505)` ancora hardcoded | BASSA | ⏳ in attesa |
+
+> Aggiornare questa tabella ad ogni sessione insieme alla ROADMAP.
+
+---
+
+## Protocollo SESSION.md
+
+SESSION.md è il file di handoff tra sessione browser (claude.ai) e sessione
+VS Code (Claude Code). Va aggiornato ad ogni passaggio di contesto.
+
+### Regole
+- Leggere sempre SESSION.md all'avvio prima di qualsiasi operazione.
+- Dopo ogni step completato: aggiornare "Risultato ultima operazione" e "Prossimo step".
+- Dopo ogni sessione VS Code: aggiornare "Stato attuale" con un riassunto.
+- SESSION.md NON va in git (è in .gitignore).
+
+### Passaggio browser → VS Code
+L'utente dirà: `"Leggi SESSION.md e dimmi dove eravamo rimasti."`
+Rispondere con: obiettivo, stato attuale, prossimo step — senza chiedere altro.
+
+### Passaggio VS Code → browser
+L'utente incollerà il risultato della sessione VS Code nel browser.
+Aggiornare SESSION.md con il nuovo stato prima di procedere.
+
+---
+
 ## Esecuzione
 
 - Scomporre ogni processo in step semplici.
@@ -70,10 +127,11 @@ All'inizio di ogni sessione:
 ## Rilasci (batch)
 
 Ogni rilascio segue questa sequenza:
-
 1. Copia del file in `C:\doomsday-engine\<path>\`
 2. Commit + push su `faustodba/doomsday-engine`
 3. Aggiornamento ROADMAP (fix applicati, stato RT, issues aperti)
+4. Aggiornamento tabella Issues aperti in CLAUDE.md se necessario
+5. Aggiornamento SESSION.md con stato post-rilascio
 
 ---
 

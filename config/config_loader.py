@@ -9,7 +9,8 @@
 #    3. config/global_config.json           ← parametri globali (letto ad ogni tick)
 #
 #  Output:
-#    GlobalConfig   — parametri globali tipizzati (task, rifornimento, zaino, raccolta)
+#    MumuConfig     — parametri MuMuPlayer (path, timeout, ritardi)
+#    GlobalConfig   — parametri globali tipizzati (task, rifornimento, zaino, raccolta, mumu)
 #    InstanceCfg    — configurazione per singola istanza (merge globale + per-istanza)
 #
 #  Utilizzo in main.py:
@@ -19,6 +20,10 @@
 #    gcfg = load_global()                        # rilegge global_config.json
 #    cfg  = build_instance_cfg(ist_dict, gcfg)   # merge con dati istanza
 #    ctx  = TaskContext(..., config=cfg)
+#
+#  Utilizzo in launcher.py:
+#    from config.config_loader import load_global
+#    _cfg = load_global().mumu                   # MumuConfig con path e timeout
 #
 #  Compatibilità task esistenti:
 #    cfg.get(key, default)      → invariato
@@ -172,6 +177,28 @@ def save_global(gcfg: "GlobalConfig", path: str | Path | None = None) -> bool:
 
 
 # ==============================================================================
+# MumuConfig — parametri MuMuPlayer
+# ==============================================================================
+
+@dataclass
+class MumuConfig:
+    """
+    Parametri MuMuPlayer letti dalla sezione "mumu" di global_config.json.
+    Prodotto da load_global().mumu.
+    """
+    manager:             str = (
+        r"C:\Program Files\Netease\MuMuPlayer\nx_main\MuMuManager.exe"
+    )
+    adb:                 str = (
+        r"C:\Program Files\Netease\MuMuPlayer\nx_main\adb.exe"
+    )
+    timeout_adb_s:       int = 120
+    timeout_carica_s:    int = 180
+    delay_carica_iniz_s: int = 45
+    n_back_pulizia:      int = 5
+
+
+# ==============================================================================
 # GlobalConfig — parametri globali tipizzati
 # ==============================================================================
 
@@ -181,6 +208,9 @@ class GlobalConfig:
     Parametri globali del bot. Prodotto da load_global().
     Accesso diretto agli attributi oppure via get(key, default).
     """
+
+    # MuMu
+    mumu: MumuConfig = field(default_factory=MumuConfig)
 
     # Sistema
     tick_sleep:   int   = 300
@@ -248,6 +278,7 @@ class GlobalConfig:
     def _from_raw(cls, raw: dict) -> "GlobalConfig":
         """Costruisce GlobalConfig da dict grezzo (global_config.json)."""
         s  = raw.get("sistema", {})
+        m  = raw.get("mumu", {})
         t  = raw.get("task", {})
         rc = raw.get("rifornimento_comune", {})
         rm = raw.get("rifornimento_mappa", {})
@@ -257,6 +288,18 @@ class GlobalConfig:
         al = ra.get("allocazione", {})
 
         return cls(
+            # MuMu
+            mumu = MumuConfig(
+                manager             = str(m.get("manager",
+                    r"C:\Program Files\Netease\MuMuPlayer\nx_main\MuMuManager.exe")),
+                adb                 = str(m.get("adb",
+                    r"C:\Program Files\Netease\MuMuPlayer\nx_main\adb.exe")),
+                timeout_adb_s       = int(m.get("timeout_adb_s",       120)),
+                timeout_carica_s    = int(m.get("timeout_carica_s",    180)),
+                delay_carica_iniz_s = int(m.get("delay_carica_iniz_s", 45)),
+                n_back_pulizia      = int(m.get("n_back_pulizia",      5)),
+            ),
+
             # Sistema
             tick_sleep   = int(s.get("tick_sleep",   300)),
             max_parallel = int(s.get("max_parallel", 2)),
@@ -326,6 +369,14 @@ class GlobalConfig:
             "sistema": {
                 "tick_sleep":   self.tick_sleep,
                 "max_parallel": self.max_parallel,
+            },
+            "mumu": {
+                "manager":             self.mumu.manager,
+                "adb":                 self.mumu.adb,
+                "timeout_adb_s":       self.mumu.timeout_adb_s,
+                "timeout_carica_s":    self.mumu.timeout_carica_s,
+                "delay_carica_iniz_s": self.mumu.delay_carica_iniz_s,
+                "n_back_pulizia":      self.mumu.n_back_pulizia,
             },
             "task": {
                 "raccolta":      self.task_raccolta,

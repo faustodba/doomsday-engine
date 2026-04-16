@@ -92,6 +92,19 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 - `pin_acciaio.png` = `pin_pomodoro.png` (stesso file) → stesso cx,cy.
   Risolvibile quando sarà disponibile il vero `pin_acciaio.png`.
 
+### 7. Alleanza — swipe perde click durante claim (BASSA)
+- Alcuni claim consecutivi atterrano sulla stessa coordinata
+- Causa probabile: scroll lista non attende stabilizzazione UI
+- Fix: aggiungere wait_stabilize dopo swipe in `_loop_claim()`
+
+### 8. Radar — tap iniziale apre maschera laterale invece di icona radar (ALTA)
+- Primo tap su pin_radar apre una maschera UI laterale inattesa
+- Task va in loop e si blocca dopo 3 tentativi
+- Causa probabile: coordinate tap_icona `(78,315)` non allineate
+  o icona radar coperta da elemento UI
+- Fix: verificare coordinate in screenshot reale + aggiungere
+  dismiss maschera laterale prima del retry
+
 ---
 
 ---
@@ -110,6 +123,12 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | _TASK_SETUP riordino | `main.py` | Nuovo ordine priorità: Raccolta ultima (110), Rifornimento penultima (100). interval=0.0 per Boost/Vip/Arena/Rifornimento/Raccolta (always-run con guard). Messaggi/Alleanza/Store→4h. ArenaMercato/Radar/RadarCensus→12h |
 | Architettura documentata | `ROADMAP.md` | Catena di comando 5 livelli: Config→Scheduling→should_run()→HOME gate→run() |
 | Pytest 258/258 | `tests/unit/` + `tests/tasks/` | Aggiornati test_state, test_orchestrator, test_boost, test_vip, test_arena, test_rifornimento. FakeMatcher.find_one, FakeNavigator, FakeState con BoostState/VipState, _MatchResult, gate should_run stub |
+| core/launcher.py | NUOVO | Avvio/chiusura istanze MuMu: avvia_istanza(), attendi_home(), chiudi_istanza(). Path e timeout da global_config.json |
+| config/config_loader.py | MumuConfig | Nuova dataclass per sezione mumu. GlobalConfig.mumu esposto |
+| global_config.json | sezione mumu | Path MuMuManager, ADB, timeout avvio istanza |
+| main.py | _thread_istanza() | Integrazione launcher: avvia_istanza() + attendi_home() pre-tick, chiudi_istanza() post-tick |
+| core/launcher.py | fix path | nx_main\ aggiunto a tutti i candidati MuMuManager |
+| core/launcher.py | fix Screen.UNKNOWN | Confronto enum corretto invece di stringa |
 
 ---
 

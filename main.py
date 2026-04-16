@@ -28,6 +28,7 @@ from core.task import TaskContext, TaskResult
 from core.logger import StructuredLogger, get_logger, close_all_loggers
 from core.state import InstanceState
 from config.config_loader import load_global, build_instance_cfg
+from core import launcher as _launcher
 
 
 def _import_tasks() -> dict:
@@ -149,7 +150,7 @@ def _build_ctx(ist: dict, gcfg, dry_run: bool) -> TaskContext:
     porta = ist.get("porta", 16384 + ist.get("indice", 0) * 32)
 
     cfg    = build_instance_cfg(ist, gcfg)
-    logger = get_logger(nome, log_dir=os.path.join(ROOT, "logs"), console=False)
+    logger = get_logger(nome, log_dir=os.path.join(ROOT, "logs"), console=True)
     state  = InstanceState.load(nome, state_dir=os.path.join(ROOT, "state"))
 
     if dry_run:
@@ -281,6 +282,17 @@ def _thread_istanza(ist, tasks_cls, dry_run, tick_sleep, stop_event):
     except Exception as exc:
         _log(nome, f"[WARN] Ripristino schedule: {exc}")
 
+    # ── Avvio istanza MuMu + attesa HOME ─────────────────────────────────
+    _log_fn = lambda msg: _log(nome, msg)
+
+    if not dry_run:
+        if not _launcher.avvia_istanza(ist, _log_fn):
+            _log(nome, "[ERRORE] avvia_istanza() fallito — thread interrotto")
+            return
+        if not _launcher.attendi_home(ctx, _log_fn):
+            _log(nome, "[ERRORE] attendi_home() fallito — thread interrotto")
+            return
+
     while not stop_event.is_set():
         gcfg = load_global()
         ctx  = _build_ctx(ist, gcfg, dry_run)
@@ -322,6 +334,10 @@ def _thread_istanza(ist, tasks_cls, dry_run, tick_sleep, stop_event):
         for _ in range(tick_sleep):
             if stop_event.is_set(): break
             time.sleep(1)
+
+    # ── Chiusura istanza MuMu ────────────────────────────────────────────
+    if not dry_run:
+        _launcher.chiudi_istanza(ist, porta, _log_fn)
 
     _aggiorna_stato_istanza(nome, {"stato": "idle"})
     _log(nome, "Thread fermato.")
