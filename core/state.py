@@ -4,7 +4,7 @@
 #  Stato runtime di una singola istanza, persistito su disco come JSON.
 #
 #  Classi:
-#    RifornimentoState  — quota giornaliera spedizioni, reset automatico
+#    RifornimentoState  — quota giornaliera spedizioni + guard provviste_esaurite
 #    ScheduleState      — persistenza scheduling task (restart-safe)
 #    DailyTasksState    — flag completamento task giornalieri con timestamp
 #    MetricsState       — metriche produzione (risorse/ora, marce inviate)
@@ -19,6 +19,12 @@
 #    - Nessuna dipendenza da device.py o config.py — layer puro di dati
 #    - I timestamp sono sempre UTC (datetime.now(UTC))
 #    - Il reset giornaliero usa la data UTC, non l'ora locale
+#
+#  REFACTORING 16/04/2026 — RifornimentoState:
+#    - aggiunto campo provviste_esaurite: bool
+#    - aggiunto metodo segna_provviste_esaurite()
+#    - _controlla_reset() resetta anche provviste_esaurite
+#    - should_run() → False se provviste_esaurite (guard persistente)
 #
 #  FIX 14/04/2026 — ScheduleState:
 #    - timestamps ora salvati come ISO string (es. "2026-04-14T16:45:39+00:00")
@@ -92,6 +98,10 @@ class RifornimentoState:
     data_riferimento: str = field(default_factory=_today_utc)
     ultima_spedizione: str | None = None   # timestamp ISO ultima spedizione
 
+    # Guard persistente: True quando il gioco segnala provviste=0
+    # Blocca il task per tutta la giornata UTC su tutti i riavvii dell'istanza
+    provviste_esaurite: bool = False
+
     # Statistiche giornaliere
     provviste_residue: int = -1
     inviato_oggi: dict = field(default_factory=dict)   # {risorsa: int}
@@ -101,11 +111,12 @@ class RifornimentoState:
         """Se siamo in un nuovo giorno UTC, azzera il contatore e le statistiche."""
         oggi = _today_utc()
         if self.data_riferimento != oggi:
-            self.spedizioni_oggi = 0
-            self.data_riferimento = oggi
-            self.provviste_residue = -1
-            self.inviato_oggi = {}
-            self.dettaglio_oggi = []
+            self.spedizioni_oggi    = 0
+            self.data_riferimento   = oggi
+            self.provviste_esaurite = False
+            self.provviste_residue  = -1
+            self.inviato_oggi       = {}
+            self.dettaglio_oggi     = []
 
     @property
     def quota_esaurita(self) -> bool:
@@ -118,6 +129,25 @@ class RifornimentoState:
         """Numero di spedizioni ancora disponibili oggi."""
         self._controlla_reset()
         return max(0, self.quota_max - self.spedizioni_oggi)
+
+    def should_run(self) -> bool:
+        """
+        Guard persistente per RifornimentoTask.should_run().
+        False se le provviste giornaliere sono esaurite (segnalato dal gioco).
+        Reset automatico a mezzanotte UTC.
+        NON considera quota_max — quella è un limite di sessione gestito in run().
+        """
+        self._controlla_reset()
+        return not self.provviste_esaurite
+
+    def segna_provviste_esaurite(self) -> None:
+        """
+        Chiamato da RifornimentoTask quando _compila_e_invia() rileva provviste=0.
+        Persiste su disco — blocca il task per tutta la giornata UTC
+        indipendentemente dai riavvii dell'istanza.
+        """
+        self._controlla_reset()
+        self.provviste_esaurite = True
 
     def registra_spedizione(self,
                             risorsa: str = "",
@@ -153,23 +183,25 @@ class RifornimentoState:
 
     def reset_forzato(self) -> None:
         """Azzera manualmente la quota (es. dopo cambio data manuale)."""
-        self.spedizioni_oggi = 0
-        self.data_riferimento = _today_utc()
-        self.ultima_spedizione = None
-        self.provviste_residue = -1
-        self.inviato_oggi = {}
-        self.dettaglio_oggi = []
+        self.spedizioni_oggi    = 0
+        self.data_riferimento   = _today_utc()
+        self.ultima_spedizione  = None
+        self.provviste_esaurite = False
+        self.provviste_residue  = -1
+        self.inviato_oggi       = {}
+        self.dettaglio_oggi     = []
 
     @classmethod
     def from_dict(cls, d: dict) -> "RifornimentoState":
         return cls(
-            spedizioni_oggi=d.get("spedizioni_oggi", 0),
-            quota_max=d.get("quota_max", 5),
-            data_riferimento=d.get("data_riferimento", _today_utc()),
-            ultima_spedizione=d.get("ultima_spedizione", None),
-            provviste_residue=d.get("provviste_residue", -1),
-            inviato_oggi=dict(d.get("inviato_oggi", {})),
-            dettaglio_oggi=list(d.get("dettaglio_oggi", [])),
+            spedizioni_oggi     = d.get("spedizioni_oggi",     0),
+            quota_max           = d.get("quota_max",           5),
+            data_riferimento    = d.get("data_riferimento",    _today_utc()),
+            ultima_spedizione   = d.get("ultima_spedizione",   None),
+            provviste_esaurite  = d.get("provviste_esaurite",  False),
+            provviste_residue   = d.get("provviste_residue",   -1),
+            inviato_oggi        = dict(d.get("inviato_oggi",   {})),
+            dettaglio_oggi      = list(d.get("dettaglio_oggi", [])),
         )
 
     def to_dict(self) -> dict:
@@ -178,6 +210,7 @@ class RifornimentoState:
             "quota_max":          self.quota_max,
             "data_riferimento":   self.data_riferimento,
             "ultima_spedizione":  self.ultima_spedizione,
+            "provviste_esaurite": self.provviste_esaurite,
             "provviste_residue":  self.provviste_residue,
             "inviato_oggi":       self.inviato_oggi,
             "dettaglio_oggi":     self.dettaglio_oggi,

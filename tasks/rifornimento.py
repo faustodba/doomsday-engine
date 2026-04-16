@@ -958,10 +958,14 @@ class RifornimentoTask(Task):
         return 4.0
 
     def should_run(self, ctx) -> bool:
+        # Guard tecnica
         if ctx.device is None or ctx.matcher is None:
             return False
-        if hasattr(ctx.config, "task_abilitato"):
-            return ctx.config.task_abilitato("rifornimento")
+        # Guard stato persistente: provviste giornaliere esaurite
+        # (persiste su disco, reset mezzanotte UTC)
+        if ctx.state is not None and not ctx.state.rifornimento.should_run():
+            ctx.log_msg("Rifornimento: provviste esaurite oggi → skip")
+            return False
         return True
 
     def run(self, ctx: TaskContext,
@@ -1161,7 +1165,10 @@ class RifornimentoTask(Task):
                 )
 
                 if quota_esaurita:
-                    ctx.log_msg("Rifornimento: quota giornaliera esaurita — stop")
+                    ctx.log_msg("Rifornimento: provviste giornaliere esaurite — stop")
+                    if ctx.state is not None:
+                        ctx.state.rifornimento.segna_provviste_esaurite()
+                        ctx.log_msg("Rifornimento: RifornimentoState.provviste_esaurite=True")
                     break
                 if not ok:
                     ctx.log_msg("Rifornimento: invio fallito — stop")
