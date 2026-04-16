@@ -10,6 +10,9 @@
 #    - leggi_contatore_slot: portato da ocr.py V5 leggi_contatore_da_zona
 #      Zone: testo (890,117,946,141) psm=7 + fallback cifre separate
 #      Pre-check pixel bianchi: se assenti → (0, totale_noto)
+#  FIX 16/04/2026:
+#    - leggi_contatore_slot: pre-check < 15px bianchi prova fallback
+#      thresh_130 psm=6 scale=2 prima di restituire (0, totale_noto)
 # ==============================================================================
 
 from __future__ import annotations
@@ -360,6 +363,29 @@ def _ocr_zona_intera_slot(crop_pil: Image.Image) -> tuple[int, int]:
         return (-1, -1)
 
 
+def _ocr_slot_thresh130(crop_pil: Image.Image) -> tuple[int, int]:
+    """
+    Fallback OCR slot con thresh=130, scale=2, psm=6.
+    Usato quando maschera_bianca restituisce < _SOGLIA_PX_BIANCHI pixel bianchi.
+    Ritorna (attive, totale) o (-1, -1).
+    """
+    try:
+        w, h  = crop_pil.size
+        arr   = np.array(crop_pil)
+        gray  = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
+        gray2 = cv2.resize(gray, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
+        _, binary = cv2.threshold(gray2, 130, 255, cv2.THRESH_BINARY)
+        cfg = "--psm 6 -c tessedit_char_whitelist=0123456789/"
+        with _tesseract_lock:
+            testo = pytesseract.image_to_string(binary, config=cfg).strip()
+        m = re.search(r"(\d+)/(\d+)", testo)
+        if m:
+            return (int(m.group(1)), int(m.group(2)))
+        return (-1, -1)
+    except Exception:
+        return (-1, -1)
+
+
 def _ocr_cifra_singola_slot(crop_pil: Image.Image, psm: int = 10) -> int:
     """OCR singola cifra con upscale 8x + Otsu. Ritorna int o -1."""
     try:
@@ -527,8 +553,9 @@ def leggi_contatore_slot(
     Zone calibrate da ocr.py V5 (890,117,946,141).
 
     Pipeline:
-      1. Pre-check pixel bianchi — se assenti → (0, totale_noto)
-      2. OCR zona intera psm=7 → pattern X/Y  [priorità]
+      1. Pre-check pixel bianchi — se < 15px → fallback thresh_130 psm=6 scale=2
+         Se fallback trova X/Y → ritorna. Altrimenti → (0, totale_noto).
+      2. OCR zona intera psm=6/7/13 → pattern X/Y  [priorità]
       3. Fallback cifre separate psm=10/8
 
     Args:
@@ -554,7 +581,12 @@ def leggi_contatore_slot(
         ))
 
         if px_bianchi < _SOGLIA_PX_BIANCHI:
-            # Nessun testo visibile → 0 squadre attive
+            # Pre-check fallito: pochi pixel bianchi con maschera_bianca.
+            # Fallback: thresh_130, psm=6, scale=2 prima di arrendersi.
+            attive_fb, totale_fb = _ocr_slot_thresh130(crop_testo)
+            if attive_fb != -1 and totale_fb != -1:
+                return (attive_fb, totale_fb)
+            # Fallback anch'esso fallito → nessuna squadra attiva
             return (0, totale_noto)
 
         # 2. OCR zona intera psm=7
