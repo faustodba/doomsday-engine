@@ -519,8 +519,8 @@ class TestOrchestratorIntegrazione:
         results = orc.tick()
         # Tutti e 3 eseguiti (disabilitati per config mancante → success=True o False)
         assert len(results) == 3
-        names_eseguiti = {e.task.name for e in orc._entries
-                          if e.last_run > 0.0}
+        names_eseguiti = {e.task.name() if callable(e.task.name) else e.task.name
+                          for e in orc._entries if e.last_run > 0.0}
         assert names_eseguiti == {"raccolta", "rifornimento", "zaino"}
 
 
@@ -533,18 +533,24 @@ class StubTaskShouldRunFalse(Task):
     def name(self): return "stub_disabled"
     def should_run(self, ctx): return False
     def run(self, ctx): return TaskResult.ok("non dovrebbe girare")
+    schedule_type = "periodic"
+    interval_hours = 0.0
 
 class StubTaskShouldRunTrue(Task):
     """Task con should_run() sempre True."""
     def name(self): return "stub_enabled"
     def should_run(self, ctx): return True
     def run(self, ctx): return TaskResult.ok("eseguito")
+    schedule_type = "periodic"
+    interval_hours = 0.0
 
 class StubTaskShouldRunException(Task):
     """Task con should_run() che solleva eccezione."""
     def name(self): return "stub_exc"
     def should_run(self, ctx): raise RuntimeError("errore should_run")
     def run(self, ctx): return TaskResult.ok("non dovrebbe girare")
+    schedule_type = "periodic"
+    interval_hours = 0.0
 
 
 class TestGateShouldRun:

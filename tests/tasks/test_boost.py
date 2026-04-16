@@ -149,7 +149,12 @@ class FakeConfig:
 
 
 class FakeState:
-    pass
+    def __init__(self, boost_should_run=True):
+        from core.state import BoostState
+        self.boost = BoostState()
+        if not boost_should_run:
+            from datetime import datetime, timezone
+            self.boost.registra_attivo("8h", riferimento=datetime.now(timezone.utc))
 
 
 class FakeLogger:
