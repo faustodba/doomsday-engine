@@ -368,7 +368,7 @@ class TestRifornimentoSlotZero:
         ctx = ctx_abilitato()
         RifornimentoTask().run(ctx, deposito=DEP_OK, slot_liberi=0)
         # Il ritorno HOME avviene via navigator.vai_in_home() — non via device.key()
-    assert ctx.navigator.home_calls >= 1
+        assert ctx.navigator.home_calls >= 1
 
 
 # ==============================================================================
@@ -391,7 +391,7 @@ class TestRifornimentoSottoSoglia:
         RifornimentoTask().run(ctx, deposito=DEP_SOTTO, slot_liberi=3)
         # KEYCODE_MAP deve essere inviato (navigazione in mappa)
         # La navigazione mappa avviene via navigator.vai_in_mappa() — non via device.key()
-    assert ctx.navigator.mappa_calls >= 1
+        assert ctx.navigator.mappa_calls >= 1
 
 
 # ==============================================================================
@@ -464,7 +464,7 @@ class TestRifornimentoSpedizioneOK:
         ctx = ctx_abilitato(**{"RIFORNIMENTO_MAX_SPEDIZIONI_CICLO": 1})
         RifornimentoTask().run(ctx, deposito=DEP_OK, slot_liberi=3)
         # Il ritorno HOME avviene via navigator.vai_in_home() — non via device.key()
-    assert ctx.navigator.home_calls >= 1
+        assert ctx.navigator.home_calls >= 1
 
 
 # ==============================================================================
