@@ -453,3 +453,48 @@ class TestArenaTask(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ==============================================================================
+# Test: ArenaState integration — guard sfide esaurite
+# ==============================================================================
+
+class TestArenaStateIntegration(unittest.TestCase):
+
+    def _make_ctx_with_state(self, esaurite=False):
+        """Costruisce ctx con InstanceState e ArenaState configurato."""
+        from core.state import InstanceState
+        ctx = _make_ctx()
+        ctx.state = InstanceState("FAKE_00")
+        if esaurite:
+            ctx.state.arena.segna_esaurite()
+        return ctx
+
+    def test_should_run_false_se_esaurite(self):
+        """ArenaTask.should_run() → False se sfide già esaurite."""
+        from tasks.arena import ArenaTask
+        ctx = self._make_ctx_with_state(esaurite=True)
+        task = ArenaTask()
+        self.assertFalse(task.should_run(ctx))
+
+    def test_should_run_true_se_non_esaurite(self):
+        """ArenaTask.should_run() → True se sfide non ancora esaurite."""
+        from tasks.arena import ArenaTask
+        ctx = self._make_ctx_with_state(esaurite=False)
+        task = ArenaTask()
+        self.assertTrue(task.should_run(ctx))
+
+    def test_segna_esaurite_dopo_purchase_popup(self):
+        """ArenaState.segna_esaurite() persiste correttamente."""
+        from core.state import InstanceState
+        state = InstanceState("FAKE_00")
+        self.assertTrue(state.arena.should_run())
+        state.arena.segna_esaurite()
+        self.assertFalse(state.arena.should_run())
+
+    def test_arena_state_reset_nuovo_giorno(self):
+        """ArenaState si resetta automaticamente a mezzanotte UTC."""
+        from core.state import ArenaState
+        a = ArenaState(esaurite=True, data_riferimento="2020-01-01")
+        self.assertTrue(a.should_run())  # nuovo giorno → reset
+        self.assertFalse(a.esaurite)

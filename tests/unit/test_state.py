@@ -19,6 +19,9 @@ from core.state import (
     InstanceState,
     MetricsState,
     RifornimentoState,
+    BoostState,
+    VipState,
+    ArenaState,
     _today_utc,
 )
 
@@ -86,6 +89,262 @@ class TestRifornimentoState:
         assert r.spedizioni_oggi == 0
         assert r.quota_max == 5
 
+    def test_provviste_esaurite_default_false(self):
+        r = RifornimentoState()
+        assert r.provviste_esaurite is False
+
+    def test_should_run_true_per_default(self):
+        r = RifornimentoState()
+        assert r.should_run() is True
+
+    def test_segna_provviste_esaurite(self):
+        r = RifornimentoState()
+        r.segna_provviste_esaurite()
+        assert r.provviste_esaurite is True
+        assert r.should_run() is False
+
+    def test_provviste_esaurite_reset_nuovo_giorno(self):
+        r = RifornimentoState(
+            provviste_esaurite=True,
+            data_riferimento="2020-01-01",
+        )
+        assert r.should_run() is True  # reset triggera
+        assert r.provviste_esaurite is False
+
+    def test_provviste_esaurite_persiste_in_giornata(self):
+        r = RifornimentoState()
+        r.segna_provviste_esaurite()
+        d = r.to_dict()
+        r2 = RifornimentoState.from_dict(d)
+        assert r2.provviste_esaurite is True
+        assert r2.should_run() is False
+
+    def test_reset_forzato_azzera_provviste_esaurite(self):
+        r = RifornimentoState()
+        r.segna_provviste_esaurite()
+        r.reset_forzato()
+        assert r.provviste_esaurite is False
+        assert r.should_run() is True
+
+
+
+
+# ==============================================================================
+# TestBoostState
+# ==============================================================================
+
+class TestBoostState:
+
+    def test_defaults(self):
+        b = BoostState()
+        assert b.tipo is None
+        assert b.scadenza is None
+        assert b.disponibile is True
+
+    def test_should_run_mai_attivato(self):
+        """Senza scadenza → should_run=True (mai attivato)."""
+        b = BoostState()
+        assert b.should_run() is True
+
+    def test_registra_attivo_8h(self):
+        from datetime import datetime, timezone
+        b = BoostState()
+        now = datetime.now(timezone.utc)
+        b.registra_attivo("8h", riferimento=now)
+        assert b.tipo == "8h"
+        assert b.disponibile is True
+        assert b.scadenza is not None
+        assert b.is_attivo is True
+
+    def test_registra_attivo_1d(self):
+        from datetime import datetime, timezone
+        b = BoostState()
+        now = datetime.now(timezone.utc)
+        b.registra_attivo("1d", riferimento=now)
+        assert b.tipo == "1d"
+        assert b.is_attivo is True
+
+    def test_should_run_false_quando_attivo(self):
+        from datetime import datetime, timezone
+        b = BoostState()
+        b.registra_attivo("8h", riferimento=datetime.now(timezone.utc))
+        assert b.should_run() is False
+
+    def test_should_run_true_quando_scaduto(self):
+        from datetime import datetime, timezone, timedelta
+        b = BoostState()
+        passato = datetime.now(timezone.utc) - timedelta(hours=9)
+        b.registra_attivo("8h", riferimento=passato)
+        assert b.is_attivo is False
+        assert b.should_run() is True
+
+    def test_registra_non_disponibile(self):
+        b = BoostState()
+        b.registra_non_disponibile()
+        assert b.disponibile is False
+        assert b.should_run() is True  # riprova sempre
+
+    def test_should_run_true_se_non_disponibile_anche_con_scadenza(self):
+        from datetime import datetime, timezone
+        b = BoostState()
+        b.registra_attivo("8h", riferimento=datetime.now(timezone.utc))
+        b.registra_non_disponibile()
+        assert b.should_run() is True
+
+    def test_serializzazione_roundtrip(self):
+        from datetime import datetime, timezone
+        b = BoostState()
+        b.registra_attivo("8h", riferimento=datetime.now(timezone.utc))
+        d = b.to_dict()
+        b2 = BoostState.from_dict(d)
+        assert b2.tipo == "8h"
+        assert b2.disponibile is True
+        assert b2.is_attivo is True
+
+    def test_from_dict_vuoto(self):
+        b = BoostState.from_dict({})
+        assert b.tipo is None
+        assert b.should_run() is True
+
+    def test_log_stato_mai_attivato(self):
+        b = BoostState()
+        assert "mai attivato" in b.log_stato()
+
+    def test_log_stato_attivo(self):
+        from datetime import datetime, timezone
+        b = BoostState()
+        b.registra_attivo("8h", riferimento=datetime.now(timezone.utc))
+        assert "ATTIVO" in b.log_stato()
+
+
+# ==============================================================================
+# TestVipState
+# ==============================================================================
+
+class TestVipState:
+
+    def test_defaults(self):
+        v = VipState()
+        assert v.cass_ritirata is False
+        assert v.free_ritirato is False
+
+    def test_should_run_true_per_default(self):
+        v = VipState()
+        assert v.should_run() is True
+
+    def test_should_run_false_quando_entrambe_ritirate(self):
+        v = VipState()
+        v.segna_cass()
+        v.segna_free()
+        assert v.should_run() is False
+
+    def test_should_run_true_solo_cass_ritirata(self):
+        v = VipState()
+        v.segna_cass()
+        assert v.should_run() is True  # free ancora da ritirare
+
+    def test_should_run_true_solo_free_ritirato(self):
+        v = VipState()
+        v.segna_free()
+        assert v.should_run() is True  # cass ancora da ritirare
+
+    def test_segna_completato(self):
+        v = VipState()
+        v.segna_completato()
+        assert v.cass_ritirata is True
+        assert v.free_ritirato is True
+        assert v.should_run() is False
+
+    def test_reset_nuovo_giorno(self):
+        v = VipState(
+            cass_ritirata=True,
+            free_ritirato=True,
+            data_riferimento="2020-01-01",
+        )
+        assert v.should_run() is True
+        assert v.cass_ritirata is False
+        assert v.free_ritirato is False
+
+    def test_serializzazione_roundtrip(self):
+        v = VipState()
+        v.segna_cass()
+        d = v.to_dict()
+        v2 = VipState.from_dict(d)
+        assert v2.cass_ritirata is True
+        assert v2.free_ritirato is False
+        assert v2.should_run() is True
+
+    def test_from_dict_vuoto(self):
+        v = VipState.from_dict({})
+        assert v.should_run() is True
+
+    def test_log_stato_completato(self):
+        v = VipState()
+        v.segna_completato()
+        assert "COMPLETATO" in v.log_stato()
+
+    def test_log_stato_parziale(self):
+        v = VipState()
+        v.segna_cass()
+        assert "DA RITIRARE" in v.log_stato()
+
+
+# ==============================================================================
+# TestArenaState
+# ==============================================================================
+
+class TestArenaState:
+
+    def test_defaults(self):
+        a = ArenaState()
+        assert a.esaurite is False
+
+    def test_should_run_true_per_default(self):
+        a = ArenaState()
+        assert a.should_run() is True
+
+    def test_segna_esaurite(self):
+        a = ArenaState()
+        a.segna_esaurite()
+        assert a.esaurite is True
+        assert a.should_run() is False
+
+    def test_reset_nuovo_giorno(self):
+        a = ArenaState(
+            esaurite=True,
+            data_riferimento="2020-01-01",
+        )
+        assert a.should_run() is True
+        assert a.esaurite is False
+
+    def test_serializzazione_roundtrip(self):
+        a = ArenaState()
+        a.segna_esaurite()
+        d = a.to_dict()
+        a2 = ArenaState.from_dict(d)
+        assert a2.esaurite is True
+        assert a2.should_run() is False
+
+    def test_from_dict_vuoto(self):
+        a = ArenaState.from_dict({})
+        assert a.should_run() is True
+
+    def test_log_stato_esaurite(self):
+        a = ArenaState()
+        a.segna_esaurite()
+        assert "ESAURITE" in a.log_stato()
+
+    def test_log_stato_disponibili(self):
+        a = ArenaState()
+        assert "disponibili" in a.log_stato()
+
+    def test_reset_ripristina_should_run(self):
+        a = ArenaState()
+        a.segna_esaurite()
+        assert a.should_run() is False
+        # Simula nuovo giorno
+        a.data_riferimento = "2020-01-01"
+        assert a.should_run() is True
 
 # ==============================================================================
 # TestDailyTasksState

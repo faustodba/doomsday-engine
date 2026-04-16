@@ -510,3 +510,62 @@ class TestRifornimentoCoordCustom:
         # Il testo "100" deve essere inviato come input
         assert ("TEXT", "100") in ctx.device.taps
         assert ("TEXT", "200") in ctx.device.taps
+
+
+# ==============================================================================
+# Test: RifornimentoState.provviste_esaurite — guard persistente
+# ==============================================================================
+
+class TestRifornimentoStateShouldRun:
+
+    def _make_ctx_with_state(self, provviste_esaurite=False):
+        from core.state import InstanceState
+        ctx = make_ctx()
+        ctx.state = InstanceState("FAKE_00")
+        if provviste_esaurite:
+            ctx.state.rifornimento.segna_provviste_esaurite()
+        return ctx
+
+    def test_should_run_true_per_default(self):
+        ctx = self._make_ctx_with_state(provviste_esaurite=False)
+        task = RifornimentoTask()
+        assert task.should_run(ctx) is True
+
+    def test_should_run_false_se_provviste_esaurite(self):
+        """Se provviste_esaurite=True → should_run=False."""
+        ctx = self._make_ctx_with_state(provviste_esaurite=True)
+        task = RifornimentoTask()
+        assert task.should_run(ctx) is False
+
+    def test_should_run_true_dopo_reset_giornaliero(self):
+        """provviste_esaurite si resetta a mezzanotte UTC."""
+        from core.state import RifornimentoState
+        r = RifornimentoState(
+            provviste_esaurite=True,
+            data_riferimento="2020-01-01",
+        )
+        assert r.should_run() is True
+
+    def test_provviste_esaurite_persiste_dopo_serializzazione(self):
+        """provviste_esaurite persiste in to_dict/from_dict."""
+        from core.state import RifornimentoState
+        r = RifornimentoState()
+        r.segna_provviste_esaurite()
+        d = r.to_dict()
+        r2 = RifornimentoState.from_dict(d)
+        assert r2.provviste_esaurite is True
+        assert r2.should_run() is False
+
+    def test_device_none_ritorna_false(self):
+        """Guard tecnica: device None → should_run=False."""
+        from core.task import TaskContext
+        from core.state import InstanceState
+        ctx = TaskContext(
+            instance_name="FAKE_00",
+            config=make_cfg(),
+            state=InstanceState("FAKE_00"),
+            log=None,
+            device=None,
+            matcher=None,
+        )
+        assert RifornimentoTask().should_run(ctx) is False

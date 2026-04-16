@@ -139,7 +139,12 @@ class FakeConfig:
 
 
 class FakeState:
-    pass
+    def __init__(self, boost_should_run=True):
+        from core.state import BoostState
+        self.boost = BoostState()
+        if not boost_should_run:
+            from datetime import datetime, timezone
+            self.boost.registra_attivo("8h", riferimento=datetime.now(timezone.utc))
 
 
 class FakeLogger:
@@ -178,15 +183,14 @@ def _make_ctx(
     matcher: FakeMatcher | None = None,
     navigator=None,
     task_abilitato: bool = True,
+    boost_should_run: bool = True,
 ):
     """Costruisce un TaskContext minimale per i test."""
-    # Import locale per evitare circular import nei test
     from core.task import TaskContext
-
     return TaskContext(
         instance_name="FAKE_00",
         config=FakeConfig(task_abilitato),
-        state=FakeState(),
+        state=FakeState(boost_should_run=boost_should_run),
         log=FakeLogger(),
         device=device,
         matcher=matcher,
@@ -248,6 +252,24 @@ class TestShouldRun:
         device  = FakeDevice()
         matcher = FakeMatcher()
         ctx     = _make_ctx(device=device, matcher=matcher, task_abilitato=True)
+        assert task.should_run(ctx) is True
+
+    def test_boost_attivo_ritorna_false(self):
+        """BoostState attivo (scadenza futura) → should_run=False."""
+        task    = _task()
+        device  = FakeDevice()
+        matcher = FakeMatcher()
+        ctx     = _make_ctx(device=device, matcher=matcher,
+                            task_abilitato=True, boost_should_run=False)
+        assert task.should_run(ctx) is False
+
+    def test_boost_scaduto_ritorna_true(self):
+        """BoostState scaduto → should_run=True."""
+        task    = _task()
+        device  = FakeDevice()
+        matcher = FakeMatcher()
+        ctx     = _make_ctx(device=device, matcher=matcher,
+                            task_abilitato=True, boost_should_run=True)
         assert task.should_run(ctx) is True
 
 

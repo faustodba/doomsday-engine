@@ -24,6 +24,7 @@ from dataclasses import dataclass
 import pytest
 
 from tasks.vip import VipConfig, VipTask, _Esito
+from core.state import VipState
 
 
 # ==============================================================================
