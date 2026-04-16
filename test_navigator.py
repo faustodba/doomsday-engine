@@ -95,10 +95,10 @@ if shot is None:
     log("FAIL: screenshot None — ADB non risponde")
     risultati["passo1"] = "FAIL"
 else:
-    score_home = matcher.score(shot, "pin/pin_home.png")
-    score_map  = matcher.score(shot, "pin/pin_map.png")
-    log(f"Score pin_home : {score_home:.3f}")
-    log(f"Score pin_map  : {score_map:.3f}")
+    score_home = matcher.score(shot, cfg.pin_home_template)
+    score_map  = matcher.score(shot, cfg.pin_map_template)
+    log(f"Score {cfg.pin_home_template} : {score_home:.3f}")
+    log(f"Score {cfg.pin_map_template}  : {score_map:.3f}")
     log(f"Soglia attiva  : {cfg.pin_threshold}")
 
     screen = nav._classifica(shot)
@@ -112,7 +112,6 @@ else:
         risultati["passo1"] = "WARN"
     else:
         log(f"FAIL: schermata UNKNOWN — score home={score_home:.3f} troppo basso")
-        log("      Verificare che pin_home.png corrisponda alla UI reale")
         log(f"      Template dir: {os.path.join(ROOT, 'templates', 'pin')}")
         risultati["passo1"] = "FAIL"
 
@@ -122,21 +121,21 @@ else:
 separa("PASSO 2 — Navigazione MAPPA")
 
 if risultati.get("passo1") in ("PASS",):
-    log("Tap bottone MAPPA...")
-    device.tap(cfg.map_btn)
+    log("Tap toggle HOME/MAPPA...")
+    device.tap(cfg.toggle_btn)
     time.sleep(cfg.wait_after_action)
 
     shot2 = device.screenshot()
     salva_screenshot(shot2, "passo2_mappa.png")
 
     if shot2 is None:
-        log("FAIL: screenshot None dopo tap MAPPA")
+        log("FAIL: screenshot None dopo tap toggle")
         risultati["passo2"] = "FAIL"
     else:
-        score_home2 = matcher.score(shot2, "pin/pin_home.png")
-        score_map2  = matcher.score(shot2, "pin/pin_map.png")
-        log(f"Score pin_home : {score_home2:.3f}")
-        log(f"Score pin_map  : {score_map2:.3f}")
+        score_home2 = matcher.score(shot2, cfg.pin_home_template)
+        score_map2  = matcher.score(shot2, cfg.pin_map_template)
+        log(f"Score {cfg.pin_home_template} : {score_home2:.3f}")
+        log(f"Score {cfg.pin_map_template}  : {score_map2:.3f}")
         screen2 = nav._classifica(shot2)
         log(f"Schermata rilevata: {screen2.name}")
 
@@ -145,7 +144,7 @@ if risultati.get("passo1") in ("PASS",):
             risultati["passo2"] = "PASS"
         else:
             log(f"FAIL: schermata attesa MAP, rilevata {screen2.name}")
-            log("      Verificare coordinate map_btn o pin_map.png")
+            log(f"      Verificare toggle_btn={cfg.toggle_btn} o {cfg.pin_map_template}")
             risultati["passo2"] = "FAIL"
 else:
     log("SKIP: passo 1 non superato")
@@ -157,21 +156,21 @@ else:
 separa("PASSO 3 — Ritorno HOME")
 
 if risultati.get("passo2") == "PASS":
-    log("Tap bottone HOME...")
-    device.tap(cfg.home_btn)
+    log("Tap toggle MAPPA/HOME...")
+    device.tap(cfg.toggle_btn)
     time.sleep(cfg.wait_after_action)
 
     shot3 = device.screenshot()
     salva_screenshot(shot3, "passo3_home.png")
 
     if shot3 is None:
-        log("FAIL: screenshot None dopo tap HOME")
+        log("FAIL: screenshot None dopo tap toggle")
         risultati["passo3"] = "FAIL"
     else:
-        score_home3 = matcher.score(shot3, "pin/pin_home.png")
-        score_map3  = matcher.score(shot3, "pin/pin_map.png")
-        log(f"Score pin_home : {score_home3:.3f}")
-        log(f"Score pin_map  : {score_map3:.3f}")
+        score_home3 = matcher.score(shot3, cfg.pin_home_template)
+        score_map3  = matcher.score(shot3, cfg.pin_map_template)
+        log(f"Score {cfg.pin_home_template} : {score_home3:.3f}")
+        log(f"Score {cfg.pin_map_template}  : {score_map3:.3f}")
         screen3 = nav._classifica(shot3)
         log(f"Schermata rilevata: {screen3.name}")
 
@@ -180,7 +179,7 @@ if risultati.get("passo2") == "PASS":
             risultati["passo3"] = "PASS"
         else:
             log(f"FAIL: schermata attesa HOME, rilevata {screen3.name}")
-            log("      Verificare coordinate home_btn o pin_home.png")
+            log(f"      Verificare toggle_btn={cfg.toggle_btn} o {cfg.pin_home_template}")
             risultati["passo3"] = "FAIL"
 else:
     log("SKIP: passo 2 non superato")

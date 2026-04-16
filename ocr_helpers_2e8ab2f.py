@@ -1,0 +1,418 @@
+# ==============================================================================
+#  DOOMSDAY ENGINE V6 - shared/ocr_helpers.py
+#
+#  FIX 12/04/2026 sessione 1:
+#    - _to_array: img.array → img.frame
+#  FIX 12/04/2026 sessione 3 — da lettura ocr.py V5:
+#    - Zone risorse calibrate, _maschera_bianca, _parse_valore, _parse_diamanti
+#    - RisorseDeposito aggiunto diamanti, upscale 4x, path Tesseract
+#  FIX 12/04/2026 sessione 4 — RT-05:
+#    - leggi_contatore_slot: portato da ocr.py V5 leggi_contatore_da_zona
+#      Zone: testo (890,117,946,141) psm=7 + fallback cifre separate
+#      Pre-check pixel bianchi: se assenti → (0, totale_noto)
+# ==============================================================================
+
+from __future__ import annotations
+
+import re
+import threading
+from typing import NamedTuple
+
+import cv2
+import numpy as np
+from PIL import Image
+
+try:
+    import pytesseract
+    import os as _os
+    pytesseract.pytesseract.tesseract_cmd = _os.environ.get(
+        "TESSERACT_EXE",
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+    )
+    _TESSERACT_OK = True
+except ImportError:
+    _TESSERACT_OK = False
+
+try:
+    from core.device import Screenshot
+    _ScreenshotType = Screenshot
+except ImportError:
+    _ScreenshotType = None  # type: ignore
+
+_tesseract_lock = threading.Lock()
+
+# ==============================================================================
+# Costanti Tesseract
+# ==============================================================================
+_PSM_LINE   = "--psm 7"
+_PSM_BLOCK  = "--psm 6"
+_PSM_RAW    = "--psm 13"
+_DIGITS_CFG = "--psm 7 -c tessedit_char_whitelist=0123456789KkMm.,"
+
+# ==============================================================================
+# Zone contatore slot — calibrate da ocr.py V5
+# ==============================================================================
+_ZONA_TESTO_SLOT  = (890, 117, 946, 141)  # testo X/Y intero — psm=7 priorità
+_ZONA_CIFRA_SX    = (890, 117, 919, 141)  # cifra attive (sinistra slash) — fallback psm=10
+_ZONA_CIFRA_DX    = (922, 117, 946, 141)  # cifra totale (destra slash) — fallback psm=8
+_SOGLIA_PX_BIANCHI = 15                   # pixel bianchi minimi per considerare slot attivi
+
+
+# ==============================================================================
+# Helper conversione immagine
+# ==============================================================================
+
+def _to_array(img: "Screenshot | np.ndarray") -> np.ndarray:
+    if _ScreenshotType is not None and isinstance(img, _ScreenshotType):
+        return img.frame
+    if isinstance(img, np.ndarray):
+        return img
+    raise TypeError(f"ocr_helpers: tipo non supportato: {type(img)}")
+
+
+def _to_pil(img: "Screenshot | np.ndarray") -> Image.Image:
+    arr = _to_array(img)
+    return Image.fromarray(cv2.cvtColor(arr, cv2.COLOR_BGR2RGB))
+
+
+def _crop_zone(arr: np.ndarray, zone: tuple) -> np.ndarray:
+    if zone is None:
+        return arr
+    x1, y1, x2, y2 = zone
+    return arr[y1:y2, x1:x2]
+
+
+def _run_tesseract(img_gray: np.ndarray, config: str) -> str:
+    if not _TESSERACT_OK:
+        return ""
+    try:
+        with _tesseract_lock:
+            text = pytesseract.image_to_string(img_gray, config=config)
+        return text.strip()
+    except Exception:
+        return ""
+
+
+# ==============================================================================
+# Preprocessing
+# ==============================================================================
+
+def prepara_otsu(img, zone=None, scale: float = 2.0) -> np.ndarray:
+    arr = _to_array(img)
+    roi = _crop_zone(arr, zone)
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    if scale != 1.0:
+        h, w = gray.shape
+        gray = cv2.resize(gray, (int(w * scale), int(h * scale)),
+                          interpolation=cv2.INTER_CUBIC)
+    gray = cv2.GaussianBlur(gray, (3, 3), 0)
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    return binary
+
+
+def prepara_crema(img, zone=None, scale: float = 2.0, thresh_low: int = 160) -> np.ndarray:
+    arr = _to_array(img)
+    roi = _crop_zone(arr, zone)
+    gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    if scale != 1.0:
+        h, w = gray.shape
+        gray = cv2.resize(gray, (int(w * scale), int(h * scale)),
+                          interpolation=cv2.INTER_CUBIC)
+    _, binary = cv2.threshold(gray, thresh_low, 255, cv2.THRESH_BINARY)
+    return cv2.bitwise_not(binary)
+
+
+def _maschera_bianca(img_pil: Image.Image, taglio_sx: int = 0) -> Image.Image:
+    """Pixel bianchi RGB>140 con padding 20px — portata da V5."""
+    arr = np.array(img_pil).astype(int)
+    h, w = arr.shape[:2]
+    pad  = 20
+    mask = np.zeros((h + pad * 2, w + pad * 2), dtype=np.uint8)
+    for y in range(h):
+        for x in range(taglio_sx, w):
+            if arr[y, x, 0] > 140 and arr[y, x, 1] > 140 and arr[y, x, 2] > 140:
+                mask[y + pad, x - taglio_sx + pad] = 255
+    return Image.fromarray(mask)
+
+
+# ==============================================================================
+# OCR principale
+# ==============================================================================
+
+def ocr_zona(img, zone=None, config: str = _PSM_LINE, preprocessor: str = "otsu") -> str:
+    arr = _to_array(img)
+    if preprocessor == "otsu":
+        processed = prepara_otsu(arr, zone)
+    elif preprocessor == "crema":
+        processed = prepara_crema(arr, zone)
+    else:
+        roi = _crop_zone(arr, zone)
+        processed = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+    return _run_tesseract(processed, config)
+
+
+def ocr_intero(img, zone=None, preprocessor: str = "otsu") -> str:
+    result = ocr_zona(img, zone, config=_PSM_LINE, preprocessor=preprocessor)
+    if result:
+        return result
+    return ocr_zona(img, zone, config=_PSM_RAW, preprocessor=preprocessor)
+
+
+def ocr_cifre(img, zone=None, preprocessor: str = "otsu") -> str:
+    return ocr_zona(img, zone, config=_DIGITS_CFG, preprocessor=preprocessor)
+
+
+# ==============================================================================
+# Parsing numerico — da ocr.py V5
+# ==============================================================================
+
+def _parse_valore(testo: str) -> float:
+    testo = testo.strip()
+    m = re.search(r'(\d+\.\d+)\s*([MKB])', testo, re.IGNORECASE)
+    if m:
+        val  = float(m.group(1))
+        mult = m.group(2).upper()
+    else:
+        m = re.search(r'(\d+)\s*([MKB])', testo, re.IGNORECASE)
+        if not m:
+            return -1
+        cifre = m.group(1)
+        mult  = m.group(2).upper()
+        if mult == 'M':
+            if len(cifre) == 3:   val = float(cifre[:-1] + '.' + cifre[-1])
+            elif len(cifre) == 2: val = float(cifre[0] + '.' + cifre[1])
+            else:                  val = float(cifre)
+        else:
+            val = float(cifre)
+    if mult == 'M':   val *= 1_000_000
+    elif mult == 'K': val *= 1_000
+    elif mult == 'B': val *= 1_000_000_000
+    return val
+
+
+def _parse_diamanti(testo: str) -> int:
+    testo = testo.strip().replace(',', '').replace('.', '').replace(' ', '')
+    nums = re.findall(r'\d+', testo)
+    if nums:
+        val = int(''.join(nums))
+        return val if val < 10_000_000 else -1
+    return -1
+
+
+def estrai_numero(testo: str) -> int | None:
+    if not testo:
+        return None
+    testo = testo.strip().upper().replace(" ", "")
+    testo = re.sub(r"[^0-9.,KM]", "", testo)
+    multiplier = 1
+    if testo.endswith("K"):   multiplier = 1_000;       testo = testo[:-1]
+    elif testo.endswith("M"): multiplier = 1_000_000;   testo = testo[:-1]
+    if "." in testo and "," in testo:
+        testo = testo.replace(".", "").replace(",", ".")
+    elif "," in testo:
+        parts = testo.split(",")
+        testo = testo.replace(",", "") if all(len(p)==3 for p in parts[1:]) and len(parts)>=2 else testo.replace(",",".")
+    elif "." in testo:
+        parts = testo.split(".")
+        if len(parts) > 2: testo = testo.replace(".", "")
+        elif len(parts) == 2 and len(parts[1]) == 3: testo = testo.replace(".", "")
+    match = re.search(r"\d[\d.]*", testo)
+    if not match:
+        return None
+    try:
+        return int(round(float(match.group().rstrip(".")) * multiplier))
+    except ValueError:
+        return None
+
+
+# ==============================================================================
+# Lettura risorsa singola — da ocr.py V5
+# ==============================================================================
+
+def leggi_risorsa(crop_pil: Image.Image, taglio_sx: int = 0) -> float:
+    try:
+        mask = _maschera_bianca(crop_pil, taglio_sx)
+        cfg  = "--psm 7 -c tessedit_char_whitelist=0123456789.MKB"
+        with _tesseract_lock:
+            testo = pytesseract.image_to_string(mask, config=cfg).strip()
+        return _parse_valore(testo)
+    except Exception:
+        return -1
+
+
+# ==============================================================================
+# Zone risorse — calibrate su screenshot reali 960x540 (ocr.py V5, 04/04/2026)
+# ==============================================================================
+
+_ZONA_BARRA_COMPLETA = (425, 4, 948, 28)
+_BARRA_X0 = 425
+_BARRA_Y0 = 4
+
+ZONE_RISORSE_V5 = {
+    "pomodoro": {"zona": (455, 4, 520, 28), "taglio": 0},
+    "legno":    {"zona": (555, 4, 622, 28), "taglio": 0},
+    "acciaio":  {"zona": (655, 4, 720, 28), "taglio": 0},
+    "petrolio": {"zona": (755, 4, 820, 28), "taglio": 0},
+    "diamanti": {"zona": (855, 4, 920, 28), "taglio": 0},
+}
+
+
+class RisorseDeposito(NamedTuple):
+    """Risorse lette dalla barra superiore. -1 = lettura fallita."""
+    pomodoro: float
+    legno:    float
+    acciaio:  float
+    petrolio: float
+    diamanti: int
+
+
+def ocr_risorse(img: "Screenshot | np.ndarray") -> RisorseDeposito:
+    """
+    Legge le 5 risorse dalla barra superiore (HOME o MAPPA).
+    Pipeline identica a V5 leggi_risorse().
+    """
+    _fallback = RisorseDeposito(-1, -1, -1, -1, -1)
+    try:
+        pil_img = _to_pil(img)
+        barra   = pil_img.crop(_ZONA_BARRA_COMPLETA)
+    except Exception:
+        return _fallback
+
+    risultati: dict = {}
+    for nome, info in ZONE_RISORSE_V5.items():
+        try:
+            x1, y1, x2, y2 = info["zona"]
+            crop   = barra.crop((x1-_BARRA_X0, y1-_BARRA_Y0, x2-_BARRA_X0, y2-_BARRA_Y0))
+            w, h   = crop.size
+            crop4x = crop.resize((w*4, h*4), Image.LANCZOS)
+            if nome == "diamanti":
+                mask = _maschera_bianca(crop4x, info["taglio"])
+                cfg  = "--psm 7 -c tessedit_char_whitelist=0123456789,."
+                with _tesseract_lock:
+                    testo = pytesseract.image_to_string(mask, config=cfg).strip()
+                risultati[nome] = _parse_diamanti(testo)
+            else:
+                risultati[nome] = leggi_risorsa(crop4x, info["taglio"])
+        except Exception:
+            risultati[nome] = -1
+
+    return RisorseDeposito(
+        pomodoro=risultati.get("pomodoro", -1),
+        legno=risultati.get("legno",    -1),
+        acciaio=risultati.get("acciaio",  -1),
+        petrolio=risultati.get("petrolio", -1),
+        diamanti=risultati.get("diamanti", -1),
+    )
+
+
+# ==============================================================================
+# Contatore slot raccoglitori — portato da ocr.py V5 leggi_contatore_da_zona
+#
+# Zone calibrate (960x540):
+#   _ZONA_TESTO_SLOT = (890, 117, 946, 141)  testo X/Y intero  psm=7
+#   _ZONA_CIFRA_SX   = (890, 117, 919, 141)  cifra attive       fallback psm=10
+#   _ZONA_CIFRA_DX   = (922, 117, 946, 141)  cifra totale       fallback psm=8
+#
+# Logica:
+#   1. Pre-check pixel bianchi nella zona testo — se < soglia → (0, totale_noto)
+#   2. OCR zona intera psm=7 → pattern X/Y
+#   3. Fallback cifre separate psm=10/8
+# ==============================================================================
+
+def _ocr_zona_intera_slot(crop_pil: Image.Image) -> tuple[int, int]:
+    """OCR X/Y sulla zona testo intera con psm=7. Ritorna (attive, totale) o (-1,-1)."""
+    try:
+        w, h   = crop_pil.size
+        crop4x = crop_pil.resize((w*4, h*4), Image.LANCZOS)
+        mask   = _maschera_bianca(crop4x, taglio_sx=0)
+        cfg    = "--psm 7 -c tessedit_char_whitelist=0123456789/"
+        with _tesseract_lock:
+            testo = pytesseract.image_to_string(mask, config=cfg).strip()
+        m = re.search(r'(\d+)/(\d+)', testo)
+        if m:
+            return (int(m.group(1)), int(m.group(2)))
+        return (-1, -1)
+    except Exception:
+        return (-1, -1)
+
+
+def _ocr_cifra_singola_slot(crop_pil: Image.Image, psm: int = 10) -> int:
+    """OCR singola cifra con upscale 8x + Otsu. Ritorna int o -1."""
+    try:
+        w, h = crop_pil.size
+        pad  = Image.new('RGB', (w+10, h+10), (0, 0, 0))
+        pad.paste(crop_pil, (5, 5))
+        c8   = pad.resize(((w+10)*8, (h+10)*8), Image.LANCZOS)
+        arr  = np.array(c8)
+        gray = cv2.cvtColor(arr, cv2.COLOR_RGB2GRAY)
+        _, th = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        cfg  = f'--psm {psm} -c tessedit_char_whitelist=0123456789'
+        with _tesseract_lock:
+            testo = pytesseract.image_to_string(Image.fromarray(th), config=cfg).strip()
+        m = re.search(r'(\d+)', testo)
+        return int(m.group(1)) if m else -1
+    except Exception:
+        return -1
+
+
+def leggi_contatore_slot(
+    img: "Screenshot | np.ndarray",
+    totale_noto: int = -1,
+) -> tuple[int, int]:
+    """
+    Legge il contatore slot raccoglitori X/Y dallo screenshot.
+    Zone calibrate da ocr.py V5 (890,117,946,141).
+
+    Pipeline:
+      1. Pre-check pixel bianchi — se assenti → (0, totale_noto)
+      2. OCR zona intera psm=7 → pattern X/Y  [priorità]
+      3. Fallback cifre separate psm=10/8
+
+    Args:
+        img:         Screenshot della HOME o MAPPA
+        totale_noto: valore totale noto (da instances.json) usato come fallback
+
+    Returns:
+        (attive, totale) — es. (2, 4)
+        (0, totale_noto) — se nessuna squadra attiva
+        (-1, -1)         — se lettura fallita
+    """
+    try:
+        pil_img = _to_pil(img)
+
+        # 1. Pre-check pixel bianchi nella zona testo
+        x1, y1, x2, y2 = _ZONA_TESTO_SLOT
+        crop_testo = pil_img.crop((x1, y1, x2, y2))
+        arr_check  = np.array(crop_testo).astype(int)
+        px_bianchi = int(np.sum(
+            (arr_check[:, :, 0] > 140) &
+            (arr_check[:, :, 1] > 140) &
+            (arr_check[:, :, 2] > 140)
+        ))
+
+        if px_bianchi < _SOGLIA_PX_BIANCHI:
+            # Nessun testo visibile → 0 squadre attive
+            return (0, totale_noto)
+
+        # 2. OCR zona intera psm=7
+        attive, totale = _ocr_zona_intera_slot(crop_testo)
+
+        # 3. Fallback cifre separate
+        if attive == -1:
+            crop_sx = pil_img.crop(_ZONA_CIFRA_SX)
+            attive  = _ocr_cifra_singola_slot(crop_sx, psm=10)
+        if totale == -1:
+            crop_dx = pil_img.crop(_ZONA_CIFRA_DX)
+            totale  = _ocr_cifra_singola_slot(crop_dx, psm=8)
+
+        # Fallback totale_noto
+        if totale == -1 and totale_noto > 0:
+            totale = totale_noto
+
+        if attive == -1 or totale == -1:
+            return (-1, -1)
+
+        return (attive, totale)
+
+    except Exception:
+        return (-1, -1)

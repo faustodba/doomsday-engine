@@ -323,8 +323,7 @@ def main():
         ok = task.should_run(ctx)
         log(f"should_run() → {ok}")
         if not ok:
-            log("[WARN] should_run() = False — il task potrebbe essere disabilitato")
-            log("       Verifica flag in global_config.json sezione 'task'")
+            log("[WARN] should_run() = False — task saltato (già eseguito, guard stato, o flag disabilitato in global_config.json)")
     except Exception as exc:
         log(f"[WARN] should_run() eccezione: {exc} — procedo comunque")
 

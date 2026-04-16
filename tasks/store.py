@@ -53,7 +53,7 @@ class StoreConfig:
     """Parametri configurabili per StoreTask."""
 
     # ── Soglie template matching ──────────────────────────────────────────────
-    soglia_store:        float = 0.75
+    soglia_store:        float = 0.70
     soglia_banner:       float = 0.85
     soglia_store_attivo: float = 0.75
     soglia_carrello:     float = 0.65
@@ -568,8 +568,11 @@ class StoreTask(Task):
                 f"Store completato — acquistati: {acquistati}",
                 data={"acquistati": acquistati, "refreshed": refreshed},
             )
+        if esito == _Esito.STORE_NON_TROVATO:
+            log(f"Outcome={esito!r} → fail")
+            return TaskResult.fail("Store non trovato nella griglia")
+
         skip_esiti = {
-            _Esito.STORE_NON_TROVATO:    "Store non trovato nella griglia",
             _Esito.NON_IN_HOME:          "Non in home — skip",
             _Esito.LABEL_NON_TROVATA:    "Label store non trovata",
             _Esito.CARRELLO_NON_TROVATO: "Carrello non trovato",

@@ -129,8 +129,10 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | main.py | _thread_istanza() | Integrazione launcher: avvia_istanza() + attendi_home() pre-tick, chiudi_istanza() post-tick |
 | core/launcher.py | fix path | nx_main\ aggiunto a tutti i candidati MuMuManager |
 | core/launcher.py | fix Screen.UNKNOWN | Confronto enum corretto invece di stringa |
-| `shared/ocr_helpers.py` | fix BUG-1 | OCR slot mappa: fallback thresh_130 quando pre-check maschera_bianca < 15px. Risolve sovrastima slot in mappa |
-| `tasks/rifornimento.py` | fix BUG-1 | vai_in_home() prima di leggi_contatore_slot() nelle iterazioni successive — slot liberi ora corretto in mappa |
+| `shared/ocr_helpers.py` | fix OCR mappa | fallback thresh_130 quando maschera_bianca < 15px. Risolve sovrastima slot in mappa |
+| `tasks/rifornimento.py` | fix BUG-1 workaround | vai_in_home() prima di leggi_contatore_slot() nelle iterazioni successive |
+| `tasks/raccolta.py` | fix rollback | vai_in_home() + leggi_contatore_slot() dopo ogni marcia fallita — riallinea attive_correnti con stato reale |
+| `tasks/arena.py` | fix HOME | vai_in_home() post-BACK al termine sfide |
 
 ---
 

@@ -55,3 +55,6 @@ env/
 .idea/
 *.swp
 *.swo
+
+# Handoff di sessione — solo locale, non versionato
+.claude/SESSION.md
