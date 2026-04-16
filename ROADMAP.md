@@ -29,13 +29,13 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
-## Piano test runtime — Stato al 14/04/2026
+## Piano test runtime — Stato al 16/04/2026
 
 | Test | Descrizione | Stato | Note |
 |------|-------------|-------|------|
 | RT-01..05 | Infrastruttura, navigator, OCR, slot | ✅ | |
 | RT-06 | VIP claim | ✅ | |
-| RT-07 | Boost | ✅ | |
+| RT-07 | Boost | ✅ | BoostState scheduling intelligente 16/04/2026 |
 | RT-08 | Messaggi + Alleanza | ✅ | |
 | RT-09 | Store | ✅ | 18 acquistati + Free Refresh |
 | RT-10 | Arena | ✅ | 5 sfide + skip checkbox |
@@ -92,6 +92,22 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
   Risolvibile quando sarà disponibile il vero `pin_acciaio.png`.
 
 ---
+
+---
+
+## Fix applicati in sessione 16/04/2026
+
+| Fix | File | Dettaglio |
+|-----|------|-----------|
+| BoostState | `core/state.py` | Nuova classe: tipo, attivato_il, scadenza, disponibile. should_run() centralizzato. registra_attivo(tipo, now) / registra_non_disponibile(). Integrata in InstanceState |
+| VipState | `core/state.py` | Nuova classe: cass_ritirata, free_ritirato, data_riferimento. should_run()=False se entrambe ritirate. segna_cass/free/completato(). Reset mezzanotte UTC |
+| ArenaState | `core/state.py` | Nuova classe: esaurite, data_riferimento. should_run()=False se sfide esaurite. segna_esaurite(). Reset mezzanotte UTC |
+| Boost scheduling | `tasks/boost.py` | should_run(): flag abilitazione + BoostState.should_run(). GIA_ATTIVO→registra "8h"; ATTIVATO_8H/1D→registra tipo; NESSUN_BOOST→registra_non_disponibile() |
+| VipTask always-run | `tasks/vip.py` | should_run(): flag abilitazione + VipState.should_run(). run() aggiorna segna_cass/free dopo ogni esito |
+| ArenaTask always-run | `tasks/arena.py` | should_run(): flag abilitazione + ArenaState.should_run(). run() chiama segna_esaurite() quando pin_arena_06_purchase rilevato |
+| Gate should_run() | `core/orchestrator.py` | tick() chiama should_run() come gate dopo e_dovuto() e prima del gate HOME. Flag abilitazione + guard stato ora effettivi in produzione |
+| _TASK_SETUP riordino | `main.py` | Nuovo ordine priorità: Raccolta ultima (110), Rifornimento penultima (100). interval=0.0 per Boost/Vip/Arena/Rifornimento/Raccolta (always-run con guard). Messaggi/Alleanza/Store→4h. ArenaMercato/Radar/RadarCensus→12h |
+| Architettura documentata | `ROADMAP.md` | Catena di comando 5 livelli: Config→Scheduling→should_run()→HOME gate→run() |
 
 ---
 
@@ -176,45 +192,20 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Prossima sessione
 
-### Priorità 0 — RT-18 completamento test scheduling
+### Priorità 0 — RifornimentoState.provviste_esaurite (TODO)
 ```
-Upgrade integrato 15/04/2026 (Step 1-6):
-  Step 1: OCR coordinate nodo reali (chiave X_Y)
-  Step 2: OCR ETA marcia (TTL dinamico)
-  Step 3: Conferma contatore post-marcia
-  Step 4: Fuori territorio → blacklist dinamica
-  Step 5: Verifica livello nodo OCR
-  Step 6: Blacklist statica fuori territorio su disco
+Aggiungere a RifornimentoState:
+  - campo provviste_esaurite: bool = False
+  - metodo segna_provviste_esaurite()
+  - _controlla_reset() resetta anche provviste_esaurite
 
-Test:
-  python run_task.py --istanza FAU_00 --task raccolta --force
-Monitorare:
-  [COORD] coordinate nodo: (X,Y) → chiave=X_Y
-  [COORD] pin_enter score=0.9xx
-  Raccolta [campo]: nodo Lv.6 ✓
-  Raccolta [campo]: territorio pixel_verdi=N → IN territorio
-  Raccolta: ETA marcia=XXs
-  [POST-MARCIA] OCR contatore N/D o attive=N
-  Raccolta: nodo X_Y COMMITTED (ETA=XXs)
-  Blacklist statica: data/blacklist_fuori_FAU_00.json
-```
+Aggiornare RifornimentoTask.should_run():
+  if ctx.state.rifornimento.provviste_esaurite:
+      return False
 
-### Priorità 1 — RT-18 completamento test scheduling
-```
-Test mancanti (in ordine):
-1. Task periodic — raccolta o rifornimento:
-     python run_task.py --istanza FAU_00 --task raccolta
-     → deve eseguire e salvare ISO in schedule.raccolta
-     → rilancia subito: deve eseguire ancora (periodic non blocca in run_task)
-
-2. --force su task daily:
-     python run_task.py --istanza FAU_00 --task vip --force
-     → log: "[SCHEDULE] --force attivo — schedule ignorato"
-
-3. restore_to_orchestrator al riavvio main.py:
-     python main.py --istanze FAU_00 --tick-sleep 10
-     → log: "Schedule ripristinato: {vip: 2026-04-14T..., ...}"
-     → verifica che VIP NON venga rieseguito nel primo tick
+Aggiornare _esegui_mappa():
+  quando _compila_e_invia() ritorna quota_esaurita=True:
+      ctx.state.rifornimento.segna_provviste_esaurite()
 ```
 
 ### Priorità 1 — RT-18 completamento test scheduling
@@ -237,7 +228,27 @@ Test mancanti (in ordine):
      → verifica che VIP NON venga rieseguito nel primo tick
 ```
 
-### Priorità 1 — Ripristino config produzione rifornimento
+### Priorità 1 — RT-21 Boost BoostState runtime
+```
+Test BoostState scheduling intelligente:
+1. Primo avvio (nessuno state):
+     python run_task.py --istanza FAU_00 --task boost
+     → boost entra (scadenza=None → should_run=True)
+     → log: "[BOOST] stato: mai attivato"
+     → se GIA_ATTIVO: registra 8h, state/FAU_00.json boost.scadenza = now+8h
+     → se ATTIVATO_8H: registra 8h
+     → se NESSUN_BOOST: disponibile=False
+
+2. Secondo avvio subito dopo (boost attivo):
+     python run_task.py --istanza FAU_00 --task boost
+     → log: "[BOOST] stato: tipo=8h scadenza=... ATTIVO (+7hXXm)"
+     → should_run=False → task skippato
+
+3. Verifica state/FAU_00.json:
+     "boost": { "tipo": "8h", "attivato_il": "...", "scadenza": "...", "disponibile": true }
+```
+
+### Priorità 2 — Ripristino config produzione rifornimento
 ```
 global_config.json da ripristinare a produzione:
   rifornimento_mappa.abilitato  = true
@@ -247,17 +258,13 @@ global_config.json da ripristinare a produzione:
   soglie normali 5.0/5.0/2.5/3.5
 ```
 
-### Priorità 1 — Dashboard radiobutton mappa/membri
+### Priorità 3 — Dashboard radiobutton mappa/membri
 - Radiobutton che scrive `rifornimento_mappa.abilitato` / `rifornimento_membri.abilitato` su `global_config.json`
 - Sezione statistiche rifornimento: `inviato_oggi`, `provviste_residue`, `dettaglio_oggi`
 
-### Priorità 2 — Issue #3 Zaino
-- `ZainoTask.run()` non riceve deposito OCR
-- Fix: leggere `ocr_risorse()` in `ZainoTask.run()` direttamente
+### Priorità 4 — Issue #4 Radar skip silenzioso
 
-### Priorità 3 — Issue #4 Radar skip silenzioso
-
-### Priorità 4 — RT-13 Multi-istanza FAU_00+FAU_01
+### Priorità 5 — RT-13 Multi-istanza FAU_00+FAU_01
 
 ---
 
@@ -346,6 +353,177 @@ Per modificare: editare `config/global_config.json` — effetto al prossimo tick
 
 ---
 
+---
+
+## Architettura V6 — Catena di comando
+
+### Livello 1 — Configurazione (strato statico)
+
+**File:** `config/global_config.json` + `config/config_loader.py`
+
+Unica fonte di verità per la configurazione. Riletta ad ogni tick — modifiche dalla dashboard hanno effetto immediato senza restart.
+
+```
+global_config.json
+  └─ task.{nome}              → bool  abilita/disabilita il task globalmente
+  └─ rifornimento_mappa.abilitato  → bool  modalità mappa
+  └─ rifornimento_membri.abilitato → bool  modalità membri
+  └─ rifornimento_comune.*    → soglie, quantità, max_spedizioni_ciclo
+  └─ zaino.*                  → modalità, soglie
+  └─ raccolta.*               → livello_nodo, allocazioni
+```
+
+`load_global()` → `GlobalConfig` tipizzato
+`build_instance_cfg(ist, gcfg)` → `_InstanceCfg` per istanza con:
+- `task_abilitato(nome)` → bool (flag on/off funzionalità)
+- `get(key, default)` → valore configurazione
+
+**Nota rifornimento:** `task_abilitato("rifornimento")` = `mappa_abilitato OR membri_abilitato`
+
+---
+
+### Livello 2 — Scheduling (strato temporale)
+
+**File:** `main.py` (`_TASK_SETUP`) + `core/orchestrator.py`
+
+Decide **quando** un task deve girare nel tempo.
+
+```
+_TASK_SETUP = [(class_name, priority, interval_hours, schedule_type), ...]
+
+interval_hours = 0.0  → always-run (nessun vincolo temporale)
+schedule_type  = "periodic" → ogni N ore dall'ultimo run
+schedule_type  = "daily"    → una volta al giorno (reset 01:00 UTC)
+```
+
+`Orchestrator.tick()` per ogni task registrato:
+```
+e_dovuto(entry) → interval scaduto? / daily non ancora eseguito oggi?
+  NO  → skip silenzioso (last_run non aggiornato)
+  SI  → procedi al livello successivo
+```
+
+---
+
+### Livello 3 — Abilitazione + Guard stato (strato logico)
+
+**File:** `tasks/*.py` → `should_run(ctx)`
+**Chiamato da:** `Orchestrator.tick()` dopo `e_dovuto()` — GATE obbligatorio
+
+`should_run()` ha **due sole responsabilità**:
+
+**A) Flag abilitazione** — configurazione statica da `global_config.json`:
+```python
+if not ctx.config.task_abilitato("nome"):
+    return False   # operatore ha disabilitato la funzionalità
+```
+
+**B) Guard stato persistente** — condizione di business giornaliera da `state/<ISTANZA>.json`:
+```python
+if not ctx.state.XXXState.should_run():
+    return False   # condizione di gioco non soddisfatta oggi
+```
+
+| Task | Flag abilitazione | Guard stato persistente |
+|------|-------------------|------------------------|
+| BoostTask | `task_boost` | `BoostState.should_run()` — boost non ancora scaduto |
+| VipTask | `task_vip` | `VipState.should_run()` — entrambe le ricompense già ritirate |
+| ArenaTask | `task_arena` | `ArenaState.should_run()` — sfide già esaurite oggi |
+| RifornimentoTask | `mappa OR membri abilitati` | `RifornimentoState.provviste_esaurite` (TODO) |
+| MessaggiTask | `task_messaggi` | nessuna |
+| AlleanzaTask | `task_alleanza` | nessuna |
+| StoreTask | `task_store` | nessuna |
+| ArenaMercatoTask | `task_arena_mercato` | nessuna |
+| ZainoTask | `task_zaino` | nessuna |
+| RadarTask | `task_radar` | nessuna |
+| RadarCensusTask | `task_radar_census` | nessuna |
+| RaccoltaTask | `task_raccolta` | nessuna (slot liberi verificati in run) |
+
+**Regola:** `should_run()` NON fa I/O, NON fa screenshot, NON fa OCR.
+Legge solo `ctx.config` e `ctx.state` — entrambi già in memoria.
+
+---
+
+### Livello 4 — Gate HOME (strato navigazione)
+
+**File:** `core/orchestrator.py`
+
+Prima di ogni `run()`, l'orchestrator verifica che il navigator sia in HOME.
+Se il gate fallisce → task saltato, `last_run` NON aggiornato → riprova al tick successivo.
+
+```
+nav.vai_in_home()
+  FAIL → TaskResult(gate_home=False), continua con il prossimo task
+  OK   → procedi a run()
+```
+
+Task che non richiedono HOME: `requires_home = False` (nessuno attualmente).
+
+---
+
+### Livello 5 — Esecuzione (strato operativo)
+
+**File:** `tasks/*.py` → `run(ctx)`
+
+Esecuzione effettiva del task. Contiene:
+- Guard operative runtime (slot liberi, soglie risorse, DOOMS_ACCOUNT) — verificate via OCR/device
+- Logica di gioco (tap, screenshot, template matching)
+- Aggiornamento stato persistente post-esecuzione (`ctx.state.XXX.segna_*()`)
+- Ritorno `TaskResult.ok() / .skip() / .fail()`
+
+**Regola:** `run()` aggiorna sempre `ctx.state` quando rileva condizioni
+significative (boost attivato, sfide esaurite, provviste=0, ricompense ritirate).
+
+---
+
+### Flusso completo per tick
+
+```
+main.py tick loop
+  │
+  ├─ load_global()                    [Livello 1 — rilegge config]
+  ├─ build_instance_cfg()             [Livello 1 — merge per istanza]
+  │
+  └─ Orchestrator.tick()
+       │
+       ├─ per ogni task (in ordine priorità):
+       │    │
+       │    ├─ e_dovuto()?             [Livello 2 — interval/daily scaduto?]
+       │    │    NO → skip
+       │    │
+       │    ├─ should_run(ctx)?        [Livello 3 — abilitato? guard stato?]
+       │    │    NO → skip (last_run non aggiornato → riprova)
+       │    │
+       │    ├─ gate HOME               [Livello 4 — navigator in HOME?]
+       │    │    FAIL → skip (last_run non aggiornato → riprova)
+       │    │
+       │    └─ task.run(ctx)           [Livello 5 — esecuzione]
+       │         └─ aggiorna ctx.state
+       │
+       └─ ctx.state.save()            [persistenza su disco]
+```
+
+---
+
+### Stato persistente per istanza (`state/<ISTANZA>.json`)
+
+```json
+{
+  "schedule":      { "task_name": "ISO timestamp ultimo run" },
+  "boost":         { "tipo": "8h", "scadenza": "ISO", "disponibile": true },
+  "vip":           { "cass_ritirata": false, "free_ritirato": false, "data": "YYYY-MM-DD" },
+  "arena":         { "esaurite": false, "data_riferimento": "YYYY-MM-DD" },
+  "rifornimento":  { "spedizioni_oggi": 3, "provviste_esaurite": false, "data": "YYYY-MM-DD" },
+  "metrics":       { ... },
+  "daily_tasks":   { ... }
+}
+```
+
+Tutte le sezioni con `data_riferimento` si resettano automaticamente a mezzanotte UTC.
+`ScheduleState` non si resetta — persiste i timestamp per il restart-safe scheduling.
+
+---
+
 ## Architettura V6 — Dettaglio classi
 
 ### TaskContext (`core/task.py`)
@@ -415,23 +593,35 @@ state.schedule.set(task_name, float) → salva come ISO string leggibile
 state.schedule.timestamps      → dict {task_name: "2026-04-14T16:45:39+00:00"}
 state.schedule.restore_to_orchestrator(orc) → ripristina last_run all'avvio
 state.schedule.update_from_stato(orc.stato()) → sync dopo ogni tick
+state.boost.should_run()             → bool (boost non ancora scaduto)
+state.boost.registra_attivo(tipo, now)→ salva tipo+"8h"|"1d" + scadenza
+state.boost.registra_non_disponibile()→ disponibile=False, riprova al tick
+state.boost.log_stato()              → str descrittiva per log
+state.vip.should_run()               → bool (False se entrambe ricompense ritirate)
+state.vip.segna_cass()               → cassaforte ritirata
+state.vip.segna_free()               → claim free ritirato
+state.vip.log_stato()                → str descrittiva per log
+state.arena.should_run()             → bool (False se sfide esaurite oggi)
+state.arena.segna_esaurite()         → sfide esaurite, skip fino a mezzanotte UTC
+state.arena.log_stato()              → str descrittiva per log
+state.rifornimento.provviste_esaurite→ bool (TODO: da aggiungere)
 ```
 
 ### Scheduling task in main.py (_TASK_SETUP)
-| Classe | Priority | Interval | Schedule |
-|--------|----------|----------|----------|
-| BoostTask | 5 | 8h | periodic |
-| RaccoltaTask | 10 | 4h | periodic |
-| RifornimentoTask | 20 | 1h | periodic |
-| ZainoTask | 30 | 168h | periodic |
-| VipTask | 40 | 24h | daily |
-| MessaggiTask | 50 | 1h | periodic |
-| AlleanzaTask | 60 | 1h | periodic |
-| StoreTask | 70 | 8h | periodic |
-| ArenaTask | 80 | 24h | daily |
-| ArenaMercatoTask | 90 | 24h | daily |
-| RadarTask | 100 | 12h | periodic |
-| RadarCensusTask | 110 | 24h | periodic |
+| Classe | Priority | Interval | Schedule | Note |
+|--------|----------|----------|----------|------|
+| BoostTask | 5 | — | periodic | scheduling via BoostState (ctx.state.boost) |
+| VipTask | 10 | 24h | daily | |
+| MessaggiTask | 20 | 1h | periodic | |
+| AlleanzaTask | 30 | 1h | periodic | |
+| StoreTask | 40 | 8h | periodic | |
+| ArenaTask | 50 | 24h | daily | |
+| ArenaMercatoTask | 60 | 24h | daily | |
+| ZainoTask | 70 | 168h | periodic | |
+| RadarTask | 80 | 12h | periodic | |
+| RadarCensusTask | 90 | 24h | periodic | disabilitato default |
+| RifornimentoTask | 100 | 1h | periodic | penultima: consuma slot squadre |
+| RaccoltaTask | 110 | — | periodic | always-run se slot liberi |
 
 ---
 

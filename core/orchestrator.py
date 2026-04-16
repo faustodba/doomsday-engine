@@ -14,6 +14,12 @@
 #    periodic  → eseguito ogni `interval_hours` ore dall'ultimo run
 #    daily     → eseguito una volta al giorno (reset alle 01:00 UTC)
 #
+#  CATENA DI COMANDO (in ordine):
+#    1. e_dovuto()      → interval/daily scaduto? (scheduling temporale)
+#    2. should_run()    → flag abilitazione + guard stato persistente
+#    3. gate HOME       → navigator in HOME prima di ogni task
+#    4. task.run()      → esecuzione effettiva
+#
 #  DESIGN:
 #    - Nessuna dipendenza da config globale: tutto via ctx.config
 #    - Nessun thread interno: l'orchestrator è chiamato da un loop esterno
@@ -182,6 +188,24 @@ class Orchestrator:
                 continue
 
             task_name = _tname(entry.task)
+
+            # ── GATE SHOULD_RUN ───────────────────────────────────────────────
+            # Flag abilitazione (global_config.json) + guard stato persistente
+            # (BoostState, VipState, ArenaState, RifornimentoState, ecc.)
+            # Se False → task saltato, last_run NON aggiornato → riprova al tick
+            try:
+                if hasattr(entry.task, "should_run"):
+                    if not entry.task.should_run(self._ctx):
+                        self._ctx.log_msg(
+                            f"Orchestrator: [{task_name}] should_run=False → saltato"
+                        )
+                        continue
+            except Exception as exc:
+                self._ctx.log_msg(
+                    f"Orchestrator: [{task_name}] should_run() eccezione: {exc} → saltato"
+                )
+                continue
+            # ── fine GATE SHOULD_RUN ─────────────────────────────────────────
 
             # ── GATE HOME ────────────────────────────────────────────────────
             # Salta il gate se il task lo dichiara esplicitamente non necessario
