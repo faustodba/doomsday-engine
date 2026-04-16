@@ -464,10 +464,27 @@ class TestArenaStateIntegration(unittest.TestCase):
     def _make_ctx_with_state(self, esaurite=False):
         """Costruisce ctx con InstanceState e ArenaState configurato."""
         from core.state import InstanceState
-        ctx = _make_ctx()
-        ctx.state = InstanceState("FAKE_00")
+        from core.task import TaskContext
+        from unittest.mock import MagicMock
+
+        class _Cfg:
+            def task_abilitato(self, n): return True
+            def get(self, k, d=None): return d
+
+        state = InstanceState("FAKE_00")
         if esaurite:
-            ctx.state.arena.segna_esaurite()
+            state.arena.segna_esaurite()
+
+        ctx = TaskContext(
+            instance_name="FAKE_00",
+            config=_Cfg(),
+            state=state,
+            log=MagicMock(),
+            device=MagicMock(),
+            matcher=MagicMock(),
+        )
+        # log_msg deve funzionare
+        ctx.log_msg = lambda msg, *a, **k: None
         return ctx
 
     def test_should_run_false_se_esaurite(self):

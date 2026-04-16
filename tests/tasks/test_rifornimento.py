@@ -28,6 +28,16 @@ from tasks.rifornimento import (
 # Fixture base
 # ------------------------------------------------------------------------------
 
+class _DictCfg:
+    def __init__(self, d=None):
+        self._d = d or {}
+    def get(self, k, default=None):
+        return self._d.get(k, default)
+    def task_abilitato(self, n):
+        return self._d.get(f"task_{n}", True)
+    def __getattr__(self, k):
+        return self._d.get(k, None)
+
 def make_ctx(config_overrides: dict | None = None) -> TaskContext:
     device = FakeDevice()
     matcher = FakeMatcher()
@@ -91,13 +101,13 @@ DEP_SOTTO = {
 class TestRifornimentoProperties:
 
     def test_name(self):
-        assert RifornimentoTask().name == "rifornimento"
+        assert RifornimentoTask().name() == "rifornimento"
 
     def test_schedule_type(self):
-        assert RifornimentoTask().schedule_type == "periodic"
+        assert RifornimentoTask().schedule_type == "periodic"  # proprietà del _TaskWrapper, non del task
 
     def test_interval_hours(self):
-        assert RifornimentoTask().interval_hours == 4.0
+        assert RifornimentoTask().interval_hours == 4.0  # proprietà del _TaskWrapper, non del task
 
 
 # ==============================================================================
@@ -562,7 +572,7 @@ class TestRifornimentoStateShouldRun:
         from core.state import InstanceState
         ctx = TaskContext(
             instance_name="FAKE_00",
-            config=make_cfg(),
+            config=_DictCfg({}),
             state=InstanceState("FAKE_00"),
             log=None,
             device=None,

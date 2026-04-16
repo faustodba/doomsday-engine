@@ -28,6 +28,7 @@ from core.orchestrator import (
 
 class StubTask(Task):
     """Task minimo controllabile per i test."""
+    def should_run(self, ctx): return True
 
     def __init__(self, name: str = "stub",
                  schedule: str = "periodic",
@@ -63,6 +64,10 @@ class StubTask(Task):
 # ------------------------------------------------------------------------------
 # Fixture
 # ------------------------------------------------------------------------------
+
+class _FakeCfg:
+    def task_abilitato(self, n): return True
+    def get(self, k, default=None): return default
 
 def make_ctx() -> TaskContext:
     device  = FakeDevice()

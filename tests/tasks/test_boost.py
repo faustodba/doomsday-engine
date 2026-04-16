@@ -88,6 +88,16 @@ class FakeDevice:
         return sum(1 for c in self.calls if c[0] == "back")
 
 
+from dataclasses import dataclass as _dc
+
+@_dc
+class _MatchResult:
+    found: bool
+    score: float
+    cx: int = 0
+    cy: int = 0
+
+
 class FakeMatcher:
     """
     Template matcher configurabile per i test.

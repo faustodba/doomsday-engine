@@ -100,7 +100,8 @@ class FakeLogger:
     def error(self, task, msg, **kw): pass
 
 
-def _make_ctx(device=None, matcher=None, navigator=None, abilitato=True):
+def _make_ctx(device=None, matcher=None, navigator=None, abilitato=True,
+    vip_should_run: bool = True):
     from core.task import TaskContext
     return TaskContext(
         instance_name="FAKE_00",
