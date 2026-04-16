@@ -1096,6 +1096,13 @@ class RifornimentoTask(Task):
                     try:
                         from shared.ocr_helpers import leggi_contatore_slot
                         max_sq = getattr(ctx.config, "max_squadre", 4)
+                        # Iterazioni successive: siamo in mappa → torna in HOME
+                        # prima della lettura slot per garantire OCR corretto.
+                        # Step 2 rientrerà in mappa perché in_mappa=False.
+                        if in_mappa and ctx.navigator is not None:
+                            ctx.navigator.vai_in_home()
+                            in_mappa = False
+                            time.sleep(1.0)
                         screen_slot = ctx.device.screenshot()
                         if screen_slot is not None:
                             attive, totale = leggi_contatore_slot(screen_slot, totale_noto=max_sq)
