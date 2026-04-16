@@ -29,7 +29,8 @@
 #    pin_vip_05_free_aperto.png pin_vip_06_popup_cass.png
 #    pin_vip_07_popup_free.png
 #
-#  Scheduling: daily, priority=15.
+#  Scheduling: always-run (interval=0.0), priority=10
+#  Guard     : ctx.state.vip.should_run() — skip se entrambe le ricompense già ritirate oggi
 #  Outcome:
 #    TaskResult.ok()   → entrambe le ricompense ritirate (o già ritirate)
 #    TaskResult.skip() → maschera VIP non aperta dopo tutti i tentativi
@@ -150,7 +151,14 @@ class VipTask(Task):
         if ctx.device is None or ctx.matcher is None:
             return False
         if hasattr(ctx.config, "task_abilitato"):
-            return ctx.config.task_abilitato("vip")
+            if not ctx.config.task_abilitato("vip"):
+                return False
+        # Guard VipState: skip se entrambe le ricompense già ritirate oggi
+        stato = ctx.state.vip.log_stato()
+        if not ctx.state.vip.should_run():
+            ctx.log_msg(f"[VIP] {stato} → skip")
+            return False
+        ctx.log_msg(f"[VIP] {stato} → eseguo")
         return True
 
     # ── ABC: run ──────────────────────────────────────────────────────────────
@@ -170,6 +178,14 @@ class VipTask(Task):
             )
         except Exception as exc:
             return TaskResult.fail(f"Eccezione non gestita: {exc}", step="esegui_vip")
+
+        # Aggiorna VipState
+        if cass_ok:
+            ctx.state.vip.segna_cass()
+        if free_ok:
+            ctx.state.vip.segna_free()
+        if cass_ok and free_ok:
+            ctx.log_msg(f"[VIP] VipState aggiornato → {ctx.state.vip.log_stato()}")
 
         return self._mappa_esito(esito, cass_ok, free_ok, log)
 
@@ -287,6 +303,7 @@ class VipTask(Task):
 
         if cass_aperta:
             log("[1] pin_vip_03 visibile — cassaforte già ritirata oggi → skip")
+            # Già ritirata: segnalo subito in VipState (se ctx disponibile)
             return True
 
         if not cass_chiusa:
@@ -366,6 +383,7 @@ class VipTask(Task):
 
         if free_aperto:
             log("[2] pin_vip_05 visibile — Claim Free già ritirato oggi → skip")
+            # Già ritirato: segnalo subito in VipState (se ctx disponibile)
             return True
 
         if not free_chiuso:

@@ -9,6 +9,7 @@
 #    DailyTasksState    — flag completamento task giornalieri con timestamp
 #    MetricsState       — metriche produzione (risorse/ora, marce inviate)
 #    BoostState         — scheduling intelligente Gathering Speed Boost
+#    VipState           — stato giornaliero ricompense VIP
 #    ArenaState         — stato giornaliero sfide Arena of Glory
 #    InstanceState      — contenitore principale, carica/salva JSON
 #
@@ -425,6 +426,101 @@ class BoostState:
 
 
 
+
+# ==============================================================================
+# VipState — stato giornaliero ricompense VIP
+# ==============================================================================
+
+@dataclass
+class VipState:
+    """
+    Stato giornaliero delle ricompense VIP per istanza.
+
+    Due ricompense indipendenti:
+      - cass_ritirata: cassaforte (pin_vip_03_cass_aperta)
+      - free_ritirato: claim free daily (pin_vip_05_free_aperto)
+
+    Logica:
+      - should_run() = True finché almeno una ricompensa non è stata ritirata
+      - Quando entrambe ritirate → skip fino a mezzanotte UTC
+      - Reset automatico a mezzanotte UTC
+      - Schedule: always-run (interval=0.0) — gestisce anomalie e retry
+
+    Aggiornamento in vip.py:
+      - cass_aperta già al check iniziale → segna_cass()
+      - free_aperto già al check iniziale → segna_free()
+      - run COMPLETATO (cass_ok AND free_ok) → segna_completato()
+
+    JSON in state/<ISTANZA>.json:
+      "vip": {
+        "cass_ritirata":    false,
+        "free_ritirato":    false,
+        "data_riferimento": "2026-04-16"
+      }
+    """
+
+    cass_ritirata:    bool = False
+    free_ritirato:    bool = False
+    data_riferimento: str  = field(default_factory=_today_utc)
+
+    # ── Business logic ────────────────────────────────────────────────────────
+
+    def _controlla_reset(self) -> None:
+        """Nuovo giorno UTC → reset entrambe le ricompense."""
+        oggi = _today_utc()
+        if self.data_riferimento != oggi:
+            self.cass_ritirata    = False
+            self.free_ritirato    = False
+            self.data_riferimento = oggi
+
+    def should_run(self) -> bool:
+        """True se almeno una ricompensa non è ancora stata ritirata oggi."""
+        self._controlla_reset()
+        return not (self.cass_ritirata and self.free_ritirato)
+
+    def segna_cass(self) -> None:
+        """Cassaforte ritirata (o già trovata aperta al check iniziale)."""
+        self._controlla_reset()
+        self.cass_ritirata = True
+
+    def segna_free(self) -> None:
+        """Claim free ritirato (o già trovato aperto al check iniziale)."""
+        self._controlla_reset()
+        self.free_ritirato = True
+
+    def segna_completato(self) -> None:
+        """Entrambe le ricompense ritirate in questo run."""
+        self._controlla_reset()
+        self.cass_ritirata = True
+        self.free_ritirato = True
+
+    def log_stato(self) -> str:
+        """Stringa descrittiva per il log."""
+        self._controlla_reset()
+        cass = "OK" if self.cass_ritirata else "DA RITIRARE"
+        free = "OK" if self.free_ritirato else "DA RITIRARE"
+        if self.cass_ritirata and self.free_ritirato:
+            return f"VIP COMPLETATO oggi ({self.data_riferimento})"
+        return f"cassaforte={cass}  free={free} ({self.data_riferimento})"
+
+    # ── Serializzazione ───────────────────────────────────────────────────────
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "VipState":
+        return cls(
+            cass_ritirata    = d.get("cass_ritirata",    False),
+            free_ritirato    = d.get("free_ritirato",    False),
+            data_riferimento = d.get("data_riferimento", _today_utc()),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "cass_ritirata":    self.cass_ritirata,
+            "free_ritirato":    self.free_ritirato,
+            "data_riferimento": self.data_riferimento,
+        }
+
+
 # ==============================================================================
 # ArenaState — stato giornaliero sfide Arena of Glory
 # ==============================================================================
@@ -689,6 +785,7 @@ class InstanceState:
     metrics:      MetricsState      = field(default_factory=MetricsState)
     schedule:     ScheduleState     = field(default_factory=ScheduleState)
     boost:        BoostState        = field(default_factory=BoostState)
+    vip:          VipState          = field(default_factory=VipState)
     arena:        ArenaState        = field(default_factory=ArenaState)
 
     # Stato runtime non persistito (ricostruito all'avvio)
@@ -706,6 +803,7 @@ class InstanceState:
             "metrics":       self.metrics.to_dict(),
             "schedule":      self.schedule.to_dict(),
             "boost":         self.boost.to_dict(),
+            "vip":           self.vip.to_dict(),
             "arena":         self.arena.to_dict(),
             "ultimo_errore": self.ultimo_errore,
             "ultimo_avvio":  self.ultimo_avvio,
@@ -720,6 +818,7 @@ class InstanceState:
             metrics=MetricsState.from_dict(d.get("metrics", {})),
             schedule=ScheduleState.from_dict(d.get("schedule", {})),
             boost=BoostState.from_dict(d.get("boost", {})),
+            vip=VipState.from_dict(d.get("vip", {})),
             arena=ArenaState.from_dict(d.get("arena", {})),
             ultimo_errore=d.get("ultimo_errore", None),
             ultimo_avvio=d.get("ultimo_avvio", None),
