@@ -1,8 +1,10 @@
 # tasks/arena.py
 """
-Step 16 — Arena of Glory (daily task).
+Step 16 — Arena of Glory.
 
-Scheduling : daily, priority=20
+Scheduling : always-run (interval=0.0), priority=50
+Guard      : ctx.state.arena.should_run() — skip se sfide esaurite oggi
+Reset      : automatico a mezzanotte UTC via ArenaState._controlla_reset()
 Template dir: templates/pin/  (prefisso "pin/")
 
 PIN usati
@@ -137,7 +139,14 @@ class ArenaTask(Task):
         if ctx.device is None or ctx.matcher is None:
             return False
         if hasattr(ctx.config, "task_abilitato"):
-            return ctx.config.task_abilitato("arena")
+            if not ctx.config.task_abilitato("arena"):
+                return False
+        # Guard ArenaState: skip se sfide già esaurite oggi
+        stato = ctx.state.arena.log_stato()
+        if not ctx.state.arena.should_run():
+            ctx.log_msg("[ARENA] %s → skip", stato)
+            return False
+        ctx.log_msg("[ARENA] %s → eseguo", stato)
         return True
 
     def run(self, ctx: TaskContext) -> TaskResult:
@@ -182,6 +191,8 @@ class ArenaTask(Task):
                 if esito == "esaurite":
                     run.esaurite = True
                     errori_consec = 0
+                    ctx.state.arena.segna_esaurite()
+                    ctx.log_msg("[ARENA] sfide esaurite → ArenaState aggiornato")
                     break
 
                 if esito == "ok":

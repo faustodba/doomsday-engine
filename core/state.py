@@ -8,6 +8,8 @@
 #    ScheduleState      — persistenza scheduling task (restart-safe)
 #    DailyTasksState    — flag completamento task giornalieri con timestamp
 #    MetricsState       — metriche produzione (risorse/ora, marce inviate)
+#    BoostState         — scheduling intelligente Gathering Speed Boost
+#    ArenaState         — stato giornaliero sfide Arena of Glory
 #    InstanceState      — contenitore principale, carica/salva JSON
 #
 #  Design:
@@ -422,6 +424,80 @@ class BoostState:
         }
 
 
+
+# ==============================================================================
+# ArenaState — stato giornaliero sfide Arena of Glory
+# ==============================================================================
+
+@dataclass
+class ArenaState:
+    """
+    Stato giornaliero delle sfide Arena of Glory.
+
+    Design intenzionalmente minimale: non contiamo le sfide (nessun OCR
+    sul contatore). L'unico segnale affidabile è il pin pin_arena_06_purchase
+    che compare quando le sfide giornaliere sono esaurite.
+
+    Logica:
+      - esaurite=False → should_run()=True → ArenaTask entra
+      - esaurite=True  → should_run()=False → skip per il resto del giorno
+      - Reset automatico a mezzanotte UTC → esaurite torna False
+
+    JSON in state/<ISTANZA>.json:
+      "arena": {
+        "esaurite":         false,
+        "data_riferimento": "2026-04-16"
+      }
+    """
+
+    esaurite:         bool = False
+    data_riferimento: str  = field(default_factory=_today_utc)
+
+    # ── Business logic ────────────────────────────────────────────────────────
+
+    def _controlla_reset(self) -> None:
+        """Nuovo giorno UTC → reset esaurite."""
+        oggi = _today_utc()
+        if self.data_riferimento != oggi:
+            self.esaurite         = False
+            self.data_riferimento = oggi
+
+    def should_run(self) -> bool:
+        """True se le sfide non sono ancora esaurite oggi."""
+        self._controlla_reset()
+        return not self.esaurite
+
+    def segna_esaurite(self) -> None:
+        """
+        Chiamato da ArenaTask quando pin_arena_06_purchase è rilevato.
+        Blocca ulteriori esecuzioni fino alla mezzanotte UTC.
+        """
+        self._controlla_reset()
+        self.esaurite = True
+
+    def log_stato(self) -> str:
+        """Stringa descrittiva per il log."""
+        self._controlla_reset()
+        if self.esaurite:
+            return f"sfide ESAURITE oggi ({self.data_riferimento})"
+        return f"sfide disponibili ({self.data_riferimento})"
+
+    # ── Serializzazione ───────────────────────────────────────────────────────
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ArenaState":
+        return cls(
+            esaurite         = d.get("esaurite",         False),
+            data_riferimento = d.get("data_riferimento", _today_utc()),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "esaurite":         self.esaurite,
+            "data_riferimento": self.data_riferimento,
+        }
+
+
 # ==============================================================================
 # DailyTasksState — completamento task giornalieri
 # ==============================================================================
@@ -613,6 +689,7 @@ class InstanceState:
     metrics:      MetricsState      = field(default_factory=MetricsState)
     schedule:     ScheduleState     = field(default_factory=ScheduleState)
     boost:        BoostState        = field(default_factory=BoostState)
+    arena:        ArenaState        = field(default_factory=ArenaState)
 
     # Stato runtime non persistito (ricostruito all'avvio)
     attivo: bool = False
@@ -629,6 +706,7 @@ class InstanceState:
             "metrics":       self.metrics.to_dict(),
             "schedule":      self.schedule.to_dict(),
             "boost":         self.boost.to_dict(),
+            "arena":         self.arena.to_dict(),
             "ultimo_errore": self.ultimo_errore,
             "ultimo_avvio":  self.ultimo_avvio,
         }
@@ -642,6 +720,7 @@ class InstanceState:
             metrics=MetricsState.from_dict(d.get("metrics", {})),
             schedule=ScheduleState.from_dict(d.get("schedule", {})),
             boost=BoostState.from_dict(d.get("boost", {})),
+            arena=ArenaState.from_dict(d.get("arena", {})),
             ultimo_errore=d.get("ultimo_errore", None),
             ultimo_avvio=d.get("ultimo_avvio", None),
         )
