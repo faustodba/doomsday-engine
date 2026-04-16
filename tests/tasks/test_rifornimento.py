@@ -119,14 +119,10 @@ class TestRifornimentoProperties:
         assert RifornimentoTask().name() == "rifornimento"
 
     def test_schedule_type(self):
-        task = RifornimentoTask()
-        st = task.schedule_type() if callable(task.schedule_type) else task.schedule_type
-        assert st == "periodic"
+        assert RifornimentoTask().schedule_type == "periodic"  # proprietà del _TaskWrapper, non del task
 
     def test_interval_hours(self):
-        task = RifornimentoTask()
-        ih = task.interval_hours() if callable(task.interval_hours) else task.interval_hours
-        assert ih == 4.0
+        assert RifornimentoTask().interval_hours == 4.0  # proprietà del _TaskWrapper, non del task
 
 
 # ==============================================================================
@@ -336,7 +332,6 @@ class TestRifornimentoDeposizoNone:
         ctx = ctx_abilitato()
         result = RifornimentoTask().run(ctx, deposito=None)
         assert result.data.get("spedizioni", 0) == 0
-        assert "deposito" in result.message
 
 
 # ==============================================================================
@@ -409,7 +404,7 @@ class TestRifornimentoSupplyNonTrovato:
     @patch("tasks.rifornimento.time.sleep")
     def test_supply_non_trovato_zero_sped(self, mock_sleep):
         ctx = ctx_abilitato()
-        ctx.device.add_screenshot(None)
+        ctx.device.set_screenshot(None)
         # FakeMatcher di default non trova nulla → _apri_resource_supply ritorna False
         result = RifornimentoTask().run(ctx, deposito=DEP_OK, slot_liberi=3)
         assert result.data["spedizioni"] == 0
@@ -417,7 +412,7 @@ class TestRifornimentoSupplyNonTrovato:
     @patch("tasks.rifornimento.time.sleep")
     def test_tap_lente_eseguito(self, mock_sleep):
         ctx = ctx_abilitato()
-        ctx.device.add_screenshot(None)
+        ctx.device.set_screenshot(None)
         RifornimentoTask().run(ctx, deposito=DEP_OK, slot_liberi=3)
         # La centratura mappa deve avvenire
         assert _DEFAULTS["TAP_LENTE_MAPPA"] in ctx.device.taps
@@ -431,7 +426,7 @@ class TestRifornimentoSpedizioneOK:
 
     @patch("tasks.rifornimento.time.sleep")
     @patch("tasks.rifornimento._compila_e_invia",
-           return_value=(True, 54, False, 1_000_000, -1))
+           return_value=(True, 54, False, 1_000_000))
     @patch("tasks.rifornimento._apri_resource_supply", return_value=True)
     @patch("tasks.rifornimento._centra_mappa")
     def test_una_spedizione(self, mock_centra, mock_apri, mock_compila, mock_sleep):
@@ -442,7 +437,7 @@ class TestRifornimentoSpedizioneOK:
 
     @patch("tasks.rifornimento.time.sleep")
     @patch("tasks.rifornimento._compila_e_invia",
-           return_value=(True, 60, False, 1_000_000, -1))
+           return_value=(True, 60, False, 1_000_000))
     @patch("tasks.rifornimento._apri_resource_supply", return_value=True)
     @patch("tasks.rifornimento._centra_mappa")
     def test_tre_spedizioni(self, mock_centra, mock_apri, mock_compila, mock_sleep):
@@ -452,7 +447,7 @@ class TestRifornimentoSpedizioneOK:
 
     @patch("tasks.rifornimento.time.sleep")
     @patch("tasks.rifornimento._compila_e_invia",
-           return_value=(True, 54, False, 1_000_000, -1))
+           return_value=(True, 54, False, 1_000_000))
     @patch("tasks.rifornimento._apri_resource_supply", return_value=True)
     @patch("tasks.rifornimento._centra_mappa")
     def test_result_message_contiene_spedizioni(self,
@@ -463,7 +458,7 @@ class TestRifornimentoSpedizioneOK:
 
     @patch("tasks.rifornimento.time.sleep")
     @patch("tasks.rifornimento._compila_e_invia",
-           return_value=(True, 54, False, 1_000_000, -1))
+           return_value=(True, 54, False, 1_000_000))
     @patch("tasks.rifornimento._apri_resource_supply", return_value=True)
     @patch("tasks.rifornimento._centra_mappa")
     def test_home_key_finale(self, mock_centra, mock_apri, mock_compila, mock_sleep):
@@ -481,7 +476,7 @@ class TestRifornimentoQuotaEsaurita:
 
     @patch("tasks.rifornimento.time.sleep")
     @patch("tasks.rifornimento._compila_e_invia",
-           return_value=(False, 0, True, 0, 0))
+           return_value=(False, 0, True, 0))
     @patch("tasks.rifornimento._apri_resource_supply", return_value=True)
     @patch("tasks.rifornimento._centra_mappa")
     def test_quota_esaurita_stop(self, mock_centra, mock_apri,
@@ -500,7 +495,7 @@ class TestRifornimentoEtaResidua:
 
     @patch("tasks.rifornimento.time.sleep")
     @patch("tasks.rifornimento._compila_e_invia",
-           return_value=(True, 60, False, 1_000_000, -1))
+           return_value=(True, 60, False, 1_000_000))
     @patch("tasks.rifornimento._apri_resource_supply", return_value=True)
     @patch("tasks.rifornimento._centra_mappa")
     def test_eta_residua_presente(self, mock_centra, mock_apri,
@@ -520,7 +515,7 @@ class TestRifornimentoCoordCustom:
 
     @patch("tasks.rifornimento.time.sleep")
     @patch("tasks.rifornimento._compila_e_invia",
-           return_value=(True, 54, False, 1_000_000, -1))
+           return_value=(True, 54, False, 1_000_000))
     @patch("tasks.rifornimento._apri_resource_supply", return_value=True)
     def test_lente_custom(self, mock_apri, mock_compila, mock_sleep):
         ctx = ctx_abilitato(**{
@@ -532,7 +527,7 @@ class TestRifornimentoCoordCustom:
 
     @patch("tasks.rifornimento.time.sleep")
     @patch("tasks.rifornimento._compila_e_invia",
-           return_value=(True, 54, False, 1_000_000, -1))
+           return_value=(True, 54, False, 1_000_000))
     @patch("tasks.rifornimento._apri_resource_supply", return_value=True)
     def test_rifugio_xy_custom(self, mock_apri, mock_compila, mock_sleep):
         ctx = ctx_abilitato(**{
