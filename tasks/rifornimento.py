@@ -958,11 +958,10 @@ class RifornimentoTask(Task):
         return 4.0
 
     def should_run(self, ctx) -> bool:
-        # Guard tecnica
+        if not ctx.config.task_abilitato("rifornimento"):
+            return False
         if ctx.device is None or ctx.matcher is None:
             return False
-        # Guard stato persistente: provviste giornaliere esaurite
-        # (persiste su disco, reset mezzanotte UTC)
         if ctx.state is not None and not ctx.state.rifornimento.should_run():
             ctx.log_msg("Rifornimento: provviste esaurite oggi → skip")
             return False

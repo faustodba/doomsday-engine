@@ -283,8 +283,11 @@ def _thread_istanza(ist, tasks_cls, dry_run, tick_sleep, stop_event):
         _log(nome, f"[WARN] Ripristino schedule: {exc}")
 
     _log_fn = lambda msg: _log(nome, msg)
+    _istanza_chiusa = True
 
     while not stop_event.is_set():
+        _istanza_chiusa = False
+
         # ── 1. Avvio istanza MuMu + attesa HOME ─────────────────────────
         if not dry_run:
             if not _launcher.avvia_istanza(ist, _log_fn):
@@ -344,6 +347,7 @@ def _thread_istanza(ist, tasks_cls, dry_run, tick_sleep, stop_event):
         # ── 4. Chiusura istanza MuMu (fine ciclo) ───────────────────────
         if not dry_run:
             _launcher.chiudi_istanza(ist, porta, _log_fn)
+            _istanza_chiusa = True
 
         # ── 5. Pausa inter-tick ──────────────────────────────────────────
         for _ in range(tick_sleep):
@@ -351,7 +355,7 @@ def _thread_istanza(ist, tasks_cls, dry_run, tick_sleep, stop_event):
             time.sleep(1)
 
     # ── Shutdown safety net (Ctrl+C durante tick) ────────────────────────
-    if not dry_run:
+    if not dry_run and not _istanza_chiusa:
         _launcher.chiudi_istanza(ist, porta, _log_fn)
 
     _aggiorna_stato_istanza(nome, {"stato": "idle"})
