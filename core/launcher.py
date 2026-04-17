@@ -14,7 +14,7 @@
 #    mumu.timeout_adb_s       — timeout polling is_android_started
 #    mumu.timeout_carica_s    — timeout polling HOME dopo avvio gioco
 #    mumu.delay_carica_iniz_s — attesa fissa iniziale dopo avvio gioco
-#    mumu.n_back_pulizia      — BACK inviati prima di vai_in_home()
+#    mumu.n_back_pulizia      — deprecato (BACK ora nel loop polling)
 #
 #  Standard V6: nessun asyncio, solo time.sleep(), subprocess.run() con
 #  timeout, log tramite log_fn(msg) passata dall'esterno.
@@ -55,8 +55,7 @@ GAME_ACTIVITY: str = (
 )
 
 # Intervalli di polling non esposti in global_config (costanti operative interne)
-DELAY_POLL_S: float = 5.0   # intervallo polling schermata / android_started
-DELAY_BACK:   float = 0.5   # pausa tra i BACK di pulizia popup
+DELAY_POLL_S: float = 5.0   # intervallo polling android_started
 
 
 # ==============================================================================
@@ -233,10 +232,14 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:
 
     Flusso:
       1. Attesa fissa delay_carica_iniz_s (caricamento iniziale)
-      2. Polling ctx.navigator.schermata_corrente() ogni DELAY_POLL_S
-         finché != Screen.UNKNOWN, max timeout_carica_s
-      3. BACK × n_back_pulizia (chiude eventuali popup di avvio)
-      4. ctx.navigator.vai_in_home() come verifica finale
+      2. Loop fino a timeout_carica_s:
+         - device.back() (chiude popup di avvio)
+         - time.sleep(1.5)
+         - schermata = nav.schermata_corrente()
+         - log "[nome] schermata=X (Ns)"
+         - se schermata != Screen.UNKNOWN: break
+      3. Se timeout: return False
+      4. vai_in_home() verifica finale
 
     Args:
         ctx: TaskContext con navigator disponibile
@@ -247,19 +250,26 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:
     """
     _cfg = load_global().mumu
     nome = getattr(ctx, "instance_name", "?")
+    nav    = getattr(ctx, "navigator", None)
+    device = getattr(ctx, "device", None)
 
     # 1. Attesa fissa caricamento
     _log(f"[{nome}] attesa caricamento iniziale {_cfg.delay_carica_iniz_s}s", log_fn)
     time.sleep(_cfg.delay_carica_iniz_s)
 
-    # 2. Polling schermata_corrente
-    nav = getattr(ctx, "navigator", None)
+    # 2. Loop BACK + polling schermata
     if nav is None:
         _log(f"[{nome}] navigator non disponibile — skip polling", log_fn)
     else:
-        _log(f"[{nome}] polling schermata (max {_cfg.timeout_carica_s}s)", log_fn)
+        _log(f"[{nome}] loop BACK + polling schermata (max {_cfg.timeout_carica_s}s)", log_fn)
         t_start = time.time()
+        trovata = False
         while time.time() - t_start < _cfg.timeout_carica_s:
+            # BACK chiude eventuali popup sovrapposti (daily login, eventi, ecc.)
+            if device is not None:
+                device.back()
+            time.sleep(1.5)
+
             try:
                 schermata = nav.schermata_corrente()
             except Exception:
@@ -270,26 +280,21 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:
 
             if schermata != Screen.UNKNOWN:
                 _log(f"[{nome}] schermata rilevata: {schermata}", log_fn)
+                trovata = True
                 break
-            time.sleep(DELAY_POLL_S)
-        else:
-            _log(f"[{nome}] TIMEOUT: schermata ancora UNKNOWN dopo {_cfg.timeout_carica_s}s", log_fn)
-            return False
 
-    # 3. BACK pulizia popup
-    _log(f"[{nome}] BACK×{_cfg.n_back_pulizia} pulizia popup", log_fn)
-    device = getattr(ctx, "device", None)
-    if device is not None:
-        for _ in range(_cfg.n_back_pulizia):
-            device.back()
-            time.sleep(DELAY_BACK)
+        # 3. Timeout
+        if not trovata:
+            _log(f"[{nome}] TIMEOUT: schermata ancora UNKNOWN dopo "
+                 f"{_cfg.timeout_carica_s}s", log_fn)
+            return False
 
     # 4. vai_in_home() verifica finale
     if nav is not None:
         _log(f"[{nome}] vai_in_home() verifica finale", log_fn)
         ok = nav.vai_in_home()
         if ok:
-            _log(f"[{nome}] HOME raggiunto ✓", log_fn)
+            _log(f"[{nome}] HOME raggiunto", log_fn)
         else:
             _log(f"[{nome}] vai_in_home() FALLITO", log_fn)
         return ok

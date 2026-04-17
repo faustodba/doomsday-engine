@@ -158,6 +158,17 @@ Ogni rilascio segue questa sequenza:
 
 ---
 
+## Regole anti-disallineamento (vincolanti)
+
+- `_TASK_SETUP` in `main.py` è la fonte di verità per priorità e scheduling
+- La tabella "_TASK_SETUP" in `ROADMAP.md` deve essere identica a `main.py`
+- Ogni modifica a `_TASK_SETUP` deve aggiornare `ROADMAP.md` nella stessa sessione
+- Prima di ogni sessione: verificare allineamento `_TASK_SETUP` ↔ `ROADMAP.md`
+- `schedule_type "always"` → `interval=0.0`, `RaccoltaTask` UNICO task always
+- Priorità: numero più basso = eseguito prima nel tick
+
+---
+
 ## Regola generale
 
 > Approccio strutturato, verificabile, tracciabile.

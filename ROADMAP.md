@@ -109,6 +109,17 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Fix applicati in sessione 17/04/2026
+
+| Fix | File | Dettaglio |
+|-----|------|-----------|
+| attendi_home() loop BACK | `core/launcher.py` | Loop BACK+polling invece di sequenza rigida — gestisce banner multipli |
+| chiudi_istanza() post-tick | `main.py` | Chiusura MuMu dopo ogni tick, non solo a Ctrl+C |
+| _TASK_SETUP priorità | `main.py` | Riallineamento completo a ROADMAP — erano completamente invertite |
+| Regole anti-disallineamento | `.claude/CLAUDE.md` | Sezione vincolante: _TASK_SETUP ↔ ROADMAP sempre allineati |
+
+---
+
 ## Fix applicati in sessione 16/04/2026
 
 | Fix | File | Dettaglio |
@@ -619,10 +630,10 @@ state.rifornimento.provviste_esaurite→ bool (TODO: da aggiungere)
 ### Scheduling task in main.py (_TASK_SETUP)
 | Classe | Priority | Interval | Schedule | Note |
 |--------|----------|----------|----------|------|
-| BoostTask | 5 | — | periodic | scheduling via BoostState (ctx.state.boost) |
+| BoostTask | 5 | — | periodic | always-run con BoostState guard |
 | VipTask | 10 | 24h | daily | |
-| MessaggiTask | 20 | 1h | periodic | |
-| AlleanzaTask | 30 | 1h | periodic | |
+| MessaggiTask | 20 | 4h | periodic | |
+| AlleanzaTask | 30 | 4h | periodic | |
 | StoreTask | 40 | 8h | periodic | |
 | ArenaTask | 50 | 24h | daily | |
 | ArenaMercatoTask | 60 | 24h | daily | |
@@ -630,7 +641,7 @@ state.rifornimento.provviste_esaurite→ bool (TODO: da aggiungere)
 | RadarTask | 80 | 12h | periodic | |
 | RadarCensusTask | 90 | 24h | periodic | disabilitato default |
 | RifornimentoTask | 100 | 1h | periodic | penultima: consuma slot squadre |
-| RaccoltaTask | 110 | — | periodic | always-run se slot liberi |
+| RaccoltaTask | 110 | — | always | always-run se slot liberi |
 
 ---
 

@@ -220,18 +220,18 @@ class _TaskWrapper:
 # Thread istanza
 # ---------------------------------------------------------------------------
 _TASK_SETUP = [
-    ("BoostTask",         5,   8.0,   "periodic"),
-    ("RaccoltaTask",      10,  4.0,   "periodic"),
-    ("RifornimentoTask",  20,  1.0,   "periodic"),
-    ("ZainoTask",         30,  168.0, "periodic"),
-    ("VipTask",           40,  24.0,  "daily"),
-    ("MessaggiTask",      50,  1.0,   "periodic"),
-    ("AlleanzaTask",      60,  1.0,   "periodic"),
-    ("StoreTask",         70,  8.0,   "periodic"),
-    ("ArenaTask",         80,  24.0,  "daily"),
-    ("ArenaMercatoTask",  90,  24.0,  "daily"),
-    ("RadarTask",         100, 12.0,  "periodic"),
-    ("RadarCensusTask",   110, 24.0,  "periodic"),
+    ("BoostTask",         5,   0.0,   "periodic"),
+    ("VipTask",           10,  24.0,  "daily"),
+    ("MessaggiTask",      20,  4.0,   "periodic"),
+    ("AlleanzaTask",      30,  4.0,   "periodic"),
+    ("StoreTask",         40,  8.0,   "periodic"),
+    ("ArenaTask",         50,  24.0,  "daily"),
+    ("ArenaMercatoTask",  60,  24.0,  "daily"),
+    ("ZainoTask",         70,  168.0, "periodic"),
+    ("RadarTask",         80,  12.0,  "periodic"),
+    ("RadarCensusTask",   90,  24.0,  "periodic"),
+    ("RifornimentoTask",  100, 1.0,   "periodic"),
+    ("RaccoltaTask",      110, 0.0,   "always"),
 ]
 
 _contatori: dict[str, dict[str, int]] = {}
@@ -282,22 +282,31 @@ def _thread_istanza(ist, tasks_cls, dry_run, tick_sleep, stop_event):
     except Exception as exc:
         _log(nome, f"[WARN] Ripristino schedule: {exc}")
 
-    # ── Avvio istanza MuMu + attesa HOME ─────────────────────────────────
     _log_fn = lambda msg: _log(nome, msg)
 
-    if not dry_run:
-        if not _launcher.avvia_istanza(ist, _log_fn):
-            _log(nome, "[ERRORE] avvia_istanza() fallito — thread interrotto")
-            return
-        if not _launcher.attendi_home(ctx, _log_fn):
-            _log(nome, "[ERRORE] attendi_home() fallito — thread interrotto")
-            return
-
     while not stop_event.is_set():
+        # ── 1. Avvio istanza MuMu + attesa HOME ─────────────────────────
+        if not dry_run:
+            if not _launcher.avvia_istanza(ist, _log_fn):
+                _log(nome, "[ERRORE] avvia_istanza() fallito — retry al prossimo ciclo")
+                for _ in range(tick_sleep):
+                    if stop_event.is_set(): break
+                    time.sleep(1)
+                continue
+            if not _launcher.attendi_home(ctx, _log_fn):
+                _log(nome, "[ERRORE] attendi_home() fallito — retry al prossimo ciclo")
+                _launcher.chiudi_istanza(ist, porta, _log_fn)
+                for _ in range(tick_sleep):
+                    if stop_event.is_set(): break
+                    time.sleep(1)
+                continue
+
+        # ── 2. Rebuild context (rilegge config aggiornata) ───────────────
         gcfg = load_global()
         ctx  = _build_ctx(ist, gcfg, dry_run)
         orc._ctx = ctx
 
+        # ── 3. Tick ──────────────────────────────────────────────────────
         _aggiorna_stato_istanza(nome, {"stato": "running", "scheduler": _scheduler_prossimi(orc)})
         _log(nome, f"Tick -- {orc.n_dovuti()} task dovuti su {len(orc)} registrati")
 
@@ -331,11 +340,17 @@ def _thread_istanza(ist, tasks_cls, dry_run, tick_sleep, stop_event):
             _log(nome, f"[WARN] save state: {exc}")
 
         _log(nome, f"Tick completato ({len(results)} eseguiti) -- pausa {tick_sleep}s")
+
+        # ── 4. Chiusura istanza MuMu (fine ciclo) ───────────────────────
+        if not dry_run:
+            _launcher.chiudi_istanza(ist, porta, _log_fn)
+
+        # ── 5. Pausa inter-tick ──────────────────────────────────────────
         for _ in range(tick_sleep):
             if stop_event.is_set(): break
             time.sleep(1)
 
-    # ── Chiusura istanza MuMu ────────────────────────────────────────────
+    # ── Shutdown safety net (Ctrl+C durante tick) ────────────────────────
     if not dry_run:
         _launcher.chiudi_istanza(ist, porta, _log_fn)
 

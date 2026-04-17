@@ -14,7 +14,7 @@
   },
   "task": {
     "raccolta": true,
-    "rifornimento": true,
+    "rifornimento": false,
     "zaino": true,
     "vip": true,
     "alleanza": true,
