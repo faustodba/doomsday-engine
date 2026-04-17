@@ -105,6 +105,14 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 - Fix: verificare coordinate in screenshot reale + aggiungere
   dismiss maschera laterale prima del retry
 
+### 9. Raccolta parallela — selezione icona tipo fallisce (ALTA)
+- In modalità multi-istanza parallela, `[VERIFICA] tipo` score scende a 0.23
+- Singola istanza: score > 0.99
+- Causa: interferenza tap/UI tra istanze MuMu in parallelo
+- Lock globale screencap non risolve — problema è nei tap, non negli screenshot
+- Fix da valutare: lock globale su tutte le operazioni ADB (tap inclusi)
+  o architettura sequenziale per le fasi critiche di raccolta
+
 ---
 
 ---
@@ -119,6 +127,12 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | Regole anti-disallineamento | `.claude/CLAUDE.md` | Sezione vincolante: _TASK_SETUP ↔ ROADMAP sempre allineati |
 | avvia_player() | `core/launcher.py` | Avvio automatico MuMuNxMain.exe — rileva processo esistente, polling 60s |
 | Note W10/W11 | `.claude/CLAUDE.md` | W10: player non necessario; W11: player deve essere avviato |
+| Lock globale screencap | `core/device.py` | _screencap_global_lock serializza screencap tra istanze diverse |
+| Porte istanze | `config/instances.json` | Tutte le porte corrette con formula 16384 + indice×32 |
+| task_abilitato 2 livelli | `config/config_loader.py` | rifornimento = task_rifornimento AND (mappa OR membri) |
+| should_run rifornimento | `tasks/rifornimento.py` | Usa task_abilitato("rifornimento") come tutti gli altri task |
+| Arena timeout | `tasks/arena.py` | _MAX_BATTAGLIA_S 15→52 (delay 8s + poll = 60s totali) |
+| _istanza_chiusa guard | `main.py` | Evita doppia chiudi_istanza() su shutdown se già chiusa post-tick |
 
 ---
 

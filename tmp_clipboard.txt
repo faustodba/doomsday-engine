@@ -1,0 +1,9 @@
+import threading as _threading
+_screencap_locks: dict = {}
+_screencap_locks_meta = _threading.Lock()
+
+def _screencap_lock_for(serial: str) -> _threading.Lock:
+    with _screencap_locks_meta:
+        if serial not in _screencap_locks:
+            _screencap_locks[serial] = _threading.Lock()
+        return _screencap_locks[serial]
