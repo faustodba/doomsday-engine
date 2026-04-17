@@ -169,6 +169,16 @@ Ogni rilascio segue questa sequenza:
 
 ---
 
+## Modalità esecuzione
+
+- Architettura: SEQUENZIALE — una istanza alla volta, mai parallele
+- Ciclo: FAU_00 → FAU_01 → FAU_02 → sleep 30min → ripeti
+- `_thread_istanza` esegue UN SOLO tick per chiamata (no while loop interno)
+- Parallelismo multi-istanza rimandato a quando implementato max_parallel
+- Interferenze ADB/MuMu in parallelo documentate in Issue #9 e #10
+
+---
+
 ## Note ambiente
 
 ### MuMu Player — avvio automatico

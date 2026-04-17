@@ -140,6 +140,10 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | should_run rifornimento | `tasks/rifornimento.py` | Usa task_abilitato("rifornimento") come tutti gli altri task |
 | Arena timeout | `tasks/arena.py` | _MAX_BATTAGLIA_S 15→52 (delay 8s + poll = 60s totali) |
 | _istanza_chiusa guard | `main.py` | Evita doppia chiudi_istanza() su shutdown se già chiusa post-tick |
+| Modalità sequenziale | `main.py` | Ciclo FAU_00→FAU_01→FAU_02→sleep 30min→ripeti. _thread_istanza esegue un solo tick per chiamata. main() gestisce il loop ciclo |
+| report.py | NUOVO | Script autonomo analisi log notturni. Genera HTML con statistiche per N istanze: marce, task, errori, screenshot None, launcher |
+| instances.json produzione | `config/instances.json` | Solo FAU_00/01/02 abilitate, tutte le altre abilitata=false |
+| Lock screencap ripristinato | `core/device.py` | Rimosso lock globale, ripristinato lock per serial. Modalità sequenziale rende il lock globale non necessario |
 
 ---
 

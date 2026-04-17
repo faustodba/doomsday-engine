@@ -1,0 +1,686 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DOOMSDAY ENGINE V6 — Report 17/04/2026</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Exo+2:wght@300;600;900&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0a0c10;
+  --bg2: #0f1318;
+  --bg3: #141922;
+  --border: #1e2a3a;
+  --accent: #00d4ff;
+  --accent2: #ff6b35;
+  --green: #00ff88;
+  --red: #ff3355;
+  --yellow: #ffd700;
+  --text: #c8d8e8;
+  --text-dim: #5a7a8a;
+  --glow: 0 0 20px rgba(0,212,255,0.3);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Exo 2', sans-serif;
+  font-weight: 300;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+body::before {
+  content: '';
+  position: fixed;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: 
+    repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(0,212,255,0.015) 2px, rgba(0,212,255,0.015) 4px);
+  pointer-events: none;
+  z-index: 0;
+}
+.container { max-width: 1400px; margin: 0 auto; padding: 40px 24px; position: relative; z-index: 1; }
+
+/* HEADER */
+.header {
+  display: flex; align-items: flex-start; justify-content: space-between;
+  margin-bottom: 48px; padding-bottom: 24px;
+  border-bottom: 1px solid var(--border);
+}
+.header-left h1 {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 28px; font-weight: 400;
+  color: var(--accent);
+  text-shadow: var(--glow);
+  letter-spacing: 3px;
+  text-transform: uppercase;
+}
+.header-left .subtitle {
+  font-size: 12px; color: var(--text-dim);
+  letter-spacing: 4px; margin-top: 6px;
+  text-transform: uppercase;
+}
+.header-right {
+  text-align: right;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 13px; color: var(--text-dim);
+  line-height: 1.8;
+}
+.header-right .ts { color: var(--accent); font-size: 15px; }
+
+/* SUMMARY BAR */
+.summary-bar {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 16px; margin-bottom: 40px;
+}
+.stat-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  border-top: 2px solid var(--accent);
+  padding: 20px 24px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.2s;
+}
+.stat-card::after {
+  content: '';
+  position: absolute; top: 0; right: 0;
+  width: 60px; height: 60px;
+  background: radial-gradient(circle at top right, rgba(0,212,255,0.08), transparent);
+}
+.stat-card.warn { border-top-color: var(--yellow); }
+.stat-card.warn::after { background: radial-gradient(circle at top right, rgba(255,215,0,0.08), transparent); }
+.stat-card.danger { border-top-color: var(--red); }
+.stat-card.danger::after { background: radial-gradient(circle at top right, rgba(255,51,85,0.08), transparent); }
+.stat-card.ok { border-top-color: var(--green); }
+.stat-card.ok::after { background: radial-gradient(circle at top right, rgba(0,255,136,0.08), transparent); }
+.stat-label { font-size: 10px; letter-spacing: 3px; text-transform: uppercase; color: var(--text-dim); margin-bottom: 10px; }
+.stat-value { font-family: 'Share Tech Mono', monospace; font-size: 36px; color: var(--text); }
+.stat-sub { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+
+/* SECTIONS */
+.section { margin-bottom: 40px; }
+.section-title {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px; letter-spacing: 5px;
+  text-transform: uppercase; color: var(--accent);
+  margin-bottom: 16px;
+  display: flex; align-items: center; gap: 12px;
+}
+.section-title::after {
+  content: ''; flex: 1; height: 1px;
+  background: linear-gradient(to right, var(--border), transparent);
+}
+
+/* ISTANZA GRID */
+.istanze-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  gap: 24px;
+}
+.istanza-card {
+  background: var(--bg2);
+  border: 1px solid var(--border);
+  padding: 0;
+  overflow: hidden;
+}
+.istanza-header {
+  background: var(--bg3);
+  padding: 16px 20px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--border);
+}
+.istanza-name {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 16px; color: var(--accent);
+  letter-spacing: 2px;
+}
+.istanza-ticks {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 12px; color: var(--text-dim);
+}
+.istanza-body { padding: 20px; }
+
+/* TASK TABLE */
+.task-table { width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 20px; }
+.task-table th {
+  text-align: left; padding: 6px 8px;
+  font-size: 9px; letter-spacing: 3px; text-transform: uppercase;
+  color: var(--text-dim); border-bottom: 1px solid var(--border);
+}
+.task-table td { padding: 7px 8px; border-bottom: 1px solid rgba(30,42,58,0.5); }
+.task-table tr:last-child td { border-bottom: none; }
+.task-table tr:hover td { background: rgba(0,212,255,0.03); }
+.task-name { font-family: 'Share Tech Mono', monospace; color: var(--text); }
+.badge {
+  display: inline-block; padding: 2px 8px;
+  font-family: 'Share Tech Mono', monospace; font-size: 10px;
+  border-radius: 2px; font-weight: 600;
+}
+.badge-ok { background: rgba(0,255,136,0.15); color: var(--green); }
+.badge-fail { background: rgba(255,51,85,0.15); color: var(--red); }
+.badge-skip { background: rgba(90,122,138,0.15); color: var(--text-dim); }
+.badge-zero { background: rgba(30,42,58,0.5); color: var(--border); }
+
+/* MARCE */
+.marce-row {
+  display: grid; grid-template-columns: 1fr 1fr 1fr;
+  gap: 12px; margin-bottom: 20px;
+}
+.marce-cell {
+  background: var(--bg3);
+  padding: 12px 16px;
+  text-align: center;
+}
+.marce-val {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 28px;
+}
+.marce-lbl { font-size: 9px; letter-spacing: 2px; color: var(--text-dim); text-transform: uppercase; margin-top: 4px; }
+.val-green { color: var(--green); }
+.val-red { color: var(--red); }
+.val-yellow { color: var(--yellow); }
+
+/* ERRORI */
+.errori-list {
+  list-style: none;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px;
+  line-height: 1.7;
+  max-height: 160px;
+  overflow-y: auto;
+  background: var(--bg3);
+  padding: 12px 16px;
+}
+.errori-list li { color: var(--red); opacity: 0.8; padding: 2px 0; }
+.errori-list li::before { content: '! '; color: var(--red); }
+.no-errori { color: var(--green); font-family: 'Share Tech Mono', monospace; font-size: 11px; }
+
+/* SLOT CHART */
+.slot-bar { margin-bottom: 8px; }
+.slot-label { font-size: 10px; color: var(--text-dim); margin-bottom: 4px; }
+.slot-track {
+  height: 6px; background: var(--bg3);
+  border-radius: 3px; overflow: hidden;
+}
+.slot-fill {
+  height: 100%; border-radius: 3px;
+  background: linear-gradient(to right, var(--accent), var(--green));
+  transition: width 0.3s;
+}
+
+/* LAUNCHER SECTION */
+.launcher-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+.launcher-item {
+  background: var(--bg2); border: 1px solid var(--border);
+  padding: 16px 20px;
+}
+.launcher-name { font-family: 'Share Tech Mono', monospace; font-size: 13px; color: var(--accent); margin-bottom: 8px; }
+.launcher-stat { font-size: 11px; color: var(--text-dim); display: flex; justify-content: space-between; padding: 3px 0; }
+.launcher-stat span { color: var(--text); font-family: 'Share Tech Mono', monospace; }
+
+/* ERRORI GLOBALI */
+.global-errori {
+  background: var(--bg2); border: 1px solid var(--border);
+  border-left: 3px solid var(--red);
+  padding: 20px;
+}
+.errore-line {
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 11px; color: var(--red);
+  opacity: 0.8; padding: 4px 0;
+  border-bottom: 1px solid rgba(255,51,85,0.1);
+}
+.errore-line:last-child { border-bottom: none; }
+
+/* FOOTER */
+.footer {
+  margin-top: 60px; padding-top: 20px;
+  border-top: 1px solid var(--border);
+  text-align: center;
+  font-family: 'Share Tech Mono', monospace;
+  font-size: 10px; color: var(--text-dim);
+  letter-spacing: 2px;
+}
+
+/* SCROLLBAR */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: var(--bg3); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+@keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+.section { animation: fadeIn 0.4s ease both; }
+.section:nth-child(2) { animation-delay: 0.1s; }
+.section:nth-child(3) { animation-delay: 0.2s; }
+.section:nth-child(4) { animation-delay: 0.3s; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<div class="header">
+  <div class="header-left">
+    <h1>&#9888; Doomsday Engine V6</h1>
+    <div class="subtitle">Night Run Report &mdash; Analisi automatica log</div>
+  </div>
+  <div class="header-right">
+    <div class="ts">17/04/2026</div>
+    <div>Generato: 22:04:39</div>
+    <div>Istanze: 3</div>
+    <div>Log: logs\bot.log</div>
+  </div>
+</div>
+
+<!-- SUMMARY BAR -->
+<div class="summary-bar">
+  <div class="stat-card ok">
+    <div class="stat-label">Tick Totali</div>
+    <div class="stat-value">0</div>
+    <div class="stat-sub">su tutte le istanze</div>
+  </div>
+  <div class="stat-card ok">
+    <div class="stat-label">Marce Inviate</div>
+    <div class="stat-value">4</div>
+    <div class="stat-sub">raccolta risorse</div>
+  </div>
+  <div class="stat-card warn">
+    <div class="stat-label">Errori Totali</div>
+    <div class="stat-value">9</div>
+    <div class="stat-sub">anomalie rilevate</div>
+  </div>
+  <div class="stat-card warn">
+    <div class="stat-label">Screenshot None</div>
+    <div class="stat-value">72</div>
+    <div class="stat-sub">frame persi ADB</div>
+  </div>
+  <div class="stat-card">
+    <div class="stat-label">Task Eseguiti</div>
+    <div class="stat-value">17</div>
+    <div class="stat-sub">completati con successo</div>
+  </div>
+</div>
+
+<!-- ISTANZE -->
+<div class="section">
+  <div class="section-title">Dettaglio per Istanza</div>
+  <div class="istanze-grid">
+    
+    <div class="istanza-card">
+      <div class="istanza-header">
+        <div class="istanza-name">FAU_00</div>
+        <div class="istanza-ticks">0 tick completati</div>
+      </div>
+      <div class="istanza-body">
+        
+        <div class="marce-row">
+          <div class="marce-cell">
+            <div class="marce-val val-green">0</div>
+            <div class="marce-lbl">Marce Inviate</div>
+          </div>
+          <div class="marce-cell">
+            <div class="marce-val val-red">0</div>
+            <div class="marce-lbl">Fallite</div>
+          </div>
+          <div class="marce-cell">
+            <div class="marce-val val-yellow">0</div>
+            <div class="marce-lbl">Fuori Territorio</div>
+          </div>
+        </div>
+        
+        
+        
+        <table class="task-table">
+          <thead><tr>
+            <th>Task</th><th>OK</th><th>Fail</th><th>Skip</th>
+          </tr></thead>
+          <tbody>
+        <tr>
+          <td class="task-name">boost</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">vip</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">messaggi</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">alleanza</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">store</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">arena</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">arena_mercato</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">zaino</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">radar</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">radar_census</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">rifornimento</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">raccolta</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr></tbody>
+        </table>
+        
+        <div style="margin-bottom:12px">
+          <div class="slot-label">Screenshot persi: <span class="val-green" style="font-family:Share Tech Mono,monospace">0</span></div>
+        </div>
+        
+        <div class="slot-label" style="margin-bottom:8px">Anomalie e Errori</div>
+        <div class="no-errori">&#10003; Nessun errore rilevato</div>
+        
+      </div>
+    </div>
+
+    <div class="istanza-card">
+      <div class="istanza-header">
+        <div class="istanza-name">FAU_01</div>
+        <div class="istanza-ticks">0 tick completati</div>
+      </div>
+      <div class="istanza-body">
+        
+        <div class="marce-row">
+          <div class="marce-cell">
+            <div class="marce-val val-green">4</div>
+            <div class="marce-lbl">Marce Inviate</div>
+          </div>
+          <div class="marce-cell">
+            <div class="marce-val val-red">0</div>
+            <div class="marce-lbl">Fallite</div>
+          </div>
+          <div class="marce-cell">
+            <div class="marce-val val-yellow">1</div>
+            <div class="marce-lbl">Fuori Territorio</div>
+          </div>
+        </div>
+        
+        
+        
+        <table class="task-table">
+          <thead><tr>
+            <th>Task</th><th>OK</th><th>Fail</th><th>Skip</th>
+          </tr></thead>
+          <tbody>
+        <tr>
+          <td class="task-name">boost</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-skip">5</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">vip</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">messaggi</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">alleanza</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">store</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">arena</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">arena_mercato</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">zaino</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">radar</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">radar_census</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">rifornimento</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-skip">5</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">raccolta</td>
+          <td><span class="badge badge-ok">5</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr></tbody>
+        </table>
+        
+        <div style="margin-bottom:12px">
+          <div class="slot-label">Screenshot persi: <span class="val-yellow" style="font-family:Share Tech Mono,monospace">48</span></div>
+        </div>
+        
+        <div class="slot-label" style="margin-bottom:8px">Anomalie e Errori</div>
+        <div class="no-errori">&#10003; Nessun errore rilevato</div>
+        
+      </div>
+    </div>
+
+    <div class="istanza-card">
+      <div class="istanza-header">
+        <div class="istanza-name">FAU_02</div>
+        <div class="istanza-ticks">0 tick completati</div>
+      </div>
+      <div class="istanza-body">
+        
+        <div class="marce-row">
+          <div class="marce-cell">
+            <div class="marce-val val-green">0</div>
+            <div class="marce-lbl">Marce Inviate</div>
+          </div>
+          <div class="marce-cell">
+            <div class="marce-val val-red">1</div>
+            <div class="marce-lbl">Fallite</div>
+          </div>
+          <div class="marce-cell">
+            <div class="marce-val val-yellow">3</div>
+            <div class="marce-lbl">Fuori Territorio</div>
+          </div>
+        </div>
+        
+        
+        
+        <table class="task-table">
+          <thead><tr>
+            <th>Task</th><th>OK</th><th>Fail</th><th>Skip</th>
+          </tr></thead>
+          <tbody>
+        <tr>
+          <td class="task-name">boost</td>
+          <td><span class="badge badge-ok">2</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">vip</td>
+          <td><span class="badge badge-ok">1</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">messaggi</td>
+          <td><span class="badge badge-ok">1</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">alleanza</td>
+          <td><span class="badge badge-ok">1</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">store</td>
+          <td><span class="badge badge-ok">1</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">arena</td>
+          <td><span class="badge badge-ok">1</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">arena_mercato</td>
+          <td><span class="badge badge-ok">1</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">zaino</td>
+          <td><span class="badge badge-ok">1</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">radar</td>
+          <td><span class="badge badge-ok">1</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">radar_census</td>
+          <td><span class="badge badge-ok">1</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">rifornimento</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-skip">2</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">raccolta</td>
+          <td><span class="badge badge-ok">1</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr></tbody>
+        </table>
+        
+        <div style="margin-bottom:12px">
+          <div class="slot-label">Screenshot persi: <span class="val-yellow" style="font-family:Share Tech Mono,monospace">24</span></div>
+        </div>
+        
+        <div class="slot-label" style="margin-bottom:8px">Anomalie e Errori</div>
+        <ul class="errori-list"><li>[NAV] vai_in_home FALLITO dopo 8 tentativi</li><li>[ARENA] vai_in_home() post-BACK → FALLITO</li><li>[NAV] vai_in_home FALLITO dopo 8 tentativi</li><li>[ARENA] navigator: vai_in_home() fallito — BACK di recupero</li><li>Raccolta: OCR slot fallito — uso default 0/4</li><li>Raccolta: OCR slot fallito — uso default 0/4</li><li>[NAV] vai_in_home FALLITO dopo 8 tentativi</li><li>[NAV] vai_in_home FALLITO dopo 8 tentativi</li><li>[NAV] vai_in_home FALLITO dopo 8 tentativi</li></ul>
+        
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- LAUNCHER -->
+<div class="section">
+  <div class="section-title">Statistiche Launcher</div>
+  <div class="launcher-grid">
+    
+        <div class="launcher-item">
+          <div class="launcher-name">FAU_00</div>
+          <div class="launcher-stat">Avvii <span>0</span></div>
+          <div class="launcher-stat">Chiusure <span>0</span></div>
+          <div class="launcher-stat">Bilanciato <span>&#10003;</span></div>
+        </div>
+        <div class="launcher-item">
+          <div class="launcher-name">FAU_01</div>
+          <div class="launcher-stat">Avvii <span>0</span></div>
+          <div class="launcher-stat">Chiusure <span>0</span></div>
+          <div class="launcher-stat">Bilanciato <span>&#10003;</span></div>
+        </div>
+        <div class="launcher-item">
+          <div class="launcher-name">FAU_02</div>
+          <div class="launcher-stat">Avvii <span>0</span></div>
+          <div class="launcher-stat">Chiusure <span>0</span></div>
+          <div class="launcher-stat">Bilanciato <span>&#10003;</span></div>
+        </div>
+  </div>
+</div>
+
+<!-- ERRORI GLOBALI LAUNCHER -->
+
+
+<div class="footer">
+  DOOMSDAY ENGINE V6 &mdash; REPORT AUTOMATICO &mdash; NESSUN INTERVENTO UMANO RICHIESTO
+</div>
+
+</div>
+</body>
+</html>
