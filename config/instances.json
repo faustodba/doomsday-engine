@@ -28,7 +28,7 @@
   {
     "nome": "FAU_02",
     "indice": 2,
-    "porta": 16480,
+    "porta": 16448,
     "truppe": 50000,
     "max_squadre": 4,
     "layout": 1,
@@ -41,7 +41,7 @@
   {
     "nome": "FAU_03",
     "indice": 3,
-    "porta": 16512,
+    "porta": 16480,
     "truppe": 50000,
     "max_squadre": 4,
     "layout": 1,
@@ -54,7 +54,7 @@
   {
     "nome": "FAU_04",
     "indice": 4,
-    "porta": 16544,
+    "porta": 16512,
     "truppe": 50000,
     "max_squadre": 4,
     "layout": 1,
@@ -67,7 +67,7 @@
   {
     "nome": "FAU_05",
     "indice": 5,
-    "porta": 16576,
+    "porta": 16544,
     "truppe": 50000,
     "max_squadre": 4,
     "layout": 1,
@@ -80,7 +80,7 @@
   {
     "nome": "FAU_06",
     "indice": 6,
-    "porta": 16608,
+    "porta": 16576,
     "truppe": 50000,
     "max_squadre": 4,
     "layout": 1,
@@ -93,7 +93,7 @@
   {
     "nome": "FAU_07",
     "indice": 7,
-    "porta": 16640,
+    "porta": 16608,
     "truppe": 50000,
     "max_squadre": 4,
     "layout": 1,
@@ -106,7 +106,7 @@
   {
     "nome": "FAU_08",
     "indice": 8,
-    "porta": 16672,
+    "porta": 16640,
     "truppe": 50000,
     "max_squadre": 4,
     "layout": 1,
@@ -119,7 +119,7 @@
   {
     "nome": "FAU_09",
     "indice": 9,
-    "porta": 16704,
+    "porta": 16672,
     "truppe": 50000,
     "max_squadre": 4,
     "layout": 2,
@@ -132,7 +132,7 @@
   {
     "nome": "FauMorfeus",
     "indice": 10,
-    "porta": 16736,
+    "porta": 16704,
     "truppe": 0,
     "max_squadre": 5,
     "layout": 1,
@@ -145,7 +145,7 @@
   {
     "nome": "FAU_10",
     "indice": 11,
-    "porta": 16768,
+    "porta": 16736,
     "truppe": 10000,
     "max_squadre": 4,
     "layout": 2,

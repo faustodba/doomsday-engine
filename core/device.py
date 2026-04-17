@@ -282,6 +282,7 @@ import os
 
 # Lock per-porta screencap — pattern V5 adb.py
 import threading as _threading
+_screencap_global_lock = _threading.Lock()
 _screencap_locks: dict = {}
 _screencap_locks_meta = _threading.Lock()
 
@@ -394,17 +395,14 @@ class AdbDevice:
             tempfile.gettempdir(), f"v6_screen_{self.port}.png"
         )
 
-        with _screencap_lock_for(self._serial):
+        with _screencap_global_lock:
+          with _screencap_lock_for(self._serial):
             try:
-                # V5: adb_shell(porta, f"screencap -p {remote_path}")
-                # = subprocess.run([ADB, "-s", serial, "shell", "screencap -p /sdcard/..."])
-                # stringa unica — NON argomenti separati
                 subprocess.run(
                     [self.ADB, "-s", self._serial,
                      "shell", f"screencap -p {remote}"],
                     capture_output=True, timeout=30,
                 )
-                # V5: subprocess.run([ADB_EXE, "-s", serial, "pull", remote, local])
                 r2 = subprocess.run(
                     [self.ADB, "-s", self._serial, "pull", remote, local],
                     capture_output=True, timeout=30,
