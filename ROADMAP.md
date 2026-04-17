@@ -108,10 +108,17 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 ### 9. Raccolta parallela — selezione icona tipo fallisce (ALTA)
 - In modalità multi-istanza parallela, `[VERIFICA] tipo` score scende a 0.23
 - Singola istanza: score > 0.99
-- Causa: interferenza tap/UI tra istanze MuMu in parallelo
-- Lock globale screencap non risolve — problema è nei tap, non negli screenshot
-- Fix da valutare: lock globale su tutte le operazioni ADB (tap inclusi)
-  o architettura sequenziale per le fasi critiche di raccolta
+- Lock globale screencap peggiora la situazione causando starvation
+- Causa vera da investigare: potrebbe essere MuMu che non aggiorna
+  il frame dell'istanza "di sfondo" quando un'altra è in foreground
+- Fix da valutare: usare exec-out screencap invece di screencap+pull,
+  oppure forzare il focus dell'istanza prima dello screenshot
+
+### 10. Lock globale screencap — starvation con 3+ istanze (ALTA)
+- `_screencap_global_lock` serializza tutti gli screenshot
+- Con FAU_02 che esegue 12 task, FAU_00/FAU_01 non riescono
+  a fare screenshot per tutta la durata del tick FAU_02
+- Fix: rimuovere il lock globale, investigare causa vera del problema
 
 ---
 
