@@ -541,7 +541,7 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         def task_abilitato(self, nome_task: str) -> bool:
             mappa = {
                 "raccolta":              gcfg.task_raccolta,
-                "rifornimento":          gcfg.rifornimento_mappa_abilitato or gcfg.rifornimento_membri_abilitato,
+                "rifornimento":          gcfg.task_rifornimento and (gcfg.rifornimento_mappa_abilitato or gcfg.rifornimento_membri_abilitato),
                 "rifornimento_mappa":    gcfg.rifornimento_mappa_abilitato,
                 "rifornimento_membri":   gcfg.rifornimento_membri_abilitato,
                 "zaino":                 gcfg.task_zaino,

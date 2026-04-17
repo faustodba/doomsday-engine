@@ -47,7 +47,7 @@
   },
   "rifornimento_mappa": {
     "_note": "Navigazione via coordinate mappa",
-    "abilitato": true,
+    "abilitato": false,
     "rifugio_x": 687,
     "rifugio_y": 532
   },
