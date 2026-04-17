@@ -4,6 +4,7 @@
 #  Gestisce avvio e chiusura istanze MuMuPlayer per V6.
 #
 #  Funzioni pubbliche:
+#    avvia_player(log_fn)              → bool
 #    avvia_istanza(ist, log_fn)        → bool
 #    attendi_home(ctx, log_fn)         → bool
 #    chiudi_istanza(ist, porta, log_fn)→ None
@@ -15,6 +16,8 @@
 #    mumu.timeout_carica_s    — timeout polling HOME dopo avvio gioco
 #    mumu.delay_carica_iniz_s — attesa fissa iniziale dopo avvio gioco
 #    mumu.n_back_pulizia      — deprecato (BACK ora nel loop polling)
+#    mumu.player_exe          — path MuMuNxMain.exe ("" = auto-deriva da manager)
+#    mumu.timeout_player_s    — timeout polling avvio player
 #
 #  Standard V6: nessun asyncio, solo time.sleep(), subprocess.run() con
 #  timeout, log tramite log_fn(msg) passata dall'esterno.
@@ -26,6 +29,7 @@ import json
 import os
 import subprocess
 import time
+from pathlib import Path
 from typing import Callable, Optional
 
 from core.navigator import Screen
@@ -139,6 +143,86 @@ def _avvia_gioco(porta: int, adb_exe: str,
 
 
 # ==============================================================================
+# Player — avvio MuMuPlayer (necessario su Windows 11)
+# ==============================================================================
+
+_PLAYER_PROCESS_NAME = "MuMuNxMain.exe"
+_PLAYER_POLL_S: float = 3.0
+
+
+def _is_player_running() -> bool:
+    """True se MuMuNxMain.exe è in esecuzione (tasklist Windows)."""
+    try:
+        result = subprocess.run(
+            ["tasklist", "/FI", f"IMAGENAME eq {_PLAYER_PROCESS_NAME}"],
+            capture_output=True, timeout=10,
+        )
+        out = result.stdout.decode(errors="replace")
+        return _PLAYER_PROCESS_NAME in out
+    except (subprocess.TimeoutExpired, Exception):
+        return False
+
+
+def avvia_player(log_fn: Optional[Callable] = None) -> bool:
+    """
+    Avvia MuMuPlayer (MuMuNxMain.exe) se non già in esecuzione.
+
+    Su Windows 11 il player deve essere avviato prima di poter lanciare
+    le singole istanze con MuMuManager. Su Windows 10 non è necessario
+    ma non causa problemi.
+
+    Il path dell'eseguibile è derivato da:
+      1. mumu.player_exe in global_config.json (se non vuoto)
+      2. Altrimenti: stessa directory di mumu.manager / MuMuNxMain.exe
+
+    Ritorna:
+        True  — player già in esecuzione o avviato con successo
+        False — timeout avvio
+    """
+    _cfg    = load_global().mumu
+    timeout = _cfg.timeout_player_s
+
+    # Già in esecuzione?
+    if _is_player_running():
+        _log("MuMuPlayer già in esecuzione", log_fn)
+        return True
+
+    # Determina path player
+    if _cfg.player_exe:
+        player_path = _cfg.player_exe
+    else:
+        manager_resolved = _resolve_manager(_cfg.manager)
+        player_path = str(Path(manager_resolved).parent / _PLAYER_PROCESS_NAME)
+
+    _log(f"Avvio MuMuPlayer: {player_path}", log_fn)
+
+    if not os.path.exists(player_path):
+        _log(f"ERRORE: {player_path} non trovato", log_fn)
+        return False
+
+    # Avvio non bloccante
+    try:
+        subprocess.Popen([player_path])
+    except Exception as exc:
+        _log(f"ERRORE avvio MuMuPlayer: {exc}", log_fn)
+        return False
+
+    # Polling fino a timeout
+    _log(f"Polling MuMuPlayer (max {timeout}s)", log_fn)
+    t_start = time.time()
+    while time.time() - t_start < timeout:
+        time.sleep(_PLAYER_POLL_S)
+        if _is_player_running():
+            _log(f"MuMuPlayer avviato OK ({time.time()-t_start:.0f}s)", log_fn)
+            return True
+        elapsed = time.time() - t_start
+        _log(f"  in attesa MuMuPlayer... ({elapsed:.0f}s)", log_fn)
+
+    _log(f"TIMEOUT: MuMuPlayer non avviato dopo {timeout}s", log_fn)
+    return False
+
+
+# ==============================================================================
 # API pubblica
 # ==============================================================================
 
@@ -147,6 +231,7 @@ def avvia_istanza(ist: dict, log_fn: Optional[Callable] = None) -> bool:
     Avvia un'istanza MuMuPlayer e il gioco Doomsday.
 
     Flusso:
+      0. avvia_player() — verifica/avvio MuMuPlayer (W11)
       1. MuMuManager control -v <indice> launch
       2. Polling is_android_started ogni DELAY_POLL_S, max timeout_adb_s
       3. adb connect 127.0.0.1:<porta>
@@ -171,6 +256,11 @@ def avvia_istanza(ist: dict, log_fn: Optional[Callable] = None) -> bool:
     _log(f"avvio istanza {nome} (indice={indice} porta={porta})", log_fn)
     _log(f"manager={_manager}", log_fn)
     _log(f"adb={_adb}", log_fn)
+
+    # 0. Verifica/avvio MuMuPlayer (necessario su Windows 11)
+    if not avvia_player(log_fn):
+        _log("ERRORE: MuMuPlayer non avviato — impossibile procedere", log_fn)
+        return False
 
     # 1. Launch MuMu
     _log(f"MuMuManager control -v {indice} launch", log_fn)

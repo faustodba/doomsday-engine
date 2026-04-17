@@ -169,6 +169,17 @@ Ogni rilascio segue questa sequenza:
 
 ---
 
+## Note ambiente
+
+### MuMu Player — avvio automatico
+- Windows 10: MuMuManager può avviare istanze senza che MuMuPlayer sia aperto
+- Windows 11: MuMuPlayer deve essere già avviato prima di chiamare avvia_istanza()
+- In produzione (Windows 11): aggiungere avvio automatico MuMuPlayer.exe
+  prima del loop istanze in main.py, oppure richiedere avvio manuale preliminare
+- TODO: verificare se MuMuManager espone un comando per avviare il player stesso
+
+---
+
 ## Regola generale
 
 > Approccio strutturato, verificabile, tracciabile.

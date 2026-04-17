@@ -117,6 +117,8 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | chiudi_istanza() post-tick | `main.py` | Chiusura MuMu dopo ogni tick, non solo a Ctrl+C |
 | _TASK_SETUP priorità | `main.py` | Riallineamento completo a ROADMAP — erano completamente invertite |
 | Regole anti-disallineamento | `.claude/CLAUDE.md` | Sezione vincolante: _TASK_SETUP ↔ ROADMAP sempre allineati |
+| avvia_player() | `core/launcher.py` | Avvio automatico MuMuNxMain.exe — rileva processo esistente, polling 60s |
+| Note W10/W11 | `.claude/CLAUDE.md` | W10: player non necessario; W11: player deve essere avviato |
 
 ---
 

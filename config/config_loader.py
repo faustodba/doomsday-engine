@@ -196,6 +196,8 @@ class MumuConfig:
     timeout_carica_s:    int = 180
     delay_carica_iniz_s: int = 45
     n_back_pulizia:      int = 5
+    player_exe:          str = ""
+    timeout_player_s:    int = 60
 
 
 # ==============================================================================
