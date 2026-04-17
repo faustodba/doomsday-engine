@@ -238,7 +238,7 @@ _contatori: dict[str, dict[str, int]] = {}
 _contatori_lock = threading.Lock()
 
 
-def _thread_istanza(ist, tasks_cls, dry_run, tick_sleep, stop_event):
+def _thread_istanza(ist, tasks_cls, dry_run):
     nome  = ist["nome"]
     porta = ist.get("porta", 16384 + ist.get("indice", 0) * 32)
 
@@ -283,83 +283,65 @@ def _thread_istanza(ist, tasks_cls, dry_run, tick_sleep, stop_event):
         _log(nome, f"[WARN] Ripristino schedule: {exc}")
 
     _log_fn = lambda msg: _log(nome, msg)
-    _istanza_chiusa = True
 
-    while not stop_event.is_set():
-        _istanza_chiusa = False
-
-        # ── 1. Avvio istanza MuMu + attesa HOME ─────────────────────────
-        if not dry_run:
-            if not _launcher.avvia_istanza(ist, _log_fn):
-                _log(nome, "[ERRORE] avvia_istanza() fallito — retry al prossimo ciclo")
-                for _ in range(tick_sleep):
-                    if stop_event.is_set(): break
-                    time.sleep(1)
-                continue
-            if not _launcher.attendi_home(ctx, _log_fn):
-                _log(nome, "[ERRORE] attendi_home() fallito — retry al prossimo ciclo")
-                _launcher.chiudi_istanza(ist, porta, _log_fn)
-                for _ in range(tick_sleep):
-                    if stop_event.is_set(): break
-                    time.sleep(1)
-                continue
-
-        # ── 2. Rebuild context (rilegge config aggiornata) ───────────────
-        gcfg = load_global()
-        ctx  = _build_ctx(ist, gcfg, dry_run)
-        orc._ctx = ctx
-
-        # ── 3. Tick ──────────────────────────────────────────────────────
-        _aggiorna_stato_istanza(nome, {"stato": "running", "scheduler": _scheduler_prossimi(orc)})
-        _log(nome, f"Tick -- {orc.n_dovuti()} task dovuti su {len(orc)} registrati")
-
-        results = orc.tick()
-
-        with _contatori_lock:
-            cnts = _contatori[nome]
-
-        ultimo = None
-        if results:
-            last_entry = max(orc._entries, key=lambda e: e.last_run, default=None)
-            if last_entry and last_entry.last_result:
-                lr    = last_entry.last_result
-                tname = last_entry.task.name() if callable(last_entry.task.name) else last_entry.task.name
-                cnts[tname] = cnts.get(tname, 0) + 1
-                ultimo = {"nome": tname, "esito": "ok" if lr.success else "err",
-                          "msg": (lr.message or "")[:120], "ts": datetime.now().strftime("%H:%M:%S"), "durata_s": 0}
-                _aggiungi_storico({"istanza": nome, "task": tname,
-                                   "esito": "ok" if lr.success else "err",
-                                   "ts": datetime.now().strftime("%H:%M:%S"),
-                                   "durata_s": 0, "msg": (lr.message or "")[:80]})
-
-        errori = sum(1 for r in results if not r.success)
-        _aggiorna_stato_istanza(nome, {"stato": "waiting", "task_eseguiti": dict(cnts),
-                                       "ultimo_task": ultimo, "scheduler": _scheduler_prossimi(orc), "errori": errori})
-        try:
-            # Sync schedule → state prima del save (restart-safe)
-            ctx.state.schedule.update_from_stato(orc.stato())
-            ctx.state.save(state_dir=os.path.join(ROOT, "state"))
-        except Exception as exc:
-            _log(nome, f"[WARN] save state: {exc}")
-
-        _log(nome, f"Tick completato ({len(results)} eseguiti) -- pausa {tick_sleep}s")
-
-        # ── 4. Chiusura istanza MuMu (fine ciclo) ───────────────────────
-        if not dry_run:
+    # ── 1. Avvio istanza MuMu + attesa HOME ─────────────────────────
+    if not dry_run:
+        if not _launcher.avvia_istanza(ist, _log_fn):
+            _log(nome, "[ERRORE] avvia_istanza() fallito")
+            _aggiorna_stato_istanza(nome, {"stato": "idle"})
+            return
+        if not _launcher.attendi_home(ctx, _log_fn):
+            _log(nome, "[ERRORE] attendi_home() fallito")
             _launcher.chiudi_istanza(ist, porta, _log_fn)
-            _istanza_chiusa = True
+            _aggiorna_stato_istanza(nome, {"stato": "idle"})
+            return
 
-        # ── 5. Pausa inter-tick ──────────────────────────────────────────
-        for _ in range(tick_sleep):
-            if stop_event.is_set(): break
-            time.sleep(1)
+    # ── 2. Rebuild context (rilegge config aggiornata) ───────────────
+    gcfg = load_global()
+    ctx  = _build_ctx(ist, gcfg, dry_run)
+    orc._ctx = ctx
 
-    # ── Shutdown safety net (Ctrl+C durante tick) ────────────────────────
-    if not dry_run and not _istanza_chiusa:
+    # ── 3. Tick ──────────────────────────────────────────────────────
+    _aggiorna_stato_istanza(nome, {"stato": "running", "scheduler": _scheduler_prossimi(orc)})
+    _log(nome, f"Tick -- {orc.n_dovuti()} task dovuti su {len(orc)} registrati")
+
+    results = orc.tick()
+
+    with _contatori_lock:
+        cnts = _contatori[nome]
+
+    ultimo = None
+    if results:
+        last_entry = max(orc._entries, key=lambda e: e.last_run, default=None)
+        if last_entry and last_entry.last_result:
+            lr    = last_entry.last_result
+            tname = last_entry.task.name() if callable(last_entry.task.name) else last_entry.task.name
+            cnts[tname] = cnts.get(tname, 0) + 1
+            ultimo = {"nome": tname, "esito": "ok" if lr.success else "err",
+                      "msg": (lr.message or "")[:120], "ts": datetime.now().strftime("%H:%M:%S"), "durata_s": 0}
+            _aggiungi_storico({"istanza": nome, "task": tname,
+                               "esito": "ok" if lr.success else "err",
+                               "ts": datetime.now().strftime("%H:%M:%S"),
+                               "durata_s": 0, "msg": (lr.message or "")[:80]})
+
+    errori = sum(1 for r in results if not r.success)
+    _aggiorna_stato_istanza(nome, {"stato": "waiting", "task_eseguiti": dict(cnts),
+                                   "ultimo_task": ultimo, "scheduler": _scheduler_prossimi(orc), "errori": errori})
+    try:
+        # Sync schedule → state prima del save (restart-safe)
+        ctx.state.schedule.update_from_stato(orc.stato())
+        ctx.state.save(state_dir=os.path.join(ROOT, "state"))
+    except Exception as exc:
+        _log(nome, f"[WARN] save state: {exc}")
+
+    _log(nome, f"Tick completato ({len(results)} eseguiti)")
+
+    # ── 4. Chiusura istanza MuMu ────────────────────────────────────
+    if not dry_run:
         _launcher.chiudi_istanza(ist, porta, _log_fn)
 
     _aggiorna_stato_istanza(nome, {"stato": "idle"})
-    _log(nome, "Thread fermato.")
+    _log(nome, "Thread completato.")
 
 
 def _scheduler_prossimi(orc) -> dict:
@@ -416,6 +398,7 @@ def main():
     if not istanze:
         _log("MAIN", "Nessuna istanza -- uscita."); sys.exit(1)
     _log("MAIN", f"Istanze: {[i['nome'] for i in istanze]}")
+    _log("MAIN", f"Modalità: SEQUENZIALE — ciclo {[i['nome'] for i in istanze]} → sleep 30min → ripeti")
 
     tasks_cls = _import_tasks()
     _log("MAIN", f"Task: {list(tasks_cls.keys())}")
@@ -441,22 +424,36 @@ def main():
     threading.Thread(target=_status_writer_loop, args=(stop_event, args.status_interval),
                      name="StatusWriter", daemon=True).start()
 
-    threads = []
-    for ist in istanze:
-        t = threading.Thread(target=_thread_istanza,
-                             args=(ist, tasks_cls, args.dry_run, args.tick_sleep, stop_event),
-                             name=ist["nome"], daemon=True)
-        t.start(); threads.append(t); time.sleep(2)
+    SLEEP_CICLO = 30 * 60  # 30 minuti tra un ciclo e l'altro
 
-    _log("MAIN", f"{len(threads)} thread avviati. Premi Ctrl+C per fermare.")
+    ciclo = 0
+    while not stop_event.is_set():
+        ciclo += 1
+        _log("MAIN", f"{'=' * 55}")
+        _log("MAIN", f"CICLO {ciclo} — {[i['nome'] for i in istanze]}")
 
-    try:
-        while not stop_event.is_set(): time.sleep(1)
-    except KeyboardInterrupt:
-        stop_event.set()
+        for ist in istanze:
+            if stop_event.is_set():
+                break
+            nome = ist["nome"]
+            _log("MAIN", f"--- Avvio istanza {nome} ---")
+            t = threading.Thread(
+                target=_thread_istanza,
+                args=(ist, tasks_cls, args.dry_run),
+                name=nome, daemon=True
+            )
+            t.start()
+            t.join()  # Attende che l'istanza completi il tick prima di passare alla prossima
+            _log("MAIN", f"--- Istanza {nome} completata ---")
 
-    _log("MAIN", "Attesa thread...")
-    for t in threads: t.join(timeout=30)
+        if stop_event.is_set():
+            break
+
+        _log("MAIN", f"Ciclo {ciclo} completato — sleep {SLEEP_CICLO//60} minuti")
+        for _ in range(SLEEP_CICLO):
+            if stop_event.is_set(): break
+            time.sleep(1)
+
     close_all_loggers()
     _log("MAIN", "Engine fermato.")
 

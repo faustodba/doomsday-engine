@@ -48,7 +48,7 @@
     "lingua": "en",
     "livello": 6,
     "profilo": "full",
-    "abilitata": true,
+    "abilitata": false,
     "fascia_oraria": ""
   },
   {
@@ -61,7 +61,7 @@
     "lingua": "en",
     "livello": 6,
     "profilo": "full",
-    "abilitata": true,
+    "abilitata": false,
     "fascia_oraria": ""
   },
   {
@@ -74,7 +74,7 @@
     "lingua": "en",
     "livello": 6,
     "profilo": "full",
-    "abilitata": true,
+    "abilitata": false,
     "fascia_oraria": ""
   },
   {
@@ -87,7 +87,7 @@
     "lingua": "en",
     "livello": 6,
     "profilo": "full",
-    "abilitata": true,
+    "abilitata": false,
     "fascia_oraria": ""
   },
   {
@@ -100,7 +100,7 @@
     "lingua": "en",
     "livello": 6,
     "profilo": "full",
-    "abilitata": true,
+    "abilitata": false,
     "fascia_oraria": ""
   },
   {
@@ -113,7 +113,7 @@
     "lingua": "en",
     "livello": 6,
     "profilo": "full",
-    "abilitata": true,
+    "abilitata": false,
     "fascia_oraria": ""
   },
   {
@@ -126,7 +126,7 @@
     "lingua": "en",
     "livello": 6,
     "profilo": "full",
-    "abilitata": true,
+    "abilitata": false,
     "fascia_oraria": ""
   },
   {
@@ -139,7 +139,7 @@
     "lingua": "en",
     "livello": 7,
     "profilo": "raccolta_only",
-    "abilitata": true,
+    "abilitata": false,
     "fascia_oraria": ""
   },
   {
@@ -152,7 +152,7 @@
     "lingua": "en",
     "livello": 6,
     "profilo": "full",
-    "abilitata": true,
+    "abilitata": false,
     "fascia_oraria": ""
   }
 ]
