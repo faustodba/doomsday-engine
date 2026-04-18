@@ -515,38 +515,6 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
     return True
 
 
-def _cerca_nodo_con_fallback(ctx: TaskContext, tipo: str) -> tuple[bool, int]:
-    """
-    Tenta la ricerca nodo con sequenza livelli: 7 → livello_default → 5.
-    Deduplicati e ordinati dal più alto al più basso.
-    Ritorna (trovato, livello_usato). livello_usato=0 se fallisce tutto.
-    """
-    livello_base = max(1, min(7, int(
-        ctx.config.get("livello", _cfg(ctx, "RACCOLTA_LIVELLO"))
-    )))
-
-    # Sequenza: 7, livello_base (se diverso da 7 e 5), 5
-    # Deduplicata e ordinata dal più alto al più basso
-    candidati = sorted(set([7, livello_base, 5]), reverse=True)
-    # Rimuovi livelli fuori range
-    candidati = [lv for lv in candidati if 1 <= lv <= 7]
-
-    for lv in candidati:
-        ctx.log_msg(f"Raccolta: tentativo CERCA {tipo} Lv.{lv}")
-        ok = _cerca_nodo(ctx, tipo, livello_override=lv)
-        if ok:
-            return True, lv
-        # Se _cerca_nodo fallisce per tipo NON selezionato,
-        # non ha senso ritentare con altro livello — abort
-        # _cerca_nodo ritorna False solo per tipo NON selezionato
-        # In quel caso usciamo subito
-        ctx.log_msg(f"Raccolta: CERCA {tipo} Lv.{lv} fallita — "
-                    f"tipo NON selezionato, abort sequenza")
-        return False, 0
-
-    return False, 0
-
-
 # ==============================================================================
 # Step 1 — OCR coordinate nodo reali (V5 ocr.py → _ocr_box + _leggi_coord_nodo)
 # ==============================================================================
@@ -975,26 +943,36 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
         # _cerca_nodo OK: ora leggi le coordinate del primo nodo
         # Se la lista risultati è vuota, chiave sarà None
         chiave_test = _leggi_coord_nodo(ctx)
-        if chiave_test is not None:
-            # Trovato almeno un nodo a questo livello — procedi
+        if chiave_test is not None and not blacklist_fuori.contiene(chiave_test):
+            # Trovato nodo utile a questo livello — procedi
             ctx.log_msg(f"Raccolta: nodo trovato a Lv.{lv} — procedo")
             cerca_ok = True
             break
-        # Lista vuota a questo livello → prova livello successivo
-        ctx.log_msg(
-            f"Raccolta: nessun nodo disponibile a Lv.{lv} — "
-            f"provo livello successivo"
-        )
+        # Lista vuota OR primo nodo già in blacklist fuori territorio
+        # → prova livello successivo
+        if chiave_test is not None:
+            ctx.log_msg(
+                f"Raccolta [{tipo}] Lv.{lv}: nodo {chiave_test} "
+                f"in blacklist fuori — provo livello successivo"
+            )
+        else:
+            ctx.log_msg(
+                f"Raccolta: nessun nodo disponibile a Lv.{lv} — "
+                f"provo livello successivo"
+            )
         # Chiudi pannello lente prima del prossimo tentativo
         ctx.device.key("KEYCODE_BACK")
         time.sleep(0.8)
 
     if not cerca_ok:
+        # Tutti i livelli hanno restituito nodi blacklistati o lista vuota
+        # → skip neutro (non bloccare il tipo: altri livelli/istanti potrebbero
+        # produrre nodi validi; il guard skip_neutri_per_tipo gestisce il blocco)
         ctx.log_msg(
-            f"Raccolta [{tipo}]: nessun nodo trovato su nessun livello — "
-            f"tipo bloccato"
+            f"Raccolta [{tipo}]: nessun nodo utile su livelli {sequenza_livelli} — "
+            f"skip neutro"
         )
-        return False, True, False  # tipo_bloccato=True
+        return False, False, True  # skip_neutro=True
 
     # chiave già letta nel loop sopra
     chiave = chiave_test
