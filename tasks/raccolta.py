@@ -324,6 +324,8 @@ class BlacklistFuori:
     def __init__(self, data_dir: str = "data"):
         self._lock = threading.Lock()
         path = Path(data_dir)
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parents[1] / path
         path.mkdir(parents=True, exist_ok=True)
         self._path = path / "blacklist_fuori_globale.json"
         self._data: dict[str, dict] = self._carica()

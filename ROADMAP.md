@@ -162,6 +162,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | skip_neutri_per_tipo | `tasks/raccolta.py` | Blocca tipo dopo 2 skip neutri consecutivi |
 | MCP Monitor server | `monitor/mcp_server.py` | MCP server FastMCP per analisi log in tempo reale da Claude Code VSCode. Strumenti: ciclo_stato, istanza_anomalie, istanza_raccolta, istanza_launcher, log_tail, anomalie_live |
 | Monitor analyzer | `monitor/analyzer.py` | Logica parsing JSONL, rilevamento anomalie, statistiche raccolta/launcher condivisa tra MCP server e futuri tool |
+| BlacklistFuori path assoluto | `tasks/raccolta.py` | `BlacklistFuori.__init__()` risolve `data_dir` relativo contro project root (`Path(__file__).resolve().parents[1]`). Fix WinError 5 "Accesso negato: 'data'" quando CWD del processo ≠ `C:\doomsday-engine` (regressione blacklist globale) |
 
 ### Test notturno 18/04/2026 — 3 cicli sequenziali FAU_00/01/02
 
