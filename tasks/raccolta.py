@@ -960,9 +960,19 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
                 f"Raccolta: nessun nodo disponibile a Lv.{lv} — "
                 f"provo livello successivo"
             )
-        # Chiudi pannello lente prima del prossimo tentativo
+        # Reset UI completo prima del prossimo livello: doppio BACK
+        # (chiude lista risultati + lente) + ricentro mappa via HOME/MAPPA.
+        # Il solo BACK lascia la lente in stato intermedio e _verifica_tipo
+        # al prossimo livello fallisce sistematicamente.
         ctx.device.key("KEYCODE_BACK")
-        time.sleep(0.8)
+        time.sleep(0.5)
+        ctx.device.key("KEYCODE_BACK")
+        time.sleep(0.5)
+        if ctx.navigator is not None:
+            ctx.navigator.vai_in_home()
+            time.sleep(0.5)
+            ctx.navigator.vai_in_mappa()
+            time.sleep(1.0)
 
     if not cerca_ok:
         # Tutti i livelli hanno restituito nodi blacklistati o lista vuota
