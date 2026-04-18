@@ -46,6 +46,7 @@ from typing import Literal
 import numpy as np
 
 from core.task import Task, TaskContext, TaskResult
+from shared.ui_helpers import attendi_template
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -280,11 +281,11 @@ class ArenaTask(Task):
         if not _navigato:
             ctx.log_msg("[ARENA] tap_barra fallback → coordinate fisse %s", _TAP_CAMPAIGN)
             ctx.device.tap(*_TAP_CAMPAIGN)
-        time.sleep(3.0)
+        time.sleep(1.0)  # animazione minima
 
         ctx.log_msg("[ARENA] Campaign → Arena of Doom")
         ctx.device.tap(*_TAP_ARENA_OF_DOOM)
-        time.sleep(3.5)
+        time.sleep(1.0)  # animazione minima
 
         # Gestione popup all'ingresso
         self._gestisci_popup_glory(ctx)
@@ -396,14 +397,14 @@ class ArenaTask(Task):
         else:
             ctx.log_msg("[ARENA] [CONTINUE] fallback → doppio tap centro")
             self._doppio_tap_centro(ctx)
-        time.sleep(2.5)
+        time.sleep(0.5)  # minimo animazione tap
 
         # POST-CONTINUE: popup Glory post-vittoria (cambio tier)?
         screen_post = ctx.device.screenshot()
         if screen_post is not None and self._match(ctx, screen_post, "glory"):
             ctx.log_msg("[ARENA] [POST-CONTINUE] popup Glory — chiudo")
             ctx.device.tap(*_TAP_GLORY_CONTINUE)
-            time.sleep(2.0)
+            time.sleep(0.5)  # minimo animazione tap
 
         # Verifica ritorno lista
         if not self._check_pin(ctx, "lista", retry=2, retry_s=1.5):

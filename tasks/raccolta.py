@@ -314,17 +314,18 @@ class Blacklist:
 class BlacklistFuori:
     """
     Blacklist persistente su disco dei nodi fuori territorio.
-    File: {BLACKLIST_FUORI_DIR}/blacklist_fuori_{istanza}.json
+    File: {BLACKLIST_FUORI_DIR}/blacklist_fuori_globale.json
     Formato: {"X_Y": {"ts": float, "tipo": str}}
     Nessun TTL — i nodi fuori territorio sono permanenti (la mappa non cambia).
+    Globale: condivisa tra tutte le istanze (stesso server/mappa).
     Thread-safe tramite lock.
     """
 
-    def __init__(self, istanza: str, data_dir: str = "data"):
+    def __init__(self, data_dir: str = "data"):
         self._lock = threading.Lock()
         path = Path(data_dir)
         path.mkdir(parents=True, exist_ok=True)
-        self._path = path / f"blacklist_fuori_{istanza}.json"
+        self._path = path / "blacklist_fuori_globale.json"
         self._data: dict[str, dict] = self._carica()
 
     def _carica(self) -> dict:
@@ -443,7 +444,10 @@ def _verifica_tipo(ctx: TaskContext, tipo: str) -> bool:
         return True
     soglia = _cfg(ctx, "SOGLIA_TIPO")
     roi    = _cfg(ctx, "ROI_LENTE")
-    screen = ctx.device.screenshot()
+    time.sleep(0.5)
+    ctx.device.screenshot()          # flush frame cached
+    time.sleep(0.2)
+    screen = ctx.device.screenshot() # frame live
     if not screen:
         return True
     r = ctx.matcher.find_one(screen, tmpl_tipo, threshold=soglia, zone=roi)
@@ -452,15 +456,19 @@ def _verifica_tipo(ctx: TaskContext, tipo: str) -> bool:
     return r.found
 
 
-def _cerca_nodo(ctx: TaskContext, tipo: str) -> bool:
+def _cerca_nodo(ctx: TaskContext, tipo: str,
+                livello_override: int = 0) -> bool:
     """
     LENTE → tap tipo × 2 → verifica tipo → livello → CERCA.
     Ritorna True se CERCA eseguita correttamente.
+    Se livello_override > 0 sovrascrive il livello di default.
     """
     tap_lente   = _cfg(ctx, "TAP_LENTE")
     coord_lv    = _cfg(ctx, "COORD_LIVELLO").get(tipo, _cfg(ctx, "COORD_LIVELLO")["campo"])
     # Livello nodo dall'istanza (instances.json → livello), fallback a RACCOLTA_LIVELLO
     livello     = max(1, min(7, int(ctx.config.get("livello", _cfg(ctx, "RACCOLTA_LIVELLO")))))
+    if livello_override > 0:
+        livello = max(1, min(7, livello_override))
     delay_cerca = _cfg(ctx, "DELAY_CERCA")
     tap_icona   = _cfg(ctx, "TAP_ICONA_TIPO").get(tipo, _cfg(ctx, "TAP_ICONA_TIPO")["campo"])
 
@@ -503,6 +511,38 @@ def _cerca_nodo(ctx: TaskContext, tipo: str) -> bool:
     time.sleep(delay_cerca)
     ctx.log_msg(f"Raccolta: CERCA eseguita per {tipo} Lv.{livello}")
     return True
+
+
+def _cerca_nodo_con_fallback(ctx: TaskContext, tipo: str) -> tuple[bool, int]:
+    """
+    Tenta la ricerca nodo con sequenza livelli: 7 → livello_default → 5.
+    Deduplicati e ordinati dal più alto al più basso.
+    Ritorna (trovato, livello_usato). livello_usato=0 se fallisce tutto.
+    """
+    livello_base = max(1, min(7, int(
+        ctx.config.get("livello", _cfg(ctx, "RACCOLTA_LIVELLO"))
+    )))
+
+    # Sequenza: 7, livello_base (se diverso da 7 e 5), 5
+    # Deduplicata e ordinata dal più alto al più basso
+    candidati = sorted(set([7, livello_base, 5]), reverse=True)
+    # Rimuovi livelli fuori range
+    candidati = [lv for lv in candidati if 1 <= lv <= 7]
+
+    for lv in candidati:
+        ctx.log_msg(f"Raccolta: tentativo CERCA {tipo} Lv.{lv}")
+        ok = _cerca_nodo(ctx, tipo, livello_override=lv)
+        if ok:
+            return True, lv
+        # Se _cerca_nodo fallisce per tipo NON selezionato,
+        # non ha senso ritentare con altro livello — abort
+        # _cerca_nodo ritorna False solo per tipo NON selezionato
+        # In quel caso usciamo subito
+        ctx.log_msg(f"Raccolta: CERCA {tipo} Lv.{lv} fallita — "
+                    f"tipo NON selezionato, abort sequenza")
+        return False, 0
+
+    return False, 0
 
 
 # ==============================================================================
@@ -905,21 +945,73 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
 
     Ritorna (marcia_ok, tipo_bloccato, skip_neutro).
     """
-    if not _cerca_nodo(ctx, tipo):
-        ctx.log_msg(f"Raccolta [{tipo}]: CERCA fallita — skip")
-        return False, False, False
+    # Sequenza livelli da tentare prima di bloccare il tipo
+    livello_base = max(1, min(7, int(
+        ctx.config.get("livello", _cfg(ctx, "RACCOLTA_LIVELLO"))
+    )))
+    if livello_base == 7:
+        sequenza_livelli = [7, 6, 5]
+    else:
+        # livello_base == 6 (o altro): prova base, poi 7, poi 5
+        seq = [livello_base, 7, 5]
+        seen = set()
+        sequenza_livelli = [lv for lv in seq
+                            if lv not in seen and not seen.add(lv)]
 
-    # Step 1: OCR coordinate nodo PRIMA del tap nodo (popup lista risultati ancora aperto).
-    # Sequenza V5: CERCA → lente piccola coord → OCR X/Y → tap nodo → GATHER → marcia.
-    # Il tap lente coordinate NON chiude il popup lista risultati.
-    chiave = _leggi_coord_nodo(ctx)
+    cerca_ok = False
+    chiave_test = None
+    for lv in sequenza_livelli:
+        ctx.log_msg(f"Raccolta: tentativo CERCA {tipo} Lv.{lv}")
+        ok = _cerca_nodo(ctx, tipo, livello_override=lv)
+        if not ok:
+            # Tipo NON selezionato — problema UI, inutile cambiare livello
+            ctx.log_msg(
+                f"Raccolta [{tipo}]: tipo NON selezionato — "
+                f"abort sequenza livelli"
+            )
+            return False, True, False  # tipo_bloccato=True
+        # _cerca_nodo OK: ora leggi le coordinate del primo nodo
+        # Se la lista risultati è vuota, chiave sarà None
+        chiave_test = _leggi_coord_nodo(ctx)
+        if chiave_test is not None:
+            # Trovato almeno un nodo a questo livello — procedi
+            ctx.log_msg(f"Raccolta: nodo trovato a Lv.{lv} — procedo")
+            cerca_ok = True
+            break
+        # Lista vuota a questo livello → prova livello successivo
+        ctx.log_msg(
+            f"Raccolta: nessun nodo disponibile a Lv.{lv} — "
+            f"provo livello successivo"
+        )
+        # Chiudi pannello lente prima del prossimo tentativo
+        ctx.device.key("KEYCODE_BACK")
+        time.sleep(0.8)
+
+    if not cerca_ok:
+        ctx.log_msg(
+            f"Raccolta [{tipo}]: nessun nodo trovato su nessun livello — "
+            f"tipo bloccato"
+        )
+        return False, True, False  # tipo_bloccato=True
+
+    # chiave già letta nel loop sopra
+    chiave = chiave_test
     # chiave può essere None se OCR fallisce — procediamo senza blacklist
 
     # Step 6: check blacklist statica fuori territorio (disco) — skip immediato
     if chiave and blacklist_fuori.contiene(chiave):
         ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} in blacklist statica fuori — skip")
+        # Chiudi lista risultati + lente (doppio BACK per stato pulito)
         ctx.device.key("KEYCODE_BACK")
         time.sleep(0.5)
+        ctx.device.key("KEYCODE_BACK")
+        time.sleep(0.5)
+        # Ricentra mappa sul castello prima della prossima cerca
+        if ctx.navigator is not None:
+            ctx.navigator.vai_in_home()
+            time.sleep(0.5)
+            ctx.navigator.vai_in_mappa()
+            time.sleep(1.0)
         return False, False, True   # skip neutro
 
     # Check blacklist dinamica RAM — nodo già occupato da nostra squadra
@@ -981,9 +1073,17 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
         if chiave:
             blacklist_fuori.aggiungi(chiave, tipo)   # Step 6: persiste su disco
             blacklist.commit(chiave, eta_s=None)      # Step 4: blacklist dinamica
+        # Chiudi popup nodo + ricentra mappa
         ctx.device.key("KEYCODE_BACK")
         time.sleep(0.5)
-        return False, False, True   # skip neutro — non conta come fallimento
+        ctx.device.key("KEYCODE_BACK")
+        time.sleep(0.5)
+        if ctx.navigator is not None:
+            ctx.navigator.vai_in_home()
+            time.sleep(0.5)
+            ctx.navigator.vai_in_mappa()
+            time.sleep(1.0)
+        return False, False, True   # skip neutro
 
     # RESERVED
     if chiave:
@@ -1106,7 +1206,17 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
                        attive_inizio: int,
                        blacklist: Blacklist,
                        blacklist_fuori: BlacklistFuori) -> int:
-    """Loop invio squadre fino a slot pieni o MAX_FALLIMENTI."""
+    """
+    Loop invio squadre fino a slot pieni o MAX_FALLIMENTI.
+
+    Gestione risultati di _invia_squadra():
+      - ok=True: incrementa inviate, attive_correnti, reset fallimenti_cons,
+        break se slot pieni
+      - skip_neutro: nessuna modifica contatori
+      - tipo_bloccato=True: aggiunge a tipi_bloccati, NO fallimenti++, NO HOME
+      - fallimento puro (ok=False, !tipo_bloccato, !skip_neutro):
+        fallimenti++, HOME + OCR + MAP, se slot pieni → exit
+    """
     max_fallimenti = _cfg(ctx, "RACCOLTA_MAX_FALLIMENTI")
     n_truppe       = _cfg(ctx, "RACCOLTA_TRUPPE")
     deposito_ocr   = getattr(ctx, "_deposito_ocr", {})
@@ -1114,6 +1224,7 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
 
     tipi_bloccati: set[str]    = set()
     cooldown_map: dict[str, float] = {}
+    skip_neutri_per_tipo: dict[str, int] = {}
 
     attive_correnti = attive_inizio
     inviate         = 0
@@ -1131,7 +1242,7 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
 
         tipi_disponibili = [t for t in _TUTTI_I_TIPI if t not in tipi_bloccati]
         if not tipi_disponibili:
-            ctx.log_msg("Raccolta: tutti i tipi bloccati — abbandono")
+            ctx.log_msg("Raccolta: tutti i tipi bloccati — uscita")
             break
 
         ora    = time.time()
@@ -1173,45 +1284,102 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
             cooldown_map, n_truppe, tipi_bloccati, obiettivo
         )
 
+        # ── CASO ok=True ─────────────────────────────────────────────────
         if ok:
             inviate         += 1
             attive_correnti += 1
             fallimenti_cons  = 0
+            skip_neutri_per_tipo[tipo] = 0
             ctx.log_msg(f"Raccolta: squadra confermata ({attive_correnti}/{obiettivo})")
             time.sleep(_cfg(ctx, "DELAY_POST_MARCIA"))
-        elif skip_neutro:
-            ctx.log_msg(f"Raccolta: skip neutro {tipo} — fallimenti_cons invariato ({fallimenti_cons})")
-        else:
-            if tipo_bloccato:
+            if attive_correnti >= obiettivo:
+                ctx.log_msg(f"Raccolta: slot pieni ({attive_correnti}/{obiettivo}) — uscita")
+                break
+            continue
+
+        # ── CASO skip_neutro ─────────────────────────────────────────────
+        if skip_neutro:
+            skip_neutri_per_tipo[tipo] = skip_neutri_per_tipo.get(tipo, 0) + 1
+            n_skip = skip_neutri_per_tipo[tipo]
+            ctx.log_msg(
+                f"Raccolta: skip neutro {tipo} ({n_skip}/2) — "
+                f"fallimenti_cons invariato ({fallimenti_cons})"
+            )
+            if n_skip >= 2:
                 tipi_bloccati.add(tipo)
-                ctx.log_msg(f"Raccolta: tipo '{tipo}' bloccato per questo ciclo")
-            fallimenti_cons += 1
-            # Dopo ogni fallimento/rollback: torna in HOME per lettura OCR
-            # contatore slot affidabile, poi rientra in mappa per la prossima
-            # iterazione. Riallinea attive_correnti con lo stato reale.
-            if ctx.navigator is not None:
-                ctx.navigator.vai_in_home()
-                time.sleep(1.0)
-            try:
-                from shared.ocr_helpers import leggi_contatore_slot
-                screen_home = ctx.device.screenshot()
-                if screen_home is not None:
-                    attive_reali, _ = leggi_contatore_slot(
-                        screen_home, totale_noto=obiettivo
+                ctx.log_msg(
+                    f"Raccolta: tipo '{tipo}' bloccato dopo {n_skip} skip neutri consecutivi"
+                )
+                if set(_TUTTI_I_TIPI).issubset(tipi_bloccati):
+                    ctx.log_msg("Raccolta: tutti i tipi bloccati — uscita")
+                    break
+            continue
+
+        # ── CASO tipo_bloccato (CERCA fallita / blacklist / livello basso) ──
+        # Nessun HOME, nessun fallimenti++. Solo marcatura e continua.
+        if tipo_bloccato:
+            tipi_bloccati.add(tipo)
+            ctx.log_msg(f"Raccolta: tipo '{tipo}' bloccato per questo ciclo")
+            if set(_TUTTI_I_TIPI).issubset(tipi_bloccati):
+                ctx.log_msg("Raccolta: tutti i tipi bloccati — uscita")
+                break
+            continue
+
+        # ── CASO fallimento puro (marcia fallita con rollback) ───────────
+        # Torna in HOME, rileggi slot, rientra in mappa.
+        fallimenti_cons += 1
+        if ctx.navigator is not None:
+            ctx.navigator.vai_in_home()
+            time.sleep(1.0)
+        try:
+            from shared.ocr_helpers import leggi_contatore_slot
+            screen_home = ctx.device.screenshot()
+            if screen_home is not None:
+                attive_reali, _ = leggi_contatore_slot(
+                    screen_home, totale_noto=obiettivo
+                )
+                if attive_reali > obiettivo:
+                    ctx.log_msg(
+                        f"Raccolta: OCR post-rollback anomalo "
+                        f"attive={attive_reali}>totale={obiettivo} — ignorato"
                     )
-                    if attive_reali >= 0 and attive_reali != attive_correnti:
+                elif attive_reali >= 0:
+                    if attive_reali != attive_correnti:
                         ctx.log_msg(
                             f"Raccolta: [RIALLINEA] attive {attive_correnti}→{attive_reali} "
                             f"(OCR post-rollback da HOME)"
                         )
                         attive_correnti = attive_reali
-            except Exception as exc:
-                ctx.log_msg(f"Raccolta: OCR slot post-rollback fallito ({exc})")
-            if ctx.navigator is not None:
-                ctx.navigator.vai_in_mappa()
-                time.sleep(1.5)
+                    if attive_correnti >= obiettivo:
+                        ctx.log_msg(
+                            f"Raccolta: slot pieni dopo rollback "
+                            f"({attive_correnti}/{obiettivo}) — uscita immediata"
+                        )
+                        return inviate
+        except Exception as exc:
+            ctx.log_msg(f"Raccolta: OCR slot post-rollback fallito ({exc})")
+        if ctx.navigator is not None:
+            ctx.navigator.vai_in_mappa()
+            time.sleep(1.5)
 
-    ctx.log_msg(f"Raccolta: loop completato — {inviate} squadre inviate")
+    # ── Fine loop: torna in HOME, rileggi slot, log ──────────────────────
+    if ctx.navigator is not None:
+        ctx.navigator.vai_in_home()
+        time.sleep(1.0)
+    try:
+        from shared.ocr_helpers import leggi_contatore_slot
+        screen_home = ctx.device.screenshot()
+        if screen_home is not None:
+            attive_ocr, _ = leggi_contatore_slot(screen_home, totale_noto=obiettivo)
+            if 0 <= attive_ocr <= obiettivo:
+                attive_correnti = attive_ocr
+    except Exception:
+        pass
+
+    ctx.log_msg(
+        f"Raccolta: loop completato — {inviate} inviate, "
+        f"attive={attive_correnti}/{obiettivo}"
+    )
     return inviate
 
 
@@ -1277,6 +1445,15 @@ class RaccoltaTask(Task):
                 if screen_home is not None:
                     attive_ocr, totale_ocr = leggi_contatore_slot(
                         screen_home, totale_noto=totale_noto)
+                    # Sanity check: attive > totale_noto = OCR sicuramente sbagliato
+                    # (es. "5" letto come "7"). Fallback conservativo: assumo pieni.
+                    if attive_ocr > totale_noto:
+                        ctx.log_msg(
+                            f"Raccolta: OCR slot anomalo attive={attive_ocr}>totale={totale_noto} "
+                            f"— assumo slot pieni, skip conservativo"
+                        )
+                        return TaskResult(success=True, message="OCR anomalo — skip conservativo",
+                                          data={"inviate": 0})
                     if attive_ocr >= 0:
                         attive_inizio = attive_ocr
                         if totale_ocr > 0:
@@ -1322,33 +1499,110 @@ class RaccoltaTask(Task):
                 reserved_ttl=int(_cfg(ctx, "BLACKLIST_RESERVED_TTL")),
             )
 
-        # Step 6: blacklist statica fuori territorio
+        # Step 6: blacklist statica globale fuori territorio
         fuori_dir = _cfg(ctx, "BLACKLIST_FUORI_DIR")
-        blacklist_fuori = BlacklistFuori(ctx.instance_name, data_dir=fuori_dir)
+        blacklist_fuori = BlacklistFuori(data_dir=fuori_dir)
         if len(blacklist_fuori) > 0:
-            ctx.log_msg(f"Raccolta: blacklist statica fuori territorio: "
+            ctx.log_msg(f"Raccolta: blacklist statica globale fuori territorio: "
                         f"{len(blacklist_fuori)} nodi noti")
 
         ctx._deposito_ocr = deposito_ocr  # type: ignore
 
-        ctx.log_msg("Raccolta: navigazione → mappa")
-        if ctx.navigator is not None:
-            if not ctx.navigator.vai_in_mappa():
-                ctx.log_msg("Raccolta: impossibile andare in mappa — abort")
-                return TaskResult(success=False, message="vai_in_mappa fallito",
-                                  data={"inviate": 0})
-        else:
-            ctx.device.key("KEYCODE_MAP")
-            time.sleep(2.0)
+        # Loop esterno: MAX_TENTATIVI_CICLO tentativi di riempire gli slot.
+        # Ogni tentativo: naviga in mappa → _loop_invio_marce → HOME + OCR check.
+        # Uscita anticipata se slot pieni (successo) o vai_in_mappa fallisce.
+        MAX_TENTATIVI_CICLO = 3
+        tentativi_ciclo = 0
+        inviate_totali  = 0
+        attive_correnti = attive_inizio
 
-        inviate = 0
         try:
-            inviate = _loop_invio_marce(ctx, obiettivo, attive_inizio,
-                                        blacklist, blacklist_fuori)
+            while tentativi_ciclo < MAX_TENTATIVI_CICLO:
+                tentativi_ciclo += 1
+
+                if tentativi_ciclo > 1:
+                    # Rileggi slot da HOME prima di decidere se riprovare
+                    if ctx.navigator is not None:
+                        ctx.navigator.vai_in_home()
+                        time.sleep(1.0)
+                    try:
+                        from shared.ocr_helpers import leggi_contatore_slot
+                        screen_home = ctx.device.screenshot()
+                        if screen_home is not None:
+                            attive_ocr, _ = leggi_contatore_slot(
+                                screen_home, totale_noto=obiettivo
+                            )
+                            if 0 <= attive_ocr <= obiettivo:
+                                attive_correnti = attive_ocr
+                                ctx.log_msg(
+                                    f"Raccolta: pre-tentativo {tentativi_ciclo} — "
+                                    f"attive={attive_correnti}/{obiettivo}"
+                                )
+                                if attive_correnti >= obiettivo:
+                                    ctx.log_msg("Raccolta: slot pieni — chiusura istanza")
+                                    break
+                    except Exception as exc:
+                        ctx.log_msg(f"Raccolta: OCR pre-tentativo fallito ({exc})")
+
+                    # Slot ancora liberi: naviga in mappa per il tentativo successivo
+                    if ctx.navigator is not None:
+                        if not ctx.navigator.vai_in_mappa():
+                            ctx.log_msg(
+                                f"Raccolta: vai_in_mappa fallito al tentativo "
+                                f"{tentativi_ciclo} — uscita"
+                            )
+                            break
+                    else:
+                        ctx.device.key("KEYCODE_MAP")
+                        time.sleep(2.0)
+                else:
+                    # Primo tentativo: navigazione iniziale in mappa
+                    ctx.log_msg("Raccolta: navigazione → mappa")
+                    if ctx.navigator is not None:
+                        if not ctx.navigator.vai_in_mappa():
+                            ctx.log_msg("Raccolta: impossibile andare in mappa — abort")
+                            return TaskResult(success=False, message="vai_in_mappa fallito",
+                                              data={"inviate": 0})
+                    else:
+                        ctx.device.key("KEYCODE_MAP")
+                        time.sleep(2.0)
+
+                # Esegui il loop invio marce
+                inviate = _loop_invio_marce(ctx, obiettivo, attive_correnti,
+                                             blacklist, blacklist_fuori)
+                inviate_totali += inviate
+
+                # Post-loop: rileggi slot da HOME per decidere se continuare
+                if ctx.navigator is not None:
+                    ctx.navigator.vai_in_home()
+                    time.sleep(1.0)
+                try:
+                    from shared.ocr_helpers import leggi_contatore_slot
+                    screen_home = ctx.device.screenshot()
+                    if screen_home is not None:
+                        attive_ocr, _ = leggi_contatore_slot(
+                            screen_home, totale_noto=obiettivo
+                        )
+                        if 0 <= attive_ocr <= obiettivo:
+                            attive_correnti = attive_ocr
+                except Exception:
+                    pass
+
+                if attive_correnti >= obiettivo:
+                    ctx.log_msg(
+                        f"Raccolta: slot pieni ({attive_correnti}/{obiettivo}) "
+                        f"— chiusura istanza"
+                    )
+                    break
+
+                ctx.log_msg(
+                    f"Raccolta: tentativo {tentativi_ciclo}/{MAX_TENTATIVI_CICLO} "
+                    f"completato — slot {attive_correnti}/{obiettivo}"
+                )
         except Exception as e:
-            ctx.log_msg(f"Raccolta: errore nel loop marce: {e}")
+            ctx.log_msg(f"Raccolta: errore nel loop esterno: {e}")
             return TaskResult(success=False, message=f"errore: {e}",
-                              data={"inviate": inviate})
+                              data={"inviate": inviate_totali})
         finally:
             ctx.log_msg("Raccolta: ritorno in home")
             if ctx.navigator is not None:
@@ -1356,6 +1610,13 @@ class RaccoltaTask(Task):
             else:
                 ctx.device.key("KEYCODE_HOME")
 
-        ctx.log_msg(f"Raccolta: completata — {inviate}/{libere} squadre inviate")
-        return TaskResult(success=True, message=f"{inviate} squadre inviate",
-                          data={"inviate": inviate})
+        slot_pieni = (attive_correnti >= obiettivo)
+        ctx.log_msg(
+            f"Raccolta: completata — {inviate_totali} squadre totali "
+            f"(tentativi={tentativi_ciclo}, slot_pieni={slot_pieni})"
+        )
+        return TaskResult(
+            success=True,
+            message=f"{inviate_totali} squadre inviate",
+            data={"inviate": inviate_totali, "slot_pieni": slot_pieni},
+        )

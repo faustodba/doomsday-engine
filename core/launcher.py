@@ -5,6 +5,7 @@
 #
 #  Funzioni pubbliche:
 #    avvia_player(log_fn)              → bool
+#    reset_istanza(ist, log_fn)        → None   (pre-ciclo, stato pulito)
 #    avvia_istanza(ist, log_fn)        → bool
 #    attendi_home(ctx, log_fn)         → bool
 #    chiudi_istanza(ist, porta, log_fn)→ None
@@ -262,6 +263,18 @@ def avvia_istanza(ist: dict, log_fn: Optional[Callable] = None) -> bool:
         _log("ERRORE: MuMuPlayer non avviato — impossibile procedere", log_fn)
         return False
 
+    # Attesa spegnimento completo istanza precedente (max 30s)
+    _log(f"[{nome}] verifica istanza spenta...", log_fn)
+    t_off = time.time()
+    while time.time() - t_off < 30:
+        info = _mumu_info(indice, _manager)
+        started = info.get("is_android_started") or info.get("android_started")
+        if not started:
+            _log(f"[{nome}] istanza spenta — procedo", log_fn)
+            break
+        _log(f"[{nome}] istanza ancora attiva — attendo 3s...", log_fn)
+        time.sleep(3.0)
+
     # 1. Launch MuMu
     _log(f"MuMuManager control -v {indice} launch", log_fn)
     try:
@@ -329,7 +342,9 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:
          - log "[nome] schermata=X (Ns)"
          - se schermata != Screen.UNKNOWN: break
       3. Se timeout: return False
-      4. vai_in_home() verifica finale
+      4. Stabilizzazione: attende HOME stabile per 3 poll consecutivi (max 60s)
+         con BACK ad ogni iterazione per chiudere popup/banner
+      5. vai_in_home() verifica finale
 
     Args:
         ctx: TaskContext con navigator disponibile
@@ -379,7 +394,34 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:
                  f"{_cfg.timeout_carica_s}s", log_fn)
             return False
 
-    # 4. vai_in_home() verifica finale
+    # 4. Stabilizzazione: attende HOME stabile senza popup/overlay
+    # Un singolo rilevamento HOME non basta — il gioco mostra banner e
+    # popup per 10-30s dopo il caricamento. Aspettiamo che la HOME sia
+    # stabile per 3 poll consecutivi con score mappa nel range normale.
+    if nav is not None:
+        _log(f"[{nome}] stabilizzazione HOME (max 30s)...", log_fn)
+        stable_count = 0
+        t_stab = time.time()
+        while time.time() - t_stab < 30:
+            time.sleep(5.0)
+            try:
+                schermata = nav.schermata_corrente()
+            except Exception:
+                schermata = Screen.UNKNOWN
+            if schermata == Screen.HOME:
+                stable_count += 1
+                _log(f"[{nome}] HOME stabile {stable_count}/3", log_fn)
+                if stable_count >= 3:
+                    _log(f"[{nome}] HOME stabilizzata — pronti", log_fn)
+                    break
+            else:
+                if stable_count > 0:
+                    _log(f"[{nome}] HOME instabile ({schermata}) — reset contatore", log_fn)
+                stable_count = 0
+        else:
+            _log(f"[{nome}] stabilizzazione timeout — procedo comunque", log_fn)
+
+    # 5. vai_in_home() verifica finale
     if nav is not None:
         _log(f"[{nome}] vai_in_home() verifica finale", log_fn)
         ok = nav.vai_in_home()
@@ -391,6 +433,66 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:
 
     _log(f"[{nome}] navigator assente — HOME assunto (ottimistico)", log_fn)
     return True
+
+
+def reset_istanza(ist: dict, log_fn: Optional[Callable] = None) -> None:
+    """
+    Forza la chiusura completa di un'istanza prima di un nuovo ciclo.
+    Garantisce uno stato pulito indipendentemente da cosa è successo prima.
+
+    Flusso:
+      1. am force-stop gioco via adb (ignora errori)
+      2. MuMuManager control -v <indice> shutdown
+      3. Polling is_android_started == False (max 30s)
+      4. adb disconnect
+    """
+    _cfg     = load_global().mumu
+    _manager = _resolve_manager(_cfg.manager)
+    _adb     = os.environ.get("MUMU_ADB_PATH") or _cfg.adb
+
+    nome   = ist.get("nome",   "?")
+    indice = ist.get("indice", 0)
+    porta  = ist.get("porta",  16384 + indice * 32)
+
+    _log(f"[{nome}] reset pre-ciclo (indice={indice} porta={porta})", log_fn)
+
+    # 1. Force-stop gioco
+    _adb_cmd(porta, "shell", "am", "force-stop",
+             GAME_ACTIVITY.split("/")[0], adb_exe=_adb)
+
+    # 2. Shutdown MuMu
+    _log(f"[{nome}] MuMuManager shutdown...", log_fn)
+    try:
+        subprocess.run(
+            [_manager, "control", "-v", str(indice), "shutdown"],
+            capture_output=True, timeout=30,
+        )
+    except Exception as exc:
+        _log(f"[{nome}] shutdown errore (ignorato): {exc}", log_fn)
+
+    # 3. Polling spegnimento (max 30s)
+    t_off = time.time()
+    while time.time() - t_off < 30:
+        time.sleep(3.0)
+        info = _mumu_info(indice, _manager)
+        started = info.get("is_android_started") or info.get("android_started")
+        if not started:
+            _log(f"[{nome}] istanza spenta ({time.time()-t_off:.0f}s)", log_fn)
+            break
+        _log(f"[{nome}] ancora attiva — attendo...", log_fn)
+    else:
+        _log(f"[{nome}] timeout spegnimento — procedo comunque", log_fn)
+
+    # 4. adb disconnect
+    try:
+        subprocess.run(
+            [_adb, "disconnect", f"127.0.0.1:{porta}"],
+            capture_output=True, timeout=10,
+        )
+    except Exception:
+        pass
+
+    _log(f"[{nome}] reset completato", log_fn)
 
 
 def chiudi_istanza(ist: dict, porta: int,

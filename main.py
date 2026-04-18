@@ -65,6 +65,7 @@ def _carica_istanze(filtro=None) -> list[dict]:
         print(f"  [WARN] {path} non trovato"); return []
     except json.JSONDecodeError as exc:
         print(f"  [ERRORE] {path}: {exc}"); return []
+    istanze = [i for i in istanze if i.get("abilitata", False)]
     if filtro:
         istanze = [i for i in istanze if i.get("nome") in filtro]
         if not istanze:
@@ -437,6 +438,8 @@ def main():
                 break
             nome = ist["nome"]
             _log("MAIN", f"--- Avvio istanza {nome} ---")
+            if not args.dry_run:
+                _launcher.reset_istanza(ist, lambda msg: _log(nome, msg))
             t = threading.Thread(
                 target=_thread_istanza,
                 args=(ist, tasks_cls, args.dry_run),

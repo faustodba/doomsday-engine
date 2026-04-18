@@ -69,6 +69,7 @@ import numpy as np
 from typing import Optional
 
 from core.task import Task, TaskContext, TaskResult
+from shared.ui_helpers import attendi_template, attendi_scomparsa_template
 
 # ------------------------------------------------------------------------------
 # Costanti
@@ -602,11 +603,12 @@ def _gestisci_caution(ctx: TaskContext, caution_gestito: list) -> bool:
 
     # Tap "Do not show again"
     ctx.device.tap(*_cfg(ctx, "BAG_CAUTION_CHECK"))
-    time.sleep(delay)
+    time.sleep(0.3)  # minimo animazione tap
 
     # Tap OK
     ctx.device.tap(*_cfg(ctx, "BAG_CAUTION_OK"))
-    time.sleep(delay)
+    # Attendi scomparsa popup (polling max 3s)
+    attendi_scomparsa_template(ctx, pin, soglia=threshold, timeout=3.0)
 
     caution_gestito[0] = True
     ctx.log_msg("[ZAINO] Caution gestito — non comparira' piu' in questa sessione")

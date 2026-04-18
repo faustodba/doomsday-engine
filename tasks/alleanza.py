@@ -15,6 +15,7 @@ import time
 from dataclasses import dataclass
 
 from core.task import Task, TaskContext, TaskResult
+from shared.ui_helpers import attendi_template
 
 
 @dataclass
@@ -87,11 +88,11 @@ class AlleanzaTask(Task):
     def _esegui_alleanza(self, device, matcher, coord_alleanza, log, cfg):
         log(f"Tap Alleanza {coord_alleanza}")
         device.tap(*coord_alleanza)
-        time.sleep(cfg.wait_open_alleanza)
+        time.sleep(0.3)  # minimo animazione tap
 
         log(f"Tap Dono {cfg.coord_dono}")
         device.tap(*cfg.coord_dono)
-        time.sleep(cfg.wait_open_dono)
+        time.sleep(0.3)  # minimo animazione tap
 
         log(f"Tab Negozio {cfg.coord_tab_negozio}")
         device.tap(*cfg.coord_tab_negozio)

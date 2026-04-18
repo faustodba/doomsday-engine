@@ -77,6 +77,7 @@ from typing import Optional
 import numpy as np
 
 from core.task import Task, TaskContext, TaskResult
+from shared.ui_helpers import attendi_template
 
 # ------------------------------------------------------------------------------
 # Default costanti UI (960x540)
@@ -293,7 +294,7 @@ def _centra_mappa(ctx: TaskContext) -> None:
     time.sleep(2.5)
 
     ctx.device.tap(_cfg(ctx, "TAP_CASTELLO_CENTER"))
-    time.sleep(2.0)
+    time.sleep(0.3)  # minimo animazione tap
     ctx.log_msg("Rifornimento: mappa centrata e castello tappato")
 
 
@@ -368,7 +369,7 @@ def _apri_resource_supply(ctx: TaskContext) -> bool:
 
     ctx.log_msg(f"Rifornimento: RESOURCE SUPPLY trovato ({result.cx},{result.cy}) → tap")
     ctx.device.tap(result.cx, result.cy)
-    time.sleep(2.5)
+    time.sleep(0.3)  # minimo animazione tap — popup invio viene verificato nel flusso successivo
     return True
 
 

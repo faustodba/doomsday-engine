@@ -60,6 +60,24 @@ All'inizio di ogni sessione, in questo ordine:
   a patto che ci siano slot liberi. Non aggiungere mai `interval` o `schedule`.
 - Il contatore slot squadre X/Y è leggibile via OCR sia da HOME che da MAPPA.
   Non assumere mai che si legga solo in mappa.
+- **Lettura iniziale slot OCR** deve essere fatta in HOME (più stabile di MAPPA
+  dove banner/animazioni causano falsi positivi).
+- **Sanity check OCR slot**: se `attive > totale_noto` → OCR sicuramente sbagliato
+  (es. "5" letto come "7"). Fallback conservativo: assumere slot pieni, skip.
+- **BlacklistFuori territorio** è GLOBALE (file `data/blacklist_fuori_globale.json`
+  condiviso tra tutte le istanze — stessa mappa di gioco). Non reintrodurre mai
+  file per istanza come `blacklist_fuori_FAU_XX.json`.
+- **Logica raccolta — gestione fallimenti**:
+  - CERCA fallita (tipo NON selezionato) = `tipo_bloccato=True` → blocca tipo, NON incrementa fallimenti_cons
+  - Skip neutro (nodo in blacklist) = dopo 2 skip neutri consecutivi sullo stesso tipo → blocca tipo
+  - Fallimento puro (marcia fallita) = incrementa fallimenti_cons, torna HOME, rilegge slot
+  - Se slot pieni in qualsiasi momento → uscita immediata dal loop
+  - Loop esterno: max 3 tentativi ciclo raccolta; rilettura slot tra tentativi
+- **reset_istanza()**: chiamare sempre all'inizio di ogni ciclo prima di `avvia_istanza()`.
+  Garantisce stato pulito indipendentemente da crash/interruzioni precedenti.
+- **Stabilizzazione HOME**: dopo `attendi_home()`, la HOME deve essere stabile per
+  3 poll consecutivi da 5s (15s di stabilità) prima di avviare il tick.
+  Timeout 30s: se non converge, procede comunque con `vai_in_home()` finale.
 
 ---
 
@@ -73,15 +91,16 @@ All'inizio di ogni sessione, in questo ordine:
 
 ---
 
-## Issues aperti (stato al 14/04/2026)
+## Issues aperti (stato al 18/04/2026)
 
 | # | Issue | Priorità | Stato |
 |---|-------|----------|-------|
-| RT-15 | Arena + ArenaMercato — da testare su FAU_01 | ALTA | ⏳ in attesa |
-| 1 | Rifornimento — task disabilitato, da abilitare e testare | ALTA | ⏳ in attesa |
-| 3 | Zaino — `deposito` OCR non passato dall'orchestrator a `ZainoTask.run()` | MEDIA | ⏳ in attesa |
-| 4 | Radar — skip silenzioso, nessun log prodotto | ALTA | ⏳ in attesa |
-| 5 | Alleanza — `COORD_ALLEANZA=(760,505)` ancora hardcoded | BASSA | ⏳ in attesa |
+| 1 | Rifornimento — da abilitare e testare | ALTA | ⏳ in attesa |
+| 3 | Zaino — deposito OCR | MEDIA | ⏳ in attesa |
+| 5 | Alleanza — COORD hardcoded | BASSA | ⏳ in attesa |
+| 9 | Raccolta — tipo NON selezionato FAU_01/FAU_02 | MEDIA | ✅ RISOLTA (fix flush frame cached + attendi_template) |
+| 11 | Raccolta — Issue tipo NON selezionato FAU_01/FAU_02 | MEDIA | ⏳ parziale |
+| 12 | Stabilizzazione HOME FAU_01/FAU_02 non converge (1-2/3 poi timeout) | MEDIA | ⏳ da investigare |
 
 > Aggiornare questa tabella ad ogni sessione insieme alla ROADMAP.
 

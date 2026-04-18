@@ -38,6 +38,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from core.task import Task, TaskContext, TaskResult
+from shared.ui_helpers import attendi_template
 
 if TYPE_CHECKING:
     from core.device import MuMuDevice, FakeDevice
@@ -333,10 +334,17 @@ class StoreTask(Task):
 
             log(f"Tap carrello ({r_carr.cx},{r_carr.cy})")
             device.tap(r_carr.cx, r_carr.cy)
-            time.sleep(cfg.wait_tap + 0.2)
+            time.sleep(0.3)  # minimo animazione tap
 
         # Verifica merchant aperto: doppio match open vs close
-        shot = device.screenshot()
+        # (attendi apertura popup — polling con retry interno al check)
+        for _tent in range(8):
+            shot = device.screenshot()
+            if shot is not None:
+                s = matcher.score(shot, cfg.tmpl_merchant)
+                if s >= cfg.soglia_merchant:
+                    break
+            time.sleep(0.5)
         s_merch_open  = matcher.score(shot, cfg.tmpl_merchant)
         s_merch_close = matcher.score(shot, cfg.tmpl_merchant_close)
         log(f"Merchant open={s_merch_open:.3f}  close={s_merch_close:.3f}"

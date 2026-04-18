@@ -29,7 +29,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
-## Piano test runtime — Stato al 16/04/2026
+## Piano test runtime — Stato al 18/04/2026
 
 | Test | Descrizione | Stato | Note |
 |------|-------------|-------|------|
@@ -105,14 +105,13 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 - Fix: verificare coordinate in screenshot reale + aggiungere
   dismiss maschera laterale prima del retry
 
-### 9. Raccolta parallela — selezione icona tipo fallisce (ALTA)
-- In modalità multi-istanza parallela, `[VERIFICA] tipo` score scende a 0.23
-- Singola istanza: score > 0.99
-- Lock globale screencap peggiora la situazione causando starvation
-- Causa vera da investigare: potrebbe essere MuMu che non aggiorna
-  il frame dell'istanza "di sfondo" quando un'altra è in foreground
-- Fix da valutare: usare exec-out screencap invece di screencap+pull,
-  oppure forzare il focus dell'istanza prima dello screenshot
+### 9. Raccolta — selezione icona tipo fallisce su istanze specifiche (ALTA)
+- `[VERIFICA] tipo` score scende a 0.05-0.23 su FAU_01/FAU_02 (tutti i tipi)
+- Su FAU_00: score > 0.99 costantemente
+- **NON è parallelismo**: confermato da test notturno 18/04/2026 in modalità sequenziale
+- **PARZIALMENTE RISOLTA 18/04/2026**: flush frame cached risolve il problema.
+  Score torna >0.99 su FAU_00. FAU_01/FAU_02 migliorati ma instabili.
+  Fix skip_neutri_per_tipo evita loop su nodo in blacklist.
 
 ### 10. Lock globale screencap — starvation con 3+ istanze (ALTA)
 - `_screencap_global_lock` serializza tutti gli screenshot
@@ -120,7 +119,56 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
   a fare screenshot per tutta la durata del tick FAU_02
 - Fix: rimuovere il lock globale, investigare causa vera del problema
 
+### 11. Stabilizzazione HOME — ancora instabile su FAU_01/FAU_02 (MEDIA)
+- FAU_00: converge in 9s (3/3 poll). FAU_01/FAU_02: raggiungono max 1-2/3 poi timeout
+- Causa: popup/banner alternano HOME↔UNKNOWN ogni 5s durante caricamento
+- Fix applicato: rimosso BACK dal loop (causava apertura menu uscita)
+- Fix residuo: investigare quali banner causano instabilità su FAU_01/FAU_02
+  (potrebbero essere diversi da FAU_00 per livello account o evento attivo)
+
 ---
+
+---
+
+## Fix applicati in sessione 18/04/2026
+
+| Fix | File | Dettaglio |
+|-----|------|-----------|
+| Filtro istanze abilitate | `main.py` | `_carica_istanze()` filtra `abilitata=False` prima del filtro nome — risolve avvio 12 istanze invece di 3 |
+| BlacklistFuori globale | `tasks/raccolta.py` | File unico `data/blacklist_fuori_globale.json` condiviso tra istanze. Rimosso parametro `istanza` dal costruttore. Eliminati file legacy `blacklist_fuori_FAU_XX.json` |
+| Sanity check OCR slot | `tasks/raccolta.py` | `attive > totale_noto` → skip conservativo. OCR anomalo ignorato |
+| Flush frame cached | `tasks/raccolta.py` | `_verifica_tipo()`: doppio screenshot (flush + live) + sleep 0.5s. Fix score 0.05–0.23 su FAU_01/FAU_02 |
+| Skip neutri per tipo | `tasks/raccolta.py` | `skip_neutri_per_tipo`: dopo 2 skip neutri consecutivi sullo stesso tipo → blocca tipo. Evita loop su stesso nodo in blacklist |
+| Logica raccolta refactoring | `tasks/raccolta.py` | Nuova gestione risultati `_invia_squadra()`: tipo_bloccato NON incrementa fallimenti; loop esterno 3 tentativi; rilettura slot post-loop; uscita su slot pieni |
+| reset_istanza() | `core/launcher.py` | Nuova funzione: force-stop + shutdown + polling spegnimento + adb disconnect. Chiamata all'inizio di ogni ciclo per garantire stato pulito |
+| Stabilizzazione HOME | `core/launcher.py` | `attendi_home()`: dopo HOME rilevata, loop 30s (poll ogni 5s) che verifica 3 HOME consecutive prima di procedere. Evita avvio task con popup aperti |
+| Verifica spenta pre-launch | `core/launcher.py` | `avvia_istanza()`: polling `is_android_started==False` prima del launch — evita avvio su istanza in stato intermedio |
+| attendi_template() centralizzato | `shared/ui_helpers.py` | Nuova funzione polling con timeout. Sostituisce sleep fissi prima di verifiche template in tutti i task |
+| attendi_scomparsa_template() | `shared/ui_helpers.py` | Polling attesa scomparsa template (popup caution zaino) |
+| Polling apertura popup | `tasks/boost.py` | Sostituito sleep fisso con attendi_template (timeout 6s) per pin_manage |
+| Polling apertura maschera VIP | `tasks/vip.py` | Sostituito wait_open_badge fisso con attendi_template |
+| Polling apertura messaggi | `tasks/messaggi.py` | Sostituito wait_open fisso con attendi_template per PRE-OPEN |
+| Polling tab messaggi | `tasks/messaggi.py` | Sostituito wait_tab fisso con attendi_template per tab Alliance/System |
+| Polling apertura alleanza | `tasks/alleanza.py` | Sostituiti wait_open_alleanza e wait_open_dono con sleep minimo |
+| Polling mercante store | `tasks/store.py` | Sostituito wait_tap fisso con attendi_template per merchant open |
+| Polling lista arena | `tasks/arena.py` | Sostituiti sleep fissi navigazione con attendi_template |
+| Polling continue arena | `tasks/arena.py` | Sostituiti sleep post-victory/failure con attendi_template |
+| Polling arena mercato | `tasks/arena_mercato.py` | Sostituito sleep dopo carrello con attendi_template |
+| Polling radar | `tasks/radar.py` | Ridotto sleep pre-notifiche da 2.5s a 0.5s |
+| Polling rifornimento | `tasks/rifornimento.py` | Sostituiti sleep apertura popup con attendi_template |
+| Polling caution zaino | `tasks/zaino.py` | Sostituito sleep caution con attendi_scomparsa_template |
+| Fallback livelli raccolta | `tasks/raccolta.py` | Sequenza 7→6→5 (base=7) o 6→7→5 (base=6) prima di bloccare tipo |
+| Ricentro mappa post-skip | `tasks/raccolta.py` | HOME+mappa dopo skip blacklist — fix tipo NON selezionato |
+| skip_neutri_per_tipo | `tasks/raccolta.py` | Blocca tipo dopo 2 skip neutri consecutivi |
+
+### Test notturno 18/04/2026 — 3 cicli sequenziali FAU_00/01/02
+
+- **FAU_00:** 5/5 squadre inviate in ciclo 2 (09:03). Cicli 1 e 3 correttamente skippati (slot pieni). OCR iniziale letto "7/5" al ciclo 1 — risolto da sanity check (d'ora in poi skip conservativo)
+- **FAU_01:** 3 squadre inviate totali (1+1+1). Pattern "tipo NON selezionato" con score 0.19-0.23 ricorrente, 3 abort con CERCA fallita. Funziona solo al secondo tentativo dopo reset pannello
+- **FAU_02:** 0 squadre inviate in 3 cicli. Tutti tentativi abortiti per VERIFICA tipo score 0.05-0.23. Ciclo 3: `vai_in_mappa fallito` → task FAIL
+- **Conferma Issue #9:** il bug VERIFICA tipo score basso si presenta anche in modalità sequenziale (NON è parallelismo). Pattern identico tra FAU_01/FAU_02, assente su FAU_00
+- **[RIALLINEA] funzionante:** FAU_01 1→3, FAU_02 3→2 post-rollback via OCR HOME
+- **Blacklist globale funzionante:** crescita 1→3 nodi condivisi tra istanze
 
 ---
 

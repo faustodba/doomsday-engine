@@ -64,6 +64,7 @@ from typing import Literal
 import numpy as np
 
 from core.task import Task, TaskContext, TaskResult
+from shared.ui_helpers import attendi_template
 # Import a livello modulo — necessario per patch nei test
 from tasks.radar_census import RadarCensusTask
 
@@ -176,9 +177,9 @@ class RadarTask(Task):
 
         # 2. Apri Radar Station
         ctx.device.tap(*tap_icona)
-        time.sleep(2.5)
+        time.sleep(0.5)  # minimo animazione tap
         log("Attesa apertura mappa + notifiche (10s)...")
-        time.sleep(10.0)
+        time.sleep(10.0)  # intenzionale — attesa notifiche
 
         # 3. Loop pallini
         try:

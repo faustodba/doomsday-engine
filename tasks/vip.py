@@ -44,6 +44,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from core.task import Task, TaskContext, TaskResult
+from shared.ui_helpers import attendi_template
 
 if TYPE_CHECKING:
     from core.device import MuMuDevice, FakeDevice
@@ -217,7 +218,8 @@ class VipTask(Task):
             # ── STEP 2: apri maschera VIP ─────────────────────────────────────
             log(f"Tap badge VIP {cfg.tap_badge}")
             device.tap(*cfg.tap_badge)
-            time.sleep(cfg.wait_open_badge)
+            # attendi apertura maschera VIP (polling max 6s via _check_pin sotto)
+            time.sleep(0.3)  # minimo animazione tap
 
             ok_store = self._check_pin(
                 device, matcher,
@@ -313,7 +315,7 @@ class VipTask(Task):
         # Cassaforte disponibile → tap Claim
         log(f"[1] pin_vip_02 visibile → tap Claim {cfg.tap_claim_cassaforte}")
         device.tap(*cfg.tap_claim_cassaforte)
-        time.sleep(cfg.wait_claim_cass)
+        time.sleep(0.3)  # minimo animazione tap
 
         # [PRE-POPUP-C]
         ok_popup = self._check_pin(
@@ -393,7 +395,7 @@ class VipTask(Task):
         # Claim Free disponibile → tap
         log(f"[2] pin_vip_04 visibile → tap Claim Free {cfg.tap_claim_free}")
         device.tap(*cfg.tap_claim_free)
-        time.sleep(cfg.wait_claim_free)
+        time.sleep(0.3)  # minimo animazione tap
 
         # [PRE-POPUP-F]
         ok_popup = self._check_pin(

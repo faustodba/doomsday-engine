@@ -267,7 +267,7 @@ body::before {
   </div>
   <div class="header-right">
     <div class="ts">17/04/2026</div>
-    <div>Generato: 22:04:39</div>
+    <div>Generato: 22:08:46</div>
     <div>Istanze: 3</div>
     <div>Log: logs\bot.log</div>
   </div>
@@ -282,22 +282,22 @@ body::before {
   </div>
   <div class="stat-card ok">
     <div class="stat-label">Marce Inviate</div>
-    <div class="stat-value">4</div>
+    <div class="stat-value">0</div>
     <div class="stat-sub">raccolta risorse</div>
   </div>
-  <div class="stat-card warn">
+  <div class="stat-card ok">
     <div class="stat-label">Errori Totali</div>
-    <div class="stat-value">9</div>
+    <div class="stat-value">1</div>
     <div class="stat-sub">anomalie rilevate</div>
   </div>
   <div class="stat-card warn">
     <div class="stat-label">Screenshot None</div>
-    <div class="stat-value">72</div>
+    <div class="stat-value">0</div>
     <div class="stat-sub">frame persi ADB</div>
   </div>
   <div class="stat-card">
     <div class="stat-label">Task Eseguiti</div>
-    <div class="stat-value">17</div>
+    <div class="stat-value">1</div>
     <div class="stat-sub">completati con successo</div>
   </div>
 </div>
@@ -310,6 +310,232 @@ body::before {
     <div class="istanza-card">
       <div class="istanza-header">
         <div class="istanza-name">FAU_00</div>
+        <div class="istanza-ticks">0 tick completati</div>
+      </div>
+      <div class="istanza-body">
+        
+        <div class="marce-row">
+          <div class="marce-cell">
+            <div class="marce-val val-green">0</div>
+            <div class="marce-lbl">Marce Inviate</div>
+          </div>
+          <div class="marce-cell">
+            <div class="marce-val val-red">0</div>
+            <div class="marce-lbl">Fallite</div>
+          </div>
+          <div class="marce-cell">
+            <div class="marce-val val-yellow">0</div>
+            <div class="marce-lbl">Fuori Territorio</div>
+          </div>
+        </div>
+        
+        
+        
+        <table class="task-table">
+          <thead><tr>
+            <th>Task</th><th>OK</th><th>Fail</th><th>Skip</th>
+          </tr></thead>
+          <tbody>
+        <tr>
+          <td class="task-name">boost</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-skip">1</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">vip</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">messaggi</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">alleanza</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">store</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">arena</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">arena_mercato</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">zaino</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">radar</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">radar_census</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">rifornimento</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-skip">1</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">raccolta</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-fail">1</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr></tbody>
+        </table>
+        
+        <div style="margin-bottom:12px">
+          <div class="slot-label">Screenshot persi: <span class="val-green" style="font-family:Share Tech Mono,monospace">0</span></div>
+        </div>
+        
+        <div class="slot-label" style="margin-bottom:8px">Anomalie e Errori</div>
+        <ul class="errori-list"><li>Orchestrator: task 'raccolta' completato -- success=False msg='vai_in_mappa fallito'</li></ul>
+        
+      </div>
+    </div>
+
+    <div class="istanza-card">
+      <div class="istanza-header">
+        <div class="istanza-name">FAU_01</div>
+        <div class="istanza-ticks">0 tick completati</div>
+      </div>
+      <div class="istanza-body">
+        
+        <div class="marce-row">
+          <div class="marce-cell">
+            <div class="marce-val val-green">0</div>
+            <div class="marce-lbl">Marce Inviate</div>
+          </div>
+          <div class="marce-cell">
+            <div class="marce-val val-red">0</div>
+            <div class="marce-lbl">Fallite</div>
+          </div>
+          <div class="marce-cell">
+            <div class="marce-val val-yellow">0</div>
+            <div class="marce-lbl">Fuori Territorio</div>
+          </div>
+        </div>
+        
+        
+        
+        <table class="task-table">
+          <thead><tr>
+            <th>Task</th><th>OK</th><th>Fail</th><th>Skip</th>
+          </tr></thead>
+          <tbody>
+        <tr>
+          <td class="task-name">boost</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-skip">1</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">vip</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">messaggi</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">alleanza</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">store</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">arena</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">arena_mercato</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">zaino</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">radar</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">radar_census</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">rifornimento</td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-skip">1</span></td>
+        </tr>
+        <tr>
+          <td class="task-name">raccolta</td>
+          <td><span class="badge badge-ok">1</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+          <td><span class="badge badge-zero">0</span></td>
+        </tr></tbody>
+        </table>
+        
+        <div style="margin-bottom:12px">
+          <div class="slot-label">Screenshot persi: <span class="val-green" style="font-family:Share Tech Mono,monospace">0</span></div>
+        </div>
+        
+        <div class="slot-label" style="margin-bottom:8px">Anomalie e Errori</div>
+        <div class="no-errori">&#10003; Nessun errore rilevato</div>
+        
+      </div>
+    </div>
+
+    <div class="istanza-card">
+      <div class="istanza-header">
+        <div class="istanza-name">FAU_02</div>
         <div class="istanza-ticks">0 tick completati</div>
       </div>
       <div class="istanza-body">
@@ -416,232 +642,6 @@ body::before {
         
         <div class="slot-label" style="margin-bottom:8px">Anomalie e Errori</div>
         <div class="no-errori">&#10003; Nessun errore rilevato</div>
-        
-      </div>
-    </div>
-
-    <div class="istanza-card">
-      <div class="istanza-header">
-        <div class="istanza-name">FAU_01</div>
-        <div class="istanza-ticks">0 tick completati</div>
-      </div>
-      <div class="istanza-body">
-        
-        <div class="marce-row">
-          <div class="marce-cell">
-            <div class="marce-val val-green">4</div>
-            <div class="marce-lbl">Marce Inviate</div>
-          </div>
-          <div class="marce-cell">
-            <div class="marce-val val-red">0</div>
-            <div class="marce-lbl">Fallite</div>
-          </div>
-          <div class="marce-cell">
-            <div class="marce-val val-yellow">1</div>
-            <div class="marce-lbl">Fuori Territorio</div>
-          </div>
-        </div>
-        
-        
-        
-        <table class="task-table">
-          <thead><tr>
-            <th>Task</th><th>OK</th><th>Fail</th><th>Skip</th>
-          </tr></thead>
-          <tbody>
-        <tr>
-          <td class="task-name">boost</td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-skip">5</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">vip</td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">messaggi</td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">alleanza</td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">store</td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">arena</td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">arena_mercato</td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">zaino</td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">radar</td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">radar_census</td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">rifornimento</td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-skip">5</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">raccolta</td>
-          <td><span class="badge badge-ok">5</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr></tbody>
-        </table>
-        
-        <div style="margin-bottom:12px">
-          <div class="slot-label">Screenshot persi: <span class="val-yellow" style="font-family:Share Tech Mono,monospace">48</span></div>
-        </div>
-        
-        <div class="slot-label" style="margin-bottom:8px">Anomalie e Errori</div>
-        <div class="no-errori">&#10003; Nessun errore rilevato</div>
-        
-      </div>
-    </div>
-
-    <div class="istanza-card">
-      <div class="istanza-header">
-        <div class="istanza-name">FAU_02</div>
-        <div class="istanza-ticks">0 tick completati</div>
-      </div>
-      <div class="istanza-body">
-        
-        <div class="marce-row">
-          <div class="marce-cell">
-            <div class="marce-val val-green">0</div>
-            <div class="marce-lbl">Marce Inviate</div>
-          </div>
-          <div class="marce-cell">
-            <div class="marce-val val-red">1</div>
-            <div class="marce-lbl">Fallite</div>
-          </div>
-          <div class="marce-cell">
-            <div class="marce-val val-yellow">3</div>
-            <div class="marce-lbl">Fuori Territorio</div>
-          </div>
-        </div>
-        
-        
-        
-        <table class="task-table">
-          <thead><tr>
-            <th>Task</th><th>OK</th><th>Fail</th><th>Skip</th>
-          </tr></thead>
-          <tbody>
-        <tr>
-          <td class="task-name">boost</td>
-          <td><span class="badge badge-ok">2</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">vip</td>
-          <td><span class="badge badge-ok">1</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">messaggi</td>
-          <td><span class="badge badge-ok">1</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">alleanza</td>
-          <td><span class="badge badge-ok">1</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">store</td>
-          <td><span class="badge badge-ok">1</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">arena</td>
-          <td><span class="badge badge-ok">1</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">arena_mercato</td>
-          <td><span class="badge badge-ok">1</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">zaino</td>
-          <td><span class="badge badge-ok">1</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">radar</td>
-          <td><span class="badge badge-ok">1</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">radar_census</td>
-          <td><span class="badge badge-ok">1</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">rifornimento</td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-skip">2</span></td>
-        </tr>
-        <tr>
-          <td class="task-name">raccolta</td>
-          <td><span class="badge badge-ok">1</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-          <td><span class="badge badge-zero">0</span></td>
-        </tr></tbody>
-        </table>
-        
-        <div style="margin-bottom:12px">
-          <div class="slot-label">Screenshot persi: <span class="val-yellow" style="font-family:Share Tech Mono,monospace">24</span></div>
-        </div>
-        
-        <div class="slot-label" style="margin-bottom:8px">Anomalie e Errori</div>
-        <ul class="errori-list"><li>[NAV] vai_in_home FALLITO dopo 8 tentativi</li><li>[ARENA] vai_in_home() post-BACK → FALLITO</li><li>[NAV] vai_in_home FALLITO dopo 8 tentativi</li><li>[ARENA] navigator: vai_in_home() fallito — BACK di recupero</li><li>Raccolta: OCR slot fallito — uso default 0/4</li><li>Raccolta: OCR slot fallito — uso default 0/4</li><li>[NAV] vai_in_home FALLITO dopo 8 tentativi</li><li>[NAV] vai_in_home FALLITO dopo 8 tentativi</li><li>[NAV] vai_in_home FALLITO dopo 8 tentativi</li></ul>
         
       </div>
     </div>

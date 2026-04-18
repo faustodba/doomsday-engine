@@ -53,11 +53,9 @@ class BoostConfig:
     swipe_y_start:        int             = 380
     swipe_y_end:          int             = 280
     swipe_dur_ms:         int             = 400
-    wait_after_tap:       float           = 1.5
     wait_after_swipe:     float           = 1.5
     wait_after_use:       float           = 1.5
     wait_after_back:      float           = 0.5
-    wait_after_speed_tap: float           = 2.0
     tmpl_boost:           str             = "pin/pin_boost.png"
     tmpl_manage:          str             = "pin/pin_manage.png"
     tmpl_speed:           str             = "pin/pin_speed.png"
@@ -160,11 +158,12 @@ class BoostTask(Task):
         score_b = matcher.score(shot, cfg.tmpl_boost)
         log(f"pin_boost score={score_b:.3f} → tap {cfg.tap_boost}")
         device.tap(*cfg.tap_boost)
-        time.sleep(cfg.wait_after_tap)
 
-        # STEP 2 — verifica popup Manage Shelter
-        shot    = device.screenshot()
-        score_m = matcher.score(shot, cfg.tmpl_manage)
+        # STEP 2 — attesa polling popup Manage Shelter (max 6s)
+        score_m = self._attendi_template(
+            device, matcher, cfg.tmpl_manage, cfg.soglia_manage,
+            timeout=6.0, poll=0.5
+        )
         log(f"pin_manage score={score_m:.3f}")
         if score_m < cfg.soglia_manage:
             log("Popup non aperto — abort")
@@ -209,8 +208,9 @@ class BoostTask(Task):
         tap_speed = (480, speed_cy)
         log(f"Tap Gathering Speed {tap_speed}")
         device.tap(*tap_speed)
-        time.sleep(cfg.wait_after_speed_tap)
 
+        # Attesa polling sottoschermata boost (max 4s)
+        time.sleep(0.5)  # minimo per animazione tap
         shot = device.screenshot()
         if shot is None:
             self._chiudi_popup(device, cfg)
@@ -262,6 +262,27 @@ class BoostTask(Task):
             cfg.swipe_dur_ms,
         )
         time.sleep(cfg.wait_after_swipe)
+
+    def _attendi_template(self, device, matcher, tmpl: str,
+                          soglia: float, timeout: float = 5.0,
+                          poll: float = 0.5) -> float:
+        """
+        Polling con timeout: verifica il template ogni `poll` secondi
+        fino a timeout. Ritorna lo score al momento del rilevamento
+        (>= soglia) oppure l'ultimo score se timeout.
+        """
+        t_start = time.time()
+        score = 0.0
+        while time.time() - t_start < timeout:
+            shot = device.screenshot()
+            if shot is None:
+                time.sleep(poll)
+                continue
+            score = matcher.score(shot, tmpl)
+            if score >= soglia:
+                return score
+            time.sleep(poll)
+        return score
 
     # ── Mapping outcome → TaskResult ──────────────────────────────────────────
 

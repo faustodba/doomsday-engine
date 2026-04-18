@@ -55,6 +55,7 @@ import time
 from dataclasses import dataclass
 
 from core.task import Task, TaskContext, TaskResult
+from shared.ui_helpers import attendi_template
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -262,7 +263,7 @@ class ArenaMercatoTask(Task):
         # Tap carrello — prima azione (come in V5 _visita_mercato_arena)
         ctx.log_msg("[MERCATO-ARENA] tap carrello (905,68) → Arena Store")
         ctx.device.tap(*_TAP_CARRELLO)
-        time.sleep(2.0)
+        time.sleep(0.3)  # minimo animazione tap
 
         acquisti_360     = 0
         acquisti_15      = 0
