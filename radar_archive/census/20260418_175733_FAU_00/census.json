@@ -1,0 +1,20 @@
+[
+  {
+    "n": 1,
+    "cx": 109,
+    "cy": 392,
+    "tipo": "para",
+    "template": "pin_para",
+    "conf_tmpl": 0.651,
+    "crop_file": "crops\\crop_0109_0392_para_pin_para.png",
+    "rf_label": "paracadute",
+    "rf_conf": 0.255,
+    "istanza": "FAU_00",
+    "timestamp": "20260418_175733",
+    "categoria": "sconosciuto",
+    "categoria_source": "none",
+    "categoria_conf": 0.0,
+    "ready": false,
+    "reason": "unknown"
+  }
+]

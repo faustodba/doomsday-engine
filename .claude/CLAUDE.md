@@ -209,6 +209,43 @@ Ogni rilascio segue questa sequenza:
 
 ---
 
+## MCP Monitor
+
+Il progetto include un MCP server locale per analisi log in tempo reale.
+
+### Configurazione
+- Server: `C:\doomsday-engine\monitor\mcp_server.py`
+- Config: `C:\doomsday-engine\.claude\mcp_servers.json`
+- Trasporto: stdio
+- Python: `C:\Users\CUBOTTO\AppData\Local\Python\pythoncore-3.14-64\python.exe`
+
+### Avvio
+Il server si avvia automaticamente quando Claude Code carica il progetto.
+Non richiede avvio manuale.
+
+### Strumenti disponibili
+| Tool | Parametri | Descrizione |
+|------|-----------|-------------|
+| `ciclo_stato` | — | Summary completo ultimo ciclo tutte le istanze |
+| `anomalie_live` | — | Anomalie ultimi 10 minuti tutte le istanze |
+| `istanza_anomalie` | nome, n_righe=200 | Anomalie ultime N righe istanza |
+| `istanza_raccolta` | nome | Statistiche raccolta ultimo tick |
+| `istanza_launcher` | nome | Stato launcher ultimo avvio |
+| `log_tail` | nome, n=50 | Ultime N righe log istanza |
+
+### Pattern anomalie rilevati
+- ERROR: FALLITO, vai_in_mappa fallito, avvia_istanza() fallito,
+  impossibile andare in mappa, abort sequenza livelli, screenshot None
+- WARN: NON selezionato, stabilizzazione timeout, HOME instabile,
+  troppi fallimenti, timeout battaglia
+
+### Regola operativa
+Durante ogni sessione di test attivo, interrogare `anomalie_live`
+ogni 5 minuti per rilevare problemi in tempo reale senza
+attendere la fine del ciclo.
+
+---
+
 ## Regola generale
 
 > Approccio strutturato, verificabile, tracciabile.

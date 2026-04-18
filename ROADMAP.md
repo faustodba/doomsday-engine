@@ -160,6 +160,8 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | Fallback livelli raccolta | `tasks/raccolta.py` | Sequenza 7→6→5 (base=7) o 6→7→5 (base=6) prima di bloccare tipo |
 | Ricentro mappa post-skip | `tasks/raccolta.py` | HOME+mappa dopo skip blacklist — fix tipo NON selezionato |
 | skip_neutri_per_tipo | `tasks/raccolta.py` | Blocca tipo dopo 2 skip neutri consecutivi |
+| MCP Monitor server | `monitor/mcp_server.py` | MCP server FastMCP per analisi log in tempo reale da Claude Code VSCode. Strumenti: ciclo_stato, istanza_anomalie, istanza_raccolta, istanza_launcher, log_tail, anomalie_live |
+| Monitor analyzer | `monitor/analyzer.py` | Logica parsing JSONL, rilevamento anomalie, statistiche raccolta/launcher condivisa tra MCP server e futuri tool |
 
 ### Test notturno 18/04/2026 — 3 cicli sequenziali FAU_00/01/02
 
@@ -169,6 +171,23 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 - **Conferma Issue #9:** il bug VERIFICA tipo score basso si presenta anche in modalità sequenziale (NON è parallelismo). Pattern identico tra FAU_01/FAU_02, assente su FAU_00
 - **[RIALLINEA] funzionante:** FAU_01 1→3, FAU_02 3→2 post-rollback via OCR HOME
 - **Blacklist globale funzionante:** crescita 1→3 nodi condivisi tra istanze
+
+---
+
+## MCP Monitor — Comandi di riferimento
+
+Il MCP server `doomsday-monitor` è configurato in `.claude/mcp_servers.json`
+e viene caricato automaticamente da Claude Code all'avvio di VSCode.
+
+### Analisi ciclo completo
+Ultime N righe del log JSONL di una istanza (o bot.log).
+
+### Workflow monitoraggio durante esecuzione
+1. Avvia motore in PS: `python main.py --tick-sleep 300`
+2. In Claude Code chiedi: `anomalie_live` ogni 5 minuti
+3. Se anomalia: `istanza_anomalie FAU_01` per dettaglio
+4. Fine ciclo: `ciclo_stato` per summary completo
+5. Problema raccolta: `istanza_raccolta FAU_01` per analisi
 
 ---
 
