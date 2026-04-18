@@ -26,20 +26,56 @@
 #            → check pre-tap: se nodo già noto fuori territorio → skip immediato
 #            → risparmio popup e BACK su nodi permanentemente fuori zona
 #
-#  FLUSSO AGGIORNATO:
+#  FIX 19/04/2026 — sessione consolidamento (RT-23):
+#    FIX A — Sequenza logica _invia_squadra() riscritta:
+#            CERCA → leggi_coord → check blacklist_fuori (skip_neutro) →
+#            check blacklist RAM (retry o tipo_bloccato) → reserve →
+#            tap nodo + gather → territorio (skip_neutro se FUORI) →
+#            livello nodo (tipo_bloccato se basso) → marcia → commit.
+#    FIX B — _reset_to_mappa(ctx, obiettivo) funzione centralizzata:
+#            vai_in_home → leggi_contatore_slot → vai_in_mappa.
+#            Ritorna attive_reali (-1 se OCR fallisce). Sostituisce tutti
+#            i blocchi sparsi di "BACK + HOME + MAPPA".
+#    FIX C — Verifica slot HOME dopo ogni marcia confermata (ok=True):
+#            _reset_to_mappa() + aggiornamento attive_correnti.
+#            Uscita immediata se attive_correnti >= obiettivo.
+#    FIX D — idx_seq sostituito da iteratore su sequenza ricalcolata:
+#            ogni giro while ricalcola sequenza; for tipo in sequenza:
+#            se ok=True → break for → ricalcola al prossimo while.
+#    FIX E — Fallback livelli semplificato:
+#            base=7 → [7, 6], base=6 → [6, 7]. Rimosso Lv.5.
+#    FIX F — Delay stabilizzazione aumentati in _cerca_nodo,
+#            _verifica_tipo, _tap_nodo_e_verifica_gather, _esegui_marcia.
+#    FIX G — _tap_nodo_e_verifica_gather ritorna _GatherResult dataclass
+#            invece di tuple implicita (ok: bool, screen: Optional).
+#
+#  FLUSSO AGGIORNATO (post FIX A):
 #    0. Verifica abilitazione + slot liberi (iniettabile nei test)
 #    1. Naviga in mappa
-#    2. Loop: finché attive < obiettivo e fallimenti < MAX_FALLIMENTI:
-#       a. Seleziona tipo dalla sequenza (allocation gap V5)
-#       b. Cerca nodo (LENTE → tipo × 2 → livello → CERCA)
-#       c. Tap nodo → verifica GATHER → OCR coordinate reali
-#       d. Check blacklist statica fuori territorio (disco)
-#       e. Check blacklist dinamica (RAM)
-#       f. Verifica livello nodo via OCR
-#       g. Verifica territorio → se fuori: blacklist statica + dinamica
-#       h. RESERVED → _esegui_marcia (con OCR ETA)
-#       i. Verifica contatore post-marcia → COMMITTED o rollback
-#    3. Ritorna in home
+#    2. Loop esterno (max 3 tentativi ciclo): ogni tentativo esegue
+#       _loop_invio_marce → HOME + OCR slot; uscita se slot pieni.
+#    3. _loop_invio_marce: while finché attive < obiettivo:
+#       a. Ricalcola sequenza (allocation gap V5) + interleave
+#       b. for tipo in sequenza:
+#            - salta se tipo bloccato o in cooldown
+#            - _invia_squadra(tipo)
+#            - ok=True: +1 inviate, _reset_to_mappa, break for → ricalcola
+#            - skip_neutro: contatore +1, block tipo se >= 2, continue
+#            - tipo_bloccato: block tipo, continue
+#            - fallimento puro: fallimenti_cons +1, continue
+#    4. _invia_squadra:
+#       - per lv in sequenza_livelli:
+#           CERCA + leggi coord
+#           se chiave in blacklist_fuori → _reset_to_mappa → prova lv successivo
+#           se chiave in blacklist RAM → retry CERCA stesso lv; ancora occupato
+#             → tipo_bloccato
+#           altrimenti → reserve + break (usa questo nodo)
+#       - se nessun lv ha dato nodo utile → skip_neutro
+#       - tap nodo + gather
+#       - territorio IN? sì → livello nodo OK? sì → marcia → commit
+#                        no → blacklist_fuori.aggiungi + rollback → skip_neutro
+#                        livello basso → blacklist.commit + tipo_bloccato
+#    5. Ritorna in home
 #
 #  COORDINATE DEFAULT (960x540):
 #    TAP_LENTE              = (38, 325)    icona lente grande in mappa
@@ -78,6 +114,7 @@ import os
 import re as _re
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
@@ -440,16 +477,21 @@ def _nodo_in_territorio(screen, tipo: str, ctx: TaskContext) -> bool:
 
 
 def _verifica_tipo(ctx: TaskContext, tipo: str) -> bool:
-    """Verifica visiva che il tipo sia selezionato nel pannello lente."""
+    """
+    Verifica visiva che il tipo sia selezionato nel pannello lente.
+    FIX F 19/04/2026: delay stabilizzazione aumentati
+      - sleep iniziale (pre-flush): 0.5 → 0.8
+      - sleep tra flush e live:     0.2 → 0.5
+    """
     tmpl_tipo = _cfg(ctx, "TMPL_TIPO").get(tipo)
     if not tmpl_tipo:
         return True
     soglia = _cfg(ctx, "SOGLIA_TIPO")
     roi    = _cfg(ctx, "ROI_LENTE")
-    time.sleep(0.5)
-    ctx.device.screenshot()          # flush frame cached
-    time.sleep(0.2)
-    screen = ctx.device.screenshot() # frame live
+    time.sleep(0.8)                   # FIX F: 0.5 → 0.8
+    ctx.device.screenshot()           # flush frame cached
+    time.sleep(0.5)                   # FIX F: 0.2 → 0.5
+    screen = ctx.device.screenshot()  # frame live
     if not screen:
         return True
     r = ctx.matcher.find_one(screen, tmpl_tipo, threshold=soglia, zone=roi)
@@ -464,6 +506,12 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
     LENTE → tap tipo × 2 → verifica tipo → livello → CERCA.
     Ritorna True se CERCA eseguita correttamente.
     Se livello_override > 0 sovrascrive il livello di default.
+
+    FIX F 19/04/2026: delay stabilizzazione aumentati
+      - dopo tap(tap_lente):          0.8 → 1.5
+      - dopo doppio tap(tap_icona):   1.2 → 1.8
+      - tap meno livello delay:       0.15 → 0.2
+      - tap piu livello delay:        0.2 → 0.25
     """
     tap_lente   = _cfg(ctx, "TAP_LENTE")
     coord_lv    = _cfg(ctx, "COORD_LIVELLO").get(tipo, _cfg(ctx, "COORD_LIVELLO")["campo"])
@@ -476,11 +524,11 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
 
     ctx.log_msg(f"Raccolta: LENTE → {tipo} Lv.{livello}")
     ctx.device.tap(tap_lente)
-    time.sleep(0.8)
+    time.sleep(1.5)                   # FIX F: 0.8 → 1.5
 
     ctx.device.tap(tap_icona)
     ctx.device.tap(tap_icona)
-    time.sleep(1.2)
+    time.sleep(1.8)                   # FIX F: 1.2 → 1.8
 
     if not _verifica_tipo(ctx, tipo):
         ctx.log_msg(f"Raccolta: tipo {tipo} NON selezionato — retry tap icona")
@@ -491,10 +539,10 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
             ctx.device.key("KEYCODE_BACK")
             time.sleep(2.0)
             ctx.device.tap(tap_lente)
-            time.sleep(0.8)
+            time.sleep(1.5)           # FIX F: coerenza con tap_lente sopra
             ctx.device.tap(tap_icona)
             ctx.device.tap(tap_icona)
-            time.sleep(1.5)
+            time.sleep(1.8)           # FIX F: coerenza con doppio tap sopra
             if not _verifica_tipo(ctx, tipo):
                 ctx.log_msg(f"Raccolta: tipo {tipo} NON selezionato dopo reset — abort")
                 ctx.device.key("KEYCODE_BACK")
@@ -503,11 +551,11 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
 
     for _ in range(7):
         ctx.device.tap(coord_lv["meno"])
-        time.sleep(0.15)
+        time.sleep(0.2)               # FIX F: 0.15 → 0.2
     time.sleep(0.3)
     for _ in range(livello - 1):
         ctx.device.tap(coord_lv["piu"])
-        time.sleep(0.2)
+        time.sleep(0.25)              # FIX F: 0.2 → 0.25
 
     ctx.device.tap(coord_lv["search"])
     time.sleep(delay_cerca)
@@ -754,14 +802,68 @@ def _leggi_attive_post_marcia(ctx: TaskContext, obiettivo: int,
 
 
 # ==============================================================================
+# FIX G 19/04/2026 — _GatherResult: firma coerente per _tap_nodo_e_verifica_gather
+# ==============================================================================
+
+@dataclass
+class _GatherResult:
+    """
+    Risultato di _tap_nodo_e_verifica_gather().
+    ok     = True se popup nodo è stato aperto con pin_gather visibile.
+    screen = screenshot del popup (per uso successivo: territorio, livello).
+    """
+    ok: bool
+    screen: Optional[object] = None
+
+
+# ==============================================================================
+# FIX B 19/04/2026 — _reset_to_mappa: funzione centralizzata reset UI
+# ==============================================================================
+
+def _reset_to_mappa(ctx: TaskContext, obiettivo: int) -> int:
+    """
+    Porta il sistema in posizione iniziale pulita dopo qualsiasi percorso
+    di scarto (blacklist fuori, tipo_bloccato, skip_neutro, fallimento).
+
+    Sequenza: vai_in_home() → leggi_contatore_slot() → vai_in_mappa()
+
+    Ritorna: attive_reali (int >= 0) oppure -1 se OCR fallisce o
+             ctx.navigator è None.
+    """
+    if ctx.navigator is None:
+        return -1
+    ctx.navigator.vai_in_home()
+    time.sleep(1.0)
+    attive = -1
+    try:
+        from shared.ocr_helpers import leggi_contatore_slot
+        screen = ctx.device.screenshot()
+        if screen is not None:
+            att, _ = leggi_contatore_slot(screen, totale_noto=obiettivo)
+            if 0 <= att <= obiettivo:
+                attive = att
+    except Exception:
+        pass
+    ctx.navigator.vai_in_mappa()
+    time.sleep(1.5)
+    return attive
+
+
+# ==============================================================================
 # Sequenza UI principale
 # ==============================================================================
 
-def _tap_nodo_e_verifica_gather(ctx: TaskContext, tipo: str) -> str:
+def _tap_nodo_e_verifica_gather(ctx: TaskContext, tipo: str) -> _GatherResult:
     """
-    Tap nodo → verifica GATHER visibile.
-    Ritorna "ok" | "fuori" | "errore".
-    NON verifica territorio — viene fatto in _invia_squadra dopo OCR coordinate.
+    Tap nodo → verifica pin_gather visibile.
+    Ritorna _GatherResult(ok=True, screen=screen) se popup aperto
+    oppure _GatherResult(ok=False) in caso di errore.
+    NON verifica territorio — viene fatto nel chiamante dopo OCR coordinate.
+
+    FIX F 19/04/2026: delay stabilizzazione aumentati
+      - dopo tap nodo:        1.0 → 1.5
+      - dopo retry tap nodo:  1.5 → 2.0
+    FIX G 19/04/2026: return _GatherResult dataclass invece di tuple/str.
     """
     tap_nodo        = _cfg(ctx, "TAP_NODO")
     template_gather = _cfg(ctx, "TEMPLATE_GATHER")
@@ -770,11 +872,11 @@ def _tap_nodo_e_verifica_gather(ctx: TaskContext, tipo: str) -> str:
 
     ctx.log_msg(f"Raccolta [{tipo}]: tap nodo {tap_nodo}")
     ctx.device.tap(tap_nodo)
-    time.sleep(1.0)
+    time.sleep(1.5)                   # FIX F: 1.0 → 1.5
 
     screen = ctx.device.screenshot()
     if not screen:
-        return "errore"
+        return _GatherResult(ok=False)
 
     r = ctx.matcher.find_one(screen, template_gather, threshold=soglia, zone=roi_gather)
     ctx.log_msg(f"Raccolta [{tipo}]: pin_gather score={r.score:.3f} → "
@@ -783,24 +885,24 @@ def _tap_nodo_e_verifica_gather(ctx: TaskContext, tipo: str) -> str:
     if not r.found:
         ctx.log_msg(f"Raccolta [{tipo}]: GATHER non visibile — retry tap nodo")
         ctx.device.tap(tap_nodo)
-        time.sleep(1.5)
+        time.sleep(2.0)               # FIX F: 1.5 → 2.0
         screen2 = ctx.device.screenshot()
         if screen2:
             r2 = ctx.matcher.find_one(screen2, template_gather, threshold=soglia, zone=roi_gather)
             ctx.log_msg(f"Raccolta [{tipo}]: pin_gather retry score={r2.score:.3f} → "
                         f"{'OK' if r2.found else 'NON trovato'}")
             if r2.found:
-                screen = screen2
+                return _GatherResult(ok=True, screen=screen2)
             else:
                 ctx.device.key("KEYCODE_BACK")
                 time.sleep(0.5)
-                return "errore"
+                return _GatherResult(ok=False)
         else:
             ctx.device.key("KEYCODE_BACK")
             time.sleep(0.5)
-            return "errore"
+            return _GatherResult(ok=False)
 
-    return "gather_ok", screen   # type: ignore  — ritorna anche screen per uso successivo
+    return _GatherResult(ok=True, screen=screen)
 
 
 def _esegui_marcia(ctx: TaskContext, n_truppe: int,
@@ -809,6 +911,12 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int,
     Sequenza UI: RACCOGLI → SQUADRA → (truppe) → OCR ETA → MARCIA.
     Ritorna (ok, eta_s).
     Step 2: OCR ETA dalla maschera pre-MARCIA.
+
+    FIX F 19/04/2026: delay stabilizzazione aumentati
+      - dopo tap_raccogli:       0.5 → 0.8
+      - dopo tap_squadra:        1.4 → 1.8
+      - dopo retry tap_squadra:  1.8 → 2.2
+      - dopo tap_marcia:         0.8 → 1.2
     """
     tap_raccogli    = _cfg(ctx, "TAP_RACCOGLI")
     tap_squadra     = _cfg(ctx, "TAP_SQUADRA")
@@ -822,9 +930,9 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int,
 
     ctx.log_msg("Raccolta: RACCOGLI → SQUADRA")
     ctx.device.tap(tap_raccogli)
-    time.sleep(0.5)
+    time.sleep(0.8)                   # FIX F: 0.5 → 0.8
     ctx.device.tap(tap_squadra)
-    time.sleep(1.4)
+    time.sleep(1.8)                   # FIX F: 1.4 → 1.8
 
     # Verifica maschera invio aperta
     screen = ctx.device.screenshot()
@@ -835,7 +943,7 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int,
         else:
             ctx.log_msg(f"Raccolta: maschera NON aperta score={maschera.score:.3f} — retry")
             ctx.device.tap(tap_squadra)
-            time.sleep(1.8)
+            time.sleep(2.2)           # FIX F: 1.8 → 2.2
             screen = ctx.device.screenshot()
             if screen:
                 m2 = ctx.matcher.find_one(screen, template_marcia, threshold=soglia)
@@ -874,7 +982,7 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int,
 
     ctx.log_msg("Raccolta: tap MARCIA")
     ctx.device.tap(tap_marcia)
-    time.sleep(0.8)
+    time.sleep(1.2)                   # FIX F: 0.8 → 1.2
 
     # Verifica maschera chiusa
     screen_post = ctx.device.screenshot()
@@ -904,209 +1012,205 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
                    tipi_bloccati: set,
                    obiettivo: int) -> tuple[bool, bool, bool]:
     """
-    Cerca nodo, verifica blacklist, invia marcia.
+    FIX A 19/04/2026 — Sequenza logica riscritta:
 
-    Integra Step 1-5:
-      - Step 1: OCR coordinate reali → chiave "X_Y"
-      - Step 4+6: nodo fuori territorio → blacklist statica + dinamica
-      - Step 5: verifica livello nodo → scarta se sotto soglia
-      - Step 2: ETA marcia via _esegui_marcia()
-      - Step 3: conferma contatore post-marcia
+      1. _cerca_nodo(tipo, livello) + _leggi_coord_nodo
+         → se chiave in blacklist_fuori → _reset_to_mappa → prova lv successivo
+         → se chiave in blacklist RAM → retry CERCA stesso lv; ancora
+           occupato → tipo_bloccato
+         → altrimenti: break (usa questo nodo)
+         → se nessun lv ha dato nodo utile → skip_neutro
+      2. blacklist.reserve(chiave) — prenota PRIMA del tap
+      3. _tap_nodo_e_verifica_gather(tipo)
+         → se fallisce: rollback + _reset_to_mappa → fallimento puro
+      4. _nodo_in_territorio(screen)
+         → FUORI: blacklist_fuori.aggiungi + rollback + _reset_to_mappa
+                  → skip_neutro
+      5. _leggi_livello_nodo(screen)
+         → < MIN: blacklist.commit + _reset_to_mappa → tipo_bloccato
+      6. _esegui_marcia(n_truppe)
+         → se fallisce: rollback + _reset_to_mappa → fallimento puro
+      7. blacklist.commit(chiave, eta_s) → ok=True
+
+    FIX E 19/04/2026: sequenza_livelli semplificata (rimosso Lv.5)
+      base=7 → [7, 6], base=6 → [6, 7]
 
     Ritorna (marcia_ok, tipo_bloccato, skip_neutro).
     """
-    # Sequenza livelli da tentare prima di bloccare il tipo
+    # FIX E: sequenza livelli [base, 7] o [7, 6] — rimosso Lv.5
     livello_base = max(1, min(7, int(
         ctx.config.get("livello", _cfg(ctx, "RACCOLTA_LIVELLO"))
     )))
     if livello_base == 7:
-        sequenza_livelli = [7, 6, 5]
+        sequenza_livelli = [7, 6]
     else:
-        # livello_base == 6 (o altro): prova base, poi 7, poi 5
-        seq = [livello_base, 7, 5]
-        seen = set()
+        # livello_base == 6 (o altro base): prova base, poi 7
+        seq = [livello_base, 7]
+        seen: set[int] = set()
         sequenza_livelli = [lv for lv in seq
                             if lv not in seen and not seen.add(lv)]
 
-    cerca_ok = False
-    chiave_test = None
+    # ─── Step 1-2: CERCA + leggi coord + check blacklist ──────────────────
+    chiave: Optional[str] = None
+    chiave_test: Optional[str] = None
+
     for lv in sequenza_livelli:
         ctx.log_msg(f"Raccolta: tentativo CERCA {tipo} Lv.{lv}")
         ok = _cerca_nodo(ctx, tipo, livello_override=lv)
         if not ok:
             # Tipo NON selezionato — problema UI, inutile cambiare livello
             ctx.log_msg(
-                f"Raccolta [{tipo}]: tipo NON selezionato — "
-                f"abort sequenza livelli"
+                f"Raccolta [{tipo}]: tipo NON selezionato — abort sequenza livelli"
             )
-            return False, True, False  # tipo_bloccato=True
-        # _cerca_nodo OK: ora leggi le coordinate del primo nodo
-        # Se la lista risultati è vuota, chiave sarà None
+            return False, True, False  # tipo_bloccato
+
         chiave_test = _leggi_coord_nodo(ctx)
-        if chiave_test is not None and not blacklist_fuori.contiene(chiave_test):
-            # Trovato nodo utile a questo livello — procedi
-            ctx.log_msg(f"Raccolta: nodo trovato a Lv.{lv} — procedo")
-            cerca_ok = True
-            break
-        # Lista vuota OR primo nodo già in blacklist fuori territorio
-        # → prova livello successivo
-        if chiave_test is not None:
-            ctx.log_msg(
-                f"Raccolta [{tipo}] Lv.{lv}: nodo {chiave_test} "
-                f"in blacklist fuori — provo livello successivo"
-            )
-        else:
+
+        # ── Lista risultati vuota: prova livello successivo ────────────
+        if chiave_test is None:
             ctx.log_msg(
                 f"Raccolta: nessun nodo disponibile a Lv.{lv} — "
                 f"provo livello successivo"
             )
-        # Reset UI completo prima del prossimo livello: doppio BACK
-        # (chiude lista risultati + lente) + ricentro mappa via HOME/MAPPA.
-        # Il solo BACK lascia la lente in stato intermedio e _verifica_tipo
-        # al prossimo livello fallisce sistematicamente.
-        ctx.device.key("KEYCODE_BACK")
-        time.sleep(0.5)
-        ctx.device.key("KEYCODE_BACK")
-        time.sleep(0.5)
-        if ctx.navigator is not None:
-            ctx.navigator.vai_in_home()
-            time.sleep(0.5)
-            ctx.navigator.vai_in_mappa()
-            time.sleep(1.0)
+            _reset_to_mappa(ctx, obiettivo)
+            continue
 
-    if not cerca_ok:
-        # Tutti i livelli hanno restituito nodi blacklistati o lista vuota
-        # → skip neutro (non bloccare il tipo: altri livelli/istanti potrebbero
-        # produrre nodi validi; il guard skip_neutri_per_tipo gestisce il blocco)
-        ctx.log_msg(
-            f"Raccolta [{tipo}]: nessun nodo utile su livelli {sequenza_livelli} — "
-            f"skip neutro"
-        )
-        return False, False, True  # skip_neutro=True
+        # ── Blacklist FUORI (disco): prova livello successivo ──────────
+        if blacklist_fuori.contiene(chiave_test):
+            ctx.log_msg(
+                f"Raccolta [{tipo}] Lv.{lv}: nodo {chiave_test} "
+                f"in blacklist fuori — provo livello successivo"
+            )
+            _reset_to_mappa(ctx, obiettivo)
+            continue
 
-    # chiave già letta nel loop sopra
-    chiave = chiave_test
-    # chiave può essere None se OCR fallisce — procediamo senza blacklist
+        # ── Blacklist DINAMICA (RAM): retry CERCA stesso livello ──────
+        if blacklist.contiene(chiave_test):
+            eta_prev = blacklist.get_eta(chiave_test)
+            if isinstance(eta_prev, (int, float)) and eta_prev > 0:
+                marg    = int(_cfg(ctx, "ETA_MARGINE_S"))
+                att_min = int(_cfg(ctx, "ETA_MIN_S"))
+                attesa  = int(min(_cfg(ctx, "BLACKLIST_ATTESA_NODO"),
+                                  max(att_min, eta_prev + marg)))
+                ctx.log_msg(
+                    f"Raccolta [{tipo}]: nodo {chiave_test} in blacklist RAM "
+                    f"(ETA={int(eta_prev)}s) — cooldown {attesa}s, retry CERCA"
+                )
+            else:
+                attesa = int(_cfg(ctx, "BLACKLIST_ATTESA_NODO"))
+                ctx.log_msg(
+                    f"Raccolta [{tipo}]: nodo {chiave_test} in blacklist RAM "
+                    f"— cooldown {attesa}s (TTL fisso), retry CERCA"
+                )
+            cooldown_map[tipo] = time.time() + attesa
 
-    # Step 6: check blacklist statica fuori territorio (disco) — skip immediato
-    if chiave and blacklist_fuori.contiene(chiave):
-        ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} in blacklist statica fuori — skip")
-        # Chiudi lista risultati + lente (doppio BACK per stato pulito)
-        ctx.device.key("KEYCODE_BACK")
-        time.sleep(0.5)
-        ctx.device.key("KEYCODE_BACK")
-        time.sleep(0.5)
-        # Ricentra mappa sul castello prima della prossima cerca
-        if ctx.navigator is not None:
-            ctx.navigator.vai_in_home()
-            time.sleep(0.5)
-            ctx.navigator.vai_in_mappa()
-            time.sleep(1.0)
-        return False, False, True   # skip neutro
-
-    # Check blacklist dinamica RAM — nodo già occupato da nostra squadra
-    if chiave and blacklist.contiene(chiave):
-        eta_prev = blacklist.get_eta(chiave)
-        if isinstance(eta_prev, (int, float)) and eta_prev > 0:
-            marg    = int(_cfg(ctx, "ETA_MARGINE_S"))
-            att_min = int(_cfg(ctx, "ETA_MIN_S"))
-            attesa  = int(min(_cfg(ctx, "BLACKLIST_ATTESA_NODO"),
-                              max(att_min, eta_prev + marg)))
-            ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} in blacklist "
-                        f"(ETA={int(eta_prev)}s) — cooldown {attesa}s")
-        else:
-            attesa = int(_cfg(ctx, "BLACKLIST_ATTESA_NODO"))
-            ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} in blacklist "
-                        f"— cooldown {attesa}s (TTL fisso)")
-        cooldown_map[tipo] = time.time() + attesa
-        ctx.device.key("KEYCODE_BACK")
-        time.sleep(0.5)
-        # Nuova CERCA per trovare nodo diverso
-        if not _cerca_nodo(ctx, tipo):
-            return False, False, False
-        chiave2 = _leggi_coord_nodo(ctx)
-        if chiave2 == chiave or (chiave2 and blacklist.contiene(chiave2)):
-            ctx.log_msg(f"Raccolta [{tipo}]: secondo nodo ancora in blacklist — tipo bloccato")
+            # Retry CERCA per nodo diverso allo stesso livello
             ctx.device.key("KEYCODE_BACK")
             time.sleep(0.5)
-            return False, True, False
-        chiave = chiave2
+            if not _cerca_nodo(ctx, tipo, livello_override=lv):
+                ctx.log_msg(
+                    f"Raccolta [{tipo}]: CERCA retry fallita — tipo bloccato"
+                )
+                return False, True, False
+            chiave2 = _leggi_coord_nodo(ctx)
+            if chiave2 is None or chiave2 == chiave_test or blacklist.contiene(chiave2):
+                ctx.log_msg(
+                    f"Raccolta [{tipo}]: secondo nodo ancora occupato "
+                    f"— tipo bloccato"
+                )
+                _reset_to_mappa(ctx, obiettivo)
+                return False, True, False
+            if blacklist_fuori.contiene(chiave2):
+                ctx.log_msg(
+                    f"Raccolta [{tipo}]: secondo nodo {chiave2} "
+                    f"in blacklist fuori — skip neutro"
+                )
+                _reset_to_mappa(ctx, obiettivo)
+                return False, False, True
+            chiave_test = chiave2
+            # Cade nel blocco "nodo OK" sotto
 
-    # Tap nodo + verifica GATHER (popup lista risultati → popup nodo)
-    esito = _tap_nodo_e_verifica_gather(ctx, tipo)
-    if isinstance(esito, tuple):
-        esito_str, screen_popup = esito
-    else:
-        esito_str, screen_popup = esito, None
+        # ── Nodo utile trovato ─────────────────────────────────────────
+        chiave = chiave_test
+        ctx.log_msg(f"Raccolta: nodo trovato a Lv.{lv} — procedo")
+        break
 
-    if esito_str == "errore":
+    if chiave is None:
+        # Tutti i livelli hanno restituito lista vuota o blacklist_fuori
+        ctx.log_msg(
+            f"Raccolta [{tipo}]: nessun nodo utile su livelli "
+            f"{sequenza_livelli} — skip neutro"
+        )
+        _reset_to_mappa(ctx, obiettivo)
+        return False, False, True
+
+    # ─── Step 2b: RESERVE prima del tap (FIX A) ─────────────────────────
+    blacklist.reserve(chiave)
+    ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} RESERVED")
+
+    # ─── Step 3: tap nodo + verifica gather ─────────────────────────────
+    gather_result = _tap_nodo_e_verifica_gather(ctx, tipo)
+    if not gather_result.ok:
+        ctx.log_msg(f"Raccolta [{tipo}]: tap nodo fallito — rollback")
+        blacklist.rollback(chiave)
+        _reset_to_mappa(ctx, obiettivo)
         return False, False, False
+    screen_popup = gather_result.screen
 
-    # Step 5: verifica livello nodo via OCR
+    # ─── Step 4: verifica territorio (PRIMA del livello per early abort) ─
+    if screen_popup is not None and not _nodo_in_territorio(screen_popup, tipo, ctx):
+        ctx.log_msg(
+            f"Raccolta [{tipo}]: nodo {chiave} FUORI territorio — "
+            f"blacklist fuori + rollback"
+        )
+        blacklist_fuori.aggiungi(chiave, tipo)
+        blacklist.rollback(chiave)
+        ctx.device.key("KEYCODE_BACK")
+        time.sleep(0.5)
+        _reset_to_mappa(ctx, obiettivo)
+        return False, False, True  # skip neutro
+
+    # ─── Step 5: verifica livello nodo ──────────────────────────────────
     if screen_popup is not None:
         livello_nodo = _leggi_livello_nodo(ctx, screen_popup)
         livello_min  = int(_cfg(ctx, "RACCOLTA_LIVELLO_MIN"))
         if livello_nodo != -1 and livello_nodo < livello_min:
-            ctx.log_msg(f"Raccolta [{tipo}]: nodo Lv.{livello_nodo} < min {livello_min} "
-                        f"— scarto e blacklisto")
-            if chiave:
-                blacklist.commit(chiave, eta_s=None)
+            ctx.log_msg(
+                f"Raccolta [{tipo}]: nodo Lv.{livello_nodo} < min {livello_min} "
+                f"— blacklist + tipo bloccato"
+            )
+            blacklist.commit(chiave, eta_s=None)
             ctx.device.key("KEYCODE_BACK")
             time.sleep(0.5)
+            _reset_to_mappa(ctx, obiettivo)
             return False, True, False
         elif livello_nodo != -1:
             ctx.log_msg(f"Raccolta [{tipo}]: nodo Lv.{livello_nodo} ✓")
 
-    # Step 4+6: verifica territorio
-    if screen_popup is not None and not _nodo_in_territorio(screen_popup, tipo, ctx):
-        ctx.log_msg(f"Raccolta [{tipo}]: nodo FUORI territorio — blacklist statica + dinamica")
-        if chiave:
-            blacklist_fuori.aggiungi(chiave, tipo)   # Step 6: persiste su disco
-            blacklist.commit(chiave, eta_s=None)      # Step 4: blacklist dinamica
-        # Chiudi popup nodo + ricentra mappa
-        ctx.device.key("KEYCODE_BACK")
-        time.sleep(0.5)
-        ctx.device.key("KEYCODE_BACK")
-        time.sleep(0.5)
-        if ctx.navigator is not None:
-            ctx.navigator.vai_in_home()
-            time.sleep(0.5)
-            ctx.navigator.vai_in_mappa()
-            time.sleep(1.0)
-        return False, False, True   # skip neutro
-
-    # RESERVED
-    if chiave:
-        blacklist.reserve(chiave)
-        ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} RESERVED")
-
-    # Esegui marcia (Step 2: ETA inclusa)
+    # ─── Step 6: esegui marcia ──────────────────────────────────────────
     ok, eta_s = _esegui_marcia(ctx, n_truppe)
-
     if not ok:
-        if chiave:
-            blacklist.rollback(chiave)
-        ctx.log_msg(f"Raccolta [{tipo}]: marcia FALLITA → rollback")
-        ctx.device.key("KEYCODE_BACK")
-        time.sleep(0.5)
+        ctx.log_msg(f"Raccolta [{tipo}]: marcia FALLITA — rollback")
+        blacklist.rollback(chiave)
+        _reset_to_mappa(ctx, obiettivo)
         return False, False, False
 
-    # Step 3: lettura contatore post-marcia (solo informativa).
-    # La marcia è già confermata visivamente dalla chiusura della maschera.
-    # Il contatore in mappa può richiedere qualche secondo per aggiornarsi
-    # — non usiamo il fallback OCR come criterio di successo/fallimento.
+    # Lettura contatore post-marcia (solo informativa — marcia già
+    # confermata visivamente dalla chiusura della maschera).
     time.sleep(1.5)
     attive_dopo = _leggi_attive_post_marcia(ctx, obiettivo)
     if attive_dopo >= 0:
         ctx.log_msg(f"Raccolta [{tipo}]: marcia OK — attive post={attive_dopo}")
     else:
-        ctx.log_msg(f"Raccolta [{tipo}]: marcia OK — contatore N/D (marcia confermata visivamente)")
+        ctx.log_msg(
+            f"Raccolta [{tipo}]: marcia OK — contatore N/D "
+            f"(marcia confermata visivamente)"
+        )
 
-    # COMMITTED con ETA dinamica (Step 2)
-    if chiave:
-        blacklist.commit(chiave, eta_s=eta_s)
-        ttl_log = f"ETA={eta_s}s" if eta_s else f"TTL={_cfg(ctx, 'BLACKLIST_COMMITTED_TTL')}s"
-        ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} COMMITTED ({ttl_log})")
+    # ─── Step 7: COMMIT con ETA dinamica ────────────────────────────────
+    blacklist.commit(chiave, eta_s=eta_s)
+    ttl_log = f"ETA={eta_s}s" if eta_s else f"TTL={_cfg(ctx, 'BLACKLIST_COMMITTED_TTL')}s"
+    ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} COMMITTED ({ttl_log})")
 
     return True, False, False
 
@@ -1195,164 +1299,178 @@ def _leggi_slot_da_summary(ctx: TaskContext) -> int:
 def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
                        attive_inizio: int,
                        blacklist: Blacklist,
-                       blacklist_fuori: BlacklistFuori) -> int:
+                       blacklist_fuori: Optional[BlacklistFuori] = None) -> int:
     """
     Loop invio squadre fino a slot pieni o MAX_FALLIMENTI.
 
+    FIX C 19/04/2026: dopo ogni ok=True → _reset_to_mappa per leggere
+                      slot reali da HOME e aggiornare attive_correnti.
+    FIX D 19/04/2026: idx_seq sostituito da iteratore sulla sequenza
+                      ricalcolata ad ogni giro while; se ok=True → break
+                      dal for → ricalcola al prossimo giro.
+
     Gestione risultati di _invia_squadra():
-      - ok=True: incrementa inviate, attive_correnti, reset fallimenti_cons,
-        break se slot pieni
-      - skip_neutro: nessuna modifica contatori
-      - tipo_bloccato=True: aggiunge a tipi_bloccati, NO fallimenti++, NO HOME
-      - fallimento puro (ok=False, !tipo_bloccato, !skip_neutro):
-        fallimenti++, HOME + OCR + MAP, se slot pieni → exit
+      - ok=True: incrementa inviate, _reset_to_mappa, aggiorna attive_correnti,
+        break se slot pieni o comunque ricalcola sequenza
+      - skip_neutro: contatore +1, block tipo se >= 2, continue
+      - tipo_bloccato: aggiunge a tipi_bloccati, continue
+      - fallimento puro: fallimenti_cons +1, continue
     """
+    # FIX B/C: blacklist_fuori ora opzionale per facilità test
+    if blacklist_fuori is None:
+        blacklist_fuori = BlacklistFuori(
+            data_dir=_cfg(ctx, "BLACKLIST_FUORI_DIR")
+        )
+
     max_fallimenti = _cfg(ctx, "RACCOLTA_MAX_FALLIMENTI")
     n_truppe       = _cfg(ctx, "RACCOLTA_TRUPPE")
     deposito_ocr   = getattr(ctx, "_deposito_ocr", {})
     sequenza_base  = _cfg(ctx, "RACCOLTA_SEQUENZA")
 
-    tipi_bloccati: set[str]    = set()
-    cooldown_map: dict[str, float] = {}
+    tipi_bloccati: set[str]              = set()
+    cooldown_map: dict[str, float]       = {}
     skip_neutri_per_tipo: dict[str, int] = {}
 
     attive_correnti = attive_inizio
     inviate         = 0
     fallimenti_cons = 0
-    idx_seq         = 0
-    max_iter        = obiettivo * max(2, max_fallimenti) + 5
 
-    for iter_n in range(max_iter):
-        if attive_correnti >= obiettivo:
-            ctx.log_msg(f"Raccolta: obiettivo raggiunto ({attive_correnti}/{obiettivo})")
-            break
-        if fallimenti_cons >= max_fallimenti:
-            ctx.log_msg(f"Raccolta: troppi fallimenti ({fallimenti_cons}) — abbandono")
-            break
+    # Safety: limite totale invii per evitare loop infiniti
+    max_invii    = obiettivo * max(2, max_fallimenti) + 5
+    invii_totali = 0
 
-        tipi_disponibili = [t for t in _TUTTI_I_TIPI if t not in tipi_bloccati]
-        if not tipi_disponibili:
+    while (attive_correnti < obiettivo
+           and fallimenti_cons < max_fallimenti
+           and invii_totali < max_invii):
+
+        # ── Check: tutti i tipi bloccati? ──
+        if set(_TUTTI_I_TIPI).issubset(tipi_bloccati):
             ctx.log_msg("Raccolta: tutti i tipi bloccati — uscita")
             break
 
-        ora    = time.time()
+        # ── Check: tutti i tipi disponibili in cooldown? → attendi ──
+        tipi_disponibili = [t for t in _TUTTI_I_TIPI if t not in tipi_bloccati]
+        ora = time.time()
         pronti = [t for t in tipi_disponibili if cooldown_map.get(t, 0) <= ora]
-        if not pronti:
+        if not pronti and tipi_disponibili:
             t_min  = min(cooldown_map.get(t, ora) for t in tipi_disponibili)
             wait_s = max(1, int(t_min - ora))
-            ctx.log_msg(f"Raccolta: tutti in cooldown — attendo {wait_s}s")
+            ctx.log_msg(f"Raccolta: tutti i tipi in cooldown — attendo {wait_s}s")
             time.sleep(wait_s)
             continue
 
+        # ── FIX D: ricalcola sequenza ad ogni iterazione ──
         libere_ora = obiettivo - attive_correnti
         if deposito_ocr:
             sequenza = _calcola_sequenza_allocation(libere_ora, deposito_ocr)
-            sequenza = [t for t in sequenza if t not in tipi_bloccati] or                        _calcola_sequenza(libere_ora, sequenza_base, tipi_bloccati)
+            sequenza = [t for t in sequenza if t not in tipi_bloccati] or \
+                       _calcola_sequenza(libere_ora, sequenza_base, tipi_bloccati)
         else:
             sequenza = _calcola_sequenza(libere_ora, sequenza_base, tipi_bloccati)
 
-        # Interleave: alterna i tipi per evitare attese sul nodo stesso tipo
+        # Interleave: alterna tipi per evitare attese sullo stesso nodo
         sequenza = _interleave(sequenza)
 
         if not sequenza:
             ctx.log_msg("Raccolta: sequenza vuota — abbandono")
             break
 
-        tipo = sequenza[idx_seq % len(sequenza)]
-        idx_seq += 1
-
-        if cooldown_map.get(tipo, 0) > time.time():
-            continue
-        if tipo in tipi_bloccati:
-            continue
-
-        ctx.log_msg(f"Raccolta: invio squadra {attive_correnti + 1}/{obiettivo} → {tipo} "
-                    f"(fallimenti_cons={fallimenti_cons}/{max_fallimenti})")
-
-        ok, tipo_bloccato, skip_neutro = _invia_squadra(
-            ctx, tipo, blacklist, blacklist_fuori,
-            cooldown_map, n_truppe, tipi_bloccati, obiettivo
-        )
-
-        # ── CASO ok=True ─────────────────────────────────────────────────
-        if ok:
-            inviate         += 1
-            attive_correnti += 1
-            fallimenti_cons  = 0
-            skip_neutri_per_tipo[tipo] = 0
-            ctx.log_msg(f"Raccolta: squadra confermata ({attive_correnti}/{obiettivo})")
-            time.sleep(_cfg(ctx, "DELAY_POST_MARCIA"))
+        # ── FIX D: itera sulla sequenza in ordine — consuma tipo per tipo ──
+        # Se ok=True → break dal for → ricalcola sequenza al prossimo while
+        for tipo in sequenza:
             if attive_correnti >= obiettivo:
-                ctx.log_msg(f"Raccolta: slot pieni ({attive_correnti}/{obiettivo}) — uscita")
                 break
-            continue
+            if fallimenti_cons >= max_fallimenti:
+                break
+            if invii_totali >= max_invii:
+                break
+            if tipo in tipi_bloccati:
+                continue
+            if cooldown_map.get(tipo, 0) > time.time():
+                continue
 
-        # ── CASO skip_neutro ─────────────────────────────────────────────
-        if skip_neutro:
-            skip_neutri_per_tipo[tipo] = skip_neutri_per_tipo.get(tipo, 0) + 1
-            n_skip = skip_neutri_per_tipo[tipo]
+            invii_totali += 1
             ctx.log_msg(
-                f"Raccolta: skip neutro {tipo} ({n_skip}/2) — "
-                f"fallimenti_cons invariato ({fallimenti_cons})"
+                f"Raccolta: invio squadra {attive_correnti + 1}/{obiettivo} "
+                f"→ {tipo} (fallimenti_cons={fallimenti_cons}/{max_fallimenti})"
             )
-            if n_skip >= 2:
+
+            ok, tipo_bloccato, skip_neutro = _invia_squadra(
+                ctx, tipo, blacklist, blacklist_fuori,
+                cooldown_map, n_truppe, tipi_bloccati, obiettivo
+            )
+
+            # ── CASO ok=True ─────────────────────────────────────────
+            if ok:
+                inviate         += 1
+                attive_correnti += 1
+                fallimenti_cons  = 0
+                skip_neutri_per_tipo[tipo] = 0
+                ctx.log_msg(
+                    f"Raccolta: squadra confermata ({attive_correnti}/{obiettivo})"
+                )
+                time.sleep(_cfg(ctx, "DELAY_POST_MARCIA"))
+
+                # FIX C: verifica slot reali da HOME
+                attive_reali = _reset_to_mappa(ctx, obiettivo)
+                if attive_reali >= 0:
+                    if attive_reali != attive_correnti:
+                        ctx.log_msg(
+                            f"Raccolta: [RIALLINEA] attive "
+                            f"{attive_correnti}→{attive_reali} "
+                            f"(OCR post-marcia da HOME)"
+                        )
+                    attive_correnti = attive_reali
+                ctx.log_msg(
+                    f"Raccolta: slot post-marcia OCR="
+                    f"{attive_correnti}/{obiettivo}"
+                )
+
+                if attive_correnti >= obiettivo:
+                    ctx.log_msg(
+                        f"Raccolta: slot pieni ({attive_correnti}/{obiettivo}) "
+                        f"— uscita"
+                    )
+                    break  # esce dal for; il while terminerà
+                # FIX D: esce dal for per ricalcolare sequenza al prossimo while
+                break
+
+            # ── CASO skip_neutro ─────────────────────────────────────
+            if skip_neutro:
+                skip_neutri_per_tipo[tipo] = skip_neutri_per_tipo.get(tipo, 0) + 1
+                n_skip = skip_neutri_per_tipo[tipo]
+                ctx.log_msg(
+                    f"Raccolta: skip neutro {tipo} ({n_skip}/2) — "
+                    f"fallimenti_cons invariato ({fallimenti_cons})"
+                )
+                if n_skip >= 2:
+                    tipi_bloccati.add(tipo)
+                    ctx.log_msg(
+                        f"Raccolta: tipo '{tipo}' bloccato dopo {n_skip} "
+                        f"skip neutri consecutivi"
+                    )
+                    if set(_TUTTI_I_TIPI).issubset(tipi_bloccati):
+                        ctx.log_msg("Raccolta: tutti i tipi bloccati — uscita")
+                        break
+                continue  # prossimo tipo nella sequenza
+
+            # ── CASO tipo_bloccato ───────────────────────────────────
+            if tipo_bloccato:
                 tipi_bloccati.add(tipo)
                 ctx.log_msg(
-                    f"Raccolta: tipo '{tipo}' bloccato dopo {n_skip} skip neutri consecutivi"
+                    f"Raccolta: tipo '{tipo}' bloccato per questo ciclo"
                 )
                 if set(_TUTTI_I_TIPI).issubset(tipi_bloccati):
                     ctx.log_msg("Raccolta: tutti i tipi bloccati — uscita")
                     break
+                continue
+
+            # ── CASO fallimento puro ─────────────────────────────────
+            # _reset_to_mappa già chiamato dentro _invia_squadra
+            fallimenti_cons += 1
             continue
 
-        # ── CASO tipo_bloccato (CERCA fallita / blacklist / livello basso) ──
-        # Nessun HOME, nessun fallimenti++. Solo marcatura e continua.
-        if tipo_bloccato:
-            tipi_bloccati.add(tipo)
-            ctx.log_msg(f"Raccolta: tipo '{tipo}' bloccato per questo ciclo")
-            if set(_TUTTI_I_TIPI).issubset(tipi_bloccati):
-                ctx.log_msg("Raccolta: tutti i tipi bloccati — uscita")
-                break
-            continue
-
-        # ── CASO fallimento puro (marcia fallita con rollback) ───────────
-        # Torna in HOME, rileggi slot, rientra in mappa.
-        fallimenti_cons += 1
-        if ctx.navigator is not None:
-            ctx.navigator.vai_in_home()
-            time.sleep(1.0)
-        try:
-            from shared.ocr_helpers import leggi_contatore_slot
-            screen_home = ctx.device.screenshot()
-            if screen_home is not None:
-                attive_reali, _ = leggi_contatore_slot(
-                    screen_home, totale_noto=obiettivo
-                )
-                if attive_reali > obiettivo:
-                    ctx.log_msg(
-                        f"Raccolta: OCR post-rollback anomalo "
-                        f"attive={attive_reali}>totale={obiettivo} — ignorato"
-                    )
-                elif attive_reali >= 0:
-                    if attive_reali != attive_correnti:
-                        ctx.log_msg(
-                            f"Raccolta: [RIALLINEA] attive {attive_correnti}→{attive_reali} "
-                            f"(OCR post-rollback da HOME)"
-                        )
-                        attive_correnti = attive_reali
-                    if attive_correnti >= obiettivo:
-                        ctx.log_msg(
-                            f"Raccolta: slot pieni dopo rollback "
-                            f"({attive_correnti}/{obiettivo}) — uscita immediata"
-                        )
-                        return inviate
-        except Exception as exc:
-            ctx.log_msg(f"Raccolta: OCR slot post-rollback fallito ({exc})")
-        if ctx.navigator is not None:
-            ctx.navigator.vai_in_mappa()
-            time.sleep(1.5)
-
-    # ── Fine loop: torna in HOME, rileggi slot, log ──────────────────────
+    # ── Fine while: log finale slot da HOME ──
     if ctx.navigator is not None:
         ctx.navigator.vai_in_home()
         time.sleep(1.0)
@@ -1360,7 +1478,9 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
         from shared.ocr_helpers import leggi_contatore_slot
         screen_home = ctx.device.screenshot()
         if screen_home is not None:
-            attive_ocr, _ = leggi_contatore_slot(screen_home, totale_noto=obiettivo)
+            attive_ocr, _ = leggi_contatore_slot(
+                screen_home, totale_noto=obiettivo
+            )
             if 0 <= attive_ocr <= obiettivo:
                 attive_correnti = attive_ocr
     except Exception:
@@ -1382,6 +1502,9 @@ class RaccoltaTask(Task):
     Task periodico (4h) — invio squadre raccoglitrici.
     V6 upgraded: OCR coordinate, ETA dinamica, conferma contatore,
     blacklist statica fuori territorio, verifica livello nodo.
+
+    Nota: schedule_type "periodic" è mantenuto per retrocompatibilità;
+    in produzione main.py tratta RaccoltaTask come always-run (interval=0).
     """
 
     def name(self) -> str:

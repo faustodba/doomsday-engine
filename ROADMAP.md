@@ -167,6 +167,24 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | Fallback livelli con blacklist | `tasks/raccolta.py` | `_invia_squadra()`: il loop `sequenza_livelli` ora considera "nodo utile" solo se NON in `blacklist_fuori`. Prima il `break` scattava al primo nodo trovato anche se blacklistato, impedendo il fallback 6→7→5. Se tutti i livelli restituiscono blacklistati → skip neutro (gestito dal guard 2-strike). Rimossa funzione morta `_cerca_nodo_con_fallback` (mai chiamata) |
 | Reset UI tra livelli fallback | `tasks/raccolta.py` | Tra un livello e il successivo nel loop `sequenza_livelli`: doppio BACK + vai_in_home + vai_in_mappa per stato UI pulito. Prima il solo `KEYCODE_BACK` lasciava la lente in stato intermedio → `_verifica_tipo` al livello successivo falliva sistematicamente (log "LENTE → Lv.7" senza mai "CERCA eseguita per Lv.7", 14s di retry prima di abort tipo_bloccato). Verificato su FAU_01 e FAU_02 ciclo 19:43-19:49 |
 
+## Fix applicati in sessione 19/04/2026
+
+Riscrittura completa `tasks/raccolta.py` e `tests/tasks/test_raccolta.py` per
+consolidare la logica raccolta. Baseline test: 42 passed / 57. Post-riscrittura:
+**57 passed / 57**.
+
+| Fix | File | Dettaglio |
+|-----|------|-----------|
+| FIX A — sequenza _invia_squadra riscritta | `tasks/raccolta.py` | Flusso: CERCA + leggi_coord → blacklist_fuori (skip_neutro, prova lv successivo) → blacklist RAM (retry stesso lv, tipo_bloccato se ancora occupato) → reserve → tap nodo + gather → territorio (skip_neutro se FUORI) → livello nodo (tipo_bloccato se basso) → marcia → commit. Percorsi sparsi consolidati. |
+| FIX B — `_reset_to_mappa()` centralizzato | `tasks/raccolta.py` | `vai_in_home() → leggi_contatore_slot() → vai_in_mappa()`. Sostituisce tutti i blocchi inline BACK+HOME+MAPPA. Ritorna attive_reali (-1 se OCR fallisce). |
+| FIX C — verifica slot HOME post-marcia | `tasks/raccolta.py` | Dopo ogni ok=True in `_loop_invio_marce`: `_reset_to_mappa()` + aggiornamento `attive_correnti`. Uscita immediata se slot pieni. [RIALLINEA] logga discrepanze tra contatore in-memory e OCR. |
+| FIX D — iteratore sulla sequenza | `tasks/raccolta.py` | `idx_seq` rimpiazzato da `for tipo in sequenza`. Sequenza ricalcolata ad ogni giro while; se ok=True → break for → ricalcola al prossimo while (gap-based allocation aggiornata con attive_correnti corrente). |
+| FIX E — fallback livelli semplificato | `tasks/raccolta.py` | Rimosso Lv.5. `base=7 → [7,6]`, `base=6 → [6,7]`. Due soli livelli tentati per ogni invio. |
+| FIX F — delay stabilizzazione aumentati | `tasks/raccolta.py` | `_cerca_nodo`: tap_lente 0.8→1.5, doppio tap_icona 1.2→1.8, MENO 0.15→0.2, PIU 0.2→0.25. `_verifica_tipo`: pre-flush 0.5→0.8, flush-live 0.2→0.5. `_tap_nodo_e_verifica_gather`: tap_nodo 1.0→1.5, retry 1.5→2.0. `_esegui_marcia`: RACCOGLI 0.5→0.8, SQUADRA 1.4→1.8, retry SQUADRA 1.8→2.2, MARCIA 0.8→1.2. |
+| FIX G — `_GatherResult` dataclass | `tasks/raccolta.py` | `_tap_nodo_e_verifica_gather` ritorna `_GatherResult(ok, screen)` invece di tuple implicita. Rimosso isinstance(esito, tuple) workaround in `_invia_squadra`. |
+| Test helper `_ctx_nav_ok` | `tests/tasks/test_raccolta.py` | Stubba `navigator.vai_in_mappa/vai_in_home` a True. Necessario perché `GameNavigator + FakeMatcher` senza template barra inferiore → vai_in_mappa=False → early return in `RaccoltaTask.run`. Sbloccati 9 test preesistenti. |
+| Test ConGather aggiornati V6 | `tests/tasks/test_raccolta.py` | Chiave blacklist "tipo_campo" (legacy V5) → "100_200" (OCR V6 X_Y). Patchati `_leggi_coord_nodo`, `_reset_to_mappa`, `_leggi_attive_post_marcia`, `_leggi_livello_nodo` per isolare dalla catena OCR. |
+
 ### Test notturno 18/04/2026 — 3 cicli sequenziali FAU_00/01/02
 
 - **FAU_00:** 5/5 squadre inviate in ciclo 2 (09:03). Cicli 1 e 3 correttamente skippati (slot pieni). OCR iniziale letto "7/5" al ciclo 1 — risolto da sanity check (d'ora in poi skip conservativo)

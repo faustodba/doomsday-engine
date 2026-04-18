@@ -1,11 +1,16 @@
 # ==============================================================================
 #  tests/tasks/test_raccolta.py — Step 21
 #  Tutti i test usano FakeDevice + FakeMatcher — zero ADB reale.
+#
+#  FIX 19/04/2026:
+#    - _ctx_nav_ok(): helper che stubba navigator.vai_in_mappa/vai_in_home
+#      a True, evitando il blocco early-return in RaccoltaTask.run
+#      quando il navigator reale su FakeMatcher fallirebbe.
 # ==============================================================================
 
 import time
 import pytest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 from core.device import FakeDevice
 from core.navigator import GameNavigator
@@ -62,6 +67,19 @@ def ctx_base(**overrides) -> TaskContext:
     }
     base.update(overrides)
     return make_ctx(base)
+
+
+def _ctx_nav_ok(**overrides) -> TaskContext:
+    """
+    ctx_base() + navigator.vai_in_mappa/vai_in_home stubbed a True.
+    Necessario perché GameNavigator + FakeMatcher non trovano template
+    barra inferiore, quindi vai_in_mappa() torna False e l'esecuzione
+    di RaccoltaTask.run termina anticipatamente al check di navigazione.
+    """
+    ctx = ctx_base(**overrides)
+    ctx.navigator.vai_in_mappa = MagicMock(return_value=True)
+    ctx.navigator.vai_in_home  = MagicMock(return_value=True)
+    return ctx
 
 
 # ==============================================================================
@@ -292,15 +310,17 @@ class TestRaccoltaNavigazioneMappa:
     @patch("tasks.raccolta._loop_invio_marce", return_value=0)
     def test_navigazione_mappa_eseguita(self, mock_loop, mock_sleep):
         """Navigator.vai_in_mappa() chiamato → loop viene eseguito."""
-        ctx = ctx_base()
+        ctx = _ctx_nav_ok()
         RaccoltaTask().run(ctx, attive_inizio=0, slot_liberi=2)
-        mock_loop.assert_called_once()
+        # Il ciclo esterno puo' ripetere fino a 3 tentativi se attive_correnti
+        # non raggiunge obiettivo — verifichiamo solo che sia stato chiamato.
+        assert mock_loop.called
 
     @patch("tasks.raccolta.time.sleep")
     @patch("tasks.raccolta._loop_invio_marce", return_value=0)
     def test_ritorno_home_eseguito(self, mock_loop, mock_sleep):
         """Dopo il loop, navigator.vai_in_home() viene chiamato."""
-        ctx = ctx_base()
+        ctx = _ctx_nav_ok()
         RaccoltaTask().run(ctx, attive_inizio=0, slot_liberi=2)
         # Il loop è stato chiamato = navigazione andata a buon fine
         # Il ritorno home è garantito dal finally
@@ -314,24 +334,26 @@ class TestRaccoltaNavigazioneMappa:
 class TestRaccoltaLoopMockato:
 
     @patch("tasks.raccolta.time.sleep")
-    @patch("tasks.raccolta._loop_invio_marce", return_value=3)
+    @patch("tasks.raccolta._loop_invio_marce", side_effect=[3, 0, 0])
     def test_tre_inviate(self, mock_loop, mock_sleep):
-        ctx = ctx_base()
+        """Prima chiamata torna 3 inviate, successive 0 (slot pieni)."""
+        ctx = _ctx_nav_ok()
         result = RaccoltaTask().run(ctx, attive_inizio=0, slot_liberi=3)
         assert result.data["inviate"] == 3
         assert result.success is True
 
     @patch("tasks.raccolta.time.sleep")
-    @patch("tasks.raccolta._loop_invio_marce", return_value=1)
+    @patch("tasks.raccolta._loop_invio_marce", side_effect=[1, 0, 0])
     def test_result_message_inviate(self, mock_loop, mock_sleep):
-        ctx = ctx_base()
+        """Prima chiamata torna 1, successive 0 → inviate_totali=1."""
+        ctx = _ctx_nav_ok()
         result = RaccoltaTask().run(ctx, attive_inizio=0, slot_liberi=2)
         assert "1" in result.message
 
     @patch("tasks.raccolta.time.sleep")
     @patch("tasks.raccolta._loop_invio_marce", side_effect=RuntimeError("test"))
     def test_errore_loop_result_false(self, mock_loop, mock_sleep):
-        ctx = ctx_base()
+        ctx = _ctx_nav_ok()
         result = RaccoltaTask().run(ctx, attive_inizio=0, slot_liberi=2)
         assert result.success is False
         assert "errore" in result.message
@@ -340,7 +362,7 @@ class TestRaccoltaLoopMockato:
     @patch("tasks.raccolta._loop_invio_marce", side_effect=RuntimeError("test"))
     def test_errore_home_eseguito_comunque(self, mock_loop, mock_sleep):
         """Anche se il loop lancia eccezione, il ritorno home viene eseguito."""
-        ctx = ctx_base()
+        ctx = _ctx_nav_ok()
         result = RaccoltaTask().run(ctx, attive_inizio=0, slot_liberi=2)
         assert result.success is False  # errore riportato
 
@@ -354,7 +376,7 @@ class TestRaccoltaBlacklistIniettata:
     @patch("tasks.raccolta.time.sleep")
     @patch("tasks.raccolta._loop_invio_marce", return_value=2)
     def test_blacklist_custom_passata(self, mock_loop, mock_sleep):
-        ctx = ctx_base()
+        ctx = _ctx_nav_ok()
         bl = Blacklist()
         bl.commit("100_200")
         RaccoltaTask().run(ctx, attive_inizio=0, slot_liberi=2, blacklist=bl)
@@ -365,7 +387,7 @@ class TestRaccoltaBlacklistIniettata:
     @patch("tasks.raccolta.time.sleep")
     @patch("tasks.raccolta._loop_invio_marce", return_value=0)
     def test_blacklist_creata_internamente_se_none(self, mock_loop, mock_sleep):
-        ctx = ctx_base()
+        ctx = _ctx_nav_ok()
         RaccoltaTask().run(ctx, attive_inizio=0, slot_liberi=2, blacklist=None)
         args = mock_loop.call_args
         bl_passata = args[0][3]
@@ -423,25 +445,22 @@ class TestLoopInvioMarceConGather:
     @patch("tasks.raccolta.time.sleep")
     def test_marcia_ok_se_gather_e_marcia_trovati(self, mock_sleep):
         """
-        FakeMatcher trova gather E marcia = None (maschera chiusa dopo MARCIA)
-        → marcia OK → 1 inviata.
+        Setup end-to-end simulato: _cerca_nodo OK (pin tipo trovati),
+        _leggi_coord_nodo patchato a "100_200" (V6 usa OCR X_Y),
+        _esegui_marcia patchato a (True, 60.0) → 1 marcia inviata.
 
-        Sequenza FakeMatcher:
-          1. _leggi_coordinate_nodo: find(gather) → (400, 300)  [nodo trovato]
-          2. _esegui_marcia → screenshot → find(marcia) → None  [maschera aperta fail → OK]
-        
-        La logica _esegui_marcia verifica che la maschera sia aperta PRIMA e
-        chiusa DOPO. Nel test: matcher.find(marcia) sempre None significa
-        "maschera non rilevata" — in _esegui_marcia questo causa:
-          step 1: screenshot dopo squadra → find(marcia) = None → maschera "non aperta"
-          → retry → ancora None → return False, None
-        Quindi con solo gather trovato → marcia fallisce.
-        
-        Per simulare una marcia completa usiamo patch diretto su _esegui_marcia.
+        FIX 19/04/2026: chiave aggiornata da "tipo_campo" (V5 legacy)
+        al formato OCR V6 "X_Y". Patchati _leggi_coord_nodo,
+        _reset_to_mappa, _leggi_attive_post_marcia, _leggi_livello_nodo
+        per isolare il test dalla catena OCR.
         """
-        with patch("tasks.raccolta._esegui_marcia", return_value=(True, 60.0)):
-            ctx = ctx_base(**{"RACCOLTA_MAX_FALLIMENTI": 1,
-                              "RACCOLTA_OBIETTIVO": 1})
+        with patch("tasks.raccolta._esegui_marcia", return_value=(True, 60.0)), \
+             patch("tasks.raccolta._leggi_coord_nodo", return_value="100_200"), \
+             patch("tasks.raccolta._reset_to_mappa", return_value=-1), \
+             patch("tasks.raccolta._leggi_attive_post_marcia", return_value=-1), \
+             patch("tasks.raccolta._leggi_livello_nodo", return_value=6):
+            ctx = _ctx_nav_ok(**{"RACCOLTA_MAX_FALLIMENTI": 1,
+                                 "RACCOLTA_OBIETTIVO": 1})
             ctx.device.set_default_shot(object())
             ctx.matcher.set_result("pin/pin_gather.png", (400, 300))
             # verifica tipo: tutti i pin tipo trovati per non bloccare _cerca_nodo
@@ -454,10 +473,17 @@ class TestLoopInvioMarceConGather:
 
     @patch("tasks.raccolta.time.sleep")
     def test_nodo_committed_dopo_marcia(self, mock_sleep):
-        """Dopo una marcia OK, il nodo deve essere COMMITTED in blacklist."""
-        with patch("tasks.raccolta._esegui_marcia", return_value=(True, 45.0)):
-            ctx = ctx_base(**{"RACCOLTA_MAX_FALLIMENTI": 1,
-                              "RACCOLTA_OBIETTIVO": 1})
+        """
+        Dopo marcia OK, nodo COMMITTED in blacklist con ETA dinamica.
+        FIX 19/04/2026: chiave OCR V6 "100_200" invece di "tipo_campo".
+        """
+        with patch("tasks.raccolta._esegui_marcia", return_value=(True, 45.0)), \
+             patch("tasks.raccolta._leggi_coord_nodo", return_value="100_200"), \
+             patch("tasks.raccolta._reset_to_mappa", return_value=-1), \
+             patch("tasks.raccolta._leggi_attive_post_marcia", return_value=-1), \
+             patch("tasks.raccolta._leggi_livello_nodo", return_value=6):
+            ctx = _ctx_nav_ok(**{"RACCOLTA_MAX_FALLIMENTI": 1,
+                                 "RACCOLTA_OBIETTIVO": 1})
             ctx.device.set_default_shot(object())
             ctx.matcher.set_result("pin/pin_gather.png", (400, 300))
             for tmpl in ["pin/pin_field.png", "pin/pin_sawmill.png",
@@ -465,9 +491,9 @@ class TestLoopInvioMarceConGather:
                 ctx.matcher.set_result(tmpl, (500, 500))
             bl = Blacklist()
             _loop_invio_marce(ctx, 1, 0, bl)
-            # chiave blacklist = TAP_NODO fisso "tipo_campo"
-            assert bl.get_state("tipo_campo") == "COMMITTED"
-            assert bl.get_eta("tipo_campo") == 45.0
+            # V6: chiave = coordinate OCR "X_Y" (patchata a "100_200")
+            assert bl.get_state("100_200") == "COMMITTED"
+            assert bl.get_eta("100_200") == 45.0
 
 
 # ==============================================================================
@@ -526,18 +552,19 @@ class TestRaccoltaSlotLiberi:
     @patch("tasks.raccolta._loop_invio_marce", return_value=0)
     def test_slot_calcolato_da_attive(self, mock_loop, mock_sleep):
         """slot_liberi=-1 → calcolato come obiettivo - attive_inizio."""
-        ctx = ctx_base(**{"RACCOLTA_OBIETTIVO": 4})
+        ctx = _ctx_nav_ok(**{"RACCOLTA_OBIETTIVO": 4})
         RaccoltaTask().run(ctx, attive_inizio=2, slot_liberi=-1)
-        # 4 - 2 = 2 libere → il loop viene chiamato
-        mock_loop.assert_called_once()
+        # 4 - 2 = 2 libere → il loop viene chiamato (puo' essere richiamato
+        # fino a 3 volte dal ciclo esterno)
+        assert mock_loop.called
 
     @patch("tasks.raccolta.time.sleep")
     @patch("tasks.raccolta._loop_invio_marce", return_value=0)
     def test_slot_iniettato_sovrascrive(self, mock_loop, mock_sleep):
         """slot_liberi esplicito → usato direttamente."""
-        ctx = ctx_base(**{"RACCOLTA_OBIETTIVO": 4})
+        ctx = _ctx_nav_ok(**{"RACCOLTA_OBIETTIVO": 4})
         RaccoltaTask().run(ctx, attive_inizio=0, slot_liberi=1)
-        mock_loop.assert_called_once()
+        assert mock_loop.called
 
 
 # ==============================================================================
