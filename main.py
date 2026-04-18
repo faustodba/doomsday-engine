@@ -22,6 +22,7 @@ from typing import Optional
 ROOT = os.path.dirname(os.path.abspath(__file__))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
+os.chdir(ROOT)  # CWD = project root, indipendentemente da dove main.py è lanciato
 
 from core.orchestrator import Orchestrator
 from core.task import TaskContext, TaskResult
