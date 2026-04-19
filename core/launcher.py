@@ -263,6 +263,17 @@ def avvia_istanza(ist: dict, log_fn: Optional[Callable] = None) -> bool:
         _log("ERRORE: MuMuPlayer non avviato — impossibile procedere", log_fn)
         return False
 
+    # 0.5. Reset socket ADB tra istanze sequenziali (fix #F1b).
+    # Su macchina lenta (HDD + 11 istanze seriali) il frame grabber ADB
+    # accumula socket rotti -> device.screenshot() ritorna None persistente.
+    # kill-server+start-server resetta stato senza toccare MuMu.
+    _log(f"[{nome}] adb kill-server/start-server (reset socket)", log_fn)
+    try:
+        subprocess.run([_adb, "kill-server"],  timeout=10, capture_output=True)
+        subprocess.run([_adb, "start-server"], timeout=10, capture_output=True)
+    except Exception as exc:
+        _log(f"[{nome}] adb reset warn: {exc}", log_fn)
+
     # Attesa spegnimento completo istanza precedente (max 30s)
     _log(f"[{nome}] verifica istanza spenta...", log_fn)
     t_off = time.time()
