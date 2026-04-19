@@ -181,6 +181,7 @@ class BoostTask(Task):
 
         # STEP 3 — scroll fino a pin_speed
         speed_trovato = False
+        speed_cx      = -1
         speed_cy      = -1
         score_50_last = -1.0
 
@@ -192,10 +193,15 @@ class BoostTask(Task):
 
             if score_speed >= cfg.soglia_speed:
                 match         = matcher.find_one(shot, cfg.tmpl_speed, threshold=cfg.soglia_speed)
-                speed_cy      = match.cy if match and match.found else 270
+                if match and match.found:
+                    speed_cx = match.cx
+                    speed_cy = match.cy
+                else:
+                    speed_cx = 480    # fallback centro schermo
+                    speed_cy = 270
                 speed_trovato = True
                 score_50_last = score_50
-                log(f"pin_speed TROVATO cy={speed_cy}")
+                log(f"pin_speed TROVATO cx={speed_cx} cy={speed_cy}")
                 break
 
             score_50_last = max(score_50_last, score_50)
@@ -214,7 +220,13 @@ class BoostTask(Task):
             return _Outcome.GIA_ATTIVO, "8h"
 
         # STEP 5 — tap riga Gathering Speed
-        tap_speed = (480, speed_cy)
+        # FIX 19/04/2026: tap direttamente sul centro dell'icona pin_speed
+        # (speed_cx, speed_cy). Il tap precedente era (480, speed_cy) con
+        # x hardcoded al centro schermo — zona inerte della riga (tra icona
+        # sx e pulsante dx). Verificato runtime FAU_00/FAU_01 ciclo 12:12-12:14:
+        # tap (480, cy) NON apriva la maschera USE (pin_speed_use=-1.0
+        # sistematico, pin_speed_8h resta a 0.606 = stessa lista boost).
+        tap_speed = (speed_cx, speed_cy)
         log(f"Tap Gathering Speed {tap_speed}")
         device.tap(*tap_speed)
 

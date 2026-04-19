@@ -178,13 +178,15 @@ class FakeLogger:
 
 
 def _cfg_zero() -> BoostConfig:
-    """Config con tutti i wait azzerati per test veloci."""
+    """
+    Config con tutti i wait azzerati per test veloci.
+    FIX 19/04/2026: rimossi wait_after_tap e wait_after_speed_tap che
+    non esistono piu' in BoostConfig (parametri legacy).
+    """
     return BoostConfig(
-        wait_after_tap=0,
         wait_after_swipe=0,
         wait_after_use=0,
         wait_after_back=0,
-        wait_after_speed_tap=0,
     )
 
 
