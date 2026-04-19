@@ -35,7 +35,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 |------|-------------|-------|------|
 | RT-01..05 | Infrastruttura, navigator, OCR, slot | ✅ | |
 | RT-06 | VIP claim | ✅ | |
-| RT-07 | Boost | ✅ | BoostState scheduling intelligente 16/04/2026 |
+| RT-07 | Boost | ✅ | BoostState scheduling 16/04/2026. RIAPERTO 19/04 (tap non responsivo) → RISOLTO 19/04 (tap `speed_cx/speed_cy`, cy<400 responsivo, polling `pin_speed_use` 4s). Verificato live FAU_00 ore 18:12: boost 8h attivato. |
 | RT-08 | Messaggi + Alleanza | ✅ | |
 | RT-09 | Store | ✅ | 18 acquistati + Free Refresh |
 | RT-10 | Arena | ✅ | 5 sfide + skip checkbox |
