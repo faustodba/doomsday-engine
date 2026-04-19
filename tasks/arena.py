@@ -81,6 +81,7 @@ _MAX_BATTAGLIA_S   = 52.0   # timeout polling
 
 MAX_TENTATIVI         = 3
 MAX_ERRORI_CONSEC     = 2
+ARENA_TIMEOUT_S       = 300  # Hard timeout globale task (fix #F2)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -167,8 +168,13 @@ class ArenaTask(Task):
 
     def _esegui(self, ctx: TaskContext, run: _ArenaRun) -> None:
         ctx.log_msg("[ARENA] Avvio Arena of Glory (max %d sfide)", MAX_SFIDE)
+        deadline = time.time() + ARENA_TIMEOUT_S
 
         for tentativo in range(1, MAX_TENTATIVI + 1):
+            if time.time() > deadline:
+                run.errore = f"timeout globale {ARENA_TIMEOUT_S}s"
+                ctx.log_msg("[ARENA] %s — abort tentativi", run.errore)
+                break
             ctx.log_msg("[ARENA] tentativo %d/%d", tentativo, MAX_TENTATIVI)
 
             # 1. Verifica HOME — FIX: usa vai_in_home() invece di current_screen()
