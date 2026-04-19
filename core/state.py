@@ -882,8 +882,15 @@ class InstanceState:
 
     def save(self, state_dir: str | Path = "state") -> None:
         """
-        Salva lo stato su disco in formato JSON.
-        Crea la directory se non esiste.
+        Salva lo stato su disco in formato JSON, atomico.
+
+        Pattern tmp + fsync + os.replace:
+          - scrittura su file .tmp
+          - f.flush() + os.fsync() forzano il write fisico su disco
+            (evita corruzione in caso di crash / power-loss con HDD lento)
+          - os.replace() rinomina atomicamente (NTFS/ext4)
+          - Se il processo muore prima di os.replace: file originale intatto
+          - Se muore dopo: nuovo file completo e consistente
 
         Args:
             state_dir: directory dove salvare il file JSON
@@ -891,8 +898,12 @@ class InstanceState:
         path = Path(state_dir)
         path.mkdir(parents=True, exist_ok=True)
         file_path = path / f"{self.instance_name}.json"
-        with open(file_path, "w", encoding="utf-8") as f:
+        tmp_path  = file_path.with_suffix(".json.tmp")
+        with open(tmp_path, "w", encoding="utf-8") as f:
             json.dump(self.to_dict(), f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, file_path)
 
     # ── Shortcut per i task (delegano alle sezioni) ───────────────────────────
 
