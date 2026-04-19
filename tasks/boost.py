@@ -11,6 +11,14 @@
 #    - Quando nessun boost → registra_non_disponibile() → riprova al prossimo tick
 #    - Interval fisso rimosso da _TASK_SETUP — la scadenza governa il timing
 #
+#  FIX 19/04/2026 — polling reale sotto-maschera USE:
+#    Dopo il tap su "Gathering Speed" veniva fatto 1 screenshot dopo 0.5s
+#    fissi (commento diceva "polling max 4s" ma nessun polling era
+#    implementato). Se la maschera USE non era completamente renderizzata,
+#    pin_speed_use=-1.0 → "Nessun boost disponibile" falso negativo.
+#    Verificato su FAU_00 ciclo 21:47 (score pin_speed_8h=0.616, use=-1.0).
+#    Sostituito con polling find_one fino a timeout 5s con poll 0.4s.
+#
 #  Flusso:
 #    1. should_run() → legge BoostState: skip se boost attivo e non in scadenza
 #    2. Assicura HOME via navigator
@@ -19,9 +27,10 @@
 #    5. Scroll finché pin_speed visibile (max MAX_SWIPE)
 #    6. Se pin_50_ visibile → boost già attivo → registra "8h" → chiudi popup
 #    7. Tap riga Gathering Speed
-#    8. Cerca pin_speed_8h + pin_speed_use → tap USE → registra "8h"
-#    9. Fallback: cerca pin_speed_1d + pin_speed_use → tap USE → registra "1d"
-#   10. Nessun boost → registra_non_disponibile() → chiudi popup
+#    8. Polling fino a pin_speed_use visibile (timeout 5s)
+#    9. Cerca pin_speed_8h + pin_speed_use → tap USE → registra "8h"
+#   10. Fallback: cerca pin_speed_1d + pin_speed_use → tap USE → registra "1d"
+#   11. Nessun boost → registra_non_disponibile() → chiudi popup
 #
 #  Logging BoostState:
 #    [BOOST] stato: tipo=8h  scadenza=2026-04-16T16:00:00+00:00  ATTIVO (+7h45m)
@@ -209,16 +218,34 @@ class BoostTask(Task):
         log(f"Tap Gathering Speed {tap_speed}")
         device.tap(*tap_speed)
 
-        # Attesa polling sottoschermata boost (max 4s)
+        # FIX 19/04/2026: polling reale attesa sottomaschera USE.
+        # Prima: sleep 0.5s + 1 screenshot. Ora: poll find_one pin_speed_use
+        # fino a timeout 5s (poll 0.4s). Risolve falso negativo quando
+        # l'animazione popup non è completata al singolo shot.
         time.sleep(0.5)  # minimo per animazione tap
-        shot = device.screenshot()
+        t_start = time.time()
+        timeout_popup_use = 5.0
+        poll_use = 0.4
+        match_use = None
+        shot = None
+        while time.time() - t_start < timeout_popup_use:
+            shot = device.screenshot()
+            if shot is not None:
+                match_use = matcher.find_one(
+                    shot, cfg.tmpl_speed_use, threshold=cfg.soglia_use
+                )
+                if match_use is not None and match_use.found:
+                    break
+            time.sleep(poll_use)
+        elapsed = time.time() - t_start
         if shot is None:
             self._chiudi_popup(device, cfg)
             return _Outcome.ERRORE, None
+        log(f"Attesa maschera USE: {elapsed:.1f}s "
+            f"(pin_speed_use {'trovato' if match_use and match_use.found else 'NON trovato'})")
 
-        # STEP 6 — boost 8h (preferito)
+        # STEP 6 — boost 8h (preferito) — riutilizza shot e match_use dal polling
         score_8h  = matcher.score(shot, cfg.tmpl_speed_8h)
-        match_use = matcher.find_one(shot, cfg.tmpl_speed_use, threshold=cfg.soglia_use)
         score_use = match_use.score if (match_use and match_use.found) else -1.0
         log(f"pin_speed_8h={score_8h:.3f}  pin_speed_use={score_use:.3f}")
 
@@ -230,9 +257,8 @@ class BoostTask(Task):
             time.sleep(cfg.wait_after_back)
             return _Outcome.ATTIVATO_8H, "8h"
 
-        # STEP 7 — fallback boost 1d
+        # STEP 7 — fallback boost 1d — match_use e shot ancora validi
         score_1d  = matcher.score(shot, cfg.tmpl_speed_1d)
-        match_use = matcher.find_one(shot, cfg.tmpl_speed_use, threshold=cfg.soglia_use)
         score_use = match_use.score if (match_use and match_use.found) else -1.0
         log(f"pin_speed_1d={score_1d:.3f}  pin_speed_use={score_use:.3f}")
 
