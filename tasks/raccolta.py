@@ -1446,7 +1446,7 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
         )
 
     max_fallimenti = _cfg(ctx, "RACCOLTA_MAX_FALLIMENTI")
-    n_truppe       = _cfg(ctx, "RACCOLTA_TRUPPE")
+    n_truppe       = int(ctx.config.get("truppe", _cfg(ctx, "RACCOLTA_TRUPPE")))
     deposito_ocr   = getattr(ctx, "_deposito_ocr", {})
     sequenza_base  = _cfg(ctx, "RACCOLTA_SEQUENZA")
 
