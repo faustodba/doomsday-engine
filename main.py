@@ -233,8 +233,8 @@ _TASK_SETUP = [
     ("ArenaMercatoTask",  60,  24.0,  "daily"),
     ("ZainoTask",         70,  168.0, "periodic"),
     ("RadarTask",         80,  12.0,  "periodic"),
-    ("RadarCensusTask",   90,  24.0,  "periodic"),
-    ("RifornimentoTask",  100, 1.0,   "periodic"),
+    ("RadarCensusTask",   90,  12.0,  "periodic"),
+    ("RifornimentoTask",  100, 0.0,   "always"),
     ("RaccoltaTask",      110, 0.0,   "always"),
 ]
 

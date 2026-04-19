@@ -190,7 +190,7 @@ Ogni rilascio segue questa sequenza:
 - La tabella "_TASK_SETUP" in `ROADMAP.md` deve essere identica a `main.py`
 - Ogni modifica a `_TASK_SETUP` deve aggiornare `ROADMAP.md` nella stessa sessione
 - Prima di ogni sessione: verificare allineamento `_TASK_SETUP` ↔ `ROADMAP.md`
-- `schedule_type "always"` → `interval=0.0`, `RaccoltaTask` UNICO task always
+- `schedule_type "always"` → `interval=0.0`. Task always: `RifornimentoTask`, `RaccoltaTask` (il guard `should_run()` interno decide se eseguire in base a pre-condizioni)
 - Priorità: numero più basso = eseguito prima nel tick
 
 ---

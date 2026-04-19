@@ -841,8 +841,8 @@ state.rifornimento.provviste_esaurite→ bool (TODO: da aggiungere)
 | ArenaMercatoTask | 60 | 24h | daily | |
 | ZainoTask | 70 | 168h | periodic | |
 | RadarTask | 80 | 12h | periodic | |
-| RadarCensusTask | 90 | 24h | periodic | disabilitato default |
-| RifornimentoTask | 100 | 1h | periodic | penultima: consuma slot squadre |
+| RadarCensusTask | 90 | 12h | periodic | disabilitato default |
+| RifornimentoTask | 100 | — | always | always-run con guard pre-condizioni (soglie risorse, slot) |
 | RaccoltaTask | 110 | — | always | always-run se slot liberi |
 
 ---
