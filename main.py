@@ -380,7 +380,8 @@ def _parse_args():
                                 formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument("--istanze", default=None)
     p.add_argument("--dry-run", action="store_true", default=False)
-    p.add_argument("--tick-sleep", type=int, default=300)
+    p.add_argument("--tick-sleep", type=int, default=300,
+                   help="Secondi di pausa tra un ciclo completo di istanze e il successivo")
     p.add_argument("--no-dashboard", action="store_true", default=False)
     p.add_argument("--status-interval", type=int, default=5)
     return p.parse_args()
@@ -402,7 +403,7 @@ def main():
     if not istanze:
         _log("MAIN", "Nessuna istanza -- uscita."); sys.exit(1)
     _log("MAIN", f"Istanze: {[i['nome'] for i in istanze]}")
-    _log("MAIN", f"Modalità: SEQUENZIALE — ciclo {[i['nome'] for i in istanze]} → sleep 30min → ripeti")
+    _log("MAIN", f"Modalità: SEQUENZIALE — ciclo {[i['nome'] for i in istanze]} → sleep {args.tick_sleep}s → ripeti")
 
     tasks_cls = _import_tasks()
     _log("MAIN", f"Task: {list(tasks_cls.keys())}")
@@ -428,7 +429,7 @@ def main():
     threading.Thread(target=_status_writer_loop, args=(stop_event, args.status_interval),
                      name="StatusWriter", daemon=True).start()
 
-    SLEEP_CICLO = 30 * 60  # 30 minuti tra un ciclo e l'altro
+    SLEEP_CICLO = args.tick_sleep  # secondi tra un ciclo e l'altro (CLI --tick-sleep)
 
     ciclo = 0
     while not stop_event.is_set():
