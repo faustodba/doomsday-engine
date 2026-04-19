@@ -410,10 +410,10 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:
     # popup per 10-30s dopo il caricamento. Aspettiamo che la HOME sia
     # stabile per 3 poll consecutivi con score mappa nel range normale.
     if nav is not None:
-        _log(f"[{nome}] stabilizzazione HOME (max 30s)...", log_fn)
+        _log(f"[{nome}] stabilizzazione HOME (max 60s)...", log_fn)
         stable_count = 0
         t_stab = time.time()
-        while time.time() - t_stab < 30:
+        while time.time() - t_stab < 60:
             time.sleep(5.0)
             try:
                 schermata = nav.schermata_corrente()

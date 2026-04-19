@@ -9,7 +9,7 @@
     "adb": "C:\\Program Files\\Netease\\MuMuPlayer\\nx_main\\adb.exe",
     "timeout_adb_s": 120,
     "timeout_carica_s": 180,
-    "delay_carica_iniz_s": 45,
+    "delay_carica_iniz_s": 60,
     "n_back_pulizia": 5,
     "player_exe": "",
     "timeout_player_s": 60

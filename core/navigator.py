@@ -42,8 +42,8 @@ class Screen(Enum):
 
 @dataclass
 class NavigatorConfig:
-    wait_after_action:  float = 1.5
-    wait_after_overlay: float = 2.0
+    wait_after_action:  float = 2.0
+    wait_after_overlay: float = 2.5
     max_attempts:       int   = 8
     overlay_tap:        tuple[int, int] = (480, 270)
     # V5: TAP_TOGGLE_HOME_MAPPA = (38, 505) — unico bottone che alterna HOME/MAPPA
