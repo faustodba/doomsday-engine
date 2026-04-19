@@ -34,6 +34,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from core.navigator import Screen
+from core.adaptive_timing import AdaptiveTiming
 from config.config_loader import load_global
 
 
@@ -297,14 +298,22 @@ def avvia_istanza(ist: dict, log_fn: Optional[Callable] = None) -> bool:
         _log(f"MuMuManager launch errore: {exc}", log_fn)
         return False
 
-    # 2. Polling is_android_started
-    _log(f"Polling Android started (max {_cfg.timeout_adb_s}s)", log_fn)
+    # 2. Polling is_android_started (timeout adattivo per-istanza — F-A)
+    _tm = AdaptiveTiming(nome)
+    _boot_timeout = _tm.get("boot_android_s", float(_cfg.timeout_adb_s))
+    _log(
+        f"Polling Android started (max {_boot_timeout:.0f}s, "
+        f"base={_cfg.timeout_adb_s}s)",
+        log_fn,
+    )
     t_start = time.time()
     android_ok = False
-    while time.time() - t_start < _cfg.timeout_adb_s:
+    while time.time() - t_start < _boot_timeout:
         info = _mumu_info(indice, _manager)
         if info.get("is_android_started") or info.get("android_started"):
-            _log(f"Android started dopo {time.time()-t_start:.0f}s", log_fn)
+            boot_s = time.time() - t_start
+            _log(f"Android started dopo {boot_s:.0f}s", log_fn)
+            _tm.record("boot_android_s", boot_s)
             android_ok = True
             break
         elapsed = time.time() - t_start
@@ -312,7 +321,7 @@ def avvia_istanza(ist: dict, log_fn: Optional[Callable] = None) -> bool:
         time.sleep(DELAY_POLL_S)
 
     if not android_ok:
-        _log(f"TIMEOUT: Android non started dopo {_cfg.timeout_adb_s}s", log_fn)
+        _log(f"TIMEOUT: Android non started dopo {_boot_timeout:.0f}s", log_fn)
         return False
 
     # 3. adb connect
