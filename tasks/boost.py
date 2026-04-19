@@ -11,13 +11,14 @@
 #    - Quando nessun boost → registra_non_disponibile() → riprova al prossimo tick
 #    - Interval fisso rimosso da _TASK_SETUP — la scadenza governa il timing
 #
-#  FIX 19/04/2026 — polling reale sotto-maschera USE:
+#  FIX 19/04/2026 — ripristino comportamento V5 sotto-maschera USE:
 #    Dopo il tap su "Gathering Speed" veniva fatto 1 screenshot dopo 0.5s
-#    fissi (commento diceva "polling max 4s" ma nessun polling era
-#    implementato). Se la maschera USE non era completamente renderizzata,
-#    pin_speed_use=-1.0 → "Nessun boost disponibile" falso negativo.
-#    Verificato su FAU_00 ciclo 21:47 (score pin_speed_8h=0.616, use=-1.0).
-#    Sostituito con polling find_one fino a timeout 5s con poll 0.4s.
+#    fissi. Provato con polling 5s (commit a0f344a) → nessun miglioramento.
+#    Provato con tap su (speed_cx, speed_cy) (commit 08069fc) → peggio,
+#    il tap sull'icona non apriva la sotto-maschera.
+#    Ripristinato V5: tap su (480, speed_cy) con X fisso centro schermo +
+#    time.sleep(2.0) fisso + singolo screenshot. V5 produzione conferma
+#    che questa combinazione apre correttamente la sotto-maschera USE.
 #
 #  Flusso:
 #    1. should_run() → legge BoostState: skip se boost attivo e non in scadenza
@@ -220,44 +221,26 @@ class BoostTask(Task):
             return _Outcome.GIA_ATTIVO, "8h"
 
         # STEP 5 — tap riga Gathering Speed
-        # FIX 19/04/2026: tap direttamente sul centro dell'icona pin_speed
-        # (speed_cx, speed_cy). Il tap precedente era (480, speed_cy) con
-        # x hardcoded al centro schermo — zona inerte della riga (tra icona
-        # sx e pulsante dx). Verificato runtime FAU_00/FAU_01 ciclo 12:12-12:14:
-        # tap (480, cy) NON apriva la maschera USE (pin_speed_use=-1.0
-        # sistematico, pin_speed_8h resta a 0.606 = stessa lista boost).
-        tap_speed = (speed_cx, speed_cy)
-        log(f"Tap Gathering Speed {tap_speed}")
+        # RIPRISTINO V5 19/04/2026: tap su (480, speed_cy) con X fisso al
+        # centro schermo, Y dalla posizione trovata di pin_speed. Stesso
+        # approccio di V5 (produzione bot-farm) provato funzionante. Il fix
+        # precedente a (speed_cx, speed_cy) era sbagliato: tappava sull'icona
+        # a sx che non è il punto interattivo per aprire la sotto-maschera.
+        # L'attesa post-tap è 2.0s fissi come V5 (animazione completa).
+        tap_speed = (480, speed_cy)
+        log(f"Tap Gathering Speed {tap_speed} (speed_cx={speed_cx} solo diagnostico)")
         device.tap(*tap_speed)
+        time.sleep(2.0)
 
-        # FIX 19/04/2026: polling reale attesa sottomaschera USE.
-        # Prima: sleep 0.5s + 1 screenshot. Ora: poll find_one pin_speed_use
-        # fino a timeout 5s (poll 0.4s). Risolve falso negativo quando
-        # l'animazione popup non è completata al singolo shot.
-        time.sleep(0.5)  # minimo per animazione tap
-        t_start = time.time()
-        timeout_popup_use = 5.0
-        poll_use = 0.4
-        match_use = None
-        shot = None
-        while time.time() - t_start < timeout_popup_use:
-            shot = device.screenshot()
-            if shot is not None:
-                match_use = matcher.find_one(
-                    shot, cfg.tmpl_speed_use, threshold=cfg.soglia_use
-                )
-                if match_use is not None and match_use.found:
-                    break
-            time.sleep(poll_use)
-        elapsed = time.time() - t_start
+        shot = device.screenshot()
         if shot is None:
+            log("Screenshot fallito dopo tap speed — abort")
             self._chiudi_popup(device, cfg)
             return _Outcome.ERRORE, None
-        log(f"Attesa maschera USE: {elapsed:.1f}s "
-            f"(pin_speed_use {'trovato' if match_use and match_use.found else 'NON trovato'})")
 
-        # STEP 6 — boost 8h (preferito) — riutilizza shot e match_use dal polling
+        # STEP 6 — boost 8h (preferito)
         score_8h  = matcher.score(shot, cfg.tmpl_speed_8h)
+        match_use = matcher.find_one(shot, cfg.tmpl_speed_use, threshold=cfg.soglia_use)
         score_use = match_use.score if (match_use and match_use.found) else -1.0
         log(f"pin_speed_8h={score_8h:.3f}  pin_speed_use={score_use:.3f}")
 
@@ -269,8 +252,10 @@ class BoostTask(Task):
             time.sleep(cfg.wait_after_back)
             return _Outcome.ATTIVATO_8H, "8h"
 
-        # STEP 7 — fallback boost 1d — match_use e shot ancora validi
+        # STEP 7 — fallback boost 1d (rileggi pin_speed_use: posizione
+        # potrebbe differire con solo 1d visibile, come in V5)
         score_1d  = matcher.score(shot, cfg.tmpl_speed_1d)
+        match_use = matcher.find_one(shot, cfg.tmpl_speed_use, threshold=cfg.soglia_use)
         score_use = match_use.score if (match_use and match_use.found) else -1.0
         log(f"pin_speed_1d={score_1d:.3f}  pin_speed_use={score_use:.3f}")
 
