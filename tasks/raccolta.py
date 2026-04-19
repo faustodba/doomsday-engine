@@ -543,7 +543,7 @@ def _verifica_tipo(ctx: TaskContext, tipo: str) -> bool:
     roi    = _cfg(ctx, "ROI_LENTE")
     time.sleep(0.8)                   # FIX F: 0.5 → 0.8
     ctx.device.screenshot()           # flush frame cached
-    time.sleep(0.5)                   # FIX F: 0.2 → 0.5
+    time.sleep(1.0)                   # Slow-PC: 0.5 → 1.0 (stabilizza pre-match tipo)
     screen = ctx.device.screenshot()  # frame live
     if not screen:
         return True
@@ -740,7 +740,7 @@ def _leggi_coord_nodo(ctx: TaskContext) -> Optional[str]:
 
     # Tap lente coordinata + verifica popup aperto
     ctx.device.tap(tap_lente_coord)
-    time.sleep(1.3)
+    time.sleep(1.5)                   # Slow-PC: 1.3 → 1.5
 
     screen = ctx.device.screenshot()
     if screen is None:
@@ -1123,7 +1123,7 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int,
 
     ctx.log_msg("Raccolta: tap MARCIA")
     ctx.device.tap(tap_marcia)
-    time.sleep(1.2)                   # FIX F: 0.8 → 1.2
+    time.sleep(1.5)                   # Slow-PC: 1.2 → 1.5
 
     # Verifica maschera chiusa
     screen_post = ctx.device.screenshot()

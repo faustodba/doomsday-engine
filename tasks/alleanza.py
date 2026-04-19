@@ -31,8 +31,8 @@ class AlleanzaConfig:
     n_back_chiudi:      int   = 3
     wait_open_alleanza: float = 2.0
     wait_open_dono:     float = 2.0
-    wait_tab:           float = 0.8
-    wait_rivendica:     float = 0.55
+    wait_tab:           float = 1.5   # Slow-PC: 0.8 → 1.5 (pre-match pin_claim)
+    wait_rivendica:     float = 1.0   # Slow-PC: 0.55 → 1.0 (stabilizza UI post-claim)
     wait_raccogli:      float = 1.0
     wait_back:          float = 0.8
     wait_back_last:     float = 1.0

@@ -111,8 +111,8 @@ _DEFAULTS: dict = {
     "BAG_SCROLL_MS":           400,
     # Ritardi
     "BAG_DELAY_APRI":          2.0,
-    "BAG_DELAY_ICONA":         0.8,
-    "BAG_DELAY_INPUT":         0.5,
+    "BAG_DELAY_ICONA":         1.5,   # Slow-PC: 0.8 → 1.5 (pre-OCR pannello)
+    "BAG_DELAY_INPUT":         1.0,   # Slow-PC: 0.5 → 1.0 (post-tap campi input)
     "BAG_DELAY_USE":           1.0,
     "BAG_DELAY_POST":          1.5,
     # Wait UI stabile post-swipe

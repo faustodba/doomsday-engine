@@ -89,7 +89,7 @@ class MessaggiTask(Task):
     def _esegui_messaggi(self, device, matcher, navigator, log, cfg):
         log(f"Tap icona messaggi {cfg.tap_icona_messaggi}")
         device.tap(*cfg.tap_icona_messaggi)
-        time.sleep(0.3)  # minimo animazione tap
+        time.sleep(1.0)  # Slow-PC: 0.3 → 1.0 (pre-verifica pin aperto)
 
         ok_open = self._verifica_pin(device, matcher, cfg.tmpl_alliance,
                                      cfg.soglia_alliance, cfg.roi_alliance,
@@ -128,7 +128,7 @@ class MessaggiTask(Task):
                       tab_roi, nome_tab, log, cfg):
         log(f"Tap tab {nome_tab} {tab_tap}")
         device.tap(*tab_tap)
-        time.sleep(0.3)  # minimo animazione tap
+        time.sleep(1.0)  # Slow-PC: 0.3 → 1.0 (pre-verifica pin tab)
 
         ok_tab = self._verifica_pin(device, matcher, tab_tmpl, tab_soglia, tab_roi,
                                     retry=cfg.retry_tab, retry_sleep=cfg.retry_sleep,
