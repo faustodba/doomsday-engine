@@ -52,6 +52,14 @@
 #            salva frame in debug_task/raccolta/ per analisi visiva della
 #            schermata anomala (Issue #9 petrolio FAU_00: score 0.15
 #            stabile = UI alterata da overlay/popup, non rumore casuale).
+#    FIX I — _apri_lente_verificata(): apertura lente con verifica
+#            post-tap che le icone tipo siano visibili nella ROI LENTE.
+#            Se no (maschera bestie, popup "General Notice", etc.) →
+#            BACK×2 recovery + retry fino a max_retry=3. Integrato in
+#            `_cerca_nodo` sia in apertura primaria che in reset pannello.
+#            Risolve trigger visivamente confermato via debug screenshot:
+#            FAU_00 dopo marcia cade in maschera beast roster/Level Up,
+#            i tap successivi (tipo, livello, CERCA) vanno su UI sbagliata.
 #
 #  FLUSSO AGGIORNATO (post FIX A):
 #    0. Verifica abilitazione + slot liberi (iniettabile nei test)
@@ -547,6 +555,65 @@ def _verifica_tipo(ctx: TaskContext, tipo: str) -> bool:
     return r.found
 
 
+def _apri_lente_verificata(ctx: TaskContext, max_retry: int = 3) -> bool:
+    """
+    Apre la lente con verifica post-tap che le icone tipo siano visibili
+    nella ROI lente. Se non visibile (siamo in maschera bestie, popup
+    "General Notice", o altra UI imprevista) → BACK × 2 recovery + retry.
+
+    FIX 19/04/2026: introdotto per gestire il caso in cui il tap (38,325)
+    NON apre la lente ma cade su una bestia visibile sulla mappa o è
+    intercettato da un popup. Verificato visivamente via debug screenshot:
+    FAU_00 catturato nella maschera "beast roster"/"Level Up" dopo il tap.
+    Risolve il trigger dell'effetto a catena Issue #9.
+
+    Pre-check: se la lente è già aperta (marker visibile), non rifà il tap
+    (eviterebbe toggle chiudi/riapri).
+
+    Ritorna True se la lente è aperta (marker pin_field visibile in ROI),
+    False se dopo max_retry tentativi la verifica fallisce.
+    """
+    tap_lente     = _cfg(ctx, "TAP_LENTE")
+    marker_tmpl   = _cfg(ctx, "TMPL_TIPO").get("campo", "pin/pin_field.png")
+    marker_soglia = 0.60
+    roi           = _cfg(ctx, "ROI_LENTE")
+
+    def _lente_aperta() -> bool:
+        screen = ctx.device.screenshot()
+        if screen is None:
+            return False
+        try:
+            r = ctx.matcher.find_one(screen, marker_tmpl,
+                                      threshold=marker_soglia, zone=roi)
+            return r is not None and r.found
+        except Exception:
+            return False
+
+    # Pre-check: se la lente è già aperta, skip tap (eviterebbe toggle)
+    if _lente_aperta():
+        ctx.log_msg("[LENTE] già aperta, skip tap")
+        return True
+
+    for tentativo in range(1, max_retry + 1):
+        ctx.device.tap(tap_lente)
+        time.sleep(1.5)
+        if _lente_aperta():
+            if tentativo > 1:
+                ctx.log_msg(f"[LENTE] aperta al tent {tentativo}/{max_retry}")
+            return True
+        ctx.log_msg(
+            f"[LENTE] tap NON ha aperto la lente (tent {tentativo}/{max_retry}) "
+            f"— BACK×2 recovery"
+        )
+        # Doppio BACK per uscire da popup/beast mask/level-up/ecc.
+        ctx.device.key("KEYCODE_BACK")
+        time.sleep(0.8)
+        ctx.device.key("KEYCODE_BACK")
+        time.sleep(0.8)
+    ctx.log_msg(f"[LENTE] apertura lente fallita dopo {max_retry} tentativi")
+    return False
+
+
 def _cerca_nodo(ctx: TaskContext, tipo: str,
                 livello_override: int = 0) -> bool:
     """
@@ -559,8 +626,12 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
       - dopo doppio tap(tap_icona):   1.2 → 1.8
       - tap meno livello delay:       0.15 → 0.2
       - tap piu livello delay:        0.2 → 0.25
+
+    FIX 19/04/2026 RT-24: apertura lente verificata via
+    `_apri_lente_verificata()` prima di tap_icona. Evita che tap (38,325)
+    finisca sulla mappa (bestie) o su popup, con successivo tap_icona su
+    UI sbagliata (effetto a catena Issue #9).
     """
-    tap_lente   = _cfg(ctx, "TAP_LENTE")
     coord_lv    = _cfg(ctx, "COORD_LIVELLO").get(tipo, _cfg(ctx, "COORD_LIVELLO")["campo"])
     # Livello nodo dall'istanza (instances.json → livello), fallback a RACCOLTA_LIVELLO
     livello     = max(1, min(7, int(ctx.config.get("livello", _cfg(ctx, "RACCOLTA_LIVELLO")))))
@@ -570,8 +641,11 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
     tap_icona   = _cfg(ctx, "TAP_ICONA_TIPO").get(tipo, _cfg(ctx, "TAP_ICONA_TIPO")["campo"])
 
     ctx.log_msg(f"Raccolta: LENTE → {tipo} Lv.{livello}")
-    ctx.device.tap(tap_lente)
-    time.sleep(1.5)                   # FIX F: 0.8 → 1.5
+    # FIX RT-24: apertura lente verificata con recovery BACK se finisce su
+    # bestie/popup. Se dopo 3 tentativi la lente non si apre → abort tipo.
+    if not _apri_lente_verificata(ctx):
+        ctx.log_msg(f"Raccolta: impossibile aprire lente per {tipo} — abort")
+        return False
 
     ctx.device.tap(tap_icona)
     ctx.device.tap(tap_icona)
@@ -585,8 +659,10 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
             ctx.log_msg(f"Raccolta: tipo {tipo} ancora NON selezionato — reset pannello")
             ctx.device.key("KEYCODE_BACK")
             time.sleep(2.0)
-            ctx.device.tap(tap_lente)
-            time.sleep(1.5)           # FIX F: coerenza con tap_lente sopra
+            # FIX RT-24: anche qui usa _apri_lente_verificata
+            if not _apri_lente_verificata(ctx):
+                ctx.log_msg(f"Raccolta: riapertura lente fallita dopo reset — abort")
+                return False
             ctx.device.tap(tap_icona)
             ctx.device.tap(tap_icona)
             time.sleep(1.8)           # FIX F: coerenza con doppio tap sopra
