@@ -139,8 +139,20 @@ class GameNavigator:
     def vai_in_home(self) -> bool:
         """Porta il bot in HOME. Ritorna True se raggiunto."""
         cfg = self.config
+        none_streak = 0
         for attempt in range(cfg.max_attempts):
-            shot   = self.device.screenshot()
+            shot = self.device.screenshot()
+            if shot is None:
+                none_streak += 1
+                if none_streak >= 3:
+                    self._log(
+                        f"[NAV] vai_in_home ABORT — screenshot None {none_streak}x "
+                        f"consecutive (ADB unhealthy)"
+                    )
+                    return False
+            else:
+                none_streak = 0
+
             screen = self._classifica(shot)
 
             self._log(f"[NAV] vai_in_home tentativo {attempt+1}/{cfg.max_attempts} — screen={screen.name}")
