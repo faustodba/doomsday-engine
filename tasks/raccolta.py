@@ -179,6 +179,9 @@ _DEFAULTS: dict = {
     "TEMPLATE_ENTER":       "pin/pin_enter.png",   # popup "Enter coordinates"
     "ROI_ENTER":            (300,  85, 700, 125),
     "TEMPLATE_SOGLIA":      0.75,
+    # F3 — maschera invio aperta ma senza squadre disponibili
+    "TEMPLATE_NO_SQUADS":   "pin/pin_no_squads.png",
+    "SOGLIA_NO_SQUADS":     0.85,
     # OCR coordinate nodo — zona popup lente piccola (V5 ocr.py)
     "OCR_COORD_ZONA_X":     (430, 125, 530, 155),
     "OCR_COORD_ZONA_Y":     (535, 125, 635, 155),
@@ -1071,6 +1074,21 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int,
             if screen:
                 m2 = ctx.matcher.find_one(screen, template_marcia, threshold=soglia)
                 if not m2.found:
+                    # F3: prima di FALLITO, check pin_no_squads (maschera
+                    # aperta ma senza squadre disponibili -> uscita raccolta)
+                    m_ns = ctx.matcher.find_one(
+                        screen, _cfg(ctx, "TEMPLATE_NO_SQUADS"),
+                        threshold=_cfg(ctx, "SOGLIA_NO_SQUADS"),
+                    )
+                    if m_ns.found:
+                        ctx.log_msg(
+                            f"Raccolta: rilevato 'No Squads' score={m_ns.score:.3f} — "
+                            f"nessuna squadra disponibile"
+                        )
+                        ctx.device.key("KEYCODE_BACK")
+                        time.sleep(0.3)
+                        ctx._raccolta_no_squads = True
+                        return False, None
                     ctx.log_msg("Raccolta: maschera ancora non aperta — FALLITO")
                     return False, None
                 ctx.log_msg(f"Raccolta: maschera aperta al retry score={m2.score:.3f} → OK")
@@ -1522,6 +1540,12 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
                 ctx, tipo, blacklist, blacklist_fuori,
                 cooldown_map, n_truppe, tipi_bloccati, obiettivo
             )
+
+            # F3 — uscita immediata se rilevato "No Squads"
+            if getattr(ctx, "_raccolta_no_squads", False):
+                ctx.log_msg("Raccolta: 'No Squads' — uscita immediata loop")
+                ctx._raccolta_no_squads = False   # reset per prossima esecuzione
+                break
 
             # ── CASO ok=True ─────────────────────────────────────────
             if ok:
