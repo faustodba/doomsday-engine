@@ -35,7 +35,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 |------|-------------|-------|------|
 | RT-01..05 | Infrastruttura, navigator, OCR, slot | ✅ | |
 | RT-06 | VIP claim | ✅ | |
-| RT-07 | Boost | ✅ | BoostState scheduling 16/04/2026. RIAPERTO 19/04 (tap non responsivo) → RISOLTO 19/04 (tap `speed_cx/speed_cy`, cy<400 responsivo, polling `pin_speed_use` 4s). Verificato live FAU_00 ore 18:12: boost 8h attivato. |
+| RT-07 | Boost | ✅ | BoostState scheduling 16/04/2026. RIAPERTO 19/04 (tap non responsivo) → RISOLTO 19/04 (tap `speed_cx/speed_cy`, cy<400 responsivo, polling `pin_speed_use` 4s). Verificato FAU_00 test isolato ore 18:12 + FAU_01 ciclo completo da freddo: boost 8h attivato entrambi. |
 | RT-08 | Messaggi + Alleanza | ✅ | |
 | RT-09 | Store | ✅ | 18 acquistati + Free Refresh |
 | RT-10 | Arena | ✅ | 5 sfide + skip checkbox |
@@ -125,6 +125,14 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 - Fix applicato: rimosso BACK dal loop (causava apertura menu uscita)
 - Fix residuo: investigare quali banner causano instabilità su FAU_01/FAU_02
   (potrebbero essere diversi da FAU_00 per livello account o evento attivo)
+
+### 12. Stabilizzazione HOME FAU_01 non converge (MEDIA — NON BLOCCANTE)
+- Identica natura dell'Issue #11 ma confermata 19/04: dopo attendi_home()
+  timeout 30s, FAU_01 non raggiunge 3/3 poll consecutivi
+- **NON BLOCCANTE**: il task prosegue comunque con `vai_in_home()` finale
+  e completa il ciclo regolarmente (boost/raccolta funzionano)
+- Impatto: ~15-20s per tick persi in attesa stabilizzazione non convergente
+- Rimandata a post-RT-22 (rifornimento): non impedisce produzione
 
 ---
 
