@@ -18,9 +18,10 @@ def attendi_template(
     tmpl: str,
     soglia: float,
     timeout: float = 5.0,
-    poll: float = 0.5,
+    poll: float = 0.7,
     zone: Optional[tuple] = None,
     log_prefix: str = "",
+    initial_delay: float = 0.0,
 ) -> float:
     """
     Polling con timeout: verifica il template ogni `poll` secondi
@@ -28,17 +29,22 @@ def attendi_template(
     (>= soglia) oppure l'ultimo score se timeout.
 
     Args:
-        ctx:        TaskContext con device e matcher
-        tmpl:       path template relativo a templates/
-        soglia:     score minimo per considerare trovato
-        timeout:    secondi massimi di attesa (default 5.0)
-        poll:       intervallo tra tentativi in secondi (default 0.5)
-        zone:       ROI opzionale (x1,y1,x2,y2) per limitare la ricerca
-        log_prefix: prefisso per il log (es. "[BOOST]")
+        ctx:           TaskContext con device e matcher
+        tmpl:          path template relativo a templates/
+        soglia:        score minimo per considerare trovato
+        timeout:       secondi massimi di attesa (default 5.0)
+        poll:          intervallo tra tentativi in secondi (default 0.7,
+                       margine per macchine con HDD lento)
+        zone:          ROI opzionale (x1,y1,x2,y2) per limitare la ricerca
+        log_prefix:    prefisso per il log (es. "[BOOST]")
+        initial_delay: attesa iniziale prima del primo tentativo (default
+                       0.0). Utile per UI in transizione dopo un tap.
 
     Returns:
         float: score al momento del rilevamento oppure ultimo score
     """
+    if initial_delay > 0:
+        time.sleep(initial_delay)
     t_start = time.time()
     score   = 0.0
     while time.time() - t_start < timeout:
@@ -73,7 +79,7 @@ def attendi_scomparsa_template(
     tmpl: str,
     soglia: float,
     timeout: float = 5.0,
-    poll: float = 0.5,
+    poll: float = 0.7,
 ) -> bool:
     """
     Attende che il template scompaia (score < soglia).
