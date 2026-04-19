@@ -369,9 +369,37 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:
     nav    = getattr(ctx, "navigator", None)
     device = getattr(ctx, "device", None)
 
-    # 1. Attesa fissa caricamento
-    _log(f"[{nome}] attesa caricamento iniziale {_cfg.delay_carica_iniz_s}s", log_fn)
-    time.sleep(_cfg.delay_carica_iniz_s)
+    # 1. Attesa caricamento con polling attivo (F-B1).
+    # Prima t_min s bloccanti (login/splash tipico), poi polling ogni 2s
+    # fino a delay_carica_iniz_s. Se HOME/MAP rilevata -> skip residuo.
+    t_min = 15.0
+    t_max = float(_cfg.delay_carica_iniz_s)
+    _log(
+        f"[{nome}] attesa caricamento min={t_min:.0f}s max={t_max:.0f}s "
+        f"(polling attivo)",
+        log_fn,
+    )
+    time.sleep(t_min)
+
+    if nav is not None:
+        t_poll = time.time()
+        while time.time() - t_poll < (t_max - t_min):
+            time.sleep(2.0)
+            try:
+                schermata_early = nav.schermata_corrente()
+            except Exception:
+                schermata_early = Screen.UNKNOWN
+            if schermata_early in (Screen.HOME, Screen.MAP):
+                elapsed = t_min + (time.time() - t_poll)
+                _log(
+                    f"[{nome}] schermata={schermata_early} rilevata a {elapsed:.0f}s "
+                    f"— skip attesa residua",
+                    log_fn,
+                )
+                break
+    else:
+        # Fallback: nessun nav, pausa completa
+        time.sleep(max(0.0, t_max - t_min))
 
     # 2. Loop BACK + polling schermata
     if nav is None:
