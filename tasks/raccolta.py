@@ -48,6 +48,10 @@
 #            _verifica_tipo, _tap_nodo_e_verifica_gather, _esegui_marcia.
 #    FIX G — _tap_nodo_e_verifica_gather ritorna _GatherResult dataclass
 #            invece di tuple implicita (ok: bool, screen: Optional).
+#    FIX H — Debug screenshot su _verifica_tipo con score < 0.20:
+#            salva frame in debug_task/raccolta/ per analisi visiva della
+#            schermata anomala (Issue #9 petrolio FAU_00: score 0.15
+#            stabile = UI alterata da overlay/popup, non rumore casuale).
 #
 #  FLUSSO AGGIORNATO (post FIX A):
 #    0. Verifica abilitazione + slot liberi (iniettabile nei test)
@@ -454,6 +458,39 @@ def _calcola_sequenza(obiettivo: int, sequenza_base: list[str],
 
 
 # ==============================================================================
+# Debug — salvataggio screenshot su anomalie _verifica_tipo
+# ==============================================================================
+
+def _salva_debug_verifica(ctx: TaskContext, screen, tipo: str, score: float) -> None:
+    """
+    Salva screenshot quando _verifica_tipo fallisce con score molto basso.
+    Utile per capire cosa mostra il gioco quando il template non matcha
+    (overlay, popup, maschera alternativa, ecc.).
+
+    Output: debug_task/raccolta/verifica_{istanza}_{tipo}_{ts}_score{N}.png
+    Gitignore esclude *.png quindi non finisce in git.
+    """
+    try:
+        import cv2
+        from datetime import datetime as _dt
+        frame = getattr(screen, "frame", None)
+        if frame is None:
+            return
+        root = Path(__file__).resolve().parents[1]
+        out_dir = root / "debug_task" / "raccolta"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        ts       = _dt.now().strftime("%Y%m%d_%H%M%S")
+        istanza  = getattr(ctx, "instance_name", "UNK")
+        score_i  = int(max(0.0, min(1.0, score)) * 1000)
+        filename = f"verifica_{istanza}_{tipo}_{ts}_score{score_i:03d}.png"
+        filepath = out_dir / filename
+        cv2.imwrite(str(filepath), frame)
+        ctx.log_msg(f"[DEBUG] screenshot salvato: debug_task/raccolta/{filename}")
+    except Exception as exc:
+        ctx.log_msg(f"[DEBUG] salvataggio screenshot fallito: {exc}")
+
+
+# ==============================================================================
 # Operazioni UI
 # ==============================================================================
 
@@ -482,6 +519,11 @@ def _verifica_tipo(ctx: TaskContext, tipo: str) -> bool:
     FIX F 19/04/2026: delay stabilizzazione aumentati
       - sleep iniziale (pre-flush): 0.5 → 0.8
       - sleep tra flush e live:     0.2 → 0.5
+
+    FIX 19/04/2026 RT-24: se score < 0.20 salva screenshot debug per
+    analisi visiva della schermata anomala (Issue #9 petrolio FAU_00).
+    Score 0.15 stabile indica UI alterata (overlay/popup) — il salvataggio
+    consente di identificare cosa realmente appare sullo schermo.
     """
     tmpl_tipo = _cfg(ctx, "TMPL_TIPO").get(tipo)
     if not tmpl_tipo:
@@ -497,6 +539,11 @@ def _verifica_tipo(ctx: TaskContext, tipo: str) -> bool:
     r = ctx.matcher.find_one(screen, tmpl_tipo, threshold=soglia, zone=roi)
     ctx.log_msg(f"Raccolta: [VERIFICA] tipo {tipo} score={r.score:.3f} → "
                 f"{'OK' if r.found else 'NON selezionato'}")
+
+    # DEBUG: salva screenshot su score molto basso (UI verosimilmente alterata)
+    if not r.found and r.score < 0.20:
+        _salva_debug_verifica(ctx, screen, tipo, r.score)
+
     return r.found
 
 
