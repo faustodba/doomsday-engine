@@ -20,6 +20,18 @@
 #    time.sleep(2.0) fisso + singolo screenshot. V5 produzione conferma
 #    che questa combinazione apre correttamente la sotto-maschera USE.
 #
+#  FIX 19/04/2026 — ricentro riga Gathering Speed post-swipe:
+#    Problema: dopo N swipe la lista popup ha un offset interno che rende
+#    il tap (480, speed_cy) non responsivo (UI non cambia, pin_speed_use
+#    mai trovato, score=-1.000 su tutte le istanze).
+#    Causa: il tap viene eseguito ma il gioco non registra l'evento perché
+#    la riga è in posizione "di scorrimento" instabile nel viewport.
+#    Fix: quando pin_speed trovato dopo swipe > 0, eseguire un mini-swipe
+#    inverso (giù) per riportare la riga verso il centro schermo, poi
+#    ri-rilevare la posizione aggiornata prima del tap.
+#    Fix aggiuntivi: delay post-tap-boost 1.5s (come V5), polling
+#    pin_speed_use con timeout 4s invece di singolo screenshot.
+#
 #  Flusso:
 #    1. should_run() → legge BoostState: skip se boost attivo e non in scadenza
 #    2. Assicura HOME via navigator
@@ -27,11 +39,12 @@
 #    4. Verifica pin_manage → popup aperto
 #    5. Scroll finché pin_speed visibile (max MAX_SWIPE)
 #    6. Se pin_50_ visibile → boost già attivo → registra "8h" → chiudi popup
-#    7. Tap riga Gathering Speed
-#    8. Polling fino a pin_speed_use visibile (timeout 5s)
-#    9. Cerca pin_speed_8h + pin_speed_use → tap USE → registra "8h"
-#   10. Fallback: cerca pin_speed_1d + pin_speed_use → tap USE → registra "1d"
-#   11. Nessun boost → registra_non_disponibile() → chiudi popup
+#    7. [FIX] Se swipe > 0 → ricentro riga con mini-swipe inverso + ri-rilevamento
+#    8. Tap riga Gathering Speed (480, speed_cy)
+#    9. [FIX] Polling fino a pin_speed_use visibile (timeout 4s)
+#   10. Cerca pin_speed_8h + pin_speed_use → tap USE → registra "8h"
+#   11. Fallback: cerca pin_speed_1d + pin_speed_use → tap USE → registra "1d"
+#   12. Nessun boost → registra_non_disponibile() → chiudi popup
 #
 #  Logging BoostState:
 #    [BOOST] stato: tipo=8h  scadenza=2026-04-16T16:00:00+00:00  ATTIVO (+7h45m)
@@ -44,6 +57,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from core.task import Task, TaskContext, TaskResult
@@ -54,32 +68,69 @@ if TYPE_CHECKING:
     from shared.template_matcher import TemplateMatcher
 
 
+# ==============================================================================
+# Debug — salvataggio screenshot per ispezione UI
+# ==============================================================================
+
+def _salva_debug_shot(screen, suffisso: str, log) -> None:
+    """
+    Salva screenshot corrente in debug_task/boost/.
+    Filename: boost_{suffisso}_{YYYYMMDD_HHMMSS}.png
+    Usa cv2.imwrite sul frame BGR. .gitignore esclude *.png.
+    """
+    try:
+        import cv2
+        from datetime import datetime as _dt
+        frame = getattr(screen, "frame", None)
+        if frame is None:
+            return
+        root = Path(__file__).resolve().parents[1]
+        out_dir = root / "debug_task" / "boost"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"boost_{suffisso}_{ts}.png"
+        filepath = out_dir / filename
+        cv2.imwrite(str(filepath), frame)
+        log(f"[DEBUG] screenshot salvato: debug_task/boost/{filename}")
+    except Exception as exc:
+        log(f"[DEBUG] salvataggio screenshot fallito: {exc}")
+
+
 @dataclass
 class BoostConfig:
-    tap_boost:            tuple[int, int] = (142, 47)
-    n_back_chiudi:        int             = 3
-    max_swipe:            int             = 8
-    swipe_x:              int             = 480
-    swipe_y_start:        int             = 380
-    swipe_y_end:          int             = 280
-    swipe_dur_ms:         int             = 400
-    wait_after_swipe:     float           = 1.5
-    wait_after_use:       float           = 1.5
-    wait_after_back:      float           = 0.5
-    tmpl_boost:           str             = "pin/pin_boost.png"
-    tmpl_manage:          str             = "pin/pin_manage.png"
-    tmpl_speed:           str             = "pin/pin_speed.png"
-    tmpl_50:              str             = "pin/pin_50_.png"
-    tmpl_speed_8h:        str             = "pin/pin_speed_8h.png"
-    tmpl_speed_1d:        str             = "pin/pin_speed_1d.png"
-    tmpl_speed_use:       str             = "pin/pin_speed_use.png"
-    soglia_boost:         float           = 0.80
-    soglia_manage:        float           = 0.75
-    soglia_speed:         float           = 0.75
-    soglia_50:            float           = 0.75
-    soglia_8h:            float           = 0.75
-    soglia_1d:            float           = 0.75
-    soglia_use:           float           = 0.75
+    tap_boost:                tuple[int, int] = (142, 47)
+    n_back_chiudi:            int             = 3
+    max_swipe:                int             = 8
+    swipe_x:                  int             = 480
+    swipe_y_start:            int             = 380
+    swipe_y_end:              int             = 280
+    swipe_dur_ms:             int             = 400
+    wait_after_tap_boost:     float           = 1.5    # FIX: come V5, prima del polling manage
+    wait_after_swipe:         float           = 1.5
+    wait_after_use:           float           = 1.5
+    wait_after_back:          float           = 0.5
+    # FIX ricentro: mini-swipe inverso (dito scende = lista sale = riga scende nel viewport)
+    ricentro_swipe_y_start:   int             = 280    # da dove parte il dito
+    ricentro_swipe_y_end:     int             = 360    # dove arriva (80px verso il basso)
+    ricentro_swipe_dur_ms:    int             = 300
+    wait_after_ricentro:      float           = 1.2
+    # FIX polling pin_speed_use dopo tap riga
+    timeout_speed_use:        float           = 4.0    # polling finché sotto-maschera si apre
+    poll_speed_use:           float           = 0.5
+    tmpl_boost:               str             = "pin/pin_boost.png"
+    tmpl_manage:              str             = "pin/pin_manage.png"
+    tmpl_speed:               str             = "pin/pin_speed.png"
+    tmpl_50:                  str             = "pin/pin_50_.png"
+    tmpl_speed_8h:            str             = "pin/pin_speed_8h.png"
+    tmpl_speed_1d:            str             = "pin/pin_speed_1d.png"
+    tmpl_speed_use:           str             = "pin/pin_speed_use.png"
+    soglia_boost:             float           = 0.80
+    soglia_manage:            float           = 0.75
+    soglia_speed:             float           = 0.75
+    soglia_50:                float           = 0.75
+    soglia_8h:                float           = 0.75
+    soglia_1d:                float           = 0.75
+    soglia_use:               float           = 0.75
 
 
 class _Outcome:
@@ -169,7 +220,14 @@ class BoostTask(Task):
         log(f"pin_boost score={score_b:.3f} → tap {cfg.tap_boost}")
         device.tap(*cfg.tap_boost)
 
+        # FIX: delay post-tap come V5 (1.5s) prima del polling manage
+        # Senza questo delay il polling parte mentre l'animazione di apertura
+        # del popup non è ancora iniziata.
+        time.sleep(cfg.wait_after_tap_boost)
+
         # STEP 2 — attesa polling popup Manage Shelter (max 6s)
+        # Nota: il sleep sopra già copre il primo secondo, quindi il timeout
+        # effettivo è 6s aggiuntivi oltre al wait_after_tap_boost.
         score_m = self._attendi_template(
             device, matcher, cfg.tmpl_manage, cfg.soglia_manage,
             timeout=6.0, poll=0.5
@@ -185,6 +243,7 @@ class BoostTask(Task):
         speed_cx      = -1
         speed_cy      = -1
         score_50_last = -1.0
+        swipe_eseguiti = 0
 
         for swipe_n in range(cfg.max_swipe + 1):
             shot        = device.screenshot()
@@ -193,16 +252,17 @@ class BoostTask(Task):
             log(f"swipe {swipe_n:02d} → pin_speed={score_speed:.3f}  pin_50_={score_50:.3f}")
 
             if score_speed >= cfg.soglia_speed:
-                match         = matcher.find_one(shot, cfg.tmpl_speed, threshold=cfg.soglia_speed)
+                match = matcher.find_one(shot, cfg.tmpl_speed, threshold=cfg.soglia_speed)
                 if match and match.found:
                     speed_cx = match.cx
                     speed_cy = match.cy
                 else:
-                    speed_cx = 480    # fallback centro schermo
+                    speed_cx = 480
                     speed_cy = 270
-                speed_trovato = True
-                score_50_last = score_50
-                log(f"pin_speed TROVATO cx={speed_cx} cy={speed_cy}")
+                speed_trovato  = True
+                score_50_last  = score_50
+                swipe_eseguiti = swipe_n
+                log(f"pin_speed TROVATO cx={speed_cx} cy={speed_cy} (dopo {swipe_n} swipe)")
                 break
 
             score_50_last = max(score_50_last, score_50)
@@ -220,25 +280,45 @@ class BoostTask(Task):
             self._chiudi_popup(device, cfg)
             return _Outcome.GIA_ATTIVO, "8h"
 
-        # STEP 5 — tap riga Gathering Speed
-        # RIPRISTINO V5 19/04/2026: tap su (480, speed_cy) con X fisso al
-        # centro schermo, Y dalla posizione trovata di pin_speed. Stesso
-        # approccio di V5 (produzione bot-farm) provato funzionante. Il fix
-        # precedente a (speed_cx, speed_cy) era sbagliato: tappava sull'icona
-        # a sx che non è il punto interattivo per aprire la sotto-maschera.
-        # L'attesa post-tap è 2.0s fissi come V5 (animazione completa).
-        tap_speed = (480, speed_cy)
-        log(f"Tap Gathering Speed {tap_speed} (speed_cx={speed_cx} solo diagnostico)")
-        device.tap(*tap_speed)
-        time.sleep(2.0)
+        # STEP 4b — ricentro riga post-swipe RIMOSSO per test isolato
+        # (test: verificare se tap su (speed_cx, speed_cy) centra correttamente
+        # la riga sull'icona pin_speed senza passare per ricentro mini-swipe).
 
-        shot = device.screenshot()
+        # DEBUG 19/04/2026: screenshot PRE-TAP per ispezionare lo stato della
+        # lista boost prima del tap Gathering Speed. Utile per capire perche'
+        # il tap non apre la sotto-maschera USE (score pin_speed_use stabile).
+        shot_pre = device.screenshot()
+        if shot_pre is not None:
+            _salva_debug_shot(shot_pre, "pre_tap", log)
+
+        # STEP 5 — tap riga Gathering Speed
+        # TEST ISOLATO 19/04/2026: tap su (speed_cx, speed_cy) invece di
+        # (480, speed_cy). Obiettivo: isolare l'effetto del tap esattamente
+        # sul centro del match pin_speed, specie quando la riga è in fondo
+        # alla lista (cy alto, es. 452 osservato) dove (480, cy) cadeva in
+        # zona non responsiva.
+        tap_speed = (speed_cx, speed_cy)
+        log(f"Tap Gathering Speed {tap_speed}")
+        device.tap(*tap_speed)
+
+        # STEP 6 — FIX polling pin_speed_use (timeout 4s)
+        # Sostituisce il singolo screenshot fisso a 2.0s.
+        # La sotto-maschera USE impiega variabile 0.5–2.5s ad aprirsi
+        # a seconda del carico del dispositivo. Il polling garantisce
+        # di catturare il frame corretto indipendentemente dalla latenza.
+        time.sleep(1.0)  # minimo attesa animazione apertura
+        shot = self._attendi_frame_use(device, matcher, cfg, log)
+
+        # DEBUG 19/04/2026: screenshot POST-TAP (ultimo frame polling).
+        if shot is not None:
+            _salva_debug_shot(shot, "post_tap", log)
+
         if shot is None:
             log("Screenshot fallito dopo tap speed — abort")
             self._chiudi_popup(device, cfg)
             return _Outcome.ERRORE, None
 
-        # STEP 6 — boost 8h (preferito)
+        # STEP 7 — boost 8h (preferito)
         score_8h  = matcher.score(shot, cfg.tmpl_speed_8h)
         match_use = matcher.find_one(shot, cfg.tmpl_speed_use, threshold=cfg.soglia_use)
         score_use = match_use.score if (match_use and match_use.found) else -1.0
@@ -252,7 +332,7 @@ class BoostTask(Task):
             time.sleep(cfg.wait_after_back)
             return _Outcome.ATTIVATO_8H, "8h"
 
-        # STEP 7 — fallback boost 1d (rileggi pin_speed_use: posizione
+        # STEP 8 — fallback boost 1d (rileggi pin_speed_use: posizione
         # potrebbe differire con solo 1d visibile, come in V5)
         score_1d  = matcher.score(shot, cfg.tmpl_speed_1d)
         match_use = matcher.find_one(shot, cfg.tmpl_speed_use, threshold=cfg.soglia_use)
@@ -306,6 +386,40 @@ class BoostTask(Task):
                 return score
             time.sleep(poll)
         return score
+
+    def _attendi_frame_use(self, device, matcher, cfg: BoostConfig, log) -> object | None:
+        """
+        Polling post-tap riga: attende che pin_speed_use sia visibile
+        oppure che il timeout sia scaduto.
+        Ritorna il frame (screenshot) al momento del rilevamento, o
+        l'ultimo frame valido se timeout.
+        Logga lo score ad ogni poll per diagnostica.
+        """
+        t_start  = time.time()
+        last_shot = None
+        poll_n    = 0
+
+        while time.time() - t_start < cfg.timeout_speed_use:
+            shot = device.screenshot()
+            if shot is None:
+                time.sleep(cfg.poll_speed_use)
+                poll_n += 1
+                continue
+
+            last_shot  = shot
+            score_use  = matcher.score(shot, cfg.tmpl_speed_use)
+            score_8h   = matcher.score(shot, cfg.tmpl_speed_8h)
+            log(f"polling USE [{poll_n:02d}] pin_speed_use={score_use:.3f}  pin_speed_8h={score_8h:.3f}")
+
+            if score_use >= cfg.soglia_use:
+                log(f"pin_speed_use VISIBILE al poll {poll_n}")
+                return shot
+
+            time.sleep(cfg.poll_speed_use)
+            poll_n += 1
+
+        log(f"timeout {cfg.timeout_speed_use}s: pin_speed_use mai trovato — uso ultimo frame disponibile")
+        return last_shot
 
     # ── Mapping outcome → TaskResult ──────────────────────────────────────────
 
