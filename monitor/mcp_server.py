@@ -30,8 +30,9 @@ from monitor.analyzer import (
 )
 
 
-ROOT    = r"C:\doomsday-engine"
-ISTANZE = ["FAU_00", "FAU_01", "FAU_02"]
+_AUTO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT    = os.environ.get("DOOMSDAY_ROOT", _AUTO_ROOT)
+ISTANZE = os.environ.get("DOOMSDAY_ISTANZE", "FAU_00,FAU_01,FAU_02").split(",")
 
 mcp = FastMCP("doomsday-monitor")
 
