@@ -19,6 +19,8 @@ import argparse, json, os, signal, sys, threading, time
 from datetime import datetime, timezone
 from typing import Optional
 
+sys.stdout.reconfigure(encoding='utf-8')
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
