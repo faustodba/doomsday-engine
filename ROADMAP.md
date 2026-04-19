@@ -201,6 +201,76 @@ consolidare la logica raccolta. Baseline test: 42 passed / 57. Post-riscrittura:
 | test_boost_live.py | `test_boost_live.py` (nuovo) | Runner isolato standalone per BoostTask su FAU_00 reale. Bypassa `should_run()` (esegue `run()` direttamente), `navigator=None` (salta ensure_home), log console con timestamp, UTF-8 forzato su stdout. Utile per debug mirato del task boost senza dover lanciare l'intero `main.py`. Comando: `python test_boost_live.py`. |
 | Fix test_boost.py _cfg_zero() | `tests/tasks/test_boost.py` | Rimossi parametri `wait_after_tap` e `wait_after_speed_tap` da `BoostConfig()` — non esistono più nel dataclass (parametri legacy). Sbloccati 20 test che fallivano con TypeError. Baseline 15/35 → 35/35 passed. |
 
+## Sessione 19/04/2026 (pomeriggio) — ambiente prod + fix W11-slow
+
+### Setup ambiente produzione separato
+- Creato `C:\doomsday-engine-prod\` via robocopy con esclusioni (state/, logs/, data/, .git/, .claude/, debug_task/)
+- Creato `runtime.json` prod — tutti task ON tranne rifornimento
+- Creato `config/instances.json` prod — 11 istanze (FAU_00..FAU_10), FauMorfeus esclusa
+- Creato `release_prod.bat` (release interattivo) e `sync_prod.bat` (sync non-interattivo, nuovo commit)
+- Creato `run_prod.bat` con `PYTHONIOENCODING=utf-8`
+- `core/mcp_server.py` parametrizzato: `_AUTO_ROOT` derivato da `__file__` + env override `DOOMSDAY_ROOT`/`DOOMSDAY_ISTANZE`
+
+### Test runtime ciclo 1 (19:08:56 → 21:16:11, killed manual)
+
+| Istanza | Durata | Esito | Note |
+|---------|--------|-------|------|
+| FAU_00 | 10m48s | ✅ | raccolta OK |
+| FAU_01 | 8m32s | ✅ | raccolta OK |
+| FAU_02 | 10m04s | ✅ | raccolta OK |
+| FAU_03 | 7m53s | ❌ | ADB screenshot None dalle 17:44 (ARENA) → tutti task saltati |
+| FAU_04 | 8m02s | ❌ | stesso pattern FAU_03 |
+| FAU_05 | 17m59s | ✅ | raccolta OK, slow WiFi loading |
+| FAU_06 | 8m30s | ❌ | gate HOME fallito → raccolta saltata |
+| FAU_07 | 7m28s | ❌ | gate HOME fallito → raccolta saltata |
+| FAU_08 | 15m38s | 🟡 | 3/4 squadre, 4° invio 3× retry "No Squads" non riconosciuto |
+| FAU_09 | 12m11s | 🟡 | truppe=60000 ignorate (bug config_loader) |
+| FAU_10 | (killed) | ❌ | bloccata su arena oltre 6 min, intervento manuale |
+
+**Fallimenti**: 5/11 completi + 2 parziali. Tasso successo 27%. Necessità fix strutturali.
+
+### Fix applicati (11 commit)
+
+| Commit | Cat. | Fix | File |
+|--------|------|-----|------|
+| `9ba08a0` | Bug | RACCOLTA_TRUPPE letto via `ctx.config.get("truppe", ...)` (standard per-istanza) | `tasks/raccolta.py` |
+| `624ba7a` | Resilience F1a | `vai_in_home` early abort su 3 screenshot None consecutivi (ADB unhealthy) | `core/navigator.py` |
+| `1d1b4eb` | Resilience F1b | `adb kill-server`/`start-server` a inizio `avvia_istanza` (reset socket frame grabber) | `core/launcher.py` |
+| `3c959cf` | Resilience F2 | Hard timeout globale arena 300s con log `run.errore` | `tasks/arena.py` |
+| `701f7bd` | Bug F3 | Rilevamento `pin_no_squads` in `_esegui_marcia` → uscita immediata da `_loop_invio_marce` | `tasks/raccolta.py` |
+| `9c1dfb4` | Tuning F4+F5+F7 | `delay_carica_iniz_s` 45→60, stabilizzazione HOME 30→60s, `wait_after_action` 1.5→2.0, `wait_after_overlay` 2.0→2.5 | `config/global_config.json`, `core/launcher.py`, `core/navigator.py` |
+| `05d6952` | Perf B1 | Polling attivo post-launch: `t_min=15s` bloccanti + polling 2s fino a `delay_carica_iniz_s`, skip attesa residua su HOME/MAP | `core/launcher.py` |
+| `bba45f0` | Perf F-A | `AdaptiveTiming` MVP: sliding window 10 samples, p90*1.5+10s, clamp [base/2, base]. Integrato su `boot_android_s` | `core/adaptive_timing.py` (nuovo), `core/launcher.py` |
+| `5f5f4d9` | Tuning Fase 1 | 10 delay pre-match aumentati (raccolta, alleanza, zaino, messaggi) | 4 task files |
+| `c3cc26f` | Tuning Fase 2 | `attendi_template` poll 0.5→0.7s + nuovo param `initial_delay` (default 0) | `shared/ui_helpers.py` |
+| `a8ea422` | Reliability Fase 3 | `InstanceState.save()` atomica: tmp + `os.fsync` + `os.replace`. Evita corruzione su crash | `core/state.py` |
+
+### Issues risolti
+
+| # | Nome | Fix |
+|---|------|-----|
+| ADB screenshot None cascata | F1a + F1b |
+| Arena hang indefinito | F2 |
+| No Squads non rilevato | F3 |
+| RACCOLTA_TRUPPE non letto | `9ba08a0` |
+| State file corruttibile su kill | Fase 3 atomic save |
+| `mcp_server.py` ROOT hardcoded | auto-detect + env override |
+
+### Issues mitigati (non risolti)
+
+| # | Nome | Stato |
+|---|------|-------|
+| #11 | Stabilizzazione HOME FAU_01/02 | Mitigato (F5 window 30→60s) |
+| #12 | Stabilizzazione HOME timeout | Mitigato (stessa F5) |
+| Performance boot istanze | Adaptive timing + polling attivo |
+
+### Issues aperti nuovi
+
+| # | Nome | Priorità |
+|---|------|----------|
+| `radar_tool/templates/` mancante | BASSA (workaround: radar_census saltato per cooldown) |
+| Race buffer stdout ultima istanza | BASSA (cosmetico) |
+
 ### Test notturno 18/04/2026 — 3 cicli sequenziali FAU_00/01/02
 
 - **FAU_00:** 5/5 squadre inviate in ciclo 2 (09:03). Cicli 1 e 3 correttamente skippati (slot pieni). OCR iniziale letto "7/5" al ciclo 1 — risolto da sanity check (d'ora in poi skip conservativo)

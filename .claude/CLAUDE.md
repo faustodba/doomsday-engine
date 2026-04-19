@@ -95,12 +95,19 @@ All'inizio di ogni sessione, in questo ordine:
 
 | # | Issue | Priorità | Stato |
 |---|-------|----------|-------|
-| 1 | Rifornimento — da abilitare e testare | ALTA | ⏳ in attesa |
+| 1 | Rifornimento — da abilitare e testare | ALTA | ⏳ disabilitato in prod per sicurezza |
 | 3 | Zaino — deposito OCR | MEDIA | ⏳ in attesa |
 | 5 | Alleanza — COORD hardcoded | BASSA | ⏳ in attesa |
 | 9 | Raccolta — tipo NON selezionato FAU_01/FAU_02 | MEDIA | ✅ RISOLTA (fix flush frame cached + attendi_template) |
 | 11 | Raccolta — Issue tipo NON selezionato FAU_01/FAU_02 | MEDIA | ⏳ parziale |
-| 12 | Stabilizzazione HOME FAU_01/FAU_02 non converge (1-2/3 poi timeout) | MEDIA | ⏳ da investigare |
+| 12 | Stabilizzazione HOME FAU_01/FAU_02 non converge | MEDIA | 🟡 mitigato (window 30→60s commit `9c1dfb4`) |
+| 13 | ADB screenshot None cascata (FAU_03/04/06/07 ciclo 19/04) | ALTA | ✅ RISOLTA (F1a `624ba7a` + F1b `1d1b4eb`) |
+| 14 | Arena hang indefinito (FAU_10 ciclo 19/04 — kill manuale) | ALTA | ✅ RISOLTA (F2 timeout 300s `3c959cf`) |
+| 15 | Raccolta "No Squads" non rilevato (FAU_08, 8 retry score 0.395) | MEDIA | ✅ RISOLTA (F3 `pin_no_squads` + uscita loop `701f7bd`) |
+| 16 | `RACCOLTA_TRUPPE` non letto (FAU_09 truppe=60000 ignorate) | MEDIA | ✅ RISOLTA (`9ba08a0` pattern per-istanza `ctx.config.get("truppe", ...)`) |
+| 17 | `InstanceState.save()` non atomica — corruzione su kill | MEDIA | ✅ RISOLTA (`a8ea422` tmp+fsync+os.replace) |
+| 18 | `radar_tool/templates/` mancante (dev+prod) | BASSA | ⏳ workaround: radar_census saltato per cooldown |
+| 19 | Race buffer stdout ultima istanza a fine ciclo (cosmetico) | BASSA | ⏳ usare `python -u` o `sys.stdout.flush()` |
 
 > Aggiornare questa tabella ad ogni sessione insieme alla ROADMAP.
 
