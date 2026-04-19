@@ -519,6 +519,7 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
 
         # ── Raccolta ──────────────────────────────────────────────────────────
         LIVELLO_NODO         = gcfg.livello_nodo
+        RACCOLTA_TRUPPE      = truppe
         ALLOCAZIONE_POMODORO = gcfg.allocazione_pomodoro
         ALLOCAZIONE_LEGNO    = gcfg.allocazione_legno
         ALLOCAZIONE_PETROLIO = gcfg.allocazione_petrolio
