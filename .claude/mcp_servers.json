@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "doomsday-monitor": {
-      "command": "C:\\Users\\CUBOTTO\\AppData\\Local\\Python\\pythoncore-3.14-64\\python.exe",
-      "args": ["C:\\doomsday-engine\\monitor\\mcp_server.py"],
+      "command": "py",
+      "args": ["-3.14", "C:\\doomsday-engine\\monitor\\mcp_server.py"],
       "env": {}
     }
   }
