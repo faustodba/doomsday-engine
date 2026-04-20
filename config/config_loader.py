@@ -256,6 +256,37 @@ def merge_config(gcfg: dict, overrides: dict) -> dict:
     except Exception:
         pass
 
+    # ── rifornimento_mappa — propagazione da globali.task e globali.rifugio ──
+    # globali.task.rifornimento_mappa -> merged["rifornimento_mappa"]["abilitato"]
+    # globali.rifugio.coord_x/y       -> merged["rifornimento_mappa"]["rifugio_x/y"]
+    # Necessario perché GlobalConfig._from_raw legge da rifornimento_mappa{}
+    # non dalla sezione task{}.
+    try:
+        ov_task_rifmap = globali.get("task", {}).get("rifornimento_mappa")
+        if ov_task_rifmap is not None:
+            if "rifornimento_mappa" not in merged:
+                merged["rifornimento_mappa"] = {}
+            merged["rifornimento_mappa"]["abilitato"] = bool(ov_task_rifmap)
+    except Exception:
+        pass
+
+    try:
+        ov_rifugio = globali.get("rifugio")
+        if ov_rifugio:
+            if "rifornimento_mappa" not in merged:
+                merged["rifornimento_mappa"] = {}
+            # Schema reale in global_config.json.rifornimento_mappa:
+            # rifugio_x (int), rifugio_y (int). Il modello RuntimeOverrides
+            # usa coord_x/coord_y -> rimappa qui ai nomi reali.
+            cx = ov_rifugio.get("coord_x")
+            cy = ov_rifugio.get("coord_y")
+            if cx is not None:
+                merged["rifornimento_mappa"]["rifugio_x"] = cx
+            if cy is not None:
+                merged["rifornimento_mappa"]["rifugio_y"] = cy
+    except Exception:
+        pass
+
     # ── per-istanza (iniettato come chiave speciale) ─────────────────────────
     try:
         ov_ist = overrides.get("istanze", {})
