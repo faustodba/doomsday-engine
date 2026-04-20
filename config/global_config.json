@@ -57,16 +57,16 @@
     "avatar_template": "pin/avatar.png"
   },
   "zaino": {
-    "_note": "modalita: bag=scarica fino a soglia via BAG | svuota=svuota tutto da HOME",
+    "_note": "modalita: bag=scarica fino a soglia via BAG | svuota=svuota tutto da HOME (mutuamente esclusive)",
     "modalita": "bag",
-    "usa_pomodoro": false,
+    "usa_pomodoro": true,
     "usa_legno": true,
-    "usa_petrolio": false,
-    "usa_acciaio": false,
-    "soglia_pomodoro_m": 10.0,
-    "soglia_legno_m": 50.0,
+    "usa_petrolio": true,
+    "usa_acciaio": true,
+    "soglia_pomodoro_m": 20.0,
+    "soglia_legno_m": 20.0,
     "soglia_petrolio_m": 5.0,
-    "soglia_acciaio_m": 7.0
+    "soglia_acciaio_m": 10.0
   },
   "raccolta": {
     "livello_nodo": 6,

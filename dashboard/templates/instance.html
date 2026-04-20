@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+{% set active = "overview" %}
+{% block title %}{{ stats.nome }} — Doomsday V6{% endblock %}
+
+{% block content %}
+
+<!-- Header istanza -->
+<div style="display:flex;align-items:center;gap:16px;margin-bottom:24px">
+  <a href="/ui" class="btn btn-ghost" style="font-size:11px">← back</a>
+  <h1 style="font-family:var(--font-mono);font-size:18px;color:var(--text-head)">
+    {{ stats.nome }}
+  </h1>
+  <span class="badge badge-{{ stats.stato_live }}">{{ stats.stato_live }}</span>
+  <span class="tipologia-pill tip-{{ stats.tipologia.value }}">{{ stats.tipologia.value }}</span>
+</div>
+
+<!-- Metadati istanza -->
+<div class="section">
+  <div class="section-title">configurazione</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px">
+    {% if instance %}
+    {% for k, v in instance.items() %}
+    <div class="card-row" style="background:var(--bg-card);padding:8px 12px;border-radius:var(--r);border:1px solid var(--border)">
+      <span class="card-label">{{ k }}</span>
+      <span class="card-value">{{ v }}</span>
+    </div>
+    {% endfor %}
+    {% endif %}
+  </div>
+</div>
+
+<!-- Override istanza -->
+<div class="section">
+  <div class="section-title">override runtime</div>
+  {% set ist_ov = overrides.get("istanze", {}).get(stats.nome, {}) %}
+  <form style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end"
+        hx-patch="/api/config/overrides/istanze/{{ stats.nome }}"
+        hx-ext="json-enc"
+        hx-swap="none"
+        hx-on::after-request="document.getElementById('save-ok').style.opacity='1';setTimeout(()=>document.getElementById('save-ok').style.opacity='0',2000)">
+    <div class="form-group" style="min-width:120px">
+      <label class="form-label">truppe</label>
+      <input class="form-input" type="number" name="truppe"
+             value="{{ ist_ov.get('truppe', 0) }}">
+    </div>
+    <div class="form-group" style="min-width:120px">
+      <label class="form-label">tipologia</label>
+      <select class="form-input" name="tipologia">
+        <option value="full"     {% if ist_ov.get('tipologia','full')=='full'     %}selected{% endif %}>full</option>
+        <option value="raccolta" {% if ist_ov.get('tipologia','full')=='raccolta' %}selected{% endif %}>raccolta</option>
+      </select>
+    </div>
+    <div class="form-group" style="min-width:100px">
+      <label class="form-label">abilitata</label>
+      <select class="form-input" name="abilitata">
+        <option value="true"  {% if ist_ov.get('abilitata', True) %}selected{% endif %}>sì</option>
+        <option value="false" {% if not ist_ov.get('abilitata', True) %}selected{% endif %}>no</option>
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">salva</button>
+    <span id="save-ok" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);opacity:0;transition:opacity 0.3s">✓ salvato</span>
+  </form>
+</div>
+
+<!-- Ultimo tick -->
+<div class="section">
+  <div class="section-title">ultimo tick</div>
+  <div style="display:flex;gap:16px;flex-wrap:wrap">
+    <div class="card" style="flex:1;min-width:200px">
+      <div class="card-body">
+        <div class="card-row"><span class="card-label">avvio</span>
+          <span class="card-value">{{ stats.ultimo_tick.ts_inizio or "—" }}</span></div>
+        <div class="card-row"><span class="card-label">durata</span>
+          <span class="card-value">{{ "%.1f s" % stats.ultimo_tick.durata_s if stats.ultimo_tick.durata_s else "—" }}</span></div>
+        <div class="card-row"><span class="card-label">task ok</span>
+          <span class="card-value" style="color:var(--accent)">
+            {{ stats.ultimo_tick.task_eseguiti | join(", ") or "—" }}</span></div>
+        <div class="card-row"><span class="card-label">task fail</span>
+          <span class="card-value" style="color:var(--error)">
+            {{ stats.ultimo_tick.task_falliti | join(", ") or "—" }}</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Log viewer -->
+<div class="section">
+  <div class="section-title">log (ultime 100 righe)
+    <span class="htmx-indicator" style="color:var(--accent)"> ↻</span>
+  </div>
+  <div class="log-viewer" id="log-box"
+       hx-get="/ui/partial/log/{{ stats.nome }}"
+       hx-trigger="load, every 15s"
+       hx-swap="innerHTML">
+    {% for entry in log %}
+    <div class="log-line">
+      <span class="log-ts">{{ entry.get("ts","")[-12:-4] if entry.get("ts") else "" }}</span>
+      <span class="log-level log-{{ entry.get('level','') }}">{{ entry.get("level","")[:4] }}</span>
+      <span class="log-msg">{{ entry.get("msg","") }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+
+<script>
+// Auto-scroll log in fondo
+const lb = document.getElementById('log-box');
+if (lb) lb.scrollTop = lb.scrollHeight;
+document.addEventListener('htmx:afterSwap', e => {
+  if (e.detail.target.id === 'log-box') e.detail.target.scrollTop = e.detail.target.scrollHeight;
+});
+</script>
+
+{% endblock %}

@@ -1,0 +1,7 @@
+{% for entry in log %}
+<div class="log-line">
+  <span class="log-ts">{{ entry.get("ts","")[-12:-4] if entry.get("ts") else "" }}</span>
+  <span class="log-level log-{{ entry.get('level','') }}">{{ entry.get("level","")[:4] }}</span>
+  <span class="log-msg">{{ entry.get("msg","") }}</span>
+</div>
+{% endfor %}

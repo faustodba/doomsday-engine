@@ -22,6 +22,8 @@ from typing import Optional
 sys.stdout.reconfigure(encoding='utf-8')
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+_OVERRIDES_PATH = os.path.join(ROOT, "config", "runtime_overrides.json")
+_GLOBAL_CONFIG_PATH = os.path.join(ROOT, "config", "global_config.json")
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 os.chdir(ROOT)  # CWD = project root, indipendentemente da dove main.py è lanciato
@@ -30,7 +32,10 @@ from core.orchestrator import Orchestrator
 from core.task import TaskContext, TaskResult
 from core.logger import StructuredLogger, get_logger, close_all_loggers
 from core.state import InstanceState
-from config.config_loader import load_global, build_instance_cfg
+from config.config_loader import (
+    load_global, load_overrides, merge_config,
+    build_instance_cfg, GlobalConfig,
+)
 from core import launcher as _launcher
 
 
@@ -145,15 +150,16 @@ def _log(nome: str, msg: str) -> None:
 # ---------------------------------------------------------------------------
 # Build TaskContext
 # ---------------------------------------------------------------------------
-def _build_ctx(ist: dict, gcfg, dry_run: bool) -> TaskContext:
+def _build_ctx(ist: dict, gcfg, dry_run: bool, ist_overrides=None) -> TaskContext:
     """
     Costruisce il TaskContext per un'istanza.
     gcfg: GlobalConfig da load_global() — letto ad ogni tick.
+    ist_overrides: dict opzionale con override per-istanza da runtime_overrides.json.
     """
     nome  = ist["nome"]
     porta = ist.get("porta", 16384 + ist.get("indice", 0) * 32)
 
-    cfg    = build_instance_cfg(ist, gcfg)
+    cfg    = build_instance_cfg(ist, gcfg, overrides=ist_overrides or {})
     logger = get_logger(nome, log_dir=os.path.join(ROOT, "logs"), console=True)
     state  = InstanceState.load(nome, state_dir=os.path.join(ROOT, "state"))
 
@@ -260,8 +266,13 @@ def _thread_istanza(ist, tasks_cls, dry_run):
     with _contatori_lock:
         _contatori.setdefault(nome, {})
 
-    gcfg = load_global()
-    ctx  = _build_ctx(ist, gcfg, dry_run)
+    _ov_raw     = load_overrides(_OVERRIDES_PATH)
+    with open(_GLOBAL_CONFIG_PATH, encoding="utf-8") as _f:
+        _gcfg_raw = json.load(_f)
+    _merged_raw = merge_config(_gcfg_raw, _ov_raw)
+    gcfg        = GlobalConfig._from_raw(_merged_raw)
+    _ist_ov     = _merged_raw.get("_istanze_overrides", {}).get(nome, {})
+    ctx         = _build_ctx(ist, gcfg, dry_run, ist_overrides=_ist_ov)
     orc  = Orchestrator(ctx)
 
     for class_name, priority, interval_h, schedule in _TASK_SETUP:
@@ -301,8 +312,13 @@ def _thread_istanza(ist, tasks_cls, dry_run):
             return
 
     # ── 2. Rebuild context (rilegge config aggiornata) ───────────────
-    gcfg = load_global()
-    ctx  = _build_ctx(ist, gcfg, dry_run)
+    _ov_raw     = load_overrides(_OVERRIDES_PATH)
+    with open(_GLOBAL_CONFIG_PATH, encoding="utf-8") as _f:
+        _gcfg_raw = json.load(_f)
+    _merged_raw = merge_config(_gcfg_raw, _ov_raw)
+    gcfg        = GlobalConfig._from_raw(_merged_raw)
+    _ist_ov     = _merged_raw.get("_istanze_overrides", {}).get(nome, {})
+    ctx         = _build_ctx(ist, gcfg, dry_run, ist_overrides=_ist_ov)
     orc._ctx = ctx
 
     # ── 3. Tick ──────────────────────────────────────────────────────

@@ -17,7 +17,6 @@ build/
 bot.log
 bot.log.bak
 engine_status.json
-runtime.json
 
 # ── Logs istanze ─────────────────────────────────────────────────────────────
 logs/

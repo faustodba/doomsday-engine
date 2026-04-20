@@ -1,0 +1,19 @@
+<div class="status-bar">
+  <span class="pulse"></span>
+  <div class="status-item">
+    <span class="status-key">stato</span>
+    <span class="status-val">{{ engine.stato }}</span>
+  </div>
+  <div class="status-item">
+    <span class="status-key">ciclo</span>
+    <span class="status-val">{{ engine.ciclo }}</span>
+  </div>
+  <div class="status-item">
+    <span class="status-key">uptime</span>
+    <span class="status-val">{{ (engine.uptime_s // 3600) }}h {{ ((engine.uptime_s % 3600) // 60) }}m</span>
+  </div>
+  <div class="status-item">
+    <span class="status-key">ts</span>
+    <span class="status-val">{{ engine.ts[11:19] if engine.ts else "—" }}</span>
+  </div>
+</div>

@@ -1,0 +1,102 @@
+{
+  "globali": {
+    "task": {
+      "alleanza": true,
+      "messaggi": true,
+      "vip": true,
+      "radar": true,
+      "radar_census": false,
+      "rifornimento": false,
+      "rifornimento_mappa": false,
+      "zaino": true,
+      "arena": true,
+      "arena_mercato": true,
+      "boost": true,
+      "store": true
+    },
+    "rifugio": null,
+    "rifornimento": {
+      "soglia_campo_m": 50,
+      "mappa_abilitata": false,
+      "membri_abilitati": true,
+      "provviste_max": 100
+    },
+    "raccolta": {
+      "soglia_allocazione": 3
+    }
+  },
+  "istanze": {
+    "FAU_00": {
+      "abilitata": true,
+      "truppe": 0,
+      "tipologia": "full",
+      "fascia_oraria": null
+    },
+    "FAU_01": {
+      "abilitata": true,
+      "truppe": 50000,
+      "tipologia": "full",
+      "fascia_oraria": null
+    },
+    "FAU_02": {
+      "abilitata": true,
+      "truppe": 50000,
+      "tipologia": "full",
+      "fascia_oraria": null
+    },
+    "FAU_03": {
+      "abilitata": false,
+      "truppe": 50000,
+      "tipologia": "full",
+      "fascia_oraria": null
+    },
+    "FAU_04": {
+      "abilitata": false,
+      "truppe": 50000,
+      "tipologia": "full",
+      "fascia_oraria": null
+    },
+    "FAU_05": {
+      "abilitata": false,
+      "truppe": 50000,
+      "tipologia": "full",
+      "fascia_oraria": null
+    },
+    "FAU_06": {
+      "abilitata": false,
+      "truppe": 50000,
+      "tipologia": "full",
+      "fascia_oraria": null
+    },
+    "FAU_07": {
+      "abilitata": false,
+      "truppe": 50000,
+      "tipologia": "full",
+      "fascia_oraria": null
+    },
+    "FAU_08": {
+      "abilitata": false,
+      "truppe": 50000,
+      "tipologia": "full",
+      "fascia_oraria": null
+    },
+    "FAU_09": {
+      "abilitata": false,
+      "truppe": 50000,
+      "tipologia": "full",
+      "fascia_oraria": null
+    },
+    "FauMorfeus": {
+      "abilitata": false,
+      "truppe": 0,
+      "tipologia": "full",
+      "fascia_oraria": null
+    },
+    "FAU_10": {
+      "abilitata": false,
+      "truppe": 10000,
+      "tipologia": "full",
+      "fascia_oraria": null
+    }
+  }
+}

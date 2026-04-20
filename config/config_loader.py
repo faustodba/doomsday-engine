@@ -177,6 +177,97 @@ def save_global(gcfg: "GlobalConfig", path: str | Path | None = None) -> bool:
 
 
 # ==============================================================================
+# Runtime overrides — load + merge con global_config (dict grezzi)
+# ==============================================================================
+
+def load_overrides(path) -> dict:
+    """
+    Legge runtime_overrides.json e restituisce il dict grezzo.
+    Failsafe totale: qualsiasi errore -> {} senza eccezioni.
+    Il bot non crasha mai per un override mancante o corrotto.
+    NON importa Pydantic — solo dict grezzi.
+    """
+    try:
+        from pathlib import Path
+        return __import__('json').loads(
+            Path(path).read_text(encoding="utf-8")
+        )
+    except Exception:
+        return {}
+
+
+def merge_config(gcfg: dict, overrides: dict) -> dict:
+    """
+    Merge tra global_config.json raw (gcfg: dict) e runtime_overrides (overrides: dict).
+    Priorità: override > gcfg per chiave identica.
+    Ogni sezione in try/except separato: un override malformato non blocca gli altri.
+    Restituisce sempre un dict (mai None, mai eccezioni).
+
+    Chiave speciale iniettata nel risultato:
+      _istanze_overrides: dict[nome -> dict] — estratto da main.py
+      e passato a build_instance_cfg(overrides=ist_ovr)
+    """
+    import copy
+    merged = copy.deepcopy(gcfg)
+    if not overrides:
+        return merged
+
+    globali = overrides.get("globali", {})
+
+    # ── task flags ──────────────────────────────────────────────────────────
+    try:
+        ov_task = globali.get("task", {})
+        if ov_task:
+            if "task" not in merged:
+                merged["task"] = {}
+            for k, v in ov_task.items():
+                merged["task"][k] = v
+    except Exception:
+        pass
+
+    # ── rifugio ─────────────────────────────────────────────────────────────
+    try:
+        ov_rifugio = globali.get("rifugio")
+        if ov_rifugio:
+            merged["rifugio"] = ov_rifugio
+    except Exception:
+        pass
+
+    # ── rifornimento (merge su rifornimento_comune e rifornimento_mappa) ────
+    try:
+        ov_rif = globali.get("rifornimento", {})
+        if ov_rif:
+            for sezione in ("rifornimento_comune", "rifornimento_mappa"):
+                if sezione in merged:
+                    for k, v in ov_rif.items():
+                        if k in merged[sezione]:
+                            merged[sezione][k] = v
+    except Exception:
+        pass
+
+    # ── raccolta ────────────────────────────────────────────────────────────
+    try:
+        ov_racc = globali.get("raccolta", {})
+        if ov_racc:
+            if "raccolta" not in merged:
+                merged["raccolta"] = {}
+            for k, v in ov_racc.items():
+                merged["raccolta"][k] = v
+    except Exception:
+        pass
+
+    # ── per-istanza (iniettato come chiave speciale) ─────────────────────────
+    try:
+        ov_ist = overrides.get("istanze", {})
+        if ov_ist:
+            merged["_istanze_overrides"] = ov_ist
+    except Exception:
+        pass
+
+    return merged
+
+
+# ==============================================================================
 # MumuConfig — parametri MuMuPlayer
 # ==============================================================================
 
@@ -466,6 +557,7 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
     """
     ovr = overrides or {}
     nome = ist.get("nome", ist.get("name", "UNKNOWN"))
+    _tipologia = ovr.get("tipologia") or ist.get("profilo", "full")
 
     class _InstanceCfg:
         # ── Identità istanza ─────────────────────────────────────────────────
@@ -478,6 +570,7 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         fascia_oraria = ovr.get("fascia_oraria", ist.get("fascia_oraria", ""))
         lingua        = ist.get("lingua", "en")
         abilitata     = ist.get("abilitata", True)
+        tipologia     = _tipologia
 
         # ── Rifornimento — comune ────────────────────────────────────────────
         DOOMS_ACCOUNT                    = gcfg.dooms_account

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% set active = "overview" %}
+{% block title %}Overview — Doomsday V6{% endblock %}
+
+{% block content %}
+
+<!-- SEZIONE: Task controls globali -->
+<div class="section">
+  <div class="section-title">controllo task globali</div>
+  <div class="task-grid" id="task-grid">
+    {% set task_flags = overrides.get("globali", {}).get("task", {}) %}
+    {% for task_name, abilitato in task_flags.items() %}
+    <label class="task-toggle {% if abilitato %}on{% endif %}"
+           id="tog-{{ task_name }}"
+           hx-patch="/api/config/overrides/task/{{ task_name }}"
+           hx-params="*"
+           hx-vals='{"abilitato": "{{ "false" if abilitato else "true" }}"}'
+           hx-swap="none"
+           hx-on::after-request="window.__toggleRefresh('{{ task_name }}', {{ 'false' if abilitato else 'true' }})"
+           title="{{ task_name }}">
+      <input type="checkbox" {% if abilitato %}checked{% endif %}>
+      <span class="tog-dot"></span>
+      <span class="tog-label">{{ task_name }}</span>
+    </label>
+    {% endfor %}
+  </div>
+</div>
+
+<!-- SEZIONE: Grid istanze -->
+<div class="section">
+  <div class="section-title">istanze — {{ stats | length }} totali</div>
+  <div class="grid-cards">
+    {% for s in stats %}
+    <a href="/ui/instance/{{ s.nome }}" class="card-link">
+      <div id="card-{{ s.nome }}"
+           hx-get="/ui/partial/card/{{ s.nome }}"
+           hx-trigger="every 10s"
+           hx-swap="innerHTML">
+        {% include "partials/card_istanza.html" %}
+      </div>
+    </a>
+    {% endfor %}
+  </div>
+</div>
+
+<script>
+// Aggiorna visivamente il toggle senza ricarica pagina
+window.__toggleRefresh = function(taskName, newVal) {
+  const el = document.getElementById('tog-' + taskName);
+  if (!el) return;
+  const isOn = newVal === true || newVal === 'true';
+  el.className = 'task-toggle' + (isOn ? ' on' : '');
+  // Aggiorna hx-vals per il prossimo click
+  el.setAttribute('hx-vals', JSON.stringify({abilitato: isOn ? 'false' : 'true'}));
+  el.setAttribute('hx-on::after-request',
+    "window.__toggleRefresh('" + taskName + "', " + (isOn ? 'false' : 'true') + ")");
+};
+</script>
+{% endblock %}

@@ -1,0 +1,44 @@
+{% set stato = s.stato_live %}
+{% set badge_class = "badge-" + stato %}
+<div class="card">
+  <div class="card-header">
+    <span class="card-name">{{ s.nome }}</span>
+    <span class="badge {{ badge_class }}">{{ stato }}</span>
+  </div>
+  <div class="card-body">
+    <div class="card-row">
+      <span class="card-label">tipologia</span>
+      <span class="tipologia-pill tip-{{ s.tipologia.value }}">{{ s.tipologia.value }}</span>
+    </div>
+    {% if s.ultimo_tick.task_eseguiti %}
+    <div class="card-row">
+      <span class="card-label">ultimo tick</span>
+      <span class="card-value" style="font-size:10px">
+        {{ s.ultimo_tick.task_eseguiti | join(", ") }}
+      </span>
+    </div>
+    {% endif %}
+    {% if s.ultimo_tick.ts_inizio %}
+    <div class="card-row">
+      <span class="card-label">avvio</span>
+      <span class="card-value">{{ s.ultimo_tick.ts_inizio[11:19] }}</span>
+    </div>
+    {% endif %}
+    {% if s.ultimo_tick.raccolta.slot_totali > 0 %}
+    <div class="card-row">
+      <span class="card-label">slot</span>
+      <span class="card-value">
+        {{ s.ultimo_tick.raccolta.slot_usati }}/{{ s.ultimo_tick.raccolta.slot_totali }}
+      </span>
+    </div>
+    {% endif %}
+    {% if s.ultimo_tick.task_falliti %}
+    <div class="card-row">
+      <span class="card-label">errori</span>
+      <span class="card-value" style="color:var(--error)">
+        {{ s.ultimo_tick.task_falliti | join(", ") }}
+      </span>
+    </div>
+    {% endif %}
+  </div>
+</div>
