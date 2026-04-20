@@ -91,7 +91,7 @@ All'inizio di ogni sessione, in questo ordine:
 
 ---
 
-## Issues aperti (stato al 18/04/2026)
+## Issues aperti (stato al 20/04/2026)
 
 | # | Issue | Priorità | Stato |
 |---|-------|----------|-------|
@@ -108,6 +108,8 @@ All'inizio di ogni sessione, in questo ordine:
 | 17 | `InstanceState.save()` non atomica — corruzione su kill | MEDIA | ✅ RISOLTA (`a8ea422` tmp+fsync+os.replace) |
 | 18 | `radar_tool/templates/` mancante (dev+prod) | BASSA | ⏳ workaround: radar_census saltato per cooldown |
 | 19 | Race buffer stdout ultima istanza a fine ciclo (cosmetico) | BASSA | ⏳ usare `python -u` o `sys.stdout.flush()` |
+| 20 | Dashboard V6 rewrite (FastAPI+Jinja2+HTMX) | — | ✅ CHIUSA 20/04 — commit `9773de3` + `runtime.json` orfano eliminato, sostituito da `runtime_overrides.json` letto dal bot |
+| 21 | `gitignore` (senza punto) duplicato errato e `rifornimento_mappa.py` V5 legacy — da valutare eliminazione | BASSA | ⏳ prossima sessione |
 
 > Aggiornare questa tabella ad ogni sessione insieme alla ROADMAP.
 

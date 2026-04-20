@@ -24,6 +24,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | 22 | `core/orchestrator.py` | ✅ 49/49 | |
 | 23 | `dashboard/` | ✅ 30/30 | |
 | 24-25 | Fix + refactoring | ✅ | |
+| 26 | `dashboard/` V6 rewrite | ✅ | FastAPI+HTMX, 6 test client, commit `9773de3` |
 | **nav** | `core/navigator.py` | ✅ 20/20 | tap_barra() TM barra inferiore |
 | **main** | `main.py` + `smoke_test.py` | ✅ 61/61 | |
 
@@ -67,12 +68,33 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
   - Creare `runtime.json` con `DOOMS_ACCOUNT` e `RIFORNIMENTO_MAPPA_ABILITATO: true`
   - FAU_00 deve avere slot liberi e risorse sopra soglia
 
-### 2. Arena — timeout battaglia (MEDIA)
+### 2. Arena — timeout battaglia (RISOLTA ✅ 19/04/2026 — F2 hard timeout 300s commit `3c959cf`)
 - **Problema:** sfide 2 e 4 timeout — battaglia ancora in corso (animazioni > 38s).
-- **Fix:** aumentare `_MAX_BATTAGLIA_S` da 30s a 52s (delay 8s + poll = 60s totali).
-- **TODO pin mancanti:**
+  Issue estesa: FAU_10 hang indefinito su arena → kill manuale ciclo 19/04.
+- **Fix applicato:** hard timeout globale `ARENA_TIMEOUT_S=300` in `tasks/arena.py`.
+  `_MAX_BATTAGLIA_S` già aumentato a 52s in precedenza.
+- **TODO pin mancanti (residuo):**
   - `pin_arena_video.png` — popup video introduttivo primo accesso
   - `pin_arena_categoria.png` — popup categoria settimanale (lunedì)
+
+### 2bis. Dashboard V6 (CHIUSA ✅ 20/04/2026 — commit `9773de3`)
+- **Problema:** dashboard precedente (`dashboard/dashboard_server.py` + `dashboard.html`)
+  scriveva su `runtime.json` orfano (mai letto dal bot). Le modifiche non avevano
+  effetto. Architettura monolitica `http.server` stdlib + vanilla JS + polling manuale.
+- **Fix applicato:** rewrite completo `dashboard/` con FastAPI + Jinja2 + HTMX:
+  - `dashboard/app.py` (FastAPI, 5 router, 13 endpoint API, lifespan hook)
+  - `dashboard/services/` (config_manager, stats_reader, log_reader — read/write atomico)
+  - `dashboard/models.py` (Pydantic: RuntimeOverrides, InstanceStats, EngineStatus, …)
+  - `dashboard/routers/` (api_status, api_stats, api_config_global,
+    api_config_overrides, api_log)
+  - `dashboard/templates/` (Jinja2 base + overview + instance + config + 3 partials)
+  - `dashboard/static/style.css` (dark mode industrial con IBM Plex Mono/Sans)
+  - HTMX polling: card istanze 10s, status bar 5s, log viewer 15s
+- **Collegamento bot:** `main.py` + `config/config_loader.py` ora usano
+  `load_overrides()` + `merge_config()` + `GlobalConfig._from_raw(_merged_raw)` —
+  gli override scritti dalla dashboard hanno finalmente effetto sul bot al tick successivo.
+- **runtime.json eliminato**, sostituito da `config/runtime_overrides.json` (letto dal bot).
+- **Avvio:** `run_dashboard.bat` → `http://localhost:8765/`
 
 ### 3. Zaino — deposito OCR (CHIUSA ✅ 14/04/2026)
 - **Fix applicato:** `_leggi_deposito_ocr()` legge autonomamente via `ocr_risorse()`.
@@ -200,6 +222,29 @@ consolidare la logica raccolta. Baseline test: 42 passed / 57. Post-riscrittura:
 | Boost fix tap + polling + debug | `tasks/boost.py` | Tap su `(speed_cx, speed_cy)` (centro icona pin_speed), polling `pin_speed_use` timeout 4s via `_attendi_frame_use`, delay `wait_after_tap_boost=1.5s` post tap iniziale, screenshot debug pre/post tap in `debug_task/boost/`. Verificato via test live su FAU_00 (ore 18:12): boost 8h attivato con cy=260 (tap responsivo). Pattern osservato: se dopo swipe cy > 400 il tap è ignorato dal gioco (zona scroll-edge), sotto cy~260 tap risponde. Fix futuro potenziale: swipe aggiuntivo quando cy > 400. |
 | test_boost_live.py | `test_boost_live.py` (nuovo) | Runner isolato standalone per BoostTask su FAU_00 reale. Bypassa `should_run()` (esegue `run()` direttamente), `navigator=None` (salta ensure_home), log console con timestamp, UTF-8 forzato su stdout. Utile per debug mirato del task boost senza dover lanciare l'intero `main.py`. Comando: `python test_boost_live.py`. |
 | Fix test_boost.py _cfg_zero() | `tests/tasks/test_boost.py` | Rimossi parametri `wait_after_tap` e `wait_after_speed_tap` da `BoostConfig()` — non esistono più nel dataclass (parametri legacy). Sbloccati 20 test che fallivano con TypeError. Baseline 15/35 → 35/35 passed. |
+
+## Fix e implementazioni sessione 20/04/2026
+
+| Area | File | Dettaglio |
+|------|------|-----------|
+| Config layering | `config/config_loader.py` | `load_overrides()` + `merge_config()` — dict grezzi, failsafe totale |
+| Config layering | `config/config_loader.py` | `build_instance_cfg` +2 righe: `tipologia` da override |
+| Wire-up bot | `main.py` | `_OVERRIDES_PATH`, `_GLOBAL_CONFIG_PATH`, `GlobalConfig._from_raw(_merged_raw)` in pre/post-launcher |
+| Config file | `config/runtime_overrides.json` | Nuovo file — 12 task flags + 12 istanze override |
+| Dashboard | `dashboard/` (22 file) | Rewrite completo: FastAPI+Jinja2+HTMX, dark mode industrial |
+| Cleanup | `.gitignore` | Rimosso `runtime.json` (file eliminato) |
+
+## Prossima sessione — priorità
+
+| Priorità | Task |
+|----------|------|
+| 1 | Sync dashboard a prod (`sync_prod.bat` + test live con 11 istanze) |
+| 2 | Issue #1 — Rifornimento: abilitare e testare |
+| 3 | Issue #3 — Zaino: fix scroll/screenshot bug |
+| 4 | `gitignore` (senza punto) da eliminare, `rifornimento_mappa.py` da valutare |
+| 5 | RT-18: completare i 3 sub-test pendenti |
+
+---
 
 ## Sessione 19/04/2026 (pomeriggio) — ambiente prod + fix W11-slow
 
