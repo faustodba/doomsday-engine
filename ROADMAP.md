@@ -57,16 +57,22 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
-### 1. Rifornimento — da mettere a punto (ALTA)
-- **Stato:** fix applicati 14/04/2026 — pronto per test runtime RT-16.
-- **Fix applicati:**
+### 1. Rifornimento — da mettere a punto (CHIUSA ✅ 20/04/2026)
+- **Stato:** validato in produzione su 8 istanze il 20/04/2026.
+- **Fix finale (20/04/2026):** `_centra_mappa` → tap castello `time.sleep(2.0)` (era `0.3`),
+  `_apri_resource_supply` `time.sleep(1.5)` (era `0.3`), `_compila_e_invia`
+  retry OCR nome destinatario su stringa vuota con nuovo screenshot.
+  Commit fix: `tasks/rifornimento.py` (3 delay + retry OCR).
+- **Fix precedenti (14/04/2026):**
   - `_apri_resource_supply()`: `find()` → `find_one()` (API V6)
   - `run()`: deposito letto via OCR in mappa se non iniettato (come V5)
   - `_compila_e_invia()`: aggiunta verifica nome destinatario (come V5)
   - Navigazione HOME/MAPPA: `ctx.navigator.vai_in_home/mappa()` con fallback key
-- **Prerequisiti test:**
-  - Creare `runtime.json` con `DOOMS_ACCOUNT` e `RIFORNIMENTO_MAPPA_ABILITATO: true`
-  - FAU_00 deve avere slot liberi e risorse sopra soglia
+- **Attivazione runtime:** via `runtime_overrides.json`:
+  - `globali.task.rifornimento: true`
+  - `globali.task.rifornimento_mappa: true`
+  - `globali.rifugio: {coord_x: 680, coord_y: 531}` (propagato da `merge_config`
+    in `rifornimento_mappa.rifugio_x/y` fix `2b33efc`)
 
 ### 2. Arena — timeout battaglia (RISOLTA ✅ 19/04/2026 — F2 hard timeout 300s commit `3c959cf`)
 - **Problema:** sfide 2 e 4 timeout — battaglia ancora in corso (animazioni > 38s).
@@ -156,7 +162,40 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 - Impatto: ~15-20s per tick persi in attesa stabilizzazione non convergente
 - Rimandata a post-RT-22 (rifornimento): non impedisce produzione
 
+### 13. Boost — `gathered` non riconosciuto (MEDIA — da verificare)
+- Sospetto: delay insufficiente post-tap (STEP 5 `tasks/boost.py:309` usa
+  `time.sleep(1.0)` hardcoded prima del polling `_attendi_frame_use`).
+  Pattern analogo a quello che affliggeva rifornimento prima del fix 20/04.
+- Candidato fix: portare lo sleep a ≥ 2.0s come da nuova regola architetturale
+  "DELAY UI post-tap popup/overlay".
+- Da validare con stesso approccio del fix rifornimento: test prod + confronto
+  log OCR/template score pre/post fix.
+
 ---
+
+## Regole architetturali
+
+### REGOLA DELAY UI (20/04/2026)
+Dopo ogni tap che apre un popup o overlay, usare `time.sleep(≥ 2.0s)`
+prima di qualsiasi `screenshot` o template matching.
+
+**Derivato da**: fix rifornimento 20/04/2026 (`tasks/rifornimento.py`):
+- `_centra_mappa`: tap castello `0.3s` → **`2.0s`** (allineato V5)
+- `_apri_resource_supply`: `0.3s` → **`1.5s`** (minimo operativo)
+- `_compila_e_invia`: retry OCR nome destinatario su stringa vuota con nuovo
+  screenshot dopo `1.0s` di attesa
+
+**Applicare a**:
+- Tutti i `device.tap()` seguiti da `matcher.score()` / `matcher.find_one()` /
+  `ctx.device.screenshot()` immediato
+- Tutti i tap che aprono popup, maschere invio, pannelli overlay, popup di conferma
+- Eccezione: pattern `tap + time.sleep(x) + _attendi_template(...)` dove il
+  polling interno copre già la variabilità (allora `x ≥ 1.0s` basta,
+  il polling fa il resto)
+
+**Motivazione**: su Windows 11 con HDD lento e WiFi debole, i popup di
+gioco impiegano 1.0-2.5s a renderizzare. Delay < 1.5s causa screenshot/OCR
+su frame transienti con score borderline → falsi negativi e retry inutili.
 
 ---
 
@@ -236,13 +275,20 @@ consolidare la logica raccolta. Baseline test: 42 passed / 57. Post-riscrittura:
 
 ## Prossima sessione — priorità
 
-| Priorità | Task |
-|----------|------|
-| 1 | Sync dashboard a prod (`sync_prod.bat` + test live con 11 istanze) |
-| 2 | Issue #1 — Rifornimento: abilitare e testare |
-| 3 | Issue #3 — Zaino: fix scroll/screenshot bug |
-| 4 | `gitignore` (senza punto) da eliminare, `rifornimento_mappa.py` da valutare |
-| 5 | RT-18: completare i 3 sub-test pendenti |
+| Priorità | Task | Stato al 20/04/2026 |
+|----------|------|---------------------|
+| 1 | Issue #13 — Boost `gathered` non riconosciuto: applicare regola DELAY UI (sleep 2.0s in `tasks/boost.py:309`) + test prod | 🆕 nuovo |
+| 2 | Sync dashboard+config_loader+main.py a prod (`sync_prod.bat` + copia `runtime_overrides.json`) | ⏳ blocco — prod ferma a pre-sessione 20/04 |
+| 3 | Rifornimento: allargamento test da 8 istanze a 11 istanze prod (post-sync) | ⏳ attesa sync prod |
+| 4 | Issue #3 — Zaino: fix scroll/screenshot bug (applicare DELAY UI se serve) | ⏳ in attesa |
+| 5 | Cleanup repo: `gitignore` (senza punto) da eliminare, `rifornimento_mappa.py` V5 da valutare | ⏳ backlog |
+| 6 | RT-18: completare i 3 sub-test scheduling pendenti | ⏳ backlog |
+
+**Stato chiuso nella sessione 20/04/2026:**
+- ✅ Issue #1 Rifornimento — validato prod 8 istanze con fix DELAY UI
+- ✅ Dashboard V6 rewrite (commit `9773de3`, `7407e2b`, `2b33efc`)
+- ✅ Chain override completa: `runtime_overrides.json` → `merge_config` →
+  `GlobalConfig._from_raw(merged)` → `build_instance_cfg` → bot
 
 ---
 

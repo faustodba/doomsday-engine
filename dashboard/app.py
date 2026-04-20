@@ -139,6 +139,15 @@ def ui_config(request: Request):
     })
 
 
+@app.get("/ui/config/global", include_in_schema=False)
+def ui_config_global(request: Request):
+    """Pagina edit global_config.json (require restart bot)."""
+    from dashboard.services.config_manager import get_global_config
+    return templates.TemplateResponse(request, "config_global.html", {
+        "cfg": get_global_config(),
+    })
+
+
 # HTMX partial — card singola istanza (polling ogni 10s)
 @app.get("/ui/partial/card/{nome}", include_in_schema=False)
 def ui_partial_card(request: Request, nome: str):

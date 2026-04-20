@@ -109,6 +109,7 @@ class BoostConfig:
     wait_after_swipe:         float           = 1.5
     wait_after_use:           float           = 1.5
     wait_after_back:          float           = 0.5
+    wait_after_tap_speed:     float           = 2.0    # regola DELAY UI — da fix rifornimento 20/04/2026
     # FIX ricentro: mini-swipe inverso (dito scende = lista sale = riga scende nel viewport)
     ricentro_swipe_y_start:   int             = 280    # da dove parte il dito
     ricentro_swipe_y_end:     int             = 360    # dove arriva (80px verso il basso)
@@ -306,7 +307,7 @@ class BoostTask(Task):
         # La sotto-maschera USE impiega variabile 0.5–2.5s ad aprirsi
         # a seconda del carico del dispositivo. Il polling garantisce
         # di catturare il frame corretto indipendentemente dalla latenza.
-        time.sleep(1.0)  # minimo attesa animazione apertura
+        time.sleep(cfg.wait_after_tap_speed)  # attesa rendering popup USE (regola DELAY UI — da fix rifornimento 20/04/2026)
         shot = self._attendi_frame_use(device, matcher, cfg, log)
 
         # DEBUG 19/04/2026: screenshot POST-TAP (ultimo frame polling).

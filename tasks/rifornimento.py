@@ -294,7 +294,7 @@ def _centra_mappa(ctx: TaskContext) -> None:
     time.sleep(2.5)
 
     ctx.device.tap(_cfg(ctx, "TAP_CASTELLO_CENTER"))
-    time.sleep(0.3)  # minimo animazione tap
+    time.sleep(2.0)  # attesa apertura popup castello (da V5)
     ctx.log_msg("Rifornimento: mappa centrata e castello tappato")
 
 
@@ -369,7 +369,7 @@ def _apri_resource_supply(ctx: TaskContext) -> bool:
 
     ctx.log_msg(f"Rifornimento: RESOURCE SUPPLY trovato ({result.cx},{result.cy}) → tap")
     ctx.device.tap(result.cx, result.cy)
-    time.sleep(0.3)  # minimo animazione tap — popup invio viene verificato nel flusso successivo
+    time.sleep(1.5)  # attesa rendering popup invio risorse
     return True
 
 
@@ -389,8 +389,15 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
         return False, 0, False, 0, -1
 
     # Verifica nome destinatario (come V5 _compila_e_invia in rifornimento_base.py)
+    # Retry una volta se OCR restituisce stringa vuota (popup ancora in rendering)
     if nome_rifugio:
         ok_nome, testo_ocr = _verifica_nome_destinatario_v6(ctx, screen, nome_rifugio)
+        if not ok_nome and testo_ocr == "":
+            ctx.log_msg("Rifornimento: OCR nome vuoto — retry tra 1s")
+            time.sleep(1.0)
+            screen = ctx.device.screenshot()
+            if screen:
+                ok_nome, testo_ocr = _verifica_nome_destinatario_v6(ctx, screen, nome_rifugio)
         if not ok_nome:
             ctx.log_msg(
                 f"Rifornimento: DEST MISMATCH — OCR='{testo_ocr}' atteso='{nome_rifugio}' → BACK"

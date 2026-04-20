@@ -78,6 +78,12 @@ All'inizio di ogni sessione, in questo ordine:
 - **Stabilizzazione HOME**: dopo `attendi_home()`, la HOME deve essere stabile per
   3 poll consecutivi da 5s (15s di stabilità) prima di avviare il tick.
   Timeout 30s: se non converge, procede comunque con `vai_in_home()` finale.
+- **REGOLA DELAY UI (vincolante)**: dopo ogni `ctx.device.tap()` che apre un
+  popup, overlay o pannello, usare `time.sleep(2.0)` minimo prima di
+  `ctx.device.screenshot()` o `matcher.find_one()`. Delay insufficiente causa
+  score template matching basso o OCR su schermata non ancora renderizzata.
+  Derivato da bug rifornimento: `sleep(0.3)` → score `0.387`, `sleep(2.0)` →
+  score `0.934`.
 
 ---
 
