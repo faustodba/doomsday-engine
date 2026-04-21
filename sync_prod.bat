@@ -24,6 +24,7 @@ xcopy /Y /Q "%SRC%\shared\*.py"     "%DST%\shared\"     || goto :err
 xcopy /Y /Q "%SRC%\config\*.py"     "%DST%\config\"     || goto :err
 xcopy /Y /Q "%SRC%\monitor\*.py"    "%DST%\monitor\"    || goto :err
 xcopy /Y /E /Q "%SRC%\radar_tool\"  "%DST%\radar_tool\" || goto :err
+xcopy /Y /E /Q "%SRC%\dashboard\"   "%DST%\dashboard\"  || goto :err
 xcopy /Y /Q "%SRC%\main.py"         "%DST%\"            || goto :err
 xcopy /Y /Q "%SRC%\ROADMAP.md"      "%DST%\"            || goto :err
 

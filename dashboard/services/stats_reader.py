@@ -199,6 +199,8 @@ def get_all_stats() -> list[InstanceStats]:
             nome = ist.get("nome", "")
             if not nome:
                 continue
+            if not nome.startswith("FAU_"):
+                continue
             ist_status  = es.istanze.get(nome)
             state       = _load_state(nome)
             stato_live  = ist_status.stato if ist_status else "unknown"

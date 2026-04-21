@@ -1,0 +1,323 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Doomsday V6</title>
+<script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js" defer></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700&display=swap');
+:root {
+  --bg:       #0e1117; --bg2: #161b25; --bg3: #1e2535;
+  --border:   #2a3348;
+  --accent:   #e8a020; --accent2: #c07818;
+  --green:    #22c55e; --green-bg: rgba(34,197,94,0.08);
+  --red:      #ef4444; --red-bg:   rgba(239,68,68,0.08);
+  --yellow:   #f59e0b; --yellow-bg:rgba(245,158,11,0.08);
+  --blue:     #60a5fa; --blue-bg:  rgba(96,165,250,0.08);
+  --text:     #e2e8f0; --text-dim: #64748b; --text-mid: #94a3b8;
+  --mono:     'Share Tech Mono', monospace;
+  --sans:     'Barlow Condensed', sans-serif;
+  --r: 6px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--mono);min-height:100vh;padding:16px 20px 32px}
+
+/* HEADER */
+header{display:flex;align-items:center;justify-content:space-between;padding:12px 18px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);border-left:3px solid var(--accent);margin-bottom:14px}
+.logo{font-family:var(--sans);font-size:22px;font-weight:700;color:var(--accent);letter-spacing:3px}
+.header-nav{display:flex;gap:8px}
+.header-nav a{font-size:11px;color:var(--text-dim);text-decoration:none;padding:3px 8px;border:1px solid var(--border);border-radius:3px;letter-spacing:1px}
+.header-nav a:hover{color:var(--accent);border-color:var(--accent)}
+.header-status{font-size:11px;display:flex;gap:16px;align-items:center}
+.dot{width:8px;height:8px;border-radius:50%;display:inline-block;flex-shrink:0}
+.dot.running{background:var(--green);box-shadow:0 0 8px var(--green);animation:pulse 1.4s infinite}
+.dot.waiting{background:var(--yellow);box-shadow:0 0 8px var(--yellow);animation:pulse 2s infinite}
+.dot.stopped,.dot.unknown{background:var(--red)}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.stat-chip{color:var(--text-dim);font-size:11px}
+.stat-chip span{color:var(--accent);margin-left:4px}
+
+/* SEZIONI */
+.sec-title{font-family:var(--sans);font-size:10px;font-weight:400;letter-spacing:4px;color:var(--text-dim);text-transform:uppercase;margin:18px 0 8px;display:flex;align-items:center;gap:10px}
+.sec-title::after{content:'';flex:1;height:1px;background:var(--border)}
+
+/* SUMMARY */
+.summary{display:grid;grid-template-columns:repeat(auto-fill,minmax(110px,1fr));gap:8px;margin-bottom:4px}
+.sum-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px;text-align:center}
+.sum-num{font-family:var(--sans);font-size:32px;font-weight:700;line-height:1;margin-bottom:3px}
+.sum-lbl{font-size:9px;color:var(--text-dim);letter-spacing:2px;text-transform:uppercase}
+.num-green{color:var(--green)} .num-yellow{color:var(--yellow)}
+.num-blue{color:var(--blue)}   .num-red{color:var(--red)}
+.num-dim{color:var(--text-dim)} .num-accent{color:var(--accent)}
+
+/* ISTANZE GRID */
+.inst-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:8px}
+.inst-card{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:10px 13px;position:relative;overflow:hidden}
+.inst-card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--border)}
+.inst-card.running{border-color:rgba(34,197,94,.3);background:linear-gradient(135deg,var(--bg2),var(--green-bg))}
+.inst-card.running::before{background:var(--green)}
+.inst-card.waiting{border-color:rgba(245,158,11,.3);background:linear-gradient(135deg,var(--bg2),var(--yellow-bg))}
+.inst-card.waiting::before{background:var(--yellow)}
+.inst-card.done{border-color:rgba(96,165,250,.3);background:linear-gradient(135deg,var(--bg2),var(--blue-bg))}
+.inst-card.done::before{background:var(--blue)}
+.inst-card.error{border-color:rgba(239,68,68,.3);background:linear-gradient(135deg,var(--bg2),var(--red-bg))}
+.inst-card.error::before{background:var(--red)}
+.inst-card.idle,.inst-card.unknown{opacity:.5}
+.inst-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.inst-name{font-family:var(--sans);font-size:15px;font-weight:700;letter-spacing:2px}
+.badge{font-size:9px;font-weight:bold;padding:2px 7px;border-radius:3px;letter-spacing:1px;text-transform:uppercase}
+.badge.running{background:rgba(34,197,94,.15);color:var(--green)}
+.badge.waiting{background:rgba(245,158,11,.15);color:var(--yellow)}
+.badge.done{background:rgba(96,165,250,.15);color:var(--blue)}
+.badge.error{background:rgba(239,68,68,.15);color:var(--red)}
+.badge.idle,.badge.unknown{background:rgba(100,116,139,.2);color:var(--text-dim)}
+.inst-row{display:flex;justify-content:space-between;font-size:10px;color:var(--text-dim);margin-top:2px}
+.inst-row span:last-child{color:var(--text-mid)}
+
+/* TASK TOGGLES */
+.task-grid{display:flex;flex-wrap:wrap;gap:6px}
+.tog{display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border:1px solid var(--border);border-radius:20px;cursor:pointer;font-size:11px;color:var(--text-dim);background:var(--bg2);user-select:none;transition:all .2s}
+.tog.on{border-color:var(--green);color:var(--green);background:rgba(34,197,94,.08)}
+.tog.off{border-color:var(--red);color:var(--red);background:rgba(239,68,68,.06);opacity:.7}
+.tog-dot{width:6px;height:6px;border-radius:50%;background:currentColor;flex-shrink:0}
+
+/* CONFIG FORM */
+.cfg-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:10px}
+.cfg-box{background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:12px 14px}
+.cfg-box-title{font-size:9px;color:var(--accent);letter-spacing:2px;text-transform:uppercase;margin-bottom:10px}
+.fld{margin-bottom:8px}
+.fld label{display:block;font-size:10px;color:var(--text-dim);margin-bottom:3px;letter-spacing:1px}
+.fld input,.fld select{background:var(--bg3);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:11px;padding:4px 8px;border-radius:3px;width:100%}
+.fld input:focus,.fld select:focus{outline:none;border-color:var(--accent)}
+
+/* ISTANZE CONFIG TABLE */
+.ist-table{width:100%;border-collapse:collapse;font-size:11px}
+.ist-table th{text-align:left;font-size:9px;color:var(--text-dim);letter-spacing:2px;text-transform:uppercase;padding:4px 8px;border-bottom:1px solid var(--border)}
+.ist-table td{padding:5px 8px;border-bottom:1px solid rgba(42,51,72,.5)}
+.ist-table tr:hover td{background:rgba(255,255,255,.02)}
+
+/* BTN */
+.btn{font-family:var(--mono);font-size:11px;padding:6px 16px;border-radius:3px;border:none;cursor:pointer;letter-spacing:1px}
+.btn-primary{background:var(--accent);color:#000;font-weight:bold}
+.btn-primary:hover{background:var(--accent2)}
+.btn-sm{font-size:10px;padding:3px 10px;border:1px solid var(--border);background:transparent;color:var(--text-dim);border-radius:3px;cursor:pointer;font-family:var(--mono)}
+.btn-sm:hover{border-color:var(--accent);color:var(--accent)}
+.save-msg{font-size:11px;margin-left:10px;opacity:0;transition:opacity .3s}
+.save-ok{color:var(--green)} .save-err{color:var(--red)}
+
+/* STORICO */
+.storico-table{width:100%;border-collapse:collapse;font-size:11px}
+.storico-table th{font-size:9px;color:var(--text-dim);letter-spacing:2px;text-transform:uppercase;padding:4px 8px;border-bottom:1px solid var(--border);text-align:left}
+.storico-table td{padding:4px 8px;border-bottom:1px solid rgba(42,51,72,.4);color:var(--text-mid)}
+.esito-ok{color:var(--green)} .esito-err{color:var(--red)}
+
+.refresh-bar{height:2px;background:var(--border);margin-bottom:12px;overflow:hidden;border-radius:1px}
+.refresh-bar-inner{height:100%;background:var(--accent);animation:refill 10s linear infinite}
+@keyframes refill{from{width:100%}to{width:0%}}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<header>
+  <div class="logo">⬡ DOOMSDAY V6</div>
+  <div class="header-nav">
+    <a href="/docs" target="_blank">api docs</a>
+  </div>
+  <div class="header-status" id="hdr-status"
+       hx-get="/ui/partial/status-inline"
+       hx-trigger="load, every 5s"
+       hx-swap="innerHTML">
+    <span class="stat-chip">stato <span>—</span></span>
+  </div>
+</header>
+
+<div class="refresh-bar"><div class="refresh-bar-inner"></div></div>
+
+<!-- SUMMARY -->
+<div class="sec-title">riepilogo</div>
+<div class="summary" id="summary"
+     hx-get="/ui/partial/summary"
+     hx-trigger="load, every 10s"
+     hx-swap="innerHTML">
+  <div class="sum-card"><div class="sum-num num-dim">—</div><div class="sum-lbl">totali</div></div>
+</div>
+
+<!-- ISTANZE -->
+<div class="sec-title">istanze</div>
+<div class="inst-grid" id="inst-grid"
+     hx-get="/ui/partial/inst-grid"
+     hx-trigger="load, every 10s"
+     hx-swap="innerHTML">
+</div>
+
+<!-- TASK FLAGS -->
+<div class="sec-title">task flags — hot reload</div>
+<div class="task-grid" id="task-flags"
+     hx-get="/ui/partial/task-flags-v2"
+     hx-trigger="load"
+     hx-swap="innerHTML">
+</div>
+
+<!-- CONFIG RIFORNIMENTO + ZAINO -->
+<div class="sec-title">configurazione</div>
+<div class="cfg-grid">
+
+  <!-- Rifornimento comune -->
+  <div class="cfg-box">
+    <div class="cfg-box-title">rifornimento</div>
+    <div class="fld"><label>dooms_account</label>
+      <input id="c_dooms" type="text" value="{{ cfg.get('rifornimento_comune',{}).get('dooms_account','') }}">
+    </div>
+    <div class="fld"><label>max spedizioni ciclo</label>
+      <input id="c_maxsped" type="number" value="{{ cfg.get('rifornimento_comune',{}).get('max_spedizioni_ciclo',5) }}" style="width:80px">
+    </div>
+    {% for r,default in [('campo',5.0),('legno',5.0),('petrolio',2.5),('acciaio',3.5)] %}
+    <div class="fld"><label>soglia {{ r }} (M)</label>
+      <input id="c_soglia_{{ r }}" type="number" step="0.5"
+             value="{{ cfg.get('rifornimento_comune',{}).get('soglia_'+r+'_m', default) }}" style="width:80px">
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Rifornimento mappa -->
+  <div class="cfg-box">
+    <div class="cfg-box-title">rifornimento mappa</div>
+    <div class="fld"><label>abilitato</label>
+      <select id="c_rifm_on">
+        <option value="true"  {% if cfg.get('rifornimento_mappa',{}).get('abilitato') %}selected{% endif %}>sì</option>
+        <option value="false" {% if not cfg.get('rifornimento_mappa',{}).get('abilitato') %}selected{% endif %}>no</option>
+      </select>
+    </div>
+    <div class="fld"><label>rifugio X</label>
+      <input id="c_rifx" type="number" value="{{ cfg.get('rifornimento_mappa',{}).get('rifugio_x',687) }}" style="width:80px">
+    </div>
+    <div class="fld"><label>rifugio Y</label>
+      <input id="c_rify" type="number" value="{{ cfg.get('rifornimento_mappa',{}).get('rifugio_y',532) }}" style="width:80px">
+    </div>
+    <div class="sec-title" style="margin-top:12px">zaino</div>
+    <div class="fld"><label>modalità</label>
+      <select id="c_zaino_mode">
+        <option value="bag"    {% if cfg.get('zaino',{}).get('modalita','bag')=='bag' %}selected{% endif %}>bag</option>
+        <option value="svuota" {% if cfg.get('zaino',{}).get('modalita')=='svuota' %}selected{% endif %}>svuota</option>
+      </select>
+    </div>
+    {% for r,default in [('pomodoro',20.0),('legno',20.0),('petrolio',5.0),('acciaio',10.0)] %}
+    <div class="fld"><label>soglia zaino {{ r }} (M)</label>
+      <input id="c_zaino_{{ r }}" type="number" step="1"
+             value="{{ cfg.get('zaino',{}).get('soglia_'+r+'_m', default) }}" style="width:80px">
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- Sistema -->
+  <div class="cfg-box">
+    <div class="cfg-box-title">sistema</div>
+    <div class="fld"><label>tick sleep (s)</label>
+      <input id="c_tick" type="number" value="{{ cfg.get('sistema',{}).get('tick_sleep',300) }}" style="width:100px">
+    </div>
+    <div class="fld"><label>max parallel</label>
+      <input id="c_parallel" type="number" value="{{ cfg.get('sistema',{}).get('max_parallel',1) }}" style="width:80px">
+    </div>
+    <div class="fld"><label>livello nodo raccolta</label>
+      <input id="c_livello" type="number" value="{{ cfg.get('raccolta',{}).get('livello_nodo',6) }}" style="width:80px">
+    </div>
+  </div>
+
+</div>
+
+<!-- SALVA CONFIG -->
+<div style="margin-top:12px;display:flex;align-items:center;gap:8px">
+  <button class="btn btn-primary" onclick="salvaConfig()">salva global_config</button>
+  <span class="save-msg save-ok" id="cfg-ok">✓ salvato — riavvia bot</span>
+  <span class="save-msg save-err" id="cfg-err"></span>
+  <span style="font-size:10px;color:var(--text-dim);margin-left:8px">⚠ richiede riavvio bot</span>
+</div>
+
+<!-- ISTANZE ABILITAZIONE -->
+<div class="sec-title">istanze</div>
+<div style="overflow-x:auto">
+<table class="ist-table">
+  <thead><tr>
+    <th>nome</th><th>stato</th><th>tipologia</th><th>truppe</th><th>abilitata</th>
+  </tr></thead>
+  <tbody id="ist-tbody"
+         hx-get="/ui/partial/ist-table"
+         hx-trigger="load"
+         hx-swap="innerHTML">
+  </tbody>
+</table>
+</div>
+
+<!-- STORICO -->
+<div class="sec-title">storico eventi</div>
+<div style="overflow-x:auto">
+<table class="storico-table">
+  <thead><tr><th>ts</th><th>istanza</th><th>task</th><th>esito</th><th>durata</th><th>msg</th></tr></thead>
+  <tbody id="storico-body"
+         hx-get="/ui/partial/storico"
+         hx-trigger="load, every 30s"
+         hx-swap="innerHTML">
+  </tbody>
+</table>
+</div>
+
+<script>
+// ── SALVA global_config ───────────────────────────────────────────────────────
+function salvaConfig() {
+  const g = id => document.getElementById(id);
+  const n = id => parseFloat(g(id)?.value || 0);
+  const i = id => parseInt(g(id)?.value || 0);
+  const s = id => g(id)?.value || '';
+  const b = id => g(id)?.value === 'true';
+
+  const payload = {
+    sistema: { tick_sleep: i('c_tick'), max_parallel: i('c_parallel') },
+    raccolta: {
+      livello_nodo: i('c_livello'),
+      allocazione: { pomodoro:0.4, legno:0.3, petrolio:0.2, acciaio:0.1 }
+    },
+    rifornimento_comune: {
+      dooms_account: s('c_dooms'),
+      max_spedizioni_ciclo: i('c_maxsped'),
+      soglia_campo_m:    n('c_soglia_campo'),
+      soglia_legno_m:    n('c_soglia_legno'),
+      soglia_petrolio_m: n('c_soglia_petrolio'),
+      soglia_acciaio_m:  n('c_soglia_acciaio'),
+      campo_abilitato: true, legno_abilitato: true,
+      petrolio_abilitato: true, acciaio_abilitato: false,
+      qta_pomodoro: 999000000, qta_legno: 999000000,
+      qta_petrolio: 999000000, qta_acciaio: 999000000,
+    },
+    rifornimento_mappa: {
+      abilitato: b('c_rifm_on'),
+      rifugio_x: i('c_rifx'),
+      rifugio_y: i('c_rify'),
+    },
+    zaino: {
+      modalita: s('c_zaino_mode'),
+      usa_pomodoro: true, usa_legno: true,
+      usa_petrolio: true, usa_acciaio: true,
+      soglia_pomodoro_m: n('c_zaino_pomodoro'),
+      soglia_legno_m:    n('c_zaino_legno'),
+      soglia_petrolio_m: n('c_zaino_petrolio'),
+      soglia_acciaio_m:  n('c_zaino_acciaio'),
+    },
+  };
+  fetch('/api/config/global', {
+    method:'PUT', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(payload)
+  }).then(r => r.json().then(d => ({s:r.status,d})))
+    .then(({s,d}) => {
+      const ok = s===200;
+      const el = document.getElementById(ok?'cfg-ok':'cfg-err');
+      if (!ok) el.textContent = '✗ ' + (d.detail||'errore '+s);
+      el.style.opacity='1';
+      setTimeout(()=>el.style.opacity='0', ok?3000:5000);
+    });
+}
+</script>
+
+</body>
+</html>

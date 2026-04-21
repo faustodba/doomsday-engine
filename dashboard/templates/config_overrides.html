@@ -12,20 +12,7 @@
 <!-- Task flags -->
 <div class="section">
   <div class="section-title">task flags — hot-reload</div>
-  <div class="task-grid">
-    {% set task_flags = overrides.get("globali", {}).get("task", {}) %}
-    {% for task_name, abilitato in task_flags.items() %}
-    <label class="task-toggle {% if abilitato %}on{% endif %}"
-           id="cfg-tog-{{ task_name }}"
-           hx-patch="/api/config/overrides/task/{{ task_name }}"
-           hx-vals='{"abilitato": "{{ "false" if abilitato else "true" }}"}'
-           hx-swap="none"
-           hx-on::after-request="window.__cfgToggle('{{ task_name }}', {{ 'false' if abilitato else 'true' }})">
-      <span class="tog-dot"></span>
-      <span class="tog-label">{{ task_name }}</span>
-    </label>
-    {% endfor %}
-  </div>
+  {% include "partials/task_flags.html" %}
 </div>
 
 <!-- Rifornimento -->
@@ -66,6 +53,7 @@
   <div class="section-title">istanze — abilitazione rapida</div>
   <div style="display:flex;flex-direction:column;gap:6px">
     {% for ist in instances %}
+    {% if ist.nome.startswith("FAU_") %}
     {% set ist_ov = overrides.get("istanze", {}).get(ist.nome, {}) %}
     {% set ist_on = ist_ov.get("abilitata", ist.get("abilitata", True)) %}
     <div style="display:flex;align-items:center;gap:12px;background:var(--bg-card);
@@ -77,27 +65,17 @@
         <label class="task-toggle {% if ist_on %}on{% endif %}"
                hx-patch="/api/config/overrides/istanze/{{ ist.nome }}"
                hx-vals='{"abilitata": "{{ "false" if ist_on else "true" }}"}'
-               hx-swap="none">
+               hx-swap="none"
+               hx-on::after-request="location.reload()">
           <span class="tog-dot"></span>
           <span class="tog-label">{% if ist_on %}attiva{% else %}disabilitata{% endif %}</span>
         </label>
       </span>
       <a href="/ui/instance/{{ ist.nome }}" class="btn btn-ghost" style="padding:4px 10px;font-size:10px">dettaglio →</a>
     </div>
+    {% endif %}
     {% endfor %}
   </div>
 </div>
-
-<script>
-window.__cfgToggle = function(taskName, newVal) {
-  const el = document.getElementById('cfg-tog-' + taskName);
-  if (!el) return;
-  const isOn = newVal === true || newVal === 'true';
-  el.className = 'task-toggle' + (isOn ? ' on' : '');
-  el.setAttribute('hx-vals', JSON.stringify({abilitato: isOn ? 'false' : 'true'}));
-  el.setAttribute('hx-on::after-request',
-    "window.__cfgToggle('" + taskName + "', " + (isOn ? 'false' : 'true') + ")");
-};
-</script>
 
 {% endblock %}

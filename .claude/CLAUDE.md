@@ -97,25 +97,35 @@ All'inizio di ogni sessione, in questo ordine:
 
 ---
 
-## Issues aperti (stato al 20/04/2026)
+## Issues aperti (stato al 21/04/2026)
+
+> **Nota**: la numerazione seguente è una tabella di tracking interno di CLAUDE.md
+> e NON è perfettamente allineata alla numerazione della sezione "Issues aperti" di ROADMAP.md.
+> Per issue dettagliate consultare sempre `ROADMAP.md` → "Issues aperti (priorità)".
 
 | # | Issue | Priorità | Stato |
 |---|-------|----------|-------|
-| 1 | Rifornimento — da abilitare e testare | ALTA | ⏳ disabilitato in prod per sicurezza |
+| 1 | Rifornimento — da abilitare e testare | ALTA | ✅ RISOLTA 20/04 (DELAY UI + retry OCR), validata prod 11/11 istanze ciclo 20→21 |
 | 3 | Zaino — deposito OCR | MEDIA | ⏳ in attesa |
 | 5 | Alleanza — COORD hardcoded | BASSA | ⏳ in attesa |
 | 9 | Raccolta — tipo NON selezionato FAU_01/FAU_02 | MEDIA | ✅ RISOLTA (fix flush frame cached + attendi_template) |
 | 11 | Raccolta — Issue tipo NON selezionato FAU_01/FAU_02 | MEDIA | ⏳ parziale |
 | 12 | Stabilizzazione HOME FAU_01/FAU_02 non converge | MEDIA | 🟡 mitigato (window 30→60s commit `9c1dfb4`) |
-| 13 | ADB screenshot None cascata (FAU_03/04/06/07 ciclo 19/04) | ALTA | ✅ RISOLTA (F1a `624ba7a` + F1b `1d1b4eb`) |
-| 14 | Arena hang indefinito (FAU_10 ciclo 19/04 — kill manuale) | ALTA | ✅ RISOLTA (F2 timeout 300s `3c959cf`) |
-| 15 | Raccolta "No Squads" non rilevato (FAU_08, 8 retry score 0.395) | MEDIA | ✅ RISOLTA (F3 `pin_no_squads` + uscita loop `701f7bd`) |
-| 16 | `RACCOLTA_TRUPPE` non letto (FAU_09 truppe=60000 ignorate) | MEDIA | ✅ RISOLTA (`9ba08a0` pattern per-istanza `ctx.config.get("truppe", ...)`) |
-| 17 | `InstanceState.save()` non atomica — corruzione su kill | MEDIA | ✅ RISOLTA (`a8ea422` tmp+fsync+os.replace) |
-| 18 | `radar_tool/templates/` mancante (dev+prod) | BASSA | ⏳ workaround: radar_census saltato per cooldown |
+| 13 | Boost `gathered` non riconosciuto | MEDIA | ✅ RISOLTA 20/04 (`wait_after_tap_speed: 2.0s`) |
+| 13-bis | ADB screenshot None cascata (FAU_03/04/06/07 ciclo 19/04) | ALTA | ✅ RISOLTA (F1a `624ba7a` + F1b `1d1b4eb`) |
+| 14 | Arena START CHALLENGE non visibile (FAU_02/03/04/07/08 ciclo 20→21) | ALTA | 🆕 NUOVA 21/04 |
+| 14-bis | Arena hang indefinito (FAU_10 ciclo 19/04 — kill manuale) | ALTA | ✅ RISOLTA (F2 timeout 300s `3c959cf`) |
+| 15 | `engine_status.json` stale writer (fermo 03:51, log prosegue fino 05:51) | ALTA | 🆕 NUOVA 21/04 |
+| 15-bis | Raccolta "No Squads" non rilevato (FAU_08) | MEDIA | ✅ RISOLTA (F3 `pin_no_squads` + uscita loop `701f7bd`) |
+| 16 | OCR FAU_10 — valore "compila" scambiato per "reali" (legno=999M singola occorrenza) | MEDIA | 🆕 NUOVA 21/04 |
+| 16-bis | `RACCOLTA_TRUPPE` non letto (FAU_09) | MEDIA | ✅ RISOLTA (`9ba08a0`) |
+| 17 | Storico `engine_status.storico` filtrato — solo `raccolta`+`arena` | MEDIA | 🆕 NUOVA 21/04 |
+| 17-bis | `InstanceState.save()` non atomica | MEDIA | ✅ RISOLTA (`a8ea422` tmp+fsync+os.replace) |
+| 18 | Dashboard `/ui` mostra raw `global_config`, bot usa merged con overrides | MEDIA | 🆕 NUOVA 21/04 |
+| 18-bis | `radar_tool/templates/` mancante (dev+prod) | BASSA | ⏳ workaround: radar_census saltato |
 | 19 | Race buffer stdout ultima istanza a fine ciclo (cosmetico) | BASSA | ⏳ usare `python -u` o `sys.stdout.flush()` |
-| 20 | Dashboard V6 rewrite (FastAPI+Jinja2+HTMX) | — | ✅ CHIUSA 20/04 — commit `9773de3` + `runtime.json` orfano eliminato, sostituito da `runtime_overrides.json` letto dal bot |
-| 21 | `gitignore` (senza punto) duplicato errato e `rifornimento_mappa.py` V5 legacy — da valutare eliminazione | BASSA | ⏳ prossima sessione |
+| 20 | Dashboard V6 rewrite (FastAPI+Jinja2+HTMX) | — | ✅ CHIUSA 20/04 — commit `9773de3` + `runtime.json` orfano eliminato |
+| 21 | `gitignore` duplicato errato e `rifornimento_mappa.py` V5 legacy — da valutare eliminazione | BASSA | ⏳ prossima sessione |
 
 > Aggiornare questa tabella ad ogni sessione insieme alla ROADMAP.
 

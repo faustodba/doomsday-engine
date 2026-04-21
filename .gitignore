@@ -56,4 +56,5 @@ env/
 *.swo
 
 # Handoff di sessione — solo locale, non versionato
-.claude/SESSION.md
+.claude/SESSION.md.claude/settings.local.json
+.claude/settings.local.json

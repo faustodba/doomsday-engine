@@ -91,8 +91,8 @@ def check_imports() -> bool:
         ("tasks.radar_census",  "RadarCensusTask"),
     ]
     _infra = [
-        ("dashboard.dashboard_server", "avvia"),
-        ("main",                       "main"),
+        ("dashboard.app", "app"),
+        ("main",          "main"),
     ]
 
     task_mancanti = []

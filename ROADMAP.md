@@ -30,7 +30,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
-## Piano test runtime — Stato al 18/04/2026
+## Piano test runtime — Stato al 21/04/2026
 
 | Test | Descrizione | Stato | Note |
 |------|-------------|-------|------|
@@ -52,6 +52,7 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 | RT-21 | Pytest aggiornato 258/258 | ✅ | BoostState/VipState/ArenaState/RifornimentoState + gate should_run() orchestrator. 16/04/2026 |
 | RT-13 | Multi-istanza FAU_00+FAU_01 | ⏳ | dopo RT-18 + RT-22..24 |
 | RT-14 | Full farm 12 istanze | ⏳ | |
+| RT-22 | Ciclo notte prod 20→21/04 | 🟡 | 25 cicli 22:30→05:51, raccolta 24OK/6ERR. Rifornimento validato 11/11 istanze → **68 spedizioni, ~140.7M risorse** a FauMorfeus (legno 91.8M, petrolio 31.8M, pomodoro 17.1M). **Aperti:** arena 5 istanze KO (Issue #14), engine_status stale (#15), OCR legno anomalo FAU_10 (#16). |
 
 ---
 
@@ -162,14 +163,46 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 - Impatto: ~15-20s per tick persi in attesa stabilizzazione non convergente
 - Rimandata a post-RT-22 (rifornimento): non impedisce produzione
 
-### 13. Boost — `gathered` non riconosciuto (MEDIA — da verificare)
-- Sospetto: delay insufficiente post-tap (STEP 5 `tasks/boost.py:309` usa
-  `time.sleep(1.0)` hardcoded prima del polling `_attendi_frame_use`).
-  Pattern analogo a quello che affliggeva rifornimento prima del fix 20/04.
-- Candidato fix: portare lo sleep a ≥ 2.0s come da nuova regola architetturale
-  "DELAY UI post-tap popup/overlay".
-- Da validare con stesso approccio del fix rifornimento: test prod + confronto
-  log OCR/template score pre/post fix.
+### 13. Boost — `gathered` non riconosciuto (CHIUSA ✅ 20/04/2026)
+- **Fix applicato:** `BoostConfig.wait_after_tap_speed: 2.0s` (era `1.0s`),
+  parametrizzato da `tasks/boost.py:310`. Allineato alla regola DELAY UI.
+- **Validazione:** ciclo notte 20→21/04 senza errori boost sulle istanze attive.
+
+### 14. Arena — START CHALLENGE non visibile su 5 istanze (ALTA — NUOVA 21/04)
+- Pattern ricorrente notte 20→21: `[ARENA] [PRE-CHALLENGE] START CHALLENGE non visibile → abort`
+  su FAU_02/03/04/07/08. Seguono `screenshot None` ciclici + `vai_in_home ABORT (ADB unhealthy)`.
+- Tutti e 3 i tentativi arena falliscono, poi ADB si riprende e raccolta torna OK.
+- Ipotesi: UI gioco cambiata, template `pin_start_challenge` obsoleto, oppure entry
+  flow arena modificato (popup intermedi non gestiti).
+- Fix: aggiornare template + investigare se esiste pin intermedio saltato.
+
+### 15. `engine_status.json` stale writer (ALTA — NUOVA 21/04)
+- File timestamp fermo alle 03:51:57 mentre log istanze continuano fino 05:51.
+- Campo `ciclo: 0` mai incrementato per tutta la notte.
+- Dashboard mostra stato obsoleto (FAU_08 risulta `running` ma è passato ad altri task).
+- Ipotesi: `_status_writer_loop` thread ha preso eccezione silente oppure fd stale.
+- Fix: try/except + log in `_scrivi_status_json`, periodic heartbeat check.
+
+### 16. OCR anomalo FAU_10 — valore "compila" scambiato per "reali" (MEDIA — NUOVA 21/04)
+- Ciclo 20→21, FAU_10 spedizione 3: `Rifornimento: spedizione 3 — legno 999,000,000 reali | provviste=12,435,903`
+- 999M è il valore di "compila" (tetto artificiale 999,000,000), non la quantità spedita.
+- Singola occorrenza su 68 spedizioni — gonfia le metriche di 7x.
+- Fix: aggiungere sanity check nel logger (`qta > provviste` → warning + readback).
+
+### 17. Storico engine_status filtrato (MEDIA — NUOVA 21/04)
+- `engine_status.storico` registra solo eventi `raccolta` e `arena`.
+- Task `rifornimento`, `vip`, `alleanza`, `messaggi`, `zaino`, `arena_mercato`,
+  `boost`, `store`, `radar` MAI presenti nello storico.
+- Dashboard `/ui/partial/storico` mostra solo 2 tipi di eventi → trend incompleto.
+- Fix: verificare dove `_append_storico` è chiamato, estendere a tutti i task terminali.
+
+### 18. Dashboard mostra global_config raw, bot usa merged (MEDIA — NUOVA 21/04)
+- Route `/ui` passa `cfg = get_global_config()` (solo `global_config.json`).
+- Bot al tick usa `merge_config(gcfg, overrides)` → valori diversi.
+- Divergenze verificate prod: `task_radar_census`, `task_rifornimento`,
+  `rifornimento_mappa_abilitato`, `rifugio_x/y` — dashboard mostra valori che il bot IGNORA.
+- Fix (opzione A): route `/ui` passa merged → dashboard e bot allineati.
+- Fix (opzione B): doppia colonna "base + override" nell'UI.
 
 ---
 
@@ -262,6 +295,18 @@ consolidare la logica raccolta. Baseline test: 42 passed / 57. Post-riscrittura:
 | test_boost_live.py | `test_boost_live.py` (nuovo) | Runner isolato standalone per BoostTask su FAU_00 reale. Bypassa `should_run()` (esegue `run()` direttamente), `navigator=None` (salta ensure_home), log console con timestamp, UTF-8 forzato su stdout. Utile per debug mirato del task boost senza dover lanciare l'intero `main.py`. Comando: `python test_boost_live.py`. |
 | Fix test_boost.py _cfg_zero() | `tests/tasks/test_boost.py` | Rimossi parametri `wait_after_tap` e `wait_after_speed_tap` da `BoostConfig()` — non esistono più nel dataclass (parametri legacy). Sbloccati 20 test che fallivano con TypeError. Baseline 15/35 → 35/35 passed. |
 
+## Fix e implementazioni sessione 21/04/2026
+
+| Area | File | Dettaglio |
+|------|------|-----------|
+| Cleanup legacy | `dashboard/` | Eliminati `dashboard_server.py` (stdlib), `dashboard.html` (V5), `templates/overview.html` (orfano post-index.html) |
+| Main cleanup | `main.py` | Rimosso import `dashboard.dashboard_server.avvia`, sostituito con log info `uvicorn dashboard.app:app --port 8765` |
+| Smoke test | `smoke_test.py` | Target `dashboard.dashboard_server.avvia` → `dashboard.app.app` |
+| Template base | `dashboard/templates/base.html:17` | `overview` → `home`, rimosso marker CSS `active=='overview'` orfano |
+| Dashboard unificata | `dashboard/templates/index.html` | Nuova single-page V6 (summary + grid + task flags + config form + istanze table + storico) con 6 partial HTMX |
+| Dashboard partial | `dashboard/app.py:190-324` | 6 nuovi partial: status-inline, summary, inst-grid, task-flags-v2, ist-table, storico |
+| Config truppe | `config/runtime_overrides.json` (dev+prod) | Tutte istanze FAU_01..FAU_10 → `truppe: 0` (FauMorfeus/FAU_00 già 0) |
+
 ## Fix e implementazioni sessione 20/04/2026
 
 | Area | File | Dettaglio |
@@ -275,14 +320,21 @@ consolidare la logica raccolta. Baseline test: 42 passed / 57. Post-riscrittura:
 
 ## Prossima sessione — priorità
 
-| Priorità | Task | Stato al 20/04/2026 |
+| Priorità | Task | Stato al 21/04/2026 |
 |----------|------|---------------------|
-| 1 | Issue #13 — Boost `gathered` non riconosciuto: applicare regola DELAY UI (sleep 2.0s in `tasks/boost.py:309`) + test prod | 🆕 nuovo |
-| 2 | Sync dashboard+config_loader+main.py a prod (`sync_prod.bat` + copia `runtime_overrides.json`) | ⏳ blocco — prod ferma a pre-sessione 20/04 |
-| 3 | Rifornimento: allargamento test da 8 istanze a 11 istanze prod (post-sync) | ⏳ attesa sync prod |
-| 4 | Issue #3 — Zaino: fix scroll/screenshot bug (applicare DELAY UI se serve) | ⏳ in attesa |
-| 5 | Cleanup repo: `gitignore` (senza punto) da eliminare, `rifornimento_mappa.py` V5 da valutare | ⏳ backlog |
-| 6 | RT-18: completare i 3 sub-test scheduling pendenti | ⏳ backlog |
+| 1 | Issue #14 — Arena START CHALLENGE non visibile su 5 istanze (investigare UI/template) | 🆕 ALTA |
+| 2 | Issue #15 — engine_status.json stale writer | 🆕 ALTA |
+| 3 | Issue #18 — Dashboard `/ui` merged vs raw (Opzione A: passare merged) | 🆕 MEDIA |
+| 4 | Issue #16 — OCR anomalia FAU_10 compila/reali | 🆕 MEDIA |
+| 5 | Issue #17 — Storico filtrato (estendere a tutti i task) | 🆕 MEDIA |
+| 6 | Issue #3 — Zaino fix scroll/screenshot | ⏳ |
+| 7 | RT-18 — completare 3 sub-test scheduling pendenti | ⏳ backlog |
+
+**Stato chiuso nella sessione 21/04/2026:**
+- ✅ Cleanup legacy dashboard (3 file eliminati + refactor main.py + smoke_test)
+- ✅ Issue #13 Boost `gathered` (validato in ciclo notte 20→21)
+- ✅ Dashboard unificata `index.html` + 6 partial HTMX (`/ui/partial/*-v2`)
+- ✅ Rifornimento validato prod su 11/11 istanze (68 spedizioni, ~140.7M risorse)
 
 **Stato chiuso nella sessione 20/04/2026:**
 - ✅ Issue #1 Rifornimento — validato prod 8 istanze con fix DELAY UI

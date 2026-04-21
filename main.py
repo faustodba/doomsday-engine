@@ -425,12 +425,8 @@ def main():
     _log("MAIN", f"Task: {list(tasks_cls.keys())}")
 
     if not args.no_dashboard:
-        try:
-            from dashboard.dashboard_server import avvia as _avvia
-            _avvia()
-            _log("MAIN", "Dashboard avviata -> http://localhost:8080/dashboard.html")
-        except Exception as exc:
-            _log("MAIN", f"[WARN] Dashboard: {exc}")
+        _log("MAIN", "Dashboard disponibile su http://localhost:8765 "
+                     "(avvia separatamente con: uvicorn dashboard.app:app --host 0.0.0.0 --port 8765)")
 
     stop_event = threading.Event()
 

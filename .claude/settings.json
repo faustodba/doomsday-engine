@@ -1,0 +1,33 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(awk '{print $NF, $\\(NF-1\\), $\\(NF-2\\)}')",
+      "Read(//c/doomsday-engine-prod/**)",
+      "Bash(py -3.14 -c \"import ast; ast.parse\\(open\\('C:/doomsday-engine/config/config_loader.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(git commit -m ' *)",
+      "Bash(cmd //c \"C:\\\\doomsday-engine\\\\sync_prod.bat\")",
+      "Bash(py -3.14 -c \"import ast; ast.parse\\(open\\('C:/doomsday-engine/config/config_loader.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('C:/doomsday-engine/tasks/raccolta.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(py -3.14 -c \"import ast; ast.parse\\(open\\('C:/doomsday-engine/core/navigator.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(py -3.14 -c \"import ast; ast.parse\\(open\\('C:/doomsday-engine/core/launcher.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(py -3.14 -c \"import ast; ast.parse\\(open\\('C:/doomsday-engine/tasks/arena.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(py -3.14 -c \"import ast; ast.parse\\(open\\('C:/doomsday-engine/tasks/raccolta.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(py -3.14 -c \"import ast, json; ast.parse\\(open\\('C:/doomsday-engine/core/launcher.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('C:/doomsday-engine/core/navigator.py', encoding='utf-8'\\).read\\(\\)\\); json.load\\(open\\('C:/doomsday-engine/config/global_config.json', encoding='utf-8'\\)\\); print\\('all OK'\\)\")",
+      "Bash(py -3.14 -c \"import ast; ast.parse\\(open\\('C:/doomsday-engine/core/launcher.py', encoding='utf-8'\\).read\\(\\)\\); ast.parse\\(open\\('C:/doomsday-engine/core/adaptive_timing.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(py -3.14 -c 'import ast; ast.parse\\(open\\('\\\\''C:/doomsday-engine/__TRACKED_VAR__'\\\\'', encoding='\\\\''utf-8'\\\\''\\).read\\(\\)\\)')",
+      "Bash(py -3.14 -c \"import ast; ast.parse\\(open\\('C:/doomsday-engine/shared/ui_helpers.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(py -3.14 -c \"import json; print\\('dev zaino:', json.load\\(open\\(r'C:/doomsday-engine/config/global_config.json'\\)\\)['zaino']\\); print\\('prod zaino:', json.load\\(open\\(r'C:/doomsday-engine-prod/config/global_config.json'\\)\\)['zaino']\\)\")",
+      "Bash(py -3.14 -c \"import ast; ast.parse\\(open\\('C:/doomsday-engine/main.py', encoding='utf-8'\\).read\\(\\)\\); print\\('main.py OK'\\)\")",
+      "Bash(py -3.14 -c \"import ast; ast.parse\\(open\\('C:/doomsday-engine/main.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(awk '{print $5,$6,$7,$8,$9}')",
+      "Bash(py -3.14 -c ' *)",
+      "Bash(py -3.14 -m pip show fastapi)",
+      "Bash(py -3.14 -m pip install fastapi uvicorn --break-system-packages)",
+      "Bash(py -3.14 -m pip install fastapi uvicorn)",
+      "Bash(py -3.14 -m pip show jinja2)",
+      "Bash(py -3.14 -m pip install jinja2)"
+    ],
+    "additionalDirectories": [
+      "C:\\doomsday-engine-prod\\config"
+    ]
+  }
+}
