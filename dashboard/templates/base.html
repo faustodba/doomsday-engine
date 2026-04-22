@@ -12,21 +12,22 @@
 
   <!-- TOPBAR -->
   <header class="topbar">
-    <span class="topbar-title">⬡ DOOMSDAY V6</span>
-    <nav class="topbar-nav" style="display:flex;gap:4px">
-      <a href="/ui">home</a>
+    <span class="topbar-logo">⬡ DOOMSDAY V6</span>
+    <nav class="topbar-nav">
+      <a href="/ui" class="{% if active=='home' %}active{% endif %}">home</a>
       <a href="/ui/config" class="{% if active=='config' %}active{% endif %}">config</a>
       <a href="/ui/config/global" class="{% if active=='global' %}active{% endif %}">global cfg</a>
       <a href="/docs" target="_blank">api</a>
     </nav>
-    <div class="topbar-status"
-         hx-get="/ui/partial/status"
+    <div class="topbar-counters"
+         hx-get="/ui/partial/status-inline"
          hx-trigger="load, every 5s"
          hx-swap="innerHTML">
-      <span class="status-key">stato</span>
-      <span class="status-val">—</span>
+      <span class="cnt">stato <b>—</b></span>
     </div>
   </header>
+
+  <div class="rbar"><div class="rbar-inner"></div></div>
 
   <!-- MAIN -->
   <main class="main">

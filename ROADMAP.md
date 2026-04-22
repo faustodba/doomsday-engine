@@ -176,6 +176,19 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
   flow arena modificato (popup intermedi non gestiti).
 - Fix: aggiornare template + investigare se esiste pin intermedio saltato.
 
+### 14-bis. Raccolta No Squads — loop esterno e check universale (CHIUSA ✅ 22/04/2026)
+- **Problema:** FAU_10 generava ~40 detection "No Squads" per tick (408 su 10 tick).
+  Il check F3 (`pin_no_squads`) funzionava (407 break eseguiti) ma il `break`
+  interno usciva solo dal `for tipo`, lasciando il `while tentativi_ciclo < 3`
+  esterno a ripetere 3× l'intera navigazione (rilettura slot, vai_in_mappa, for tipi).
+- **Bug secondario:** il check `pin_no_squads` scattava SOLO se la maschera
+  non si apriva (retry fallito). Caso "maschera aperta ma overlay No Squads
+  visibile" non gestito → tap MARCIA → `marcia FALLITA — rollback`.
+- **Fix applicato:**
+  - `tasks/raccolta.py:1544-1552`: `tentativi_ciclo = MAX_TENTATIVI_CICLO` prima del break
+  - `tasks/raccolta.py:1095-1113`: check `pin_no_squads` universale dopo verifica apertura
+- **Effetto atteso:** da ~40 detection/tick → 1 detection/tick, ~3 navigazioni mappa in meno.
+
 ### 15. `engine_status.json` stale writer (ALTA — NUOVA 21/04)
 - File timestamp fermo alle 03:51:57 mentre log istanze continuano fino 05:51.
 - Campo `ciclo: 0` mai incrementato per tutta la notte.
@@ -294,6 +307,14 @@ consolidare la logica raccolta. Baseline test: 42 passed / 57. Post-riscrittura:
 | Boost fix tap + polling + debug | `tasks/boost.py` | Tap su `(speed_cx, speed_cy)` (centro icona pin_speed), polling `pin_speed_use` timeout 4s via `_attendi_frame_use`, delay `wait_after_tap_boost=1.5s` post tap iniziale, screenshot debug pre/post tap in `debug_task/boost/`. Verificato via test live su FAU_00 (ore 18:12): boost 8h attivato con cy=260 (tap responsivo). Pattern osservato: se dopo swipe cy > 400 il tap è ignorato dal gioco (zona scroll-edge), sotto cy~260 tap risponde. Fix futuro potenziale: swipe aggiuntivo quando cy > 400. |
 | test_boost_live.py | `test_boost_live.py` (nuovo) | Runner isolato standalone per BoostTask su FAU_00 reale. Bypassa `should_run()` (esegue `run()` direttamente), `navigator=None` (salta ensure_home), log console con timestamp, UTF-8 forzato su stdout. Utile per debug mirato del task boost senza dover lanciare l'intero `main.py`. Comando: `python test_boost_live.py`. |
 | Fix test_boost.py _cfg_zero() | `tests/tasks/test_boost.py` | Rimossi parametri `wait_after_tap` e `wait_after_speed_tap` da `BoostConfig()` — non esistono più nel dataclass (parametri legacy). Sbloccati 20 test che fallivano con TypeError. Baseline 15/35 → 35/35 passed. |
+
+## Fix e implementazioni sessione 22/04/2026
+
+| Area | File | Dettaglio |
+|------|------|-----------|
+| Raccolta No Squads — loop esterno | `tasks/raccolta.py:1544-1552` | Dopo il `break` dal `for tipo` su `_raccolta_no_squads`, forza anche l'uscita dal `while tentativi_ciclo` esterno (assegnando `tentativi_ciclo = MAX_TENTATIVI_CICLO`). Fix bug: FAU_10 generava ~40 detection "No Squads" per tick perché il while esterno ripeteva 3× l'intero ciclo rilettura slot/nav mappa/retry tipi. |
+| Raccolta No Squads — check universale | `tasks/raccolta.py:1095-1113` | Aggiunto check `pin_no_squads` subito dopo la verifica apertura maschera (non solo sul retry fallito). Copre il caso "maschera aperta ma overlay No Squads visibile" — evita tap MARCIA inutile + rollback. |
+| Sync prod | `C:\doomsday-engine-prod\dashboard\` | Rimossi manualmente `dashboard_server.py`, `dashboard.html`, `templates/overview.html` (sync_prod.bat copia ma non elimina). |
 
 ## Fix e implementazioni sessione 21/04/2026
 

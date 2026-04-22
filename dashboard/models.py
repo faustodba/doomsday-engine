@@ -1,17 +1,26 @@
 # ==============================================================================
 #  DOOMSDAY ENGINE V6 — dashboard/models.py
 #
-#  Modelli Pydantic v2 per la dashboard:
-#    - RuntimeOverrides    : nuovo layer override (runtime_overrides.json)
-#    - InstanceEntry       : voce di config/instances.json (read-only a runtime)
-#    - EngineStatus        : payload di engine_status.json (scritto da main.py
-#                            ogni status_interval secondi)
-#    - InstanceStats       : aggregato overview per la dashboard
+#  Modelli Pydantic v2 per la dashboard.
 #
-#  Nota architetturale: questo modulo NON modifica i file esistenti. Serve da
-#  contratto tipizzato per la nuova dashboard. Il collegamento tra
-#  runtime_overrides.json e il bot (main.py / build_instance_cfg) e' una scelta
-#  separata e non è implementata qui.
+#  Struttura runtime_overrides.json (unica fonte di verità dashboard→bot):
+#
+#    globali:
+#      task{}                  — flag on/off per ogni task
+#      sistema{}               — max_parallel, tick_sleep_min  [NUOVO]
+#      rifugio{}               — coord_x, coord_y
+#      rifornimento_comune{}   — soglie, flag per risorsa, account [NUOVO]
+#      rifornimento{}          — mappa_abilitata, membri_abilitati
+#      zaino{}                 — modalita, soglie, flag per risorsa [NUOVO]
+#      raccolta{}              — allocazione{} percentuali          [NUOVO]
+#    istanze{}                 — per-istanza: abilitata, truppe,
+#                                tipologia, fascia_oraria
+#
+#  I campi [NUOVO] sono aggiunte rispetto alla versione precedente.
+#  Retrocompatibili: il bot legge con .get() + default, non crasha mai.
+#
+#  Nota: max_squadre, layout, livello vengono scritti anche su instances.json
+#  dall'endpoint /api/config/istanze (config_manager.save_instances_fields).
 # ==============================================================================
 
 from __future__ import annotations
@@ -21,18 +30,15 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 # ==============================================================================
-# Runtime overrides — contenuto di runtime_overrides.json
+# Task flags
 # ==============================================================================
 
 class TaskFlags(BaseModel):
-    """
-    Flag on/off per tutti i task tranne raccolta.
-    raccolta e' assente by design — gira sempre, non e' controllabile.
-    """
+    """Flag on/off per tutti i task. raccolta non è controllabile (gira sempre)."""
     alleanza:           bool = True
     messaggi:           bool = True
     vip:                bool = True
@@ -47,88 +53,209 @@ class TaskFlags(BaseModel):
     store:              bool = True
 
 
+# ==============================================================================
+# Sezione sistema  [NUOVO]
+# ==============================================================================
+
+class SistemaOverride(BaseModel):
+    """Parametri globali di esecuzione. Scritti su runtime_overrides.json."""
+    max_parallel:    int = Field(default=1, ge=1, le=12)
+    tick_sleep_min:  int = Field(default=30, ge=0, le=1440)
+
+
+# ==============================================================================
+# Rifugio (coordinate mappa)
+# ==============================================================================
+
 class RifugioOverride(BaseModel):
-    coord_x: int
-    coord_y: int
+    coord_x: int = 687
+    coord_y: int = 532
+
+
+# ==============================================================================
+# Rifornimento comune  [NUOVO — sostituisce RifornimentoOverride parziale]
+# ==============================================================================
+
+class RifornimentoComuneOverride(BaseModel):
+    """
+    Parametri comuni a entrambe le modalità rifornimento.
+    Mappati su global_config.json.rifornimento_comune.* dal merge_config.
+    """
+    dooms_account:          str   = "FauMorfeus"
+    max_spedizioni_ciclo:   int   = Field(default=5, ge=0, le=50)
+    soglia_campo_m:         float = Field(default=5.0, ge=0)
+    soglia_legno_m:         float = Field(default=5.0, ge=0)
+    soglia_petrolio_m:      float = Field(default=2.5, ge=0)
+    soglia_acciaio_m:       float = Field(default=3.5, ge=0)
+    campo_abilitato:        bool  = True
+    legno_abilitato:        bool  = True
+    petrolio_abilitato:     bool  = True
+    acciaio_abilitato:      bool  = False
 
 
 class RifornimentoOverride(BaseModel):
-    soglia_campo_m:     int  = 50
-    mappa_abilitata:    bool = False
-    membri_abilitati:   bool = True
-    provviste_max:      int  = 100
+    """Modalità e coordinate rifugio. Retrocompatibile con versione precedente."""
+    soglia_campo_m:   float = 50.0   # legacy — mantenuto per retrocompat.
+    mappa_abilitata:  bool  = False
+    membri_abilitati: bool  = True
+    provviste_max:    int   = 100
+
+
+# ==============================================================================
+# Zaino  [NUOVO]
+# ==============================================================================
+
+class ZainoOverride(BaseModel):
+    """
+    Configurazione zaino. Modalità mutuamente esclusive: bag | svuota.
+    Flag per risorsa: se False quella risorsa non viene mai scaricata.
+    """
+    modalita:           str   = Field(default="bag", pattern="^(bag|svuota)$")
+    usa_pomodoro:       bool  = True
+    usa_legno:          bool  = True
+    usa_petrolio:       bool  = True
+    usa_acciaio:        bool  = False
+    soglia_pomodoro_m:  float = Field(default=20.0, ge=0)
+    soglia_legno_m:     float = Field(default=20.0, ge=0)
+    soglia_petrolio_m:  float = Field(default=5.0,  ge=0)
+    soglia_acciaio_m:   float = Field(default=10.0, ge=0)
+
+
+# ==============================================================================
+# Raccolta — allocazione  [NUOVO]
+# ==============================================================================
+
+class AllocazioneOverride(BaseModel):
+    """
+    Percentuali allocazione raccolta. Somma deve essere 100.
+    Il bot normalizza internamente ma la dashboard avverte se ≠ 100.
+    Valori 0-100 (percentuale); il bot usa float 0.0-1.0 internamente.
+    """
+    pomodoro: float = Field(default=40.0, ge=0, le=100)
+    legno:    float = Field(default=30.0, ge=0, le=100)
+    petrolio: float = Field(default=20.0, ge=0, le=100)
+    acciaio:  float = Field(default=10.0, ge=0, le=100)
+
+    @field_validator("acciaio")
+    @classmethod
+    def check_total(cls, v, info):
+        values = info.data
+        total = values.get("pomodoro", 0) + values.get("legno", 0) + values.get("petrolio", 0) + v
+        if abs(total - 100.0) > 0.5:
+            # Warning solo — non blocca il salvataggio (il bot normalizza)
+            pass
+        return v
+
+    def to_frazioni(self) -> dict:
+        """Converte percentuali in frazioni 0.0-1.0 per il bot."""
+        tot = self.pomodoro + self.legno + self.petrolio + self.acciaio
+        if tot == 0:
+            return {"pomodoro": 0.25, "legno": 0.25, "petrolio": 0.25, "acciaio": 0.25}
+        return {
+            "pomodoro": round(self.pomodoro / tot, 4),
+            "legno":    round(self.legno    / tot, 4),
+            "petrolio": round(self.petrolio / tot, 4),
+            "acciaio":  round(self.acciaio  / tot, 4),
+        }
 
 
 class RaccoltaOverride(BaseModel):
-    soglia_allocazione: int = 3
+    soglia_allocazione: int              = 3
+    allocazione:        AllocazioneOverride = Field(default_factory=AllocazioneOverride)
 
+
+# ==============================================================================
+# GlobaliOverride — contenuto di runtime_overrides.json.globali
+# ==============================================================================
 
 class GlobaliOverride(BaseModel):
-    task:         TaskFlags               = Field(default_factory=TaskFlags)
-    rifugio:      Optional[RifugioOverride] = None
-    rifornimento: RifornimentoOverride    = Field(default_factory=RifornimentoOverride)
-    raccolta:     RaccoltaOverride        = Field(default_factory=RaccoltaOverride)
+    task:                 TaskFlags                  = Field(default_factory=TaskFlags)
+    sistema:              SistemaOverride             = Field(default_factory=SistemaOverride)
+    rifugio:              RifugioOverride             = Field(default_factory=RifugioOverride)
+    rifornimento_comune:  RifornimentoComuneOverride  = Field(default_factory=RifornimentoComuneOverride)
+    rifornimento:         RifornimentoOverride        = Field(default_factory=RifornimentoOverride)
+    zaino:                ZainoOverride               = Field(default_factory=ZainoOverride)
+    raccolta:             RaccoltaOverride            = Field(default_factory=RaccoltaOverride)
 
+
+# ==============================================================================
+# IstanzaOverride — override per singola istanza
+# ==============================================================================
 
 class TipologiaIstanza(str, Enum):
-    """
-    full     = esegue tutti i task abilitati in TaskFlags
-    raccolta = esegue SOLO RaccoltaTask, zero altri task
-    """
     full     = "full"
     raccolta = "raccolta"
 
 
 class IstanzaOverride(BaseModel):
-    abilitata:     bool             = True
-    truppe:        int              = 0
-    tipologia:     TipologiaIstanza = TipologiaIstanza.full
-    fascia_oraria: Optional[str]    = None   # placeholder — da definire
+    """
+    Override per singola istanza. Scritto su runtime_overrides.json.istanze.
+    max_squadre, layout, livello scritti ANCHE su instances.json
+    dall'endpoint /api/config/istanze.
+    """
+    abilitata:    bool                    = True
+    truppe:       int                     = Field(default=0, ge=0)
+    tipologia:    TipologiaIstanza        = TipologiaIstanza.full
+    fascia_oraria: Optional[str]          = None   # "HH:MM-HH:MM" | null
+    max_squadre:  Optional[int]           = None   # scritto su instances.json
+    layout:       Optional[int]           = None   # scritto su instances.json
+    livello:      Optional[int]           = None   # scritto su instances.json
 
+
+# ==============================================================================
+# RuntimeOverrides — contenuto completo di runtime_overrides.json
+# ==============================================================================
 
 class RuntimeOverrides(BaseModel):
     """
     Contenuto completo di runtime_overrides.json.
-    Letto ad ogni turno istanza. Failsafe: se manca -> default.
+    Letto ad ogni turno istanza dal bot. Failsafe: se manca → default.
     """
-    globali: GlobaliOverride               = Field(default_factory=GlobaliOverride)
-    istanze: Dict[str, IstanzaOverride]    = Field(default_factory=dict)
+    globali: GlobaliOverride            = Field(default_factory=GlobaliOverride)
+    istanze: Dict[str, IstanzaOverride] = Field(default_factory=dict)
 
     @classmethod
     def load(cls, path: Path) -> "RuntimeOverrides":
-        """Legge runtime_overrides.json. Se assente o corrotto -> default."""
+        """Legge runtime_overrides.json. Se assente o corrotto → default."""
         try:
             return cls.model_validate_json(Path(path).read_text(encoding="utf-8"))
         except Exception:
             return cls()
 
     def save(self, path: Path) -> None:
-        """
-        Scrittura atomica su runtime_overrides.json.
-        Pattern tmp + os.replace (evita file troncati su crash).
-        """
+        """Scrittura atomica su runtime_overrides.json."""
         path = Path(path)
-        tmp = path.with_suffix(path.suffix + ".tmp")
+        tmp  = path.with_suffix(path.suffix + ".tmp")
         tmp.write_text(self.model_dump_json(indent=2), encoding="utf-8")
         os.replace(tmp, path)
 
+    def to_runtime_dict(self) -> dict:
+        """
+        Serializza in formato compatibile con merge_config() del bot.
+        Le percentuali allocazione vengono convertite in frazioni 0.0-1.0.
+        """
+        d = self.model_dump()
+        # Converti allocazione % → frazioni per il bot
+        alloc = self.globali.raccolta.allocazione
+        d["globali"]["raccolta"]["allocazione"] = alloc.to_frazioni()
+        return d
+
 
 # ==============================================================================
-# Istanza fisica — una voce di config/instances.json (read-only a runtime)
+# InstanceEntry — voce di config/instances.json (read-only a runtime)
 # ==============================================================================
 
 class InstanceEntry(BaseModel):
-    """Una voce di instances.json. Read-only a runtime."""
     nome:          str
     indice:        int
     porta:         int
-    truppe:        int  = 0
-    max_squadre:   int  = 5
-    layout:        int  = 1
-    lingua:        str  = "it"
-    livello:       int  = 7
-    profilo:       str  = ""
-    abilitata:     bool = True
+    truppe:        int           = 0
+    max_squadre:   int           = 5
+    layout:        int           = 1
+    lingua:        str           = "en"
+    livello:       int           = 7
+    profilo:       str           = "full"
+    abilitata:     bool          = True
     fascia_oraria: Optional[str] = None
 
 
@@ -137,60 +264,47 @@ class InstanceEntry(BaseModel):
 # ==============================================================================
 
 class UltimoTask(BaseModel):
-    """Dettaglio ultimo task completato per un'istanza."""
     nome:     Optional[str]   = None
-    esito:    Optional[str]   = None   # "ok" | "err" | ...
+    esito:    Optional[str]   = None
     msg:      Optional[str]   = None
-    ts:       Optional[str]   = None   # formato "HH:MM:SS"
+    ts:       Optional[str]   = None
     durata_s: Optional[float] = None
 
 
 class IstanzaStatus(BaseModel):
-    """
-    Stato live di una singola istanza nel payload engine_status.json.
-    Schema allineato al reale scritto da main._scrivi_status_json().
-    Il campo `nome` non e' nel payload (chiave dict in istanze{}) ma viene
-    popolato dal caller quando costruisce questa rappresentazione.
-    """
-    nome:              str                  = ""                       # popolato dal caller
-    stato:             str                  = "unknown"                # "idle"|"running"|"error"|"disabled"|"waiting"
-    task_corrente:     Optional[str]        = None
-    task_eseguiti:     Dict[str, int]       = Field(default_factory=dict)
-    ultimo_task:       Optional[UltimoTask] = None
-    scheduler:         Dict[str, str]       = Field(default_factory=dict)   # task_name -> "HH:MM:SS" | "adesso"
-    errori:            int                  = 0
-    porta:             Optional[int]        = None
-
-    # Campi derivati / legacy — mantenuti per compatibilità con il contratto
-    # proposto nella progettazione della nuova dashboard.
-    ultimo_tick_ts:      Optional[str]   = None
-    ultimo_tick_durata_s: Optional[float] = None
-    errori_consecutivi:  int             = 0
+    nome:                 str                  = ""
+    stato:                str                  = "unknown"
+    task_corrente:        Optional[str]         = None
+    task_eseguiti:        Dict[str, int]        = Field(default_factory=dict)
+    ultimo_task:          Optional[UltimoTask]  = None
+    scheduler:            Dict[str, str]        = Field(default_factory=dict)
+    errori:               int                  = 0
+    porta:                Optional[int]         = None
+    ultimo_tick_ts:       Optional[str]         = None
+    ultimo_tick_durata_s: Optional[float]       = None
+    errori_consecutivi:   int                  = 0
 
 
 class StoricoEntry(BaseModel):
-    """Entry dello storico eventi (engine_status.json.storico)."""
     istanza:  str
     task:     str
-    esito:    str                    # "ok" | "err"
-    ts:       str                    # "HH:MM:SS"
+    esito:    str
+    ts:       str
     durata_s: float = 0.0
     msg:      str   = ""
 
 
 class EngineStatus(BaseModel):
-    """Payload completo di engine_status.json."""
-    version:  str                        = ""
-    ts:       str                        = ""
-    uptime_s: int                        = 0
-    ciclo:    int                        = 0
-    stato:    str                        = "unknown"
-    istanze:  Dict[str, IstanzaStatus]   = Field(default_factory=dict)
-    storico:  List[StoricoEntry]         = Field(default_factory=list)
+    version:  str                       = ""
+    ts:       str                       = ""
+    uptime_s: int                       = 0
+    ciclo:    int                       = 0
+    stato:    str                       = "unknown"
+    istanze:  Dict[str, IstanzaStatus]  = Field(default_factory=dict)
+    storico:  List[StoricoEntry]        = Field(default_factory=list)
 
     @classmethod
     def load(cls, path: Path) -> "EngineStatus":
-        """Legge engine_status.json. Se assente o corrotto -> default."""
         try:
             return cls.model_validate_json(Path(path).read_text(encoding="utf-8"))
         except Exception:
@@ -198,31 +312,61 @@ class EngineStatus(BaseModel):
 
 
 # ==============================================================================
-# Statistiche istanza (aggregato state/ + logs/)
+# Statistiche istanza
 # ==============================================================================
 
 class RaccoltaStats(BaseModel):
-    """Aggregato raccolta per l'ultimo tick disponibile."""
-    slot_totali:          int       = 0
-    slot_usati:           int       = 0
-    nodi_raccolti:        int       = 0
-    nodi_falliti:         int       = 0
-    tipologie_bloccate:   List[str] = Field(default_factory=list)
+    slot_totali:        int       = 0
+    slot_usati:         int       = 0
+    nodi_raccolti:      int       = 0
+    nodi_falliti:       int       = 0
+    tipologie_bloccate: List[str] = Field(default_factory=list)
 
 
 class TickStats(BaseModel):
-    """Statistiche ultimo tick istanza."""
-    ts_inizio:      Optional[str]   = None
-    durata_s:       Optional[float] = None
-    task_eseguiti:  List[str]       = Field(default_factory=list)
-    task_falliti:   List[str]       = Field(default_factory=list)
-    raccolta:       RaccoltaStats   = Field(default_factory=RaccoltaStats)
+    ts_inizio:     Optional[str]   = None
+    durata_s:      Optional[float] = None
+    task_eseguiti: List[str]       = Field(default_factory=list)
+    task_falliti:  List[str]       = Field(default_factory=list)
+    raccolta:      RaccoltaStats   = Field(default_factory=RaccoltaStats)
 
 
 class InstanceStats(BaseModel):
-    """Aggregato completo per la dashboard — overview + dettaglio."""
-    nome:         str
-    tipologia:    TipologiaIstanza = TipologiaIstanza.full
-    abilitata:    bool             = True
-    stato_live:   str              = "unknown"
-    ultimo_tick:  TickStats        = Field(default_factory=TickStats)
+    nome:        str
+    tipologia:   TipologiaIstanza = TipologiaIstanza.full
+    abilitata:   bool             = True
+    stato_live:  str              = "unknown"
+    ultimo_tick: TickStats        = Field(default_factory=TickStats)
+
+
+# ==============================================================================
+# Payload request per endpoint sezione
+# ==============================================================================
+
+class PayloadGlobals(BaseModel):
+    """PUT /api/config/globals — task flags + parametri sistema."""
+    task:    TaskFlags      = Field(default_factory=TaskFlags)
+    sistema: SistemaOverride = Field(default_factory=SistemaOverride)
+
+
+class PayloadRifornimento(BaseModel):
+    """PUT /api/config/rifornimento — soglie, flag, modalità, coordinate."""
+    rifornimento_comune: RifornimentoComuneOverride = Field(default_factory=RifornimentoComuneOverride)
+    rifugio:             RifugioOverride             = Field(default_factory=RifugioOverride)
+    mappa_abilitata:     bool                        = False
+    membri_abilitati:    bool                        = True
+
+
+class PayloadZaino(BaseModel):
+    """PUT /api/config/zaino — modalità e soglie."""
+    zaino: ZainoOverride = Field(default_factory=ZainoOverride)
+
+
+class PayloadAllocazione(BaseModel):
+    """PUT /api/config/allocazione — percentuali raccolta."""
+    allocazione: AllocazioneOverride = Field(default_factory=AllocazioneOverride)
+
+
+class PayloadIstanze(BaseModel):
+    """PUT /api/config/istanze — lista override per-istanza."""
+    istanze: Dict[str, IstanzaOverride] = Field(default_factory=dict)

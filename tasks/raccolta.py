@@ -1093,6 +1093,24 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int,
                     return False, None
                 ctx.log_msg(f"Raccolta: maschera aperta al retry score={m2.score:.3f} → OK")
 
+    # Check pin_no_squads anche con maschera aperta: se l'overlay
+    # "No Squads" è visibile nonostante la maschera, non ci sono
+    # squadre disponibili → uscita immediata dal processo raccolta.
+    if screen is not None:
+        m_ns = ctx.matcher.find_one(
+            screen, _cfg(ctx, "TEMPLATE_NO_SQUADS"),
+            threshold=_cfg(ctx, "SOGLIA_NO_SQUADS"),
+        )
+        if m_ns.found:
+            ctx.log_msg(
+                f"Raccolta: rilevato 'No Squads' score={m_ns.score:.3f} "
+                f"(maschera aperta) — nessuna squadra disponibile"
+            )
+            ctx.device.key("KEYCODE_BACK")
+            time.sleep(0.3)
+            ctx._raccolta_no_squads = True
+            return False, None
+
     # Step 2: OCR ETA dalla maschera (screen appena acquisito)
     eta_s: Optional[int] = None
     if screen is not None:
@@ -1542,9 +1560,13 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
             )
 
             # F3 — uscita immediata se rilevato "No Squads"
+            # (anche dal loop esterno `while tentativi_ciclo`: forza la
+            #  condizione di uscita per evitare retry inutili — il gioco
+            #  non ha squadre disponibili, rifare il ciclo è sprecato)
             if getattr(ctx, "_raccolta_no_squads", False):
                 ctx.log_msg("Raccolta: 'No Squads' — uscita immediata loop")
                 ctx._raccolta_no_squads = False   # reset per prossima esecuzione
+                tentativi_ciclo = MAX_TENTATIVI_CICLO   # forza uscita while
                 break
 
             # ── CASO ok=True ─────────────────────────────────────────
