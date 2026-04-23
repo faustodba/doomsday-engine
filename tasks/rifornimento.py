@@ -885,10 +885,14 @@ def _esegui_via_membri(ctx: TaskContext, risorse_config: dict,
         snapshot_pre = dict(deposito)
 
         # ── Compila e invia ──────────────────────────────────────────────────
-        ts_invio = time.time()
+        # FIX 23/04: ts_invio catturato DOPO _compila_e_invia. L'OCR deposito +
+        # compila quantità + tap VAI richiedono ~15-20s; se ts_invio fosse preso
+        # prima, la coda_volo sottostimerebbe il tempo residuo delle spedizioni
+        # in corso, causando uscite "nessun slot dopo attesa" sbagliate.
         ok, eta_sec, quota_esaurita, qta_inviata, provviste_lette = _compila_e_invia(
             ctx, risorsa_scelta, qta, nome_rifugio
         )
+        ts_invio = time.time()
 
         if quota_esaurita:
             ctx.log_msg("Rifornimento membri: quota giornaliera esaurita — stop")
@@ -1172,11 +1176,15 @@ class RifornimentoTask(Task):
                     break
 
                 # ── 6. Compila e invia ──────────────────────────────────────
+                # FIX 23/04: ts_invio catturato DOPO _compila_e_invia (~15-20s
+                # di OCR + compila + tap VAI). Prima era PRIMA, causando coda_volo
+                # ottimistica → "nessun slot dopo attesa" sbagliato (FAU_01 tick
+                # 2/5 sped con slot=0 dopo attesa 55s, ma sped 1 ancora in volo).
                 snapshot_pre = dict(deposito) if deposito else {}
-                ts_invio = time.time()
                 ok, eta_sec, quota_esaurita, qta_inviata, provviste_lette = _compila_e_invia(
                     ctx, risorsa_scelta, qta, nome_rifugio
                 )
+                ts_invio = time.time()
 
                 if quota_esaurita:
                     ctx.log_msg("Rifornimento: provviste giornaliere esaurite — stop")
