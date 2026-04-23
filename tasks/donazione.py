@@ -181,6 +181,13 @@ class DonazioneTask(BaseTask):
                     f"[DONAZIONE] pin_marked non trovato "
                     f"(scan {scan_idx + 1}) — nessuna tecnologia donabile"
                 )
+                # Chiudi Technology + menu Alliance prima del break, così
+                # vai_in_home() successivo trova HOME e non si stucca su 8
+                # retry falliti (bloccando il gate HOME delle task successive).
+                # Back x3 coerente con i rami research/non_riconosciuto.
+                for _ in range(3):
+                    ctx.device.back()
+                    time.sleep(self.cfg.wait_back)
                 break
 
             cx, cy = result.cx, result.cy

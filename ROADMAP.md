@@ -189,6 +189,22 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
   UI dashboard → `runtime_overrides.json` → `merge_config` → `_from_raw` (normalize) →
   `ctx.config.ALLOCAZIONE_*` (frazioni) → `ratio_cfg` (mapping) → `_calcola_sequenza_allocation`
 
+### 42. Donazione — ramo "pin_marked non trovato" non chiude Technology (CHIUSA ✅ 23/04/2026)
+- **Problema:** quando `_cerca_e_dona` esce con `pin_marked non trovato al primo scan`
+  (scenario più frequente — quando l'alleanza non ha tech marked), il task NON
+  eseguiva `device.back()` prima del `break`. Il successivo `vai_in_home()`
+  nel `run()` tentava 8 volte con score HOME 0.39-0.46 (ancora in Technology)
+  e falliva → il gate HOME della task successiva (raccolta) saltava.
+- **Sintomo visibile:** il task riapriva/ri-interpretava schermate Technology
+  (l'utente ha osservato "apre maschera, non clicca, chiude, riapre più volte"),
+  segno di `vai_in_home()` che fa BACK/polling senza progressi.
+- **Osservato su FAU_04 ciclo 2 (21:40 locale):** `donate=0 success=True` ma
+  raccolta successiva skipped (HOME FALLITO), perdita slot di raccolta del tick.
+- **Fix applicato (`tasks/donazione.py:179-191`):** aggiunto back x3 nel branch
+  "pin_marked non trovato" (coerente con i branch `research` / `non_riconosciuto`
+  già presenti). Chiude Technology + Alliance menu prima del break.
+- **Hot-reload:** richiede restart bot (Python import-cache).
+
 ### 41. Integrazione DonazioneTask nella dashboard (CHIUSA ✅ 23/04/2026)
 - **Obiettivo:** rendere il nuovo `DonazioneTask` controllabile via pill UI come gli altri task.
 - **Fix applicato:**
