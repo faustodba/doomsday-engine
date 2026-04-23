@@ -948,6 +948,76 @@ def _esegui_via_membri(ctx: TaskContext, risorse_config: dict,
 
 
 # ------------------------------------------------------------------------------
+# Storico farm giornaliero — data/storico_farm.json
+# ------------------------------------------------------------------------------
+
+def _aggiorna_storico_farm(ctx, nome_istanza: str) -> None:
+    """
+    Aggiorna data/storico_farm.json con i dati odierni dell'istanza.
+    Chiamato a fine run() dopo ogni ciclo rifornimento.
+    Scrittura atomica — sicuro perché bot è sequenziale.
+
+    Struttura:
+      {
+        "YYYY-MM-DD": {
+          "FAU_00": {"legno": N, "petrolio": N, ..., "spedizioni": N,
+                     "provviste_residue": N},
+          ...
+        },
+        ...
+      }
+    Retention: ultimi 90 giorni.
+    """
+    import json as _json
+    import os as _os
+    from datetime import date
+
+    storico_path = _os.path.join(
+        _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+        "data", "storico_farm.json"
+    )
+    oggi = date.today().isoformat()  # "2026-04-23"
+
+    # Leggi inviato_oggi da state
+    rif = ctx.state.rifornimento
+    inviato    = dict(getattr(rif, "inviato_oggi", {}))
+    spedizioni = int(getattr(rif, "spedizioni_oggi", 0))
+    provviste  = int(getattr(rif, "provviste_residue", 0))
+
+    # Leggi storico esistente
+    try:
+        with open(storico_path, encoding="utf-8") as f:
+            storico = _json.load(f)
+    except Exception:
+        storico = {}
+
+    # Aggiorna entry oggi per questa istanza
+    if oggi not in storico:
+        storico[oggi] = {}
+    storico[oggi][nome_istanza] = {
+        "legno":             inviato.get("legno", 0),
+        "petrolio":          inviato.get("petrolio", 0),
+        "pomodoro":          inviato.get("pomodoro", 0),
+        "acciaio":           inviato.get("acciaio", 0),
+        "spedizioni":        spedizioni,
+        "provviste_residue": provviste,
+    }
+
+    # Mantieni solo ultimi 90 giorni
+    if len(storico) > 90:
+        chiavi_ordinate = sorted(storico.keys())
+        for k in chiavi_ordinate[:-90]:
+            del storico[k]
+
+    # Scrittura atomica
+    _os.makedirs(_os.path.dirname(storico_path), exist_ok=True)
+    tmp = storico_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        _json.dump(storico, f, ensure_ascii=False, indent=2)
+    _os.replace(tmp, storico_path)
+
+
+# ------------------------------------------------------------------------------
 # Task V6
 # ------------------------------------------------------------------------------
 
@@ -1078,6 +1148,13 @@ class RifornimentoTask(Task):
                 ctx.log_msg(f"Rifornimento: provviste residue={rif.provviste_residue:,}")
 
         ctx.log_msg(f"Rifornimento: completato — {spedizioni} spedizioni")
+
+        # Aggiorna storico farm giornaliero
+        try:
+            _aggiorna_storico_farm(ctx, ctx.instance_name)
+        except Exception as exc:
+            ctx.log_msg(f"[WARN] storico_farm: {exc}")
+
         return TaskResult(
             success=True,
             message=f"{spedizioni} spedizioni",
