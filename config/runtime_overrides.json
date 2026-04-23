@@ -33,73 +33,73 @@
       "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": null
+      "fascia_oraria": ""
     },
     "FAU_01": {
       "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": null
+      "fascia_oraria": ""
     },
     "FAU_02": {
       "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": null
+      "fascia_oraria": ""
     },
     "FAU_03": {
-      "abilitata": false,
+      "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": null
+      "fascia_oraria": ""
     },
     "FAU_04": {
-      "abilitata": false,
+      "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": null
+      "fascia_oraria": ""
     },
     "FAU_05": {
-      "abilitata": false,
+      "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": null
+      "fascia_oraria": ""
     },
     "FAU_06": {
-      "abilitata": false,
+      "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": null
+      "fascia_oraria": ""
     },
     "FAU_07": {
-      "abilitata": false,
+      "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": null
+      "fascia_oraria": ""
     },
     "FAU_08": {
-      "abilitata": false,
+      "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": null
+      "fascia_oraria": ""
     },
     "FAU_09": {
-      "abilitata": false,
+      "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": null
+      "fascia_oraria": ""
     },
     "FauMorfeus": {
-      "abilitata": false,
+      "abilitata": true,
       "truppe": 0,
-      "tipologia": "full",
-      "fascia_oraria": null
+      "tipologia": "raccolta_only",
+      "fascia_oraria": ""
     },
     "FAU_10": {
-      "abilitata": false,
+      "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": null
+      "fascia_oraria": ""
     }
   }
 }

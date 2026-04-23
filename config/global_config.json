@@ -71,8 +71,8 @@
   "raccolta": {
     "livello_nodo": 6,
     "allocazione": {
-      "pomodoro": 0.4,
-      "legno": 0.3,
+      "pomodoro": 0.35,
+      "legno": 0.35,
       "petrolio": 0.2,
       "acciaio": 0.1
     }
