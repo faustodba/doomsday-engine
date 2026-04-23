@@ -387,6 +387,21 @@ consolidare la logica raccolta. Baseline test: 42 passed / 57. Post-riscrittura:
 | Storico farm giornaliero | `tasks/rifornimento.py` | data/storico_farm.json, retention 90gg |
 | Prompt configurazione avvio | `main.py` | runtime vs reset + --use-runtime flag |
 | _carica_istanze_ciclo() | `main.py` | merge dinamico instances.json + overrides ad ogni ciclo |
+| Cleanup emulator orfani | `main.py` | `_cleanup_tutti_emulator()` startup + pre-ciclo (elimina MuMu orfani da kill unclean) |
+| Config statica pulita | `config/instances.json` | FAU_09/FAU_10 truppe=0 (erano 60000/15000) |
+| Allocazione raccolta | `config/global_config.json` | 35/35/20/10 (pomodoro/legno/acciaio/petrolio) |
+| Fix `ts_invio` rifornimento | `tasks/rifornimento.py` | `ts_invio = time.time()` DOPO `_compila_e_invia` (era prima, sottostimava ETA di ~20s → attese sbagliate) |
+| Filtro `raccolta_only` | `main.py:_thread_istanza` | Se `tipologia=="raccolta_only"` registra solo RaccoltaTask; FauMorfeus non tenta più boost/vip/arena/... |
+| toggle_task async body parser | `dashboard/routers/api_config_overrides.py` | Legge JSON body o form data da HTMX con content-type detection (fix 500 error). Include Request dagli import fastapi |
+| TipologiaIstanza raccolta_only | `dashboard/models.py` | Aggiunto enum value `raccolta_only` — prima pydantic rifiutava il valore di FauMorfeus causando 500 su tutti gli endpoint PATCH |
+| Pill raccolta rimossa | `dashboard/app.py`, `templates/index.html` | raccolta è sempre-on → tolta dalla lista task flags e dot stato dal pannello allocazione |
+| Ordine risorse fisso | `dashboard/app.py` | res-totali + res-oraria: pomodoro/legno/acciaio/petrolio coerente |
+| Config 2×2 → 4×1 responsive | `dashboard/templates/index.html`, `static/style.css` | Nuovo `.cfg4` con col-box sistema+task-flags. 4 col desktop / 2×2 `<1400px` media query |
+| Normalizzazione allocazione | `dashboard/services/config_manager.py` | `get_merged_config()` ora normalizza allocazione a frazioni 0-1 se max>1 (override era in percentuali) |
+| storico_farm.json | `tasks/rifornimento.py` | `_aggiorna_storico_farm()` scrive `data/storico_farm.json` a fine `run()`, retention 90gg |
+| Fix WinError 5 engine_status | `main.py:_scrivi_status_json` | Retry con backoff 0.1-0.5s su `os.replace` (Windows blocca rename se dashboard ha handle lettura aperto) |
+| Font +2px | `dashboard/static/style.css` | Gamma font 7-11px → 11-15px (+2 due round, leggibilità) |
+| Hide istanze zero | `dashboard/app.py:partial_res_totali` | Skip righe con `inviato_oggi` tutti 0 e `spedizioni_oggi=0` (es. FauMorfeus) |
 
 ## Fix e implementazioni sessione 22/04/2026
 

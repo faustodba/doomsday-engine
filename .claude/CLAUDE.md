@@ -132,6 +132,16 @@ All'inizio di ogni sessione, in questo ordine:
 | 25 | NameError MAX_TENTATIVI_CICLO scope fix (bug introdotto+risolto 22/04) | ALTA | ✅ RISOLTA 22/04 |
 | 26 | Rifornimento distribuzione sbilanciata — soglia_campo_m 50→5 | MEDIA | ✅ RISOLTA 22/04 (pomodoro era sempre sotto soglia 50M) |
 | 27 | Dashboard stats OCR anomali gonfiano totali (legno 1.1B vs 117M reali) | MEDIA | ✅ RISOLTA 22/04 (_MAX_QTA_SPEDIZIONE=100M filtro) |
+| 28 | Emulator orfani dopo kill unclean del bot (MuMuPlayer resta aperto) | ALTA | ✅ RISOLTA 23/04 (_cleanup_tutti_emulator a startup + pre-ciclo) |
+| 29 | Rifornimento ts_invio sottostimava ETA di ~20s | MEDIA | ✅ RISOLTA 23/04 (ts_invio DOPO _compila_e_invia) |
+| 30 | raccolta_only non filtrava task: FauMorfeus tentava boost/vip/arena/... | ALTA | ✅ RISOLTA 23/04 (_thread_istanza filtra su tipologia) |
+| 31 | TipologiaIstanza pydantic rifiutava raccolta_only → 500 su tutti i PATCH | ALTA | ✅ RISOLTA 23/04 (enum esteso raccolta_only) |
+| 32 | toggle_task 422 con HTMX form-encoded | MEDIA | ✅ RISOLTA 23/04 (async body parser con content-type detection) |
+| 33 | Allocazione dashboard in percentuali vs frazioni (UI mostrava 4000%) | MEDIA | ✅ RISOLTA 23/04 (get_merged_config normalizza) |
+| 26 | Allocazione raccolta non collegata al bot (_RATIO_TARGET_DEFAULT hardcoded) | MEDIA | 🆕 NUOVA 23/04 — fix previsto in raccolta.py |
+| 25 | Tracciamento diamanti nello state (OCR già letto ma non persistito) | BASSA | 🆕 NUOVA 23/04 |
+| 34 | engine_status.json WinError 5 (collision os.replace con dashboard reader) | BASSA | ✅ RISOLTA 23/04 (retry backoff 0.1-0.5s × 5) |
+| 35 | storico_farm.json tracciamento giornaliero per istanza | — | ✅ IMPLEMENTATA 23/04 (data/storico_farm.json, retention 90gg) |
 
 > Aggiornare questa tabella ad ogni sessione insieme alla ROADMAP.
 
