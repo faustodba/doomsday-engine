@@ -368,9 +368,28 @@ def _scrivi_status_json() -> None:
     try:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(snapshot, f, ensure_ascii=False, indent=2)
-        os.replace(tmp, path)
+        # Retry os.replace — su Windows la dashboard uvicorn può tenere un
+        # handle di lettura aperto momentaneamente: il replace fallisce con
+        # WinError 5 anche se il processo sta solo leggendo. Backoff corto.
+        last_exc = None
+        for i in range(5):
+            try:
+                os.replace(tmp, path)
+                last_exc = None
+                break
+            except PermissionError as exc:
+                last_exc = exc
+                time.sleep(0.1 * (i + 1))  # 0.1, 0.2, 0.3, 0.4, 0.5s
+        if last_exc is not None:
+            raise last_exc
     except Exception as exc:
         print(f"  [WARN] engine_status.json: {exc}")
+        # Pulizia residua del tmp se ancora presente
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
 
 
 def _stato_globale() -> str:
