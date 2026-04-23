@@ -260,6 +260,9 @@ html, body {
 /* ── Config 3 colonne ────────────────────────────────────── */
 .cfg3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap); }
 .cfg4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--gap); }
+@media (max-width: 1400px) {
+  .cfg4 { grid-template-columns: repeat(2, 1fr); }
+}
 .col-box {
   background: var(--bg2); border: 0.5px solid var(--border);
   border-radius: var(--r); overflow: hidden; display: flex; flex-direction: column;
