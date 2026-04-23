@@ -34,6 +34,7 @@ _OVERRIDES_PATH     = os.path.join(ROOT, "config", "runtime_overrides.json")
 _GLOBAL_CONFIG_PATH = os.path.join(ROOT, "config", "global_config.json")
 _INSTANCES_PATH     = os.path.join(ROOT, "config", "instances.json")
 _TASK_SETUP_PATH    = os.path.join(ROOT, "config", "task_setup.json")
+_CHECKPOINT_PATH    = os.path.join(ROOT, "last_checkpoint.json")
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 os.chdir(ROOT)  # CWD = project root, indipendentemente da dove main.py è lanciato
@@ -115,6 +116,36 @@ _TASK_SETUP = _carica_task_setup()
 
 
 # ---------------------------------------------------------------------------
+# Cleanup emulator orfani
+# ---------------------------------------------------------------------------
+def _cleanup_tutti_emulator(istanze: list[dict], dry_run: bool) -> None:
+    """
+    Chiude tutti gli emulator MuMu configurati (reset_istanza per ogni istanza).
+
+    Invocato:
+      - all'avvio del bot (prima del primo ciclo)
+      - all'inizio di ogni ciclo (prima del for istanze)
+
+    Motivazione: garantisce che ogni ciclo parta da uno stato MuMu pulito,
+    eliminando processi orfani rimasti da:
+      - kill unclean del bot precedente (SIGKILL mid-ciclo)
+      - crash/hang di un'istanza nel ciclo precedente
+      - esecuzione parallela con altro bot (dry-run orfano, ecc.)
+
+    Failsafe: ogni reset è protetto da try/except — un'istanza che fallisce
+    il reset non blocca le altre.
+    """
+    if dry_run:
+        return
+    for ist in istanze:
+        nome = ist.get("nome", "?")
+        try:
+            _launcher.reset_istanza(ist, lambda msg, n=nome: _log(n, msg))
+        except Exception as exc:
+            _log("MAIN", f"[WARN] cleanup orfano {nome}: {exc}")
+
+
+# ---------------------------------------------------------------------------
 # Reset configurazione
 # ---------------------------------------------------------------------------
 def _reset_config() -> None:
@@ -175,6 +206,65 @@ def _reset_config() -> None:
     except Exception as exc:
         print(f"[RESET] ERRORE scrittura runtime_overrides.json: {exc}")
         sys.exit(1)
+
+
+# ---------------------------------------------------------------------------
+# Checkpoint resume — last_checkpoint.json
+# ---------------------------------------------------------------------------
+def _scrivi_checkpoint(ciclo: int, istanza: str) -> None:
+    """Scrive last_checkpoint.json prima di avviare ogni istanza."""
+    try:
+        tmp = _CHECKPOINT_PATH + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({
+                "ciclo":   ciclo,
+                "istanza": istanza,
+                "ts":      datetime.now().strftime("%Y-%m-%dT%H:%M:%S"),
+            }, f, indent=2)
+        os.replace(tmp, _CHECKPOINT_PATH)
+    except Exception as exc:
+        _log("MAIN", f"[WARN] checkpoint: {exc}")
+
+
+def _cancella_checkpoint() -> None:
+    """Cancella last_checkpoint.json a fine ciclo completato."""
+    try:
+        if os.path.exists(_CHECKPOINT_PATH):
+            os.remove(_CHECKPOINT_PATH)
+    except Exception as exc:
+        _log("MAIN", f"[WARN] cancella checkpoint: {exc}")
+
+
+def _leggi_checkpoint() -> Optional[dict]:
+    """Legge last_checkpoint.json. None se non esiste o corrotto."""
+    try:
+        with open(_CHECKPOINT_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _prompt_resume(cp: dict) -> Optional[str]:
+    """
+    Mostra prompt interattivo se esiste un checkpoint.
+    Restituisce nome istanza da cui riprendere, o None per ciclo normale.
+    """
+    istanza = cp.get("istanza", "?")
+    ciclo   = cp.get("ciclo", "?")
+    ts      = cp.get("ts", "?")
+    print()
+    print(f"  ┌─────────────────────────────────────────────────┐")
+    print(f"  │  RESUME DISPONIBILE                             │")
+    print(f"  │  Ultimo ciclo interrotto: ciclo {ciclo} — {istanza:<12}│")
+    print(f"  │  Timestamp: {ts:<36}│")
+    print(f"  └─────────────────────────────────────────────────┘")
+    try:
+        risposta = input(f"  Riprendere da {istanza}? [S/n]: ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        risposta = "n"
+    if risposta in ("", "s", "si", "y", "yes"):
+        return istanza
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -482,6 +572,9 @@ def _parse_args():
                    help="Ripristina runtime_overrides.json (sezione istanze) dai valori base "
                         "di instances.json. Mantiene invariati i globali (task flags, etc.). "
                         "Il bot si avvia normalmente dopo il reset.")
+    p.add_argument("--resume", action="store_true", default=False,
+                   help="Riprende automaticamente dall'ultima istanza interrotta "
+                        "senza prompt interattivo.")
     return p.parse_args()
 
 
@@ -530,6 +623,26 @@ def main():
     threading.Thread(target=_status_writer_loop, args=(stop_event, args.status_interval),
                      name="StatusWriter", daemon=True).start()
 
+    # Cleanup emulator orfani all'avvio (kill residui di sessioni precedenti)
+    _log("MAIN", f"Cleanup emulator orfani (startup) — {len(istanze)} istanze")
+    _cleanup_tutti_emulator(istanze, args.dry_run)
+
+    # ── Resume checkpoint ────────────────────────────────────
+    resume_da: Optional[str] = None
+    cp = _leggi_checkpoint()
+    if cp:
+        if args.resume:
+            # --resume: accetta automaticamente senza prompt
+            resume_da = cp.get("istanza")
+            _log("MAIN", f"Resume automatico da {resume_da} (ciclo {cp.get('ciclo')})")
+        else:
+            # Prompt interattivo
+            resume_da = _prompt_resume(cp)
+            if resume_da:
+                _log("MAIN", f"Resume confermato da {resume_da}")
+            else:
+                _log("MAIN", "Resume rifiutato — ciclo normale da inizio")
+
     SLEEP_CICLO = args.tick_sleep
 
     ciclo = 0
@@ -538,10 +651,31 @@ def main():
         _log("MAIN", f"{'=' * 55}")
         _log("MAIN", f"CICLO {ciclo} — {[i['nome'] for i in istanze]}")
 
+        # Cleanup orfani a inizio ciclo (robustezza contro crash mid-ciclo)
+        _log("MAIN", f"Cleanup emulator orfani (pre-ciclo) — {len(istanze)} istanze")
+        _cleanup_tutti_emulator(istanze, args.dry_run)
+
+        # Flag resume attivo solo al primo ciclo
+        _resume_attivo = resume_da is not None and ciclo == 1
+        _resume_trovato = False
+
         for ist in istanze:
             if stop_event.is_set():
                 break
+
             nome = ist["nome"]
+
+            # Skip istanze precedenti al punto di resume (solo ciclo 1)
+            if _resume_attivo and not _resume_trovato:
+                if nome != resume_da:
+                    _log("MAIN", f"--- Skip {nome} (resume) ---")
+                    continue
+                else:
+                    _resume_trovato = True  # trovata — da qui in poi esegue normalmente
+
+            # Scrivi checkpoint PRIMA di avviare
+            _scrivi_checkpoint(ciclo, nome)
+
             _log("MAIN", f"--- Avvio istanza {nome} ---")
             if not args.dry_run:
                 _launcher.reset_istanza(ist, lambda msg: _log(nome, msg))
@@ -553,6 +687,10 @@ def main():
             t.start()
             t.join()
             _log("MAIN", f"--- Istanza {nome} completata ---")
+
+        # Fine ciclo — cancella checkpoint solo se completato senza interruzioni
+        if not stop_event.is_set():
+            _cancella_checkpoint()
 
         if stop_event.is_set():
             break
