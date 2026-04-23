@@ -411,6 +411,12 @@ class GlobalConfig:
         ra = raw.get("raccolta", {})
         al = ra.get("allocazione", {})
 
+        # Normalizza percentuali → frazioni 0-1
+        # AllocazioneOverride (dashboard Pydantic) salva 0-100 espliciti;
+        # global_config in 0-1. Se max>1 assume percentuali e divide.
+        _al_max = max((float(v) for v in al.values()), default=0.0) if al else 0.0
+        _al_div = 100.0 if _al_max > 1.0 else 1.0
+
         return cls(
             # MuMu
             mumu = MumuConfig(
@@ -481,10 +487,10 @@ class GlobalConfig:
 
             # Raccolta
             livello_nodo         = int(ra.get("livello_nodo",   6)),
-            allocazione_pomodoro = float(al.get("pomodoro",     0.4)),
-            allocazione_legno    = float(al.get("legno",        0.3)),
-            allocazione_petrolio = float(al.get("petrolio",     0.2)),
-            allocazione_acciaio  = float(al.get("acciaio",      0.1)),
+            allocazione_pomodoro = float(al.get("pomodoro",     0.4)) / _al_div,
+            allocazione_legno    = float(al.get("legno",        0.3)) / _al_div,
+            allocazione_petrolio = float(al.get("petrolio",     0.2)) / _al_div,
+            allocazione_acciaio  = float(al.get("acciaio",      0.1)) / _al_div,
         )
 
     def to_dict(self) -> dict:

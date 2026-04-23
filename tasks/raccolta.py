@@ -1486,6 +1486,16 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
     deposito_ocr   = getattr(ctx, "_deposito_ocr", {})
     sequenza_base  = _cfg(ctx, "RACCOLTA_SEQUENZA")
 
+    # Issue #26 — target allocazione risorse da ctx.config (frazioni 0-1).
+    # Chiavi in formato "tipo" (campo/segheria/petrolio/acciaio) per matching
+    # con _RATIO_TARGET_DEFAULT in _calcola_sequenza_allocation.
+    ratio_cfg = {
+        "campo":    float(getattr(ctx.config, "ALLOCAZIONE_POMODORO", 0.35)),
+        "segheria": float(getattr(ctx.config, "ALLOCAZIONE_LEGNO",    0.35)),
+        "petrolio": float(getattr(ctx.config, "ALLOCAZIONE_PETROLIO", 0.20)),
+        "acciaio":  float(getattr(ctx.config, "ALLOCAZIONE_ACCIAIO",  0.10)),
+    }
+
     tipi_bloccati: set[str]              = set()
     cooldown_map: dict[str, float]       = {}
     skip_neutri_per_tipo: dict[str, int] = {}
@@ -1521,7 +1531,8 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
         # ── FIX D: ricalcola sequenza ad ogni iterazione ──
         libere_ora = obiettivo - attive_correnti
         if deposito_ocr:
-            sequenza = _calcola_sequenza_allocation(libere_ora, deposito_ocr)
+            sequenza = _calcola_sequenza_allocation(libere_ora, deposito_ocr,
+                                                     ratio_target=ratio_cfg)
             sequenza = [t for t in sequenza if t not in tipi_bloccati] or \
                        _calcola_sequenza(libere_ora, sequenza_base, tipi_bloccati)
         else:
