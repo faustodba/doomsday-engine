@@ -89,14 +89,31 @@ def read_overrides():
 def save_globals(payload: PayloadGlobals):
     """
     Aggiorna task flags e parametri globali sistema.
-    Campi: task.*, sistema.max_parallel, sistema.tick_sleep_min.
+    Merge incrementale: solo i campi esplicitamente presenti nel payload
+    vengono aggiornati (exclude_unset). I campi task non inviati mantengono
+    lo stato precedente.
+
+    Bug storico: payload task={} faceva Pydantic costruire TaskFlags() con
+    default — sovrascrivendo rifornimento/radar_census/rifornimento_mappa
+    a False (default Pydantic) ogni volta che l'utente salvava "sistema".
+
     Hot-reload: attivo al prossimo tick del bot.
     """
     ov = _load_ov()
-    ov.globali.task    = payload.task
+
+    # Merge incrementale task — solo campi esplicitamente presenti
+    task_updates = payload.task.model_dump(exclude_unset=True)
+    for k, v in task_updates.items():
+        setattr(ov.globali.task, k, v)
+
+    # Sistema sempre sovrascritto (solo 2 campi, poco rischio di miss)
     ov.globali.sistema = payload.sistema
+
     _save_ov(ov)
-    return {"ok": True, "restart_required": False, "sezione": "globals"}
+    return {
+        "ok": True, "restart_required": False, "sezione": "globals",
+        "task_updated": list(task_updates.keys()),
+    }
 
 
 # ==============================================================================
