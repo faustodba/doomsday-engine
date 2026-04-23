@@ -189,6 +189,15 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
   UI dashboard → `runtime_overrides.json` → `merge_config` → `_from_raw` (normalize) →
   `ctx.config.ALLOCAZIONE_*` (frazioni) → `ratio_cfg` (mapping) → `_calcola_sequenza_allocation`
 
+### 41. Integrazione DonazioneTask nella dashboard (CHIUSA ✅ 23/04/2026)
+- **Obiettivo:** rendere il nuovo `DonazioneTask` controllabile via pill UI come gli altri task.
+- **Fix applicato:**
+  1. `dashboard/models.py` TaskFlags: aggiunto `donazione: bool = True`
+  2. `api_config_overrides.py` `toggle_task` valid_tasks: `+ donazione`
+  3. `dashboard/app.py` `partial_task_flags_v2` ORDER: `donazione` inserito dopo `alleanza`
+- **Validato:** pill renderizzata, PATCH toggle on/off funziona, flag persistito
+  su `runtime_overrides.json`, hot-reload al prossimo tick del bot.
+
 ### 40. Flag rifornimento_mappa duplicato — sub-mode incoerente (CHIUSA ✅ 23/04/2026)
 - **Problema:** la sub-mode del rifornimento (mappa vs membri) era rappresentata
   da 3 flag ridondanti (`task.rifornimento_mappa`, `rifornimento.mappa_abilitata`,

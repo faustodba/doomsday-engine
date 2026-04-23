@@ -289,7 +289,7 @@ async def toggle_task(task_name: str, request: Request):
 
     valid_tasks = {
         "alleanza", "messaggi", "vip", "radar", "radar_census",
-        "rifornimento", "zaino",
+        "rifornimento", "donazione", "zaino",
         "arena", "arena_mercato", "boost", "store",
     }
     if task_name not in valid_tasks:

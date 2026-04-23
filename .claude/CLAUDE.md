@@ -147,6 +147,7 @@ All'inizio di ogni sessione, in questo ordine:
 | 38 | Dashboard leggeva config/state da dev invece di prod (config_manager non onorava DOOMSDAY_ROOT) | MEDIA | ✅ RISOLTA 23/04 (_PROD_ROOT in config_manager coerente con stats_reader) |
 | 39 | Flag abilitata istanza applicato solo a fine ciclo (fino ~2h ritardo mid-cycle) | MEDIA | ✅ RISOLTA 23/04 (hot-check runtime_overrides prima di reset_istanza in main loop) |
 | 40 | Flag rifornimento_mappa duplicato — sub-mode incoerente tra dashboard e bot | MEDIA | ✅ RISOLTA 23/04 (unica fonte rifornimento.mappa_abilitata; eliminato task.rifornimento_mappa) |
+| 41 | Integrazione DonazioneTask nella dashboard (pill + toggle) | — | ✅ IMPLEMENTATA 23/04 (TaskFlags + valid_tasks + ORDER) |
 
 > Aggiornare questa tabella ad ogni sessione insieme alla ROADMAP.
 

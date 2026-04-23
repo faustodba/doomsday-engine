@@ -50,6 +50,7 @@ class TaskFlags(BaseModel):
     radar:              bool = True
     radar_census:       bool = False
     rifornimento:       bool = False
+    donazione:          bool = True
     zaino:              bool = True
     arena:              bool = True
     arena_mercato:      bool = True
