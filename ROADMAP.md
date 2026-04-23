@@ -408,6 +408,7 @@ consolidare la logica raccolta. Baseline test: 42 passed / 57. Post-riscrittura:
 | Hide istanze zero | `dashboard/app.py:partial_res_totali` | Skip righe con `inviato_oggi` tutti 0 e `spedizioni_oggi=0` (es. FauMorfeus) |
 | Issue #26 — Allocazione collegata al bot | `config/config_loader.py`, `tasks/raccolta.py` | `_from_raw` normalizza %→frazioni; `_loop_invio_marce` costruisce `ratio_cfg` da `ctx.config.ALLOCAZIONE_*` e lo passa a `_calcola_sequenza_allocation` (commit `424b440`) |
 | None-safe build_instance_cfg | `config/config_loader.py`, `dashboard/models.py` | Helper `_ovr()` tratta null come miss → fall-through ai default; `RuntimeOverrides.save` con `exclude_none=True` previene riscrittura null (commit `4afb14e`) |
+| Issue #37 — setModeRemote operativo | `dashboard/routers/api_config_overrides.py`, `dashboard/templates/index.html` | Nuovi endpoint PATCH `/api/config/rifornimento-mode/{mappa\|membri}` e `/api/config/zaino-mode/{bag\|svuota}` + JS `setModeRemote(taskName, sub)` fetch + sync UI + refresh task-flags-v2 (commit `c9ced2a`) |
 
 ## Fix e implementazioni sessione 22/04/2026
 

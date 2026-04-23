@@ -140,6 +140,7 @@ All'inizio di ogni sessione, in questo ordine:
 | 33 | Allocazione dashboard in percentuali vs frazioni (UI mostrava 4000%) | MEDIA | ✅ RISOLTA 23/04 (get_merged_config normalizza) |
 | 26 | Allocazione raccolta non collegata al bot (_RATIO_TARGET_DEFAULT hardcoded) | MEDIA | ✅ RISOLTA 23/04 (commit `424b440` — _from_raw normalize + ratio_cfg end-to-end) |
 | 36 | Override null (livello/max_squadre/layout) causava int(None) TypeError | ALTA | ✅ RISOLTA 23/04 (commit `4afb14e` — _ovr None-safe + exclude_none save) |
+| 37 | setModeRemote JS non definita (pill compound task-flags-v2 silent error) | MEDIA | ✅ RISOLTA 23/04 (commit `c9ced2a` — JS + 2 endpoint PATCH rifornimento-mode/zaino-mode) |
 | 25 | Tracciamento diamanti nello state (OCR già letto ma non persistito) | BASSA | 🆕 NUOVA 23/04 |
 | 34 | engine_status.json WinError 5 (collision os.replace con dashboard reader) | BASSA | ✅ RISOLTA 23/04 (retry backoff 0.1-0.5s × 5) |
 | 35 | storico_farm.json tracciamento giornaliero per istanza | — | ✅ IMPLEMENTATA 23/04 (data/storico_farm.json, retention 90gg) |
