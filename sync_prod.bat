@@ -14,6 +14,7 @@ REM                                aggiornato in dev e propagato a prod come cod
 REM    - monitor/*.py     : MCP server log analysis
 REM    - radar_tool/      : sottomodulo radar
 REM    - dashboard/       : intera dashboard FastAPI (py + templates + static)
+REM    - templates/       : template pin PNG per template matching
 REM    - main.py
 REM    - ROADMAP.md
 REM    - run_prod.bat, run_dashboard_prod.bat : launcher produzione
@@ -56,6 +57,9 @@ xcopy /Y /Q "%SRC%\config\task_setup.json"     "%DST%\config\"     || goto :err
 REM --- Tool esterni e dashboard ---
 xcopy /Y /E /Q "%SRC%\radar_tool\"              "%DST%\radar_tool\" || goto :err
 xcopy /Y /E /Q "%SRC%\dashboard\"               "%DST%\dashboard\"  || goto :err
+
+REM --- Template pin (OCR/template matching) ---
+xcopy /Y /E /Q "%SRC%\templates\"               "%DST%\templates\"  || goto :err
 
 REM --- Entry point + documentazione ---
 xcopy /Y /Q "%SRC%\main.py"                    "%DST%\"            || goto :err
