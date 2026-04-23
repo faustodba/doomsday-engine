@@ -498,8 +498,13 @@ def partial_res_totali(request: Request):
     prov_lbl = _fmt_m(farm.provviste_residue)
 
     # Dettaglio per istanza (compact)
+    _ZERO_INVIATO = {r: 0 for r in ("pomodoro", "legno", "petrolio", "acciaio")}
+
     detail_rows = ""
     for d in sorted(farm.istanze_detail, key=lambda x: x.nome):
+        # Skip istanze senza mai spedizioni (es. raccolta_only come FauMorfeus)
+        if d.inviato_oggi == _ZERO_INVIATO and d.spedizioni_oggi == 0:
+            continue
         esaurita_css = "color:var(--red)" if d.provviste_esaurite else "color:var(--text-dim)"
         prov_ist     = _fmt_m(d.provviste_residue)
         inv_str      = " · ".join(
