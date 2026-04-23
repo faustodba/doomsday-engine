@@ -183,8 +183,9 @@ class GlobaliOverride(BaseModel):
 # ==============================================================================
 
 class TipologiaIstanza(str, Enum):
-    full     = "full"
-    raccolta = "raccolta"
+    full          = "full"
+    raccolta      = "raccolta"
+    raccolta_only = "raccolta_only"   # alias profilo bot (FauMorfeus)
 
 
 class IstanzaOverride(BaseModel):

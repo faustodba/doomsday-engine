@@ -253,13 +253,22 @@ def save_istanze(payload: PayloadIstanze):
 @router.patch("/overrides/task/{task_name}")
 async def toggle_task(task_name: str, request: Request):
     """Toggle singolo task flag — accetta JSON body o form data da HTMX."""
-    # Leggi payload — HTMX manda application/json con hx-vals
+    # Legge il body UNA SOLA VOLTA in base al content-type.
+    # HTMX senza json-enc manda application/x-www-form-urlencoded;
+    # con json-enc manda application/json.
+    content_type = request.headers.get("content-type", "").lower()
+    abilitato_raw = "true"
     try:
-        body = await request.json()
-        abilitato_raw = body.get("abilitato", "true")
+        if "json" in content_type:
+            body = await request.json()
+            if isinstance(body, dict):
+                abilitato_raw = body.get("abilitato", "true")
+        else:
+            form = await request.form()
+            abilitato_raw = form.get("abilitato", "true")
     except Exception:
-        form = await request.form()
-        abilitato_raw = form.get("abilitato", "true")
+        # Fallback: prova a leggere query string
+        abilitato_raw = request.query_params.get("abilitato", "true")
 
     abilitato = str(abilitato_raw).lower() not in ("false", "0", "no")
 
