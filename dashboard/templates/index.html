@@ -390,6 +390,26 @@ function setZainoMode(mode) {
   ['bag','svuota'].forEach(m => g('z-mode-'+m)?.classList.toggle('active', m===mode));
 }
 
+// Cambio modalità remoto per pill compound in task-flags-v2
+// (autonomo, non dipende da quale box è visibile).
+async function setModeRemote(taskName, sub) {
+  const url = `/api/config/${taskName}-mode/${sub}`;
+  try {
+    const resp = await fetch(url, {method: 'PATCH'});
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    // Sync UI locale se box rifornimento/zaino è visibile
+    if (taskName === 'rifornimento') setMode(sub);
+    if (taskName === 'zaino')        setZainoMode(sub);
+    // Refresh task-flags-v2 per aggiornare pill active
+    if (typeof htmx !== 'undefined') {
+      htmx.ajax('GET', '/ui/partial/task-flags-v2',
+                {target: '#task-flags', swap: 'innerHTML'});
+    }
+  } catch (err) {
+    console.error('setModeRemote fallito:', err);
+  }
+}
+
 function updateAllocTotal() {
   let tot = 0;
   ['pomodoro','legno','petrolio','acciaio'].forEach(r => {

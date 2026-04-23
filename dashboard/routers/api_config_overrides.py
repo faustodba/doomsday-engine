@@ -289,6 +289,51 @@ async def toggle_task(task_name: str, request: Request):
 
 
 # ==============================================================================
+# PATCH /api/config/rifornimento-mode/{sub} — switch modalità rifornimento
+# ==============================================================================
+
+@router.patch("/rifornimento-mode/{sub}")
+def set_rifornimento_mode(sub: str):
+    """
+    Switch modalità rifornimento: mappa | membri (mutuamente esclusive).
+    Usato dai sub-pill "task-flags-v2" per cambio rapido senza passare dal
+    salvataggio completo via PUT /rifornimento.
+    """
+    if sub not in ("mappa", "membri"):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Sub '{sub}' non riconosciuto. Validi: mappa, membri",
+        )
+    ov = _load_ov()
+    ov.globali.rifornimento.mappa_abilitata  = (sub == "mappa")
+    ov.globali.rifornimento.membri_abilitati = (sub == "membri")
+    ov.globali.task.rifornimento_mappa       = (sub == "mappa")
+    _save_ov(ov)
+    return {"ok": True, "sezione": "rifornimento-mode", "active": sub}
+
+
+# ==============================================================================
+# PATCH /api/config/zaino-mode/{sub} — switch modalità zaino
+# ==============================================================================
+
+@router.patch("/zaino-mode/{sub}")
+def set_zaino_mode(sub: str):
+    """
+    Switch modalità zaino: bag | svuota (mutuamente esclusive).
+    Usato dai sub-pill "task-flags-v2".
+    """
+    if sub not in ("bag", "svuota"):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Sub '{sub}' non riconosciuto. Validi: bag, svuota",
+        )
+    ov = _load_ov()
+    ov.globali.zaino.modalita = sub
+    _save_ov(ov)
+    return {"ok": True, "sezione": "zaino-mode", "active": sub}
+
+
+# ==============================================================================
 # PATCH /api/config/overrides/istanze/{nome} — patch singola istanza
 # ==============================================================================
 
