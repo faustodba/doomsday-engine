@@ -200,7 +200,7 @@
           <div class="col-body">
             <div class="col-sub">% per tipo risorsa</div>
             {% set alloc = cfg.get('raccolta',{}).get('allocazione',{}) %}
-            {% for r,ico,default in [('pomodoro','🍅',40),('legno','🪵',30),('petrolio','🛢',20),('acciaio','⚙',10)] %}
+            {% for r,ico,default in [('pomodoro','🍅',40),('legno','🪵',30),('acciaio','⚙',10),('petrolio','🛢',20)] %}
             <div class="rr" id="ar-{{ r }}">
               <span class="rr-ico">{{ ico }}</span>
               <span class="rr-name">{{ r }}</span>
@@ -208,10 +208,6 @@
                      value="{{ (alloc.get(r, default/100) * 100) | round | int }}"
                      onchange="updateAllocTotal()">
               <span class="rr-unit">%</span>
-              <div class="rr-flag">
-                <input class="rr-cb" type="checkbox" checked
-                       onchange="toggleRR('ar-{{ r }}',this);updateAllocTotal()">
-              </div>
             </div>
             {% endfor %}
             <div class="alloc-total">
