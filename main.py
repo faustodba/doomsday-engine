@@ -92,6 +92,46 @@ def _carica_istanze(filtro=None) -> list[dict]:
     return istanze
 
 
+def _carica_istanze_ciclo(filtro=None) -> list[dict]:
+    """
+    Rilegge instances.json + runtime_overrides.json ad ogni ciclo.
+    Merge: abilitata/truppe/tipologia/fascia_oraria da overrides
+    sovrascrivono instances.json se presenti.
+    Usata nel loop ciclo per recepire modifiche dashboard in tempo reale.
+    """
+    path = _INSTANCES_PATH
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            istanze_base = json.load(f)
+    except Exception as exc:
+        _log("MAIN", f"[ERRORE] instances.json: {exc}")
+        return []
+
+    ov     = load_overrides(_OVERRIDES_PATH)
+    ist_ov = ov.get("istanze", {})
+
+    result = []
+    for ist in istanze_base:
+        nome   = ist.get("nome", "")
+        if not nome:
+            continue
+        merged = dict(ist)
+        override = ist_ov.get(nome, {})
+        if "abilitata"    in override: merged["abilitata"]    = override["abilitata"]
+        if "truppe"       in override: merged["truppe"]       = override["truppe"]
+        if "tipologia"    in override: merged["profilo"]      = override["tipologia"]
+        if "fascia_oraria" in override: merged["fascia_oraria"] = override["fascia_oraria"]
+        if not merged.get("abilitata", True):
+            continue
+        result.append(merged)
+
+    if filtro:
+        result = [i for i in result if i.get("nome") in filtro]
+        if not filtro or not result:
+            _log("MAIN", f"[WARN] Nessuna istanza trovata per filtro: {filtro}")
+    return result
+
+
 # ---------------------------------------------------------------------------
 # Task setup — scheduling e priorità
 # ---------------------------------------------------------------------------
@@ -265,6 +305,33 @@ def _prompt_resume(cp: dict) -> Optional[str]:
     if risposta in ("", "s", "si", "y", "yes"):
         return istanza
     return None
+
+
+def _prompt_configurazione(auto_runtime: bool = False, auto_reset: bool = False) -> bool:
+    """
+    Chiede all'utente quale configurazione usare all'avvio.
+    Restituisce True = usa runtime_overrides, False = reset a instances.json.
+    auto_runtime: --use-runtime flag, accetta automaticamente runtime.
+    auto_reset:   --reset-config flag, accetta automaticamente reset.
+    """
+    if auto_reset:
+        return False
+    if auto_runtime:
+        return True
+    print()
+    print(f"  ┌─────────────────────────────────────────────────┐")
+    print(f"  │  CONFIGURAZIONE ISTANZE                         │")
+    print(f"  │  [1] Usa configurazione runtime (ultima salvata)│")
+    print(f"  │  [2] Reset a configurazione statica             │")
+    print(f"  │      (instances.json — ignora override)         │")
+    print(f"  └─────────────────────────────────────────────────┘")
+    try:
+        risposta = input("  Scelta [1/2]: ").strip()
+    except (EOFError, KeyboardInterrupt):
+        risposta = "1"
+    if risposta == "2":
+        return False
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -575,14 +642,20 @@ def _parse_args():
     p.add_argument("--resume", action="store_true", default=False,
                    help="Riprende automaticamente dall'ultima istanza interrotta "
                         "senza prompt interattivo.")
+    p.add_argument("--use-runtime", action="store_true", default=False,
+                   help="Usa runtime_overrides.json senza prompt interattivo.")
     return p.parse_args()
 
 
 def main():
     args = _parse_args()
 
-    # ── Reset configurazione istanze (se richiesto) ──────────────────
-    if args.reset_config:
+    # ── Prompt configurazione (sempre all'avvio) ─────────────
+    usa_runtime = _prompt_configurazione(
+        auto_runtime=args.use_runtime,
+        auto_reset=args.reset_config,
+    )
+    if not usa_runtime:
         _reset_config()
 
     if os.path.exists(_LOG_PATH):
@@ -593,7 +666,9 @@ def main():
     _log("MAIN", "DOOMSDAY ENGINE V6")
     _log("MAIN", f"Root: {ROOT}  dry-run: {args.dry_run}  tick-sleep: {args.tick_sleep}s")
     _log("MAIN", f"Task setup: {len(_TASK_SETUP)} task da {_TASK_SETUP_PATH}")
-    if args.reset_config:
+    if usa_runtime:
+        _log("MAIN", "Configurazione runtime mantenuta")
+    else:
         _log("MAIN", "Config istanze ripristinata da instances.json")
 
     filtro  = [n.strip() for n in args.istanze.split(",")] if args.istanze else None
@@ -649,17 +724,20 @@ def main():
     while not stop_event.is_set():
         ciclo += 1
         _log("MAIN", f"{'=' * 55}")
-        _log("MAIN", f"CICLO {ciclo} — {[i['nome'] for i in istanze]}")
+
+        # Rilettura dinamica istanze (recepisce modifiche dashboard pre-ciclo)
+        istanze_ciclo = _carica_istanze_ciclo(filtro=filtro)
+        _log("MAIN", f"CICLO {ciclo} — {[i['nome'] for i in istanze_ciclo]}")
 
         # Cleanup orfani a inizio ciclo (robustezza contro crash mid-ciclo)
-        _log("MAIN", f"Cleanup emulator orfani (pre-ciclo) — {len(istanze)} istanze")
-        _cleanup_tutti_emulator(istanze, args.dry_run)
+        _log("MAIN", f"Cleanup emulator orfani (pre-ciclo) — {len(istanze_ciclo)} istanze")
+        _cleanup_tutti_emulator(istanze_ciclo, args.dry_run)
 
         # Flag resume attivo solo al primo ciclo
         _resume_attivo = resume_da is not None and ciclo == 1
         _resume_trovato = False
 
-        for ist in istanze:
+        for ist in istanze_ciclo:
             if stop_event.is_set():
                 break
 
