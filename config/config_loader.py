@@ -590,15 +590,23 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
     nome = ist.get("nome", ist.get("name", "UNKNOWN"))
     _tipologia = ovr.get("tipologia") or ist.get("profilo", "full")
 
+    def _ovr(key, fallback):
+        """dict.get che tratta None come chiave mancante.
+        Pydantic IstanzaOverride salva campi Optional non settati come null
+        esplicito nel JSON → `ovr.get(key, default)` ritorna None, non default.
+        """
+        v = ovr.get(key)
+        return fallback if v is None else v
+
     class _InstanceCfg:
         # ── Identità istanza ─────────────────────────────────────────────────
         instance_name = nome
-        truppe        = ovr.get("truppe",      ist.get("truppe",      12000))
-        max_squadre   = ovr.get("max_squadre", ist.get("max_squadre", 4))
-        layout        = ovr.get("layout",      ist.get("layout",      1))
-        livello       = ovr.get("livello",     ist.get("livello",     gcfg.livello_nodo))
-        profilo       = ovr.get("profilo",     ist.get("profilo",     "full"))
-        fascia_oraria = ovr.get("fascia_oraria", ist.get("fascia_oraria", ""))
+        truppe        = _ovr("truppe",      ist.get("truppe",      12000))
+        max_squadre   = _ovr("max_squadre", ist.get("max_squadre", 4))
+        layout        = _ovr("layout",      ist.get("layout",      1))
+        livello       = _ovr("livello",     ist.get("livello",     gcfg.livello_nodo))
+        profilo       = _ovr("profilo",     ist.get("profilo",     "full"))
+        fascia_oraria = _ovr("fascia_oraria", ist.get("fascia_oraria", ""))
         lingua        = ist.get("lingua", "en")
         abilitata     = ist.get("abilitata", True)
         tipologia     = _tipologia

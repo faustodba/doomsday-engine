@@ -7,25 +7,58 @@
       "radar": true,
       "radar_census": false,
       "rifornimento": true,
-      "rifornimento_mappa": true,
+      "rifornimento_mappa": false,
       "zaino": true,
       "arena": true,
       "arena_mercato": true,
       "boost": true,
       "store": true
     },
+    "sistema": {
+      "max_parallel": 2,
+      "tick_sleep_min": 300
+    },
     "rifugio": {
       "coord_x": 680,
       "coord_y": 531
     },
+    "rifornimento_comune": {
+      "dooms_account": "FauMorfeus",
+      "max_spedizioni_ciclo": 5,
+      "soglia_campo_m": 5.0,
+      "soglia_legno_m": 5.0,
+      "soglia_petrolio_m": 2.5,
+      "soglia_acciaio_m": 3.5,
+      "campo_abilitato": true,
+      "legno_abilitato": true,
+      "petrolio_abilitato": true,
+      "acciaio_abilitato": false
+    },
     "rifornimento": {
-      "soglia_campo_m": 5,
+      "soglia_campo_m": 5.0,
       "mappa_abilitata": false,
       "membri_abilitati": true,
       "provviste_max": 100
     },
+    "zaino": {
+      "modalita": "bag",
+      "usa_pomodoro": true,
+      "usa_legno": true,
+      "usa_petrolio": true,
+      "usa_acciaio": false,
+      "soglia_pomodoro_m": 20.0,
+      "soglia_legno_m": 20.0,
+      "soglia_petrolio_m": 5.0,
+      "soglia_acciaio_m": 10.0
+    },
     "raccolta": {
-      "soglia_allocazione": 3
+      "soglia_allocazione": 3,
+      "allocazione": {
+        "pomodoro": 35.0,
+        "legno": 35.0,
+        "petrolio": 20.0,
+        "acciaio": 10.0
+      }
     }
   },
   "istanze": {

@@ -224,10 +224,15 @@ class RuntimeOverrides(BaseModel):
             return cls()
 
     def save(self, path: Path) -> None:
-        """Scrittura atomica su runtime_overrides.json."""
+        """Scrittura atomica su runtime_overrides.json.
+
+        exclude_none=True: i campi Optional non settati (max_squadre, layout,
+        livello) NON vengono scritti come null nel JSON — così `dict.get` del
+        bot fall-through correttamente al default `ist.get(...)`.
+        """
         path = Path(path)
         tmp  = path.with_suffix(path.suffix + ".tmp")
-        tmp.write_text(self.model_dump_json(indent=2), encoding="utf-8")
+        tmp.write_text(self.model_dump_json(indent=2, exclude_none=True), encoding="utf-8")
         os.replace(tmp, path)
 
     def to_runtime_dict(self) -> dict:
