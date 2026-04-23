@@ -16,6 +16,7 @@ REM    - radar_tool/      : sottomodulo radar
 REM    - dashboard/       : intera dashboard FastAPI (py + templates + static)
 REM    - main.py
 REM    - ROADMAP.md
+REM    - run_prod.bat, run_dashboard_prod.bat : launcher produzione
 REM
 REM  BLACKLIST — NON SINCRONIZZATI (configurazione runtime specifica per ambiente):
 REM    - config/instances.json          : anagrafica fisica istanze MuMu,
@@ -59,6 +60,10 @@ xcopy /Y /E /Q "%SRC%\dashboard\"               "%DST%\dashboard\"  || goto :err
 REM --- Entry point + documentazione ---
 xcopy /Y /Q "%SRC%\main.py"                    "%DST%\"            || goto :err
 xcopy /Y /Q "%SRC%\ROADMAP.md"                 "%DST%\"            || goto :err
+
+REM --- Launcher produzione ---
+xcopy /Y /Q "%SRC%\run_prod.bat"               "%DST%\"            || goto :err
+xcopy /Y /Q "%SRC%\run_dashboard_prod.bat"     "%DST%\"            || goto :err
 
 echo [sync] OK — ricorda di riavviare il bot in prod
 exit /b 0
