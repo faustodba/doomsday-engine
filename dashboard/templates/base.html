@@ -13,6 +13,10 @@
   <!-- TOPBAR -->
   <header class="topbar">
     <span class="topbar-logo">⬡ DOOMSDAY V6</span>
+    <span class="env-badge {{ env_css }}">{{ env_label }}</span>
+    {% if not env_is_prod %}
+    <span class="env-warn">⚠ dati di test — non produzione</span>
+    {% endif %}
     <nav class="topbar-nav">
       <a href="/ui" class="{% if active=='home' %}active{% endif %}">home</a>
       <a href="/ui/config" class="{% if active=='config' %}active{% endif %}">config</a>

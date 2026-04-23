@@ -431,3 +431,20 @@ html, body {
   border-radius: var(--r); padding: 8px 12px; font-size: 16px;
   color: var(--yellow); margin-bottom: 12px;
 }
+
+/* ── Env badge ───────────────────────────────────────────── */
+.env-badge {
+  font-size: 9px; font-weight: 700; letter-spacing: 2px;
+  padding: 2px 8px; border-radius: 3px; text-transform: uppercase;
+}
+.env-prod {
+  background: rgba(34,197,94,.15); color: var(--green);
+  border: 0.5px solid rgba(34,197,94,.4);
+}
+.env-dev {
+  background: rgba(245,158,11,.15); color: var(--yellow);
+  border: 0.5px solid rgba(245,158,11,.4);
+}
+.env-warn {
+  font-size: 9px; color: var(--yellow); letter-spacing: 1px;
+}

@@ -9,6 +9,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 from pathlib import Path
 
@@ -44,6 +45,20 @@ def _fmt_m(v: int | float) -> str:
     if v >= 1_000:
         return f"{v / 1_000:.0f}K"
     return str(int(v))
+
+
+def _env_label() -> dict:
+    """
+    Deriva ambiente (PROD/DEV) da DOOMSDAY_ROOT.
+    Restituisce dict con label, css_class e is_prod per i template.
+    """
+    root = os.environ.get("DOOMSDAY_ROOT", "")
+    is_prod = "prod" in root.lower()
+    return {
+        "env_label":   "PROD" if is_prod else "DEV",
+        "env_css":     "env-prod" if is_prod else "env-dev",
+        "env_is_prod": is_prod,
+    }
 
 
 # ==============================================================================
@@ -123,6 +138,7 @@ def ui_index(request: Request):
         "active":  "home",
         "cfg":     get_merged_config(),
         "istanze": get_instances(),
+        **_env_label(),
     })
 
 
@@ -137,6 +153,7 @@ def ui_instance(request: Request, nome: str):
         "log":       get_instance_log(nome, 100),
         "instance":  get_instance(nome),
         "overrides": get_overrides(),
+        **_env_label(),
     })
 
 
@@ -150,6 +167,7 @@ def ui_config(request: Request):
         "overrides": get_overrides(),
         "instances": get_instances(),
         "gcfg":      get_global_config(),
+        **_env_label(),
     })
 
 
@@ -159,6 +177,7 @@ def ui_config_global(request: Request):
     return templates.TemplateResponse(request, "config_global.html", {
         "active": "global",
         "cfg":    get_global_config(),
+        **_env_label(),
     })
 
 
