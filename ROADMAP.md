@@ -176,14 +176,18 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
   flow arena modificato (popup intermedi non gestiti).
 - Fix: aggiornare template + investigare se esiste pin intermedio saltato.
 
-### 26. Allocazione raccolta non collegata al bot (MEDIA)
+### 26. Allocazione raccolta non collegata al bot (CHIUSA ✅ 23/04/2026 — commit `424b440`)
 - **Problema:** dashboard salva allocazione in runtime_overrides.json ma raccolta.py
-  usa `_RATIO_TARGET_DEFAULT` hardcodato — non legge mai `ctx.config.ALLOCAZIONE_*`.
-- **Fix:**
-  1. `raccolta.py`: costruire `ratio_target` da `ctx.config.ALLOCAZIONE_*` in run()
-  2. Normalizzare percentuali → frazioni (÷100 se max > 1)
-  3. Passare `ratio_target` a `_calcola_sequenza_allocation()`
-- **Impatto:** finché non fixato, i valori allocazione dashboard sono cosmetici.
+  usava `_RATIO_TARGET_DEFAULT` hardcodato — non leggeva mai `ctx.config.ALLOCAZIONE_*`.
+- **Fix applicato:**
+  1. `config_loader.py _from_raw`: normalizza percentuali → frazioni 0-1
+     (`_al_div = 100 if max(al.values()) > 1 else 1`) per tutti e 4 `allocazione_*`
+  2. `raccolta.py _loop_invio_marce`: costruisce `ratio_cfg` da
+     `ctx.config.ALLOCAZIONE_*` con mapping risorsa→tipo (pomodoro→campo, legno→segheria)
+  3. Passa `ratio_target=ratio_cfg` a `_calcola_sequenza_allocation()`
+- **Catena end-to-end ora funzionante:**
+  UI dashboard → `runtime_overrides.json` → `merge_config` → `_from_raw` (normalize) →
+  `ctx.config.ALLOCAZIONE_*` (frazioni) → `ratio_cfg` (mapping) → `_calcola_sequenza_allocation`
 
 ### 25. Tracciamento diamanti nello state (BASSA)
 - **Problema:** `ocr_risorse()` legge già `.diamanti` ma nessun task lo persiste.
@@ -402,6 +406,8 @@ consolidare la logica raccolta. Baseline test: 42 passed / 57. Post-riscrittura:
 | Fix WinError 5 engine_status | `main.py:_scrivi_status_json` | Retry con backoff 0.1-0.5s su `os.replace` (Windows blocca rename se dashboard ha handle lettura aperto) |
 | Font +2px | `dashboard/static/style.css` | Gamma font 7-11px → 11-15px (+2 due round, leggibilità) |
 | Hide istanze zero | `dashboard/app.py:partial_res_totali` | Skip righe con `inviato_oggi` tutti 0 e `spedizioni_oggi=0` (es. FauMorfeus) |
+| Issue #26 — Allocazione collegata al bot | `config/config_loader.py`, `tasks/raccolta.py` | `_from_raw` normalizza %→frazioni; `_loop_invio_marce` costruisce `ratio_cfg` da `ctx.config.ALLOCAZIONE_*` e lo passa a `_calcola_sequenza_allocation` (commit `424b440`) |
+| None-safe build_instance_cfg | `config/config_loader.py`, `dashboard/models.py` | Helper `_ovr()` tratta null come miss → fall-through ai default; `RuntimeOverrides.save` con `exclude_none=True` previene riscrittura null (commit `4afb14e`) |
 
 ## Fix e implementazioni sessione 22/04/2026
 
