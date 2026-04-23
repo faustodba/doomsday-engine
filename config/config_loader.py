@@ -292,17 +292,17 @@ def merge_config(gcfg: dict, overrides: dict) -> dict:
     except Exception:
         pass
 
-    # ── rifornimento_mappa — propagazione da globali.task e globali.rifugio ──
-    # globali.task.rifornimento_mappa -> merged["rifornimento_mappa"]["abilitato"]
-    # globali.rifugio.coord_x/y       -> merged["rifornimento_mappa"]["rifugio_x/y"]
-    # Necessario perché GlobalConfig._from_raw legge da rifornimento_mappa{}
-    # non dalla sezione task{}.
+    # ── rifornimento_mappa — propagazione da globali.rifornimento.mappa_abilitata ──
+    # Sub-mode del task rifornimento: unica fonte di verità è
+    # globali.rifornimento.mappa_abilitata (mutuamente esclusiva con membri_abilitati).
+    # Il flag master task.rifornimento decide se il task gira; la sub-mode
+    # decide COME gira (via mappa o via membri).
     try:
-        ov_task_rifmap = globali.get("task", {}).get("rifornimento_mappa")
-        if ov_task_rifmap is not None:
+        ov_mappa = globali.get("rifornimento", {}).get("mappa_abilitata")
+        if ov_mappa is not None:
             if "rifornimento_mappa" not in merged:
                 merged["rifornimento_mappa"] = {}
-            merged["rifornimento_mappa"]["abilitato"] = bool(ov_task_rifmap)
+            merged["rifornimento_mappa"]["abilitato"] = bool(ov_mappa)
     except Exception:
         pass
 

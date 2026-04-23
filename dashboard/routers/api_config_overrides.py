@@ -94,8 +94,8 @@ def save_globals(payload: PayloadGlobals):
     lo stato precedente.
 
     Bug storico: payload task={} faceva Pydantic costruire TaskFlags() con
-    default — sovrascrivendo rifornimento/radar_census/rifornimento_mappa
-    a False (default Pydantic) ogni volta che l'utente salvava "sistema".
+    default — sovrascrivendo rifornimento/radar_census a False (default
+    Pydantic) ogni volta che l'utente salvava "sistema".
 
     Hot-reload: attivo al prossimo tick del bot.
     """
@@ -138,11 +138,9 @@ def save_rifornimento(payload: PayloadRifornimento):
     if payload.mappa_abilitata:
         ov.globali.rifornimento.mappa_abilitata  = True
         ov.globali.rifornimento.membri_abilitati = False
-        ov.globali.task.rifornimento_mappa       = True
     elif payload.membri_abilitati:
         ov.globali.rifornimento.mappa_abilitata  = False
         ov.globali.rifornimento.membri_abilitati = True
-        ov.globali.task.rifornimento_mappa       = False
     else:
         ov.globali.rifornimento.mappa_abilitata  = False
         ov.globali.rifornimento.membri_abilitati = False
@@ -291,7 +289,7 @@ async def toggle_task(task_name: str, request: Request):
 
     valid_tasks = {
         "alleanza", "messaggi", "vip", "radar", "radar_census",
-        "rifornimento", "rifornimento_mappa", "zaino",
+        "rifornimento", "zaino",
         "arena", "arena_mercato", "boost", "store",
     }
     if task_name not in valid_tasks:
@@ -324,7 +322,6 @@ def set_rifornimento_mode(sub: str):
     ov = _load_ov()
     ov.globali.rifornimento.mappa_abilitata  = (sub == "mappa")
     ov.globali.rifornimento.membri_abilitati = (sub == "membri")
-    ov.globali.task.rifornimento_mappa       = (sub == "mappa")
     _save_ov(ov)
     return {"ok": True, "sezione": "rifornimento-mode", "active": sub}
 

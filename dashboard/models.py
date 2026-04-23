@@ -38,14 +38,18 @@ from pydantic import BaseModel, Field, field_validator
 # ==============================================================================
 
 class TaskFlags(BaseModel):
-    """Flag on/off per tutti i task. raccolta non è controllabile (gira sempre)."""
+    """Flag on/off per tutti i task. raccolta non è controllabile (gira sempre).
+
+    Nota: la sub-mode del rifornimento (mappa vs membri) NON è qui — è in
+    `RifornimentoOverride.mappa_abilitata / membri_abilitati` (mutuamente esclusive).
+    Il flag `rifornimento` è solo il master on/off del task.
+    """
     alleanza:           bool = True
     messaggi:           bool = True
     vip:                bool = True
     radar:              bool = True
     radar_census:       bool = False
     rifornimento:       bool = False
-    rifornimento_mappa: bool = False
     zaino:              bool = True
     arena:              bool = True
     arena_mercato:      bool = True

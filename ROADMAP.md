@@ -189,6 +189,34 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
   UI dashboard → `runtime_overrides.json` → `merge_config` → `_from_raw` (normalize) →
   `ctx.config.ALLOCAZIONE_*` (frazioni) → `ratio_cfg` (mapping) → `_calcola_sequenza_allocation`
 
+### 40. Flag rifornimento_mappa duplicato — sub-mode incoerente (CHIUSA ✅ 23/04/2026)
+- **Problema:** la sub-mode del rifornimento (mappa vs membri) era rappresentata
+  da 3 flag ridondanti (`task.rifornimento_mappa`, `rifornimento.mappa_abilitata`,
+  merged `rifornimento_mappa.abilitato`) con source-of-truth inconsistente:
+  - `toggle_task` scriveva solo `task.rifornimento_mappa`
+  - `set_rifornimento_mode` scriveva tutti e 3 coerentemente
+  - Dashboard render leggeva `rifornimento.mappa_abilitata`
+  - Bot leggeva (via merge) `task.rifornimento_mappa`
+  Disallineamento osservato: dashboard mostrava `mappa=True` ma bot aveva
+  `task.rifornimento_mappa=False` → rifornimento non eseguito in mappa.
+- **Semantica corretta:** `task.rifornimento` = master on/off; se True
+  si sceglie SOLO una sub-mode in `rifornimento.mappa_abilitata` o
+  `rifornimento.membri_abilitati` (mutuamente esclusive).
+- **Fix applicato:**
+  1. `config/config_loader.py:300-307`: propagazione cambia source
+     `task.rifornimento_mappa` → `rifornimento.mappa_abilitata`
+  2. `dashboard/models.py:48`: rimosso `rifornimento_mappa: bool` da TaskFlags
+  3. `dashboard/routers/api_config_overrides.py`:
+     - `set_rifornimento_mode` non scrive più `task.rifornimento_mappa`
+     - `save_rifornimento` non scrive più `task.rifornimento_mappa`
+     - `toggle_task` valid_tasks non contiene più `rifornimento_mappa`
+  4. Cleanup `runtime_overrides.json` (dev + prod): rimosso
+     `globali.task.rifornimento_mappa`
+- **Validazione:** switch mode mappa↔membri via PATCH endpoint mantiene stato
+  coerente; merged config `rifornimento_mappa.abilitato` riflette
+  correttamente `rifornimento.mappa_abilitata`; `ctx.config.RIFORNIMENTO_MAPPA_ABILITATO`
+  end-to-end dalla UI al task runtime.
+
 ### 39. Flag `abilitata` applicato solo a fine ciclo (fino ~2h ritardo) (CHIUSA ✅ 23/04/2026)
 - **Problema:** `_carica_istanze_ciclo` è chiamato una sola volta all'inizio
   del ciclo. Se l'utente disabilita un'istanza dalla dashboard a ciclo in corso,

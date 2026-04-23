@@ -7,7 +7,6 @@
       "radar": true,
       "radar_census": false,
       "rifornimento": true,
-      "rifornimento_mappa": false,
       "zaino": true,
       "arena": true,
       "arena_mercato": true,
