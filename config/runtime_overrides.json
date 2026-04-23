@@ -19,7 +19,7 @@
       "coord_y": 531
     },
     "rifornimento": {
-      "soglia_campo_m": 50,
+      "soglia_campo_m": 5,
       "mappa_abilitata": false,
       "membri_abilitati": true,
       "provviste_max": 100

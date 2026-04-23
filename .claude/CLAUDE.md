@@ -128,6 +128,10 @@ All'inizio di ogni sessione, in questo ordine:
 | 21 | `gitignore` duplicato errato e `rifornimento_mappa.py` V5 legacy — da valutare eliminazione | BASSA | ⏳ prossima sessione |
 | 22 | Dashboard `layout` istanze deprecato — rimosso dalla UI (bot usa TM) | BASSA | ✅ RISOLTA 22/04 |
 | 23 | smoke_test GlobalConfig dict vs dataclass (pre-esistente) | BASSA | ⏳ prossima sessione |
+| 24 | Raccolta No Squads — loop esterno + while interno + check universale (3-level break) | ALTA | ✅ RISOLTA 22/04 (FAU_09/10 da ~40 detection/tick a 1) |
+| 25 | NameError MAX_TENTATIVI_CICLO scope fix (bug introdotto+risolto 22/04) | ALTA | ✅ RISOLTA 22/04 |
+| 26 | Rifornimento distribuzione sbilanciata — soglia_campo_m 50→5 | MEDIA | ✅ RISOLTA 22/04 (pomodoro era sempre sotto soglia 50M) |
+| 27 | Dashboard stats OCR anomali gonfiano totali (legno 1.1B vs 117M reali) | MEDIA | ✅ RISOLTA 22/04 (_MAX_QTA_SPEDIZIONE=100M filtro) |
 
 > Aggiornare questa tabella ad ogni sessione insieme alla ROADMAP.
 

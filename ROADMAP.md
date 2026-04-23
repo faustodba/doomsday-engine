@@ -196,6 +196,31 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 - Ipotesi: `_status_writer_loop` thread ha preso eccezione silente oppure fd stale.
 - Fix: try/except + log in `_scrivi_status_json`, periodic heartbeat check.
 
+### 14-ter. Raccolta No Squads — loop while interno (CHIUSA ✅ 22/04/2026)
+- **Problema:** fix precedente (break dal `for tipo` + `tentativi_ciclo=MAX`) non bastava.
+  `_loop_invio_marce` ha un **while interno proprio** (riga 1501) che rientrava dopo il break del for,
+  ri-eseguiva il for, ri-detectava No Squads → loop infinito fino a `invii_totali >= max_invii`.
+- **Fix applicato:** terzo livello di break dopo il `for tipo` in `_loop_invio_marce:1641` —
+  propaga il break al while interno. Con il check già presente in `RaccoltaTask.run()` dopo
+  `_loop_invio_marce`, il flag viene propagato su 3 livelli di loop annidati.
+- **Validazione:** riavvio bot richiesto per attivare.
+
+### 14-quater. Raccolta NameError MAX_TENTATIVI_CICLO (CHIUSA ✅ 22/04/2026)
+- **Problema:** fix errato che assegnava `tentativi_ciclo = MAX_TENTATIVI_CICLO` dentro
+  `_loop_invio_marce`. Entrambe le variabili sono locali a `RaccoltaTask.run()` (scope diverso)
+  → `NameError` a runtime. FAU_09 e FAU_10 in stato `err` per tutti i tick raccolta.
+- **Fix applicato:** rollback della riga errata in `_loop_invio_marce`. Check flag + break
+  spostato in `RaccoltaTask.run()` dopo la chiamata `_loop_invio_marce` (scope corretto).
+
+### 15-bis. Rifornimento distribuzione risorse sbilanciata (CHIUSA ✅ 22/04/2026)
+- **Problema:** su 140.7M risorse inviate nel ciclo 20→21, distribuzione 65% legno /
+  23% petrolio / 12% pomodoro / 0% acciaio. Pomodoro mandato solo da 3 istanze su 11.
+- **Analisi:** `runtime_overrides.json` aveva `rifornimento.soglia_campo_m: 50` (50M)
+  vs default `global_config.soglia_campo_m: 5.0` (5M). Deposito tipico pomodoro 27-33M
+  → sempre sotto soglia 50M → round-robin saltava pomodoro sistematicamente.
+- **Fix applicato:** `soglia_campo_m: 50 → 5` in `runtime_overrides.json` (dev+prod).
+- **Distribuzione attesa post-fix:** pomodoro 40%, legno 40%, petrolio 20%.
+
 ### 16. OCR anomalo FAU_10 — valore "compila" scambiato per "reali" (MEDIA — NUOVA 21/04)
 - Ciclo 20→21, FAU_10 spedizione 3: `Rifornimento: spedizione 3 — legno 999,000,000 reali | provviste=12,435,903`
 - 999M è il valore di "compila" (tetto artificiale 999,000,000), non la quantità spedita.
@@ -209,13 +234,13 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 - Dashboard `/ui/partial/storico` mostra solo 2 tipi di eventi → trend incompleto.
 - Fix: verificare dove `_append_storico` è chiamato, estendere a tutti i task terminali.
 
-### 18. Dashboard mostra global_config raw, bot usa merged (MEDIA — NUOVA 21/04)
-- Route `/ui` passa `cfg = get_global_config()` (solo `global_config.json`).
-- Bot al tick usa `merge_config(gcfg, overrides)` → valori diversi.
-- Divergenze verificate prod: `task_radar_census`, `task_rifornimento`,
-  `rifornimento_mappa_abilitato`, `rifugio_x/y` — dashboard mostra valori che il bot IGNORA.
-- Fix (opzione A): route `/ui` passa merged → dashboard e bot allineati.
-- Fix (opzione B): doppia colonna "base + override" nell'UI.
+### 18. Dashboard mostra global_config raw, bot usa merged (CHIUSA ✅ 22/04/2026)
+- **Problema:** route `/ui` passava `cfg = get_global_config()` (solo `global_config.json`)
+  mentre il bot usa `merge_config(gcfg, overrides)` → divergenze verificate prod su
+  `task_radar_census`, `task_rifornimento`, `rifornimento_mappa_abilitato`, `rifugio_x/y`.
+- **Fix applicato (opzione A):** nuovo `get_merged_config()` in `dashboard/services/config_manager.py`.
+  Route `/ui` ora passa i valori merged — dashboard e bot mostrano gli stessi valori
+  effettivamente usati al tick successivo.
 
 ---
 
@@ -312,8 +337,21 @@ consolidare la logica raccolta. Baseline test: 42 passed / 57. Post-riscrittura:
 
 | Area | File | Dettaglio |
 |------|------|-----------|
-| Raccolta No Squads — loop esterno | `tasks/raccolta.py:1544-1552` | Dopo il `break` dal `for tipo` su `_raccolta_no_squads`, forza anche l'uscita dal `while tentativi_ciclo` esterno (assegnando `tentativi_ciclo = MAX_TENTATIVI_CICLO`). Fix bug: FAU_10 generava ~40 detection "No Squads" per tick perché il while esterno ripeteva 3× l'intero ciclo rilettura slot/nav mappa/retry tipi. |
-| Raccolta No Squads — check universale | `tasks/raccolta.py:1095-1113` | Aggiunto check `pin_no_squads` subito dopo la verifica apertura maschera (non solo sul retry fallito). Copre il caso "maschera aperta ma overlay No Squads visibile" — evita tap MARCIA inutile + rollback. |
+| Raccolta No Squads — 3 livelli loop | `tasks/raccolta.py` | Fix completo per uscita pulita da No Squads attraverso i 3 livelli annidati: (1) break dal `for tipo` in `_loop_invio_marce:1565`, (2) break dal `while` interno di `_loop_invio_marce:1641`, (3) break dal `while tentativi_ciclo` in `RaccoltaTask.run:1857`. Bug precedente: break solo dal for → while interno rientrava → FAU_10 generava ~40 detection/tick. |
+| Raccolta No Squads — fix scope MAX_TENTATIVI_CICLO | `tasks/raccolta.py:1564-1568` | Rollback del fix errato che usava `MAX_TENTATIVI_CICLO` in `_loop_invio_marce` (NameError — la variabile è locale a `RaccoltaTask.run`). Causava FAU_09/FAU_10 in stato err. Il flag `_raccolta_no_squads` resta True per essere letto dai chiamanti. |
+| Raccolta No Squads — check universale | `tasks/raccolta.py:1095-1113` | Check `pin_no_squads` subito dopo verifica apertura maschera (non solo sul retry fallito). Copre caso "maschera aperta ma overlay No Squads visibile" — evita tap MARCIA inutile + rollback. |
+| Rifornimento — soglia pomodoro corretta | `config/runtime_overrides.json` (dev+prod) | `soglia_campo_m: 50 → 5`. Con soglia 50M il pomodoro era sempre sotto soglia (deposito tipico 27-33M) → mai selezionato → distribuzione sbilanciata 65% legno / 23% petrolio / 12% pomodoro. Ora round-robin pulito 40/40/20. |
+| Dashboard risorse farm | `dashboard/services/stats_reader.py` | Nuova API `get_risorse_farm()` → `RisorseFarm` dataclass con `inviato_per_risorsa`, `provviste_residue`, `spedizioni_oggi`, `quota_max_per_ciclo`, `istanze_detail`, `produzione_per_ora`. Filtro anti-OCR anomalo `_MAX_QTA_SPEDIZIONE=100M` (Issue #16). Override path via `DOOMSDAY_ROOT` env var. |
+| Dashboard stats anti-OCR | `dashboard/services/stats_reader.py` | `_MAX_QTA_SPEDIZIONE=100M` filtra spedizioni anomale (es. FAU_10 legno=999M da Issue #16). Senza filtro il totale legno era gonfiato a 1.1B vs 117M reali. |
+| Dashboard naming chiaro | `dashboard/services/stats_reader.py` | `quota_max_totale` → `quota_max_per_ciclo` — distingue quota per-ciclo da `spedizioni_oggi` (cumulativo giornaliero). |
+| Dashboard fix Issue #18 | `dashboard/services/config_manager.py` | Nuovo `get_merged_config()` che applica `merge_config(global_config, runtime_overrides)`. Route `/ui` ora mostra i valori effettivamente usati dal bot (coerenti col tick successivo). |
+| Dashboard layout two-column | `dashboard/templates/index.html` | Rewrite layout: `.page-layout` con main-col + side-col sticky (pannello risorse farm). Sezioni: istanze grid, task flags + globals, cfg 3-col (rifornimento/zaino/allocazione), istanze table, storico. |
+| Dashboard API | `dashboard/routers/api_config_overrides.py` | 5 endpoint per sezione (rifornimento/zaino/raccolta/sistema/task) + PATCH singolo task e singola istanza. |
+| Dashboard models | `dashboard/models.py` | Nuovi payload Pydantic: `SistemaOverride`, `ZainoOverride`, `AllocazioneOverride` + payload di sezione per le PUT. |
+| Dashboard services | `dashboard/services/config_manager.py` | Aggiunto `save_instances_fields()` per update granulare delle istanze da UI. |
+| Dashboard partial v2 | `dashboard/app.py` | Partial corretti: `ist-table` editabile 7 colonne, `task-flags-v2` compound (rifornimento mappa/membri, zaino bag/svuota), `inst-grid`, `storico` con filtri istanza/task, `res-totali` + `res-oraria` (placeholder). |
+| Dashboard CSS unificato | `dashboard/static/style.css` + `dashboard/templates/base.html` | Unificata palette ambra Share Tech Mono, `page-layout` two-column. Eliminata divergenza `/ui` (standalone ambra) vs `/ui/config` (verde IBM). `base.html`: active home. |
+| Layout istanze deprecato | `dashboard/app.py` + `dashboard/templates/index.html` | Rimosso campo `layout` dalla UI istanze (header + partial td + JS). Il campo resta Optional in `models.py` per retrocompat. file esistenti (bot ora usa template matching). |
 | Sync prod | `C:\doomsday-engine-prod\dashboard\` | Rimossi manualmente `dashboard_server.py`, `dashboard.html`, `templates/overview.html` (sync_prod.bat copia ma non elimina). |
 
 ## Fix e implementazioni sessione 21/04/2026

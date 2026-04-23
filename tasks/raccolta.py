@@ -1559,14 +1559,11 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
                 cooldown_map, n_truppe, tipi_bloccati, obiettivo
             )
 
-            # F3 — uscita immediata se rilevato "No Squads"
-            # (anche dal loop esterno `while tentativi_ciclo`: forza la
-            #  condizione di uscita per evitare retry inutili — il gioco
-            #  non ha squadre disponibili, rifare il ciclo è sprecato)
+            # F3 — uscita immediata dal for tipo se rilevato "No Squads".
+            # NON reset del flag qui: il while esterno (in RaccoltaTask.run)
+            # controllerà il flag dopo _loop_invio_marce per uscire dal ciclo.
             if getattr(ctx, "_raccolta_no_squads", False):
                 ctx.log_msg("Raccolta: 'No Squads' — uscita immediata loop")
-                ctx._raccolta_no_squads = False   # reset per prossima esecuzione
-                tentativi_ciclo = MAX_TENTATIVI_CICLO   # forza uscita while
                 break
 
             # ── CASO ok=True ─────────────────────────────────────────
@@ -1638,6 +1635,13 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
             # _reset_to_mappa già chiamato dentro _invia_squadra
             fallimenti_cons += 1
             continue
+
+        # F3 — dopo il for: se flag No Squads True, esci anche dal while
+        # interno. Il chiamante (RaccoltaTask.run) leggerà il flag e uscirà
+        # dal while esterno. Senza questo break, il while qui rientrerebbe,
+        # il for ri-detecterebbe No Squads, loop finché invii_totali >= max.
+        if getattr(ctx, "_raccolta_no_squads", False):
+            break
 
     # ── Fine while: log finale slot da HOME ──
     if ctx.navigator is not None:
@@ -1853,6 +1857,13 @@ class RaccoltaTask(Task):
                 inviate = _loop_invio_marce(ctx, obiettivo, attive_correnti,
                                              blacklist, blacklist_fuori)
                 inviate_totali += inviate
+
+                # F3 — No Squads rilevato in _loop_invio_marce:
+                # esci dal while esterno per evitare retry su gioco senza squadre
+                if getattr(ctx, "_raccolta_no_squads", False):
+                    ctx.log_msg("Raccolta: No Squads confermato — chiusura istanza")
+                    ctx._raccolta_no_squads = False   # reset per prossima esecuzione
+                    break
 
                 # Post-loop: rileggi slot da HOME per decidere se continuare
                 if ctx.navigator is not None:
