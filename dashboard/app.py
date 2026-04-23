@@ -309,8 +309,9 @@ def partial_task_flags_v2(request: Request):
         },
     }
 
+    # raccolta esclusa: è sempre attiva, non controllabile da UI
     ORDER = [
-        "raccolta", "rifornimento", "vip", "boost", "arena", "store",
+        "rifornimento", "vip", "boost", "arena", "store",
         "alleanza", "messaggi", "radar", "zaino", "arena_mercato",
     ]
 
@@ -321,10 +322,6 @@ def partial_task_flags_v2(request: Request):
         if name in rendered:
             continue
         rendered.add(name)
-
-        if name == "raccolta":
-            rows.append('<span class="tog on"><span class="tog-dot"></span>raccolta</span>')
-            continue
 
         on       = flags.get(name, True)
         on_css   = "on" if on else "off"
