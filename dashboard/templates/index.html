@@ -205,8 +205,8 @@
               <span class="rr-ico">{{ ico }}</span>
               <span class="rr-name">{{ r }}</span>
               <input class="rr-inp" id="a-{{ r }}" type="number" step="5" min="0" max="100"
-                     value="{{ (alloc.get(r, default/100) * 100) | round | int }}"
-                     onchange="updateAllocTotal()">
+                     value="{{ alloc.get(r, default) | round | int }}"
+                     oninput="updateAllocTotal()">
               <span class="rr-unit">%</span>
             </div>
             {% endfor %}
@@ -393,8 +393,7 @@ function setZainoMode(mode) {
 function updateAllocTotal() {
   let tot = 0;
   ['pomodoro','legno','petrolio','acciaio'].forEach(r => {
-    const row = g('ar-'+r);
-    if (row?.querySelector('.rr-cb')?.checked) tot += gn('a-'+r);
+    tot += gn('a-'+r);
   });
   tot = Math.round(tot);
   g('alloc-total').textContent = tot + '%';

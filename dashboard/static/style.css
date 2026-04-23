@@ -258,7 +258,6 @@ html, body {
 .tog-c.off .tog-vsep { display: none; }
 
 /* ── Config 3 colonne ────────────────────────────────────── */
-.cfg3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--gap); }
 .cfg4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--gap); }
 @media (max-width: 1400px) {
   .cfg4 { grid-template-columns: repeat(2, 1fr); }
@@ -298,14 +297,12 @@ html, body {
 /* risorsa row con flag */
 .rr { display: flex; align-items: center; gap: 6px; }
 .rr-ico  { font-size: 17px; width: 18px; text-align: center; flex-shrink: 0; }
-.rr-name { font-size: 15px; color: var(--text-mid); width: 50px; flex-shrink: 0; }
-.rr-inp  {
-  background: var(--bg3); border: 0.5px solid var(--border);
-  color: var(--text); font-family: var(--mono); font-size: 15px;
-  padding: 2px 5px; border-radius: 3px; width: 52px; text-align: right;
-}
+.rr-name { font-size: 10px; color: var(--text-mid); width: 44px; flex-shrink: 0; }
+.rr-inp  { background: var(--bg3); border: 0.5px solid var(--border);
+           color: var(--text); font-family: var(--mono); font-size: 10px;
+           padding: 2px 4px; border-radius: 3px; width: 58px; text-align: right; }
 .rr-inp:focus { outline: none; border-color: var(--accent); }
-.rr-unit { font-size: 14px; color: var(--text-dim); width: 14px; }
+.rr-unit { font-size: 9px; color: var(--text-dim); width: 12px; }
 .rr-flag { margin-left: auto; }
 .rr-cb { width: 13px; height: 13px; accent-color: var(--accent); cursor: pointer; }
 .rr.flagoff .rr-name,

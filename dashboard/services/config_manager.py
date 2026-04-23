@@ -74,24 +74,15 @@ def get_merged_config() -> dict:
     esattamente come la vede il bot ad ogni tick.
     Usato dalla dashboard per mostrare valori reali (Issue #18).
 
-    Normalizzazione raccolta.allocazione: se i valori sono in percentuali
-    (max > 1), vengono divisi per 100 per restituire sempre frazioni 0-1.
-    Problema: AllocazioneOverride salva in 0-100, global_config in 0-1 —
-    l'override vince al merge senza conversione. Template UI assume frazioni.
+    Nota: raccolta.allocazione nel merged è in formato percentuali 0-100
+    (come salvato da `AllocazioneOverride`). Il template UI lavora in
+    percentuali senza conversione.
     """
     try:
         from config.config_loader import merge_config
         gcfg = get_global_config()
         ovr  = get_overrides()
-        merged = merge_config(gcfg, ovr)
-        # Normalizza allocazione a frazioni 0-1 (fix formato misto)
-        alloc = merged.get("raccolta", {}).get("allocazione", {})
-        if alloc:
-            max_v = max((float(v) for v in alloc.values()), default=0.0)
-            if max_v > 1.0:
-                for k in list(alloc.keys()):
-                    alloc[k] = float(alloc[k]) / 100.0
-        return merged
+        return merge_config(gcfg, ovr)
     except Exception:
         return get_global_config()
 
