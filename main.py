@@ -513,7 +513,20 @@ def _thread_istanza(ist, tasks_cls, dry_run):
     ctx         = _build_ctx(ist, gcfg, dry_run, ist_overrides=_ist_ov)
     orc  = Orchestrator(ctx)
 
+    # Tipologia istanza: se "raccolta_only" registra SOLO RaccoltaTask,
+    # altrimenti (full) registra tutti i task definiti in task_setup.json.
+    _tipologia = (
+        getattr(ctx.config, "tipologia", None)
+        or getattr(ctx.config, "profilo", None)
+        or "full"
+    )
+    _solo_raccolta = str(_tipologia) == "raccolta_only"
+    if _solo_raccolta:
+        _log(nome, f"Tipologia={_tipologia} — registro solo RaccoltaTask")
+
     for class_name, priority, interval_h, schedule in _carica_task_setup():
+        if _solo_raccolta and class_name != "RaccoltaTask":
+            continue
         Cls = tasks_cls.get(class_name)
         if Cls is None:
             continue
