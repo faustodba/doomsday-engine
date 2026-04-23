@@ -465,10 +465,10 @@ def partial_res_totali(request: Request):
     farm = get_risorse_farm()
 
     RISORSE = [
-        ("legno",    "🪵"),
-        ("petrolio", "🛢"),
-        ("acciaio",  "⚙"),
         ("pomodoro", "🍅"),
+        ("legno",    "🪵"),
+        ("acciaio",  "⚙"),
+        ("petrolio", "🛢"),
     ]
 
     # Barre proporzionali al massimo valore
@@ -551,8 +551,8 @@ def partial_res_oraria(request: Request):
     RISORSE = [
         ("pomodoro", "🍅"),
         ("legno",    "🪵"),
-        ("petrolio", "🛢"),
         ("acciaio",  "⚙"),
+        ("petrolio", "🛢"),
     ]
 
     ha_dati = any(prod.get(r, 0.0) > 0 for r, _ in RISORSE)
