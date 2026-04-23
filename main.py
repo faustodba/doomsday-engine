@@ -16,6 +16,11 @@
 #  22/04/2026 — --reset-config:
 #    - Azzera sezione istanze di runtime_overrides.json ripristinando instances.json
 #    - Mantiene invariata la sezione globali (task flags, rifornimento, etc.)
+#  23/04/2026 — task_setup.json:
+#    - _TASK_SETUP non più hardcoded: letto da config/task_setup.json
+#    - Schema JSON: lista di oggetti con chiavi class/priority/interval_hours/schedule
+#    - Letto ad ogni avvio del processo (non hot-reload — serve restart bot)
+#    - Fallback hardcoded se il file è assente/corrotto (failsafe)
 # ==============================================================================
 from __future__ import annotations
 import argparse, json, os, signal, sys, threading, time
@@ -28,6 +33,7 @@ ROOT = os.path.dirname(os.path.abspath(__file__))
 _OVERRIDES_PATH     = os.path.join(ROOT, "config", "runtime_overrides.json")
 _GLOBAL_CONFIG_PATH = os.path.join(ROOT, "config", "global_config.json")
 _INSTANCES_PATH     = os.path.join(ROOT, "config", "instances.json")
+_TASK_SETUP_PATH    = os.path.join(ROOT, "config", "task_setup.json")
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 os.chdir(ROOT)  # CWD = project root, indipendentemente da dove main.py è lanciato
@@ -83,6 +89,29 @@ def _carica_istanze(filtro=None) -> list[dict]:
         if not istanze:
             print(f"  [WARN] Nessuna istanza trovata per: {filtro}")
     return istanze
+
+
+# ---------------------------------------------------------------------------
+# Task setup — scheduling e priorità
+# ---------------------------------------------------------------------------
+
+def _carica_task_setup() -> list[tuple]:
+    """
+    Carica la configurazione dei task da config/task_setup.json.
+    Sostituisce _TASK_SETUP hardcodato — modificabile senza toccare main.py.
+    Failsafe: se il file manca o è corrotto, il bot non si avvia (errore esplicito).
+    """
+    try:
+        with open(_TASK_SETUP_PATH, encoding="utf-8") as f:
+            raw = json.load(f)
+        return [(r["class"], r["priority"], r["interval_hours"], r["schedule"]) for r in raw]
+    except Exception as exc:
+        print(f"[ERRORE] task_setup.json: {exc}")
+        sys.exit(1)
+
+
+# Caricato all'import del modulo — modifiche a task_setup.json richiedono restart.
+_TASK_SETUP = _carica_task_setup()
 
 
 # ---------------------------------------------------------------------------
@@ -295,20 +324,6 @@ class _TaskWrapper:
 # ---------------------------------------------------------------------------
 # Thread istanza
 # ---------------------------------------------------------------------------
-_TASK_SETUP = [
-    ("BoostTask",         5,   0.0,   "periodic"),
-    ("VipTask",           10,  24.0,  "daily"),
-    ("MessaggiTask",      20,  4.0,   "periodic"),
-    ("AlleanzaTask",      30,  4.0,   "periodic"),
-    ("StoreTask",         40,  8.0,   "periodic"),
-    ("ArenaTask",         50,  24.0,  "daily"),
-    ("ArenaMercatoTask",  60,  24.0,  "daily"),
-    ("ZainoTask",         70,  168.0, "periodic"),
-    ("RadarTask",         80,  12.0,  "periodic"),
-    ("RadarCensusTask",   90,  12.0,  "periodic"),
-    ("RifornimentoTask",  100, 0.0,   "always"),
-    ("RaccoltaTask",      110, 0.0,   "always"),
-]
 
 _contatori: dict[str, dict[str, int]] = {}
 _contatori_lock = threading.Lock()
@@ -341,7 +356,7 @@ def _thread_istanza(ist, tasks_cls, dry_run):
     ctx         = _build_ctx(ist, gcfg, dry_run, ist_overrides=_ist_ov)
     orc  = Orchestrator(ctx)
 
-    for class_name, priority, interval_h, schedule in _TASK_SETUP:
+    for class_name, priority, interval_h, schedule in _carica_task_setup():
         Cls = tasks_cls.get(class_name)
         if Cls is None:
             continue
@@ -484,6 +499,7 @@ def main():
     _log("MAIN", "=" * 55)
     _log("MAIN", "DOOMSDAY ENGINE V6")
     _log("MAIN", f"Root: {ROOT}  dry-run: {args.dry_run}  tick-sleep: {args.tick_sleep}s")
+    _log("MAIN", f"Task setup: {len(_TASK_SETUP)} task da {_TASK_SETUP_PATH}")
     if args.reset_config:
         _log("MAIN", "Config istanze ripristinata da instances.json")
 
