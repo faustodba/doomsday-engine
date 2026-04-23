@@ -176,6 +176,34 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
   flow arena modificato (popup intermedi non gestiti).
 - Fix: aggiornare template + investigare se esiste pin intermedio saltato.
 
+### 25. Tracciamento diamanti nello state (BASSA)
+- **Problema:** `ocr_risorse()` legge già `.diamanti` ma nessun task lo persiste.
+- **Fix:**
+  1. `tasks/rifornimento.py` — dopo OCR deposito: `ctx.state.metrics["diamanti"] = deposito.diamanti`
+  2. `core/state.py` — verificare che `metrics` sia dict libero (probabilmente ok)
+  3. `stats_reader.py` — aggregare `diamanti` in `RisorseFarm` + `get_risorse_farm()`
+  4. `app.py` — `partial_res_totali` popola `diamond-row` con valore reale
+- **Prerequisito:** verificare che `rifornimento.py` chiami già `ocr_risorse()` e dove.
+
+### 19. Emulator orfani dopo kill unclean del bot (CHIUSA ✅ 23/04/2026)
+- **Problema:** kill unclean del bot (SIGKILL, Ctrl+C durante tick, crash) lascia
+  emulator MuMuPlayer dell'istanza in corso APERTO. Al restart del bot il vecchio
+  emulator resta attivo finché il nuovo bot non arriva al turno di quella istanza
+  (ore dopo). Intanto la dashboard mostra lo stato stale e possono verificarsi
+  conflitti ADB/port.
+- **Fix applicato (`main.py`):**
+  - Nuova `_cleanup_tutti_emulator(istanze, dry_run)` che itera `reset_istanza`
+    per tutte le 12 istanze configurate.
+  - Chiamata all'**avvio del bot** (prima del primo ciclo) e all'**inizio di
+    ogni ciclo** (prima del for istanze).
+  - Ogni reset protetto da try/except — un'istanza che fallisce il reset non
+    blocca il cleanup delle altre.
+- **Trade-off:** ~12×3s = ~36s di overhead per ciclo. Mitigato dal fatto che
+  `reset_istanza` su emulator già spento è rapido (MuMuManager restituisce
+  immediatamente).
+- **Validazione:** log `[MAIN] Cleanup emulator orfani (startup)` e
+  `(pre-ciclo)` a ogni ciclo.
+
 ### 14-bis. Raccolta No Squads — loop esterno e check universale (CHIUSA ✅ 22/04/2026)
 - **Problema:** FAU_10 generava ~40 detection "No Squads" per tick (408 su 10 tick).
   Il check F3 (`pin_no_squads`) funzionava (407 break eseguiti) ma il `break`
