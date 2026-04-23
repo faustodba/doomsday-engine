@@ -176,6 +176,15 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
   flow arena modificato (popup intermedi non gestiti).
 - Fix: aggiornare template + investigare se esiste pin intermedio saltato.
 
+### 26. Allocazione raccolta non collegata al bot (MEDIA)
+- **Problema:** dashboard salva allocazione in runtime_overrides.json ma raccolta.py
+  usa `_RATIO_TARGET_DEFAULT` hardcodato — non legge mai `ctx.config.ALLOCAZIONE_*`.
+- **Fix:**
+  1. `raccolta.py`: costruire `ratio_target` da `ctx.config.ALLOCAZIONE_*` in run()
+  2. Normalizzare percentuali → frazioni (÷100 se max > 1)
+  3. Passare `ratio_target` a `_calcola_sequenza_allocation()`
+- **Impatto:** finché non fixato, i valori allocazione dashboard sono cosmetici.
+
 ### 25. Tracciamento diamanti nello state (BASSA)
 - **Problema:** `ocr_risorse()` legge già `.diamanti` ma nessun task lo persiste.
 - **Fix:**
@@ -360,6 +369,24 @@ consolidare la logica raccolta. Baseline test: 42 passed / 57. Post-riscrittura:
 | Boost fix tap + polling + debug | `tasks/boost.py` | Tap su `(speed_cx, speed_cy)` (centro icona pin_speed), polling `pin_speed_use` timeout 4s via `_attendi_frame_use`, delay `wait_after_tap_boost=1.5s` post tap iniziale, screenshot debug pre/post tap in `debug_task/boost/`. Verificato via test live su FAU_00 (ore 18:12): boost 8h attivato con cy=260 (tap responsivo). Pattern osservato: se dopo swipe cy > 400 il tap è ignorato dal gioco (zona scroll-edge), sotto cy~260 tap risponde. Fix futuro potenziale: swipe aggiuntivo quando cy > 400. |
 | test_boost_live.py | `test_boost_live.py` (nuovo) | Runner isolato standalone per BoostTask su FAU_00 reale. Bypassa `should_run()` (esegue `run()` direttamente), `navigator=None` (salta ensure_home), log console con timestamp, UTF-8 forzato su stdout. Utile per debug mirato del task boost senza dover lanciare l'intero `main.py`. Comando: `python test_boost_live.py`. |
 | Fix test_boost.py _cfg_zero() | `tests/tasks/test_boost.py` | Rimossi parametri `wait_after_tap` e `wait_after_speed_tap` da `BoostConfig()` — non esistono più nel dataclass (parametri legacy). Sbloccati 20 test che fallivano con TypeError. Baseline 15/35 → 35/35 passed. |
+
+## Fix e implementazioni sessione 23/04/2026
+
+| Fix | File | Dettaglio |
+|-----|------|-----------|
+| Pannello risorse farm dati reali | `dashboard/app.py`, `stats_reader.py` | get_risorse_farm() da state/FAU_XX.json |
+| Fix OCR Issue #16 | `stats_reader.py` | inviato da dettaglio_oggi invece di inviato_oggi |
+| FauMorfeus aggiunto | `config/instances.json` | profilo raccolta_only, abilitata=true |
+| Font +2px leggibilità | `dashboard/static/style.css` | gamma 7-11px → 9-13px |
+| Fix stati CSS | `dashboard/static/style.css` | running/waiting/error/unknown |
+| --reset-config | `main.py` | ripristina runtime_overrides da instances.json |
+| task_setup.json | `config/task_setup.json`, `main.py` | _TASK_SETUP estratto da main.py |
+| Badge PROD/DEV | `dashboard/app.py`, `base.html`, `style.css` | label ambiente in topbar |
+| Bat separati dev/prod | `run_dashboard_prod.bat`, `run_dashboard_dev.bat`, `run_dev.bat` | porte 8765/8766 |
+| Resume checkpoint | `main.py` | last_checkpoint.json + prompt interattivo |
+| Storico farm giornaliero | `tasks/rifornimento.py` | data/storico_farm.json, retention 90gg |
+| Prompt configurazione avvio | `main.py` | runtime vs reset + --use-runtime flag |
+| _carica_istanze_ciclo() | `main.py` | merge dinamico instances.json + overrides ad ogni ciclo |
 
 ## Fix e implementazioni sessione 22/04/2026
 

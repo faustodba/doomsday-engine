@@ -24,43 +24,47 @@
 
     <div class="divider"></div>
 
-    <!-- ── TASK FLAGS ─────────────────────────────────────── -->
-    <div class="section">
-      <div class="sec-label">task flags <span class="sec-tag">hot reload</span></div>
-      <div class="flags-wrap">
-        <div class="flags-globals">
-          <div class="g-field">
-            <span class="g-lbl">istanze parallele</span>
-            <input class="g-inp" id="g-parallel" type="number"
-                   value="{{ cfg.get('sistema',{}).get('max_parallel',1) }}" min="1" max="12">
-          </div>
-          <div class="g-field">
-            <span class="g-lbl">attesa tra cicli</span>
-            <input class="g-inp" id="g-sleep" type="number"
-                   value="{{ cfg.get('sistema',{}).get('tick_sleep_min',30) }}" min="0">
-            <span class="g-unit">min</span>
-          </div>
-          <div style="margin-left:auto;display:flex;align-items:center;gap:8px">
-            <button class="btn btn-ghost" onclick="salvaGlobals()">⬡ salva</button>
-            <span class="save-ok" id="g-ok">✓ salvato</span>
-            <span class="save-err" id="g-err"></span>
-          </div>
-        </div>
-        <div class="flags-row" id="task-flags"
-             hx-get="/ui/partial/task-flags-v2"
-             hx-trigger="load"
-             hx-swap="innerHTML">
-          <span style="font-size:9px;color:var(--text-dim)">caricamento...</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="divider"></div>
-
-    <!-- ── CONFIGURAZIONE 3 COLONNE ──────────────────────── -->
+    <!-- ── CONFIGURAZIONE 2x2 ────────────────────────────── -->
     <div class="section">
       <div class="sec-label">configurazione</div>
-      <div class="cfg3">
+      <div class="cfg4">
+
+        <!-- COL 0: SISTEMA + TASK FLAGS -->
+        <div class="col-box" id="col-sistema">
+          <div class="col-head">
+            <span class="col-title">sistema</span>
+          </div>
+          <div class="col-body">
+            <div class="p-row">
+              <span class="p-lbl">max parallel</span>
+              <input class="p-inp" id="g-parallel" type="number"
+                     value="{{ cfg.get('sistema',{}).get('max_parallel',1) }}"
+                     min="1" max="12" style="width:50px">
+            </div>
+            <div class="p-row">
+              <span class="p-lbl">tick sleep (s)</span>
+              <input class="p-inp" id="g-sleep" type="number"
+                     value="{{ cfg.get('sistema',{}).get('tick_sleep_min',300) }}"
+                     min="0" step="30" style="width:60px">
+            </div>
+            <div class="col-sep"></div>
+            <div class="col-sub">task flags</div>
+            <div id="task-flags"
+                 hx-get="/ui/partial/task-flags-v2"
+                 hx-trigger="load"
+                 hx-swap="innerHTML"
+                 style="display:flex;flex-wrap:wrap;gap:6px">
+            </div>
+          </div>
+          <div class="col-foot">
+            <button class="btn btn-primary btn-full" onclick="salvaGlobals()">⬡ salva sistema</button>
+            <div class="save-row">
+              <span class="save-ok" id="g-ok">✓ salvato</span>
+              <span class="save-err" id="g-err"></span>
+            </div>
+          </div>
+        </div>
+
 
         <!-- COL 1: RIFORNIMENTO -->
         <div class="col-box" id="col-rif">
