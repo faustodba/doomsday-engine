@@ -783,6 +783,17 @@ def main():
                 else:
                     _resume_trovato = True  # trovata — da qui in poi esegue normalmente
 
+            # Hot-check abilitata: rileggi override mid-ciclo per recepire
+            # modifiche dashboard prima di avviare l'istanza (altrimenti il
+            # flag prende effetto solo al prossimo ciclo, fino a ~2h di ritardo).
+            try:
+                _ov_ist = load_overrides(_OVERRIDES_PATH).get("istanze", {}).get(nome, {})
+                if "abilitata" in _ov_ist and not _ov_ist["abilitata"]:
+                    _log("MAIN", f"--- Skip {nome} (abilitata=False runtime) ---")
+                    continue
+            except Exception as exc:
+                _log("MAIN", f"[WARN] hot-check abilitata {nome}: {exc}")
+
             # Scrivi checkpoint PRIMA di avviare
             _scrivi_checkpoint(ciclo, nome)
 

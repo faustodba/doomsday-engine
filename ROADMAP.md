@@ -189,6 +189,20 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
   UI dashboard → `runtime_overrides.json` → `merge_config` → `_from_raw` (normalize) →
   `ctx.config.ALLOCAZIONE_*` (frazioni) → `ratio_cfg` (mapping) → `_calcola_sequenza_allocation`
 
+### 39. Flag `abilitata` applicato solo a fine ciclo (fino ~2h ritardo) (CHIUSA ✅ 23/04/2026)
+- **Problema:** `_carica_istanze_ciclo` è chiamato una sola volta all'inizio
+  del ciclo. Se l'utente disabilita un'istanza dalla dashboard a ciclo in corso,
+  l'istanza continua a essere avviata perché la lista era già "congelata".
+  Caso osservato: FauMorfeus con `abilitata=False` (saved 14:40:20) avviato
+  regolarmente alle 15:30:58 come parte di CICLO 2 iniziato alle 14:15:57.
+- **Fix applicato (`main.py`, for istanze_ciclo loop):**
+  Prima di `_scrivi_checkpoint` e `_launcher.reset_istanza` per ogni istanza,
+  rilettura di `runtime_overrides.json` per recuperare il flag `abilitata`
+  aggiornato. Se False → skip con log `--- Skip {nome} (abilitata=False runtime) ---`.
+  Costo: 1 read JSON extra per istanza (~10ms). Effetto immediato del flag.
+- **Validazione attesa:** disabilitare un'istanza mid-ciclo deve causare skip
+  immediato al suo turno, non avvio launcher + game.
+
 ### 38. Dashboard leggeva stato/config da dev invece di prod (CHIUSA ✅ 23/04/2026)
 - **Problema:** la sezione "risorse farm" e la card "stato" mostravano valori vuoti
   (`—`, `0`, `unknown`) anche con il bot prod regolarmente attivo e state files popolati
