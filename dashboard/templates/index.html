@@ -44,7 +44,7 @@
             <div class="p-row">
               <span class="p-lbl">tick sleep (s)</span>
               <input class="p-inp" id="g-sleep" type="number"
-                     value="{{ cfg.get('sistema',{}).get('tick_sleep_min',300) }}"
+                     value="{{ cfg.get('sistema',{}).get('tick_sleep', 300) }}"
                      min="0" step="30" style="width:60px">
             </div>
             <div class="col-sep"></div>

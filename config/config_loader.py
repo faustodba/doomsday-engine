@@ -256,6 +256,42 @@ def merge_config(gcfg: dict, overrides: dict) -> dict:
     except Exception:
         pass
 
+    # ── sistema ─────────────────────────────────────────────────────────────
+    # Alias `tick_sleep_min` (dashboard Pydantic SistemaOverride) → `tick_sleep`
+    # per backward compat bot che usa `tick_sleep` nativamente.
+    try:
+        ov_sistema = globali.get("sistema", {})
+        if ov_sistema:
+            if "sistema" not in merged:
+                merged["sistema"] = {}
+            for k, v in ov_sistema.items():
+                key = "tick_sleep" if k == "tick_sleep_min" else k
+                merged["sistema"][key] = v
+    except Exception:
+        pass
+
+    # ── zaino ───────────────────────────────────────────────────────────────
+    try:
+        ov_zaino = globali.get("zaino", {})
+        if ov_zaino:
+            if "zaino" not in merged:
+                merged["zaino"] = {}
+            for k, v in ov_zaino.items():
+                merged["zaino"][k] = v
+    except Exception:
+        pass
+
+    # ── rifornimento_comune ─────────────────────────────────────────────────
+    try:
+        ov_rc = globali.get("rifornimento_comune", {})
+        if ov_rc:
+            if "rifornimento_comune" not in merged:
+                merged["rifornimento_comune"] = {}
+            for k, v in ov_rc.items():
+                merged["rifornimento_comune"][k] = v
+    except Exception:
+        pass
+
     # ── rifornimento_mappa — propagazione da globali.task e globali.rifugio ──
     # globali.task.rifornimento_mappa -> merged["rifornimento_mappa"]["abilitato"]
     # globali.rifugio.coord_x/y       -> merged["rifornimento_mappa"]["rifugio_x/y"]
