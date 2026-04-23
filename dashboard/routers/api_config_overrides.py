@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
 
 from dashboard.models import (
     RuntimeOverrides,
@@ -250,9 +251,14 @@ def save_istanze(payload: PayloadIstanze):
 # PATCH /api/config/overrides/task/{task_name} — toggle singolo task
 # ==============================================================================
 
+class ToggleTaskPayload(BaseModel):
+    abilitato: str  # "true" / "false" — viene da hx-vals come stringa
+
+
 @router.patch("/overrides/task/{task_name}")
-def toggle_task(task_name: str, abilitato: bool):
+def toggle_task(task_name: str, payload: ToggleTaskPayload):
     """Toggle singolo task flag senza sovrascrivere tutto il file."""
+    abilitato = payload.abilitato.lower() not in ("false", "0", "no")
     valid_tasks = {
         "alleanza", "messaggi", "vip", "radar", "radar_census",
         "rifornimento", "rifornimento_mappa", "zaino",
