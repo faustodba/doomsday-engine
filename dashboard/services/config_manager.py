@@ -39,9 +39,10 @@ from dashboard.models import RuntimeOverrides
 # ==============================================================================
 
 _ROOT               = Path(__file__).parent.parent.parent
-_GLOBAL_CONFIG_PATH = _ROOT / "config" / "global_config.json"
-_OVERRIDES_PATH     = _ROOT / "config" / "runtime_overrides.json"
-_INSTANCES_PATH     = _ROOT / "config" / "instances.json"
+_PROD_ROOT          = Path(os.environ.get("DOOMSDAY_ROOT", str(_ROOT)))
+_GLOBAL_CONFIG_PATH = _PROD_ROOT / "config" / "global_config.json"
+_OVERRIDES_PATH     = _PROD_ROOT / "config" / "runtime_overrides.json"
+_INSTANCES_PATH     = _PROD_ROOT / "config" / "instances.json"
 
 
 # ==============================================================================

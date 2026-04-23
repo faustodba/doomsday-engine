@@ -189,6 +189,31 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
   UI dashboard → `runtime_overrides.json` → `merge_config` → `_from_raw` (normalize) →
   `ctx.config.ALLOCAZIONE_*` (frazioni) → `ratio_cfg` (mapping) → `_calcola_sequenza_allocation`
 
+### 38. Dashboard leggeva stato/config da dev invece di prod (CHIUSA ✅ 23/04/2026)
+- **Problema:** la sezione "risorse farm" e la card "stato" mostravano valori vuoti
+  (`—`, `0`, `unknown`) anche con il bot prod regolarmente attivo e state files popolati
+  in `C:\doomsday-engine-prod\state\`.
+- **Causa:** `dashboard/services/config_manager.py` calcolava `_ROOT` solo da
+  `__file__` e NON onorava `DOOMSDAY_ROOT` (a differenza di `stats_reader.py`
+  che invece lo usa). Risultato: se la dashboard veniva avviata dal repo dev
+  (es. `uvicorn ... --reload` lanciato manualmente), i path config puntavano
+  alla cartella dev vuota anche con `DOOMSDAY_ROOT=prod` settato.
+  Concausa: uvicorn era stato riavviato in modalità dev (cwd=dev, no env var)
+  perdendo quindi l'allineamento a prod.
+- **Fix applicato (`dashboard/services/config_manager.py`):**
+  ```python
+  _ROOT      = Path(__file__).parent.parent.parent
+  _PROD_ROOT = Path(os.environ.get("DOOMSDAY_ROOT", str(_ROOT)))
+  _GLOBAL_CONFIG_PATH = _PROD_ROOT / "config" / "global_config.json"
+  _OVERRIDES_PATH     = _PROD_ROOT / "config" / "runtime_overrides.json"
+  _INSTANCES_PATH     = _PROD_ROOT / "config" / "instances.json"
+  ```
+  Ora `config_manager` segue la stessa regola di `stats_reader`: se
+  `DOOMSDAY_ROOT` è settato usa quello, altrimenti fallback su `__file__`.
+- **Validazione:** dashboard relanciata via `run_dashboard_prod.bat`:
+  pomodoro 94.7M, legno 59.7M, petrolio 11.5M, 93 spedizioni, provviste 128.4M,
+  card stato `running` uptime 0h 34m.
+
 ### 25. Tracciamento diamanti nello state (BASSA)
 - **Problema:** `ocr_risorse()` legge già `.diamanti` ma nessun task lo persiste.
 - **Fix:**
