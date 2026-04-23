@@ -25,8 +25,7 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, HTTPException, Request
 
 from dashboard.models import (
     RuntimeOverrides,
@@ -251,14 +250,19 @@ def save_istanze(payload: PayloadIstanze):
 # PATCH /api/config/overrides/task/{task_name} — toggle singolo task
 # ==============================================================================
 
-class ToggleTaskPayload(BaseModel):
-    abilitato: str  # "true" / "false" — viene da hx-vals come stringa
-
-
 @router.patch("/overrides/task/{task_name}")
-def toggle_task(task_name: str, payload: ToggleTaskPayload):
-    """Toggle singolo task flag senza sovrascrivere tutto il file."""
-    abilitato = payload.abilitato.lower() not in ("false", "0", "no")
+async def toggle_task(task_name: str, request: Request):
+    """Toggle singolo task flag — accetta JSON body o form data da HTMX."""
+    # Leggi payload — HTMX manda application/json con hx-vals
+    try:
+        body = await request.json()
+        abilitato_raw = body.get("abilitato", "true")
+    except Exception:
+        form = await request.form()
+        abilitato_raw = form.get("abilitato", "true")
+
+    abilitato = str(abilitato_raw).lower() not in ("false", "0", "no")
+
     valid_tasks = {
         "alleanza", "messaggi", "vip", "radar", "radar_census",
         "rifornimento", "rifornimento_mappa", "zaino",
