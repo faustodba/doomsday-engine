@@ -13,6 +13,9 @@
 #    - Rimossa _carica_runtime() — sostituita da load_global()
 #    - global_config.json letto ad ogni tick → modifiche dashboard senza restart
 #    - _carica_istanze() invariata — legge ancora instances.json
+#  22/04/2026 — --reset-config:
+#    - Azzera sezione istanze di runtime_overrides.json ripristinando instances.json
+#    - Mantiene invariata la sezione globali (task flags, rifornimento, etc.)
 # ==============================================================================
 from __future__ import annotations
 import argparse, json, os, signal, sys, threading, time
@@ -22,8 +25,9 @@ from typing import Optional
 sys.stdout.reconfigure(encoding='utf-8')
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
-_OVERRIDES_PATH = os.path.join(ROOT, "config", "runtime_overrides.json")
+_OVERRIDES_PATH     = os.path.join(ROOT, "config", "runtime_overrides.json")
 _GLOBAL_CONFIG_PATH = os.path.join(ROOT, "config", "global_config.json")
+_INSTANCES_PATH     = os.path.join(ROOT, "config", "instances.json")
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
 os.chdir(ROOT)  # CWD = project root, indipendentemente da dove main.py è lanciato
@@ -65,7 +69,7 @@ def _import_tasks() -> dict:
 
 
 def _carica_istanze(filtro=None) -> list[dict]:
-    path = os.path.join(ROOT, "config", "instances.json")
+    path = _INSTANCES_PATH
     try:
         with open(path, "r", encoding="utf-8") as f:
             istanze = json.load(f)
@@ -79,6 +83,69 @@ def _carica_istanze(filtro=None) -> list[dict]:
         if not istanze:
             print(f"  [WARN] Nessuna istanza trovata per: {filtro}")
     return istanze
+
+
+# ---------------------------------------------------------------------------
+# Reset configurazione
+# ---------------------------------------------------------------------------
+def _reset_config() -> None:
+    """
+    --reset-config: ripristina la sezione istanze di runtime_overrides.json
+    dai valori base di instances.json.
+
+    Comportamento:
+      - Legge instances.json — fonte di verità statica
+      - Per ogni istanza crea un override con i soli campi modificabili dalla dashboard:
+        abilitata, truppe, tipologia (profilo), fascia_oraria
+      - Sovrascrive SOLO la sezione "istanze" di runtime_overrides.json
+      - Mantiene invariata la sezione "globali" (task flags, rifornimento, etc.)
+      - Scrittura atomica (tmp + os.replace)
+    """
+    print("[RESET] Reset configurazione istanze da instances.json...")
+
+    # Leggi instances.json
+    try:
+        with open(_INSTANCES_PATH, encoding="utf-8") as f:
+            istanze = json.load(f)
+    except Exception as exc:
+        print(f"[RESET] ERRORE lettura instances.json: {exc}")
+        sys.exit(1)
+
+    # Leggi runtime_overrides.json esistente (per preservare globali)
+    try:
+        with open(_OVERRIDES_PATH, encoding="utf-8") as f:
+            overrides = json.load(f)
+    except Exception:
+        overrides = {}
+
+    # Ricostruisci sezione istanze dai valori base di instances.json
+    nuove_istanze = {}
+    for ist in istanze:
+        nome = ist.get("nome", "")
+        if not nome:
+            continue
+        nuove_istanze[nome] = {
+            "abilitata":    ist.get("abilitata", True),
+            "truppe":       ist.get("truppe", 0),
+            "tipologia":    ist.get("profilo", "full"),
+            "fascia_oraria": ist.get("fascia_oraria", ""),
+        }
+        print(f"[RESET]   {nome}: abilitata={nuove_istanze[nome]['abilitata']} "
+              f"profilo={nuove_istanze[nome]['tipologia']}")
+
+    # Mantieni globali, sostituisci solo istanze
+    overrides["istanze"] = nuove_istanze
+
+    # Scrittura atomica
+    tmp = _OVERRIDES_PATH + ".tmp"
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(overrides, f, ensure_ascii=False, indent=2)
+        os.replace(tmp, _OVERRIDES_PATH)
+        print(f"[RESET] runtime_overrides.json aggiornato — {len(nuove_istanze)} istanze ripristinate.")
+    except Exception as exc:
+        print(f"[RESET] ERRORE scrittura runtime_overrides.json: {exc}")
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------
@@ -189,7 +256,6 @@ def _build_ctx(ist: dict, gcfg, dry_run: bool, ist_overrides=None) -> TaskContex
         try:
             from core.navigator import GameNavigator
 
-            # FIX sessione 2: firma corretta StructuredLogger.info(module, message)
             def _nav_log(msg: str) -> None:
                 logger.info("navigator", msg)
 
@@ -289,8 +355,6 @@ def _thread_istanza(ist, tasks_cls, dry_run):
     _log(nome, f"Orchestrator pronto -- {len(orc)} task: {orc.task_names()}")
 
     # ── Ripristino scheduling dal disco (restart-safe) ────────────────────
-    # Ripristina i last_run dall'ultimo stato persistito su disco.
-    # Senza questo, ogni restart rieseguirebbe tutti i task immediatamente.
     try:
         ctx.state.schedule.restore_to_orchestrator(orc)
         _log(nome, f"Schedule ripristinato: {dict(ctx.state.schedule.timestamps)}")
@@ -348,7 +412,6 @@ def _thread_istanza(ist, tasks_cls, dry_run):
     _aggiorna_stato_istanza(nome, {"stato": "waiting", "task_eseguiti": dict(cnts),
                                    "ultimo_task": ultimo, "scheduler": _scheduler_prossimi(orc), "errori": errori})
     try:
-        # Sync schedule → state prima del save (restart-safe)
         ctx.state.schedule.update_from_stato(orc.stato())
         ctx.state.save(state_dir=os.path.join(ROOT, "state"))
     except Exception as exc:
@@ -400,11 +463,19 @@ def _parse_args():
                    help="Secondi di pausa tra un ciclo completo di istanze e il successivo")
     p.add_argument("--no-dashboard", action="store_true", default=False)
     p.add_argument("--status-interval", type=int, default=5)
+    p.add_argument("--reset-config", action="store_true", default=False,
+                   help="Ripristina runtime_overrides.json (sezione istanze) dai valori base "
+                        "di instances.json. Mantiene invariati i globali (task flags, etc.). "
+                        "Il bot si avvia normalmente dopo il reset.")
     return p.parse_args()
 
 
 def main():
     args = _parse_args()
+
+    # ── Reset configurazione istanze (se richiesto) ──────────────────
+    if args.reset_config:
+        _reset_config()
 
     if os.path.exists(_LOG_PATH):
         try: os.replace(_LOG_PATH, _LOG_PATH + ".bak")
@@ -413,6 +484,8 @@ def main():
     _log("MAIN", "=" * 55)
     _log("MAIN", "DOOMSDAY ENGINE V6")
     _log("MAIN", f"Root: {ROOT}  dry-run: {args.dry_run}  tick-sleep: {args.tick_sleep}s")
+    if args.reset_config:
+        _log("MAIN", "Config istanze ripristinata da instances.json")
 
     filtro  = [n.strip() for n in args.istanze.split(",")] if args.istanze else None
     istanze = _carica_istanze(filtro=filtro)
@@ -441,7 +514,7 @@ def main():
     threading.Thread(target=_status_writer_loop, args=(stop_event, args.status_interval),
                      name="StatusWriter", daemon=True).start()
 
-    SLEEP_CICLO = args.tick_sleep  # secondi tra un ciclo e l'altro (CLI --tick-sleep)
+    SLEEP_CICLO = args.tick_sleep
 
     ciclo = 0
     while not stop_event.is_set():
@@ -462,7 +535,7 @@ def main():
                 name=nome, daemon=True
             )
             t.start()
-            t.join()  # Attende che l'istanza completi il tick prima di passare alla prossima
+            t.join()
             _log("MAIN", f"--- Istanza {nome} completata ---")
 
         if stop_event.is_set():

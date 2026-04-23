@@ -31,6 +31,22 @@ from dashboard.routers import (
 
 
 # ==============================================================================
+# Helpers
+# ==============================================================================
+
+def _fmt_m(v: int | float) -> str:
+    """Formatta valore in M/K leggibile. 91699999 → '91.7M'. 0 → '—'"""
+    v = float(v)
+    if v == 0:
+        return "—"
+    if v >= 1_000_000:
+        return f"{v / 1_000_000:.1f}M"
+    if v >= 1_000:
+        return f"{v / 1_000:.0f}K"
+    return str(int(v))
+
+
+# ==============================================================================
 # Lifespan
 # ==============================================================================
 
@@ -104,9 +120,9 @@ def root():
 def ui_index(request: Request):
     from dashboard.services.config_manager import get_merged_config, get_instances
     return templates.TemplateResponse(request, "index.html", {
-        "active":   "home",
-        "cfg":      get_merged_config(),
-        "istanze":  get_instances(),
+        "active":  "home",
+        "cfg":     get_merged_config(),
+        "istanze": get_instances(),
     })
 
 
@@ -190,8 +206,8 @@ def ui_partial_task_flags(request: Request):
 def partial_status_inline(request: Request):
     from dashboard.services.stats_reader import get_engine_status
     es = get_engine_status()
-    uptime_h = es.uptime_s // 3600
-    uptime_m = (es.uptime_s % 3600) // 60
+    uptime_h  = es.uptime_s // 3600
+    uptime_m  = (es.uptime_s % 3600) // 60
     stato_css = "running" if es.stato == "running" else "stopped"
     html = f'''
     <span class="dot {stato_css}"></span>
@@ -206,47 +222,55 @@ def partial_status_inline(request: Request):
 def partial_inst_grid(request: Request):
     from dashboard.services.stats_reader import get_engine_status
     from dashboard.services.config_manager import get_instances, get_overrides
-    es      = get_engine_status()
-    insts   = get_instances()
-    ov      = get_overrides()
-    rows    = []
-    n_run   = 0
-    n_err   = 0
+    es    = get_engine_status()
+    insts = get_instances()
+    ov    = get_overrides()
+    rows  = []
 
     for ist in insts:
-        nome      = ist.get("nome", "")
+        nome = ist.get("nome", "")
+        if not nome:
+            continue
+        ist_ov     = ov.get("istanze", {}).get(nome, {})
+        abilitata  = ist_ov.get("abilitata", ist.get("abilitata", True))
         ist_status = es.istanze.get(nome)
-        ist_ov    = ov.get("istanze", {}).get(nome, {})
-        abilitata = ist_ov.get("abilitata", ist.get("abilitata", True))
 
         if not abilitata:
             stato = "idle"
         elif ist_status:
-            stato = ist_status.stato
+            stato = ist_status.stato or "unknown"
         else:
             stato = "unknown"
 
-        if stato == "running": n_run += 1
-        if stato == "error":   n_err += 1
-
         ut         = ist_status.ultimo_task if ist_status else None
-        task_cor   = ist_status.task_corrente if ist_status else None
+        task_cor   = (ist_status.task_corrente if ist_status else None) or ""
         task_label = task_cor or (ut.nome if ut else "—")
-        slot_label = "—"
-        if ist_status and ist_status.task_eseguiti:
-            pass  # slot da OCR non disponibile in status
+        esito      = ut.esito if ut else ""
+        esito_css  = "esito-ok" if esito == "ok" else ("esito-err" if esito == "err" else "")
+        ts_label   = ut.ts if ut else "—"
+        msg_label  = (ut.msg or "")[:35] if ut else "—"
+        errori     = ist_status.errori if ist_status else 0
+        errori_css = "color:var(--red)" if errori > 0 else "color:var(--text-dim)"
 
         rows.append(f'''<div class="ic {stato}">
           <div class="ic-head">
             <span class="ic-name">{nome}</span>
             <span class="badge {stato}">{stato}</span>
           </div>
-          <div class="ic-row"><span>task</span><span>{task_label}</span></div>
-          <div class="ic-row"><span>ts</span><span>{ut.ts if ut else "—"}</span></div>
+          <div class="ic-row"><span>task</span>
+            <span class="{esito_css}">{task_label}</span></div>
+          <div class="ic-row"><span>ts</span>
+            <span>{ts_label}</span></div>
+          <div class="ic-row"><span>msg</span>
+            <span style="font-size:9px;max-width:110px;text-align:right;
+              overflow:hidden;white-space:nowrap;text-overflow:ellipsis">
+              {msg_label}</span></div>
+          <div class="ic-row"><span>errori</span>
+            <span style="{errori_css}">{errori}</span></div>
         </div>''')
 
-    # Inietta contatori nel topbar via OOB swap (opzionale — aggiornato inline)
-    return HTMLResponse(''.join(rows))
+    return HTMLResponse(''.join(rows) or
+        '<div class="ic idle"><div class="ic-head"><span class="ic-name">nessuna istanza</span></div></div>')
 
 
 @app.get("/ui/partial/task-flags-v2", include_in_schema=False)
@@ -255,7 +279,6 @@ def partial_task_flags_v2(request: Request):
     ov    = get_overrides()
     flags = ov.get("globali", {}).get("task", {})
 
-    # Task con sottotipo (compound pill)
     COMPOUND = {
         "rifornimento": {
             "subtypes": ["mappa", "membri"],
@@ -267,13 +290,12 @@ def partial_task_flags_v2(request: Request):
         },
     }
 
-    # Ordine visualizzazione
     ORDER = [
         "raccolta", "rifornimento", "vip", "boost", "arena", "store",
         "alleanza", "messaggi", "radar", "zaino", "arena_mercato",
     ]
 
-    rows = []
+    rows     = []
     rendered = set()
 
     for name in ORDER:
@@ -281,7 +303,6 @@ def partial_task_flags_v2(request: Request):
             continue
         rendered.add(name)
 
-        # raccolta — sempre on, non togglabile
         if name == "raccolta":
             rows.append('<span class="tog on"><span class="tog-dot"></span>raccolta</span>')
             continue
@@ -291,15 +312,14 @@ def partial_task_flags_v2(request: Request):
         next_val = "false" if on else "true"
 
         if name in COMPOUND:
-            c       = COMPOUND[name]
+            c         = COMPOUND[name]
             subs_html = ""
             for s in c["subtypes"]:
                 active_css = " active" if s == c["active"] else ""
-                # click sottotipo → patch modalità
                 if name == "rifornimento":
-                    patch_url  = f"/api/config/rifornimento-mode/{s}"
+                    patch_url = f"/api/config/rifornimento-mode/{s}"
                 else:
-                    patch_url  = f"/api/config/zaino-mode/{s}"
+                    patch_url = f"/api/config/zaino-mode/{s}"
                 subs_html += f'<span class="sub{active_css}" onclick="setModeRemote(\'{name}\',\'{s}\')">{s}</span>'
 
             rows.append(f'''<span class="tog-c {on_css}">
@@ -329,25 +349,24 @@ def partial_task_flags_v2(request: Request):
 def partial_ist_table(request: Request):
     from dashboard.services.config_manager import get_instances, get_overrides
     from dashboard.services.stats_reader import get_engine_status
-    insts  = get_instances()
-    ov     = get_overrides()
-    es     = get_engine_status()
-    rows   = []
+    insts = get_instances()
+    ov    = get_overrides()
+    es    = get_engine_status()
+    rows  = []
 
     for ist in insts:
-        nome      = ist.get("nome", "")
-        ist_ov    = ov.get("istanze", {}).get(nome, {})
+        nome       = ist.get("nome", "")
+        ist_ov     = ov.get("istanze", {}).get(nome, {})
         ist_status = es.istanze.get(nome)
 
-        abilitata   = ist_ov.get("abilitata",   ist.get("abilitata",   True))
-        truppe      = ist_ov.get("truppe",       ist.get("truppe",      0))
-        tipologia   = ist_ov.get("tipologia",    ist.get("profilo",     "full"))
+        abilitata   = ist_ov.get("abilitata",    ist.get("abilitata",    True))
+        truppe      = ist_ov.get("truppe",        ist.get("truppe",       0))
+        tipologia   = ist_ov.get("tipologia",     ist.get("profilo",      "full"))
         fascia_raw  = ist_ov.get("fascia_oraria", ist.get("fascia_oraria", ""))
         max_squadre = ist.get("max_squadre", 4)
         livello     = ist.get("livello", 6)
         stato       = ist_status.stato if ist_status else ("idle" if not abilitata else "unknown")
 
-        # Parse fascia "HH:MM-HH:MM"
         fascia_da = ""
         fascia_a  = ""
         if fascia_raw and "-" in str(fascia_raw):
@@ -397,7 +416,6 @@ def partial_storico(
     from dashboard.services.stats_reader import get_storico
     entries = get_storico(50)
 
-    # Filtro per istanza e task
     if istanza:
         entries = [e for e in entries if e.istanza == istanza]
     if task:
@@ -421,53 +439,134 @@ def partial_storico(
 
 @app.get("/ui/partial/res-totali", include_in_schema=False)
 def partial_res_totali(request: Request):
-    """Placeholder — dati reali da implementare con stats_reader."""
-    html = '''
-    <div class="res-sub">totale raccolto (ultime 5h)</div>
-    <div class="res-row"><span class="res-ico">🍅</span><span class="res-name">campo</span>
-      <div class="res-bar-wrap"><div class="res-bar" style="width:0%"></div></div>
-      <span class="res-val">—</span></div>
-    <div class="res-row"><span class="res-ico">🪵</span><span class="res-name">legno</span>
-      <div class="res-bar-wrap"><div class="res-bar" style="width:0%"></div></div>
-      <span class="res-val">—</span></div>
-    <div class="res-row"><span class="res-ico">🛢</span><span class="res-name">petrolio</span>
-      <div class="res-bar-wrap"><div class="res-bar" style="width:0%"></div></div>
-      <span class="res-val">—</span></div>
-    <div class="res-row"><span class="res-ico">⚙</span><span class="res-name">acciaio</span>
-      <div class="res-bar-wrap"><div class="res-bar" style="width:0%"></div></div>
-      <span class="res-val">—</span></div>
-    <div class="res-sub" style="margin-top:10px">nodi in campo ora</div>
-    <div class="res-row"><span class="res-ico">🍅</span><span class="res-name">campo</span>
-      <div class="res-bar-wrap"><div class="res-bar green" style="width:0%"></div></div>
-      <span class="res-val">—</span></div>
-    <div class="res-row"><span class="res-ico">🪵</span><span class="res-name">legno</span>
-      <div class="res-bar-wrap"><div class="res-bar green" style="width:0%"></div></div>
-      <span class="res-val">—</span></div>
-    <div class="res-row"><span class="res-ico">🛢</span><span class="res-name">petrolio</span>
-      <div class="res-bar-wrap"><div class="res-bar green" style="width:0%"></div></div>
-      <span class="res-val">—</span></div>
-    <div class="res-row"><span class="res-ico">⚙</span><span class="res-name">acciaio</span>
-      <div class="res-bar-wrap"><div class="res-bar green" style="width:0%"></div></div>
-      <span class="res-val">—</span></div>
-    <div class="diamond-row">
-      <span class="res-ico">💎</span>
-      <span class="res-name" style="color:var(--text-dim)">diamanti</span>
-      <span class="diamond-val">—</span>
+    """
+    Pannello risorse farm — blocco superiore.
+    Mostra: totale inviato oggi per risorsa (da dettaglio_oggi — immune OCR Issue #16)
+            provviste residue totali + spedizioni oggi / quota per ciclo.
+    """
+    from dashboard.services.stats_reader import get_risorse_farm
+
+    farm = get_risorse_farm()
+
+    RISORSE = [
+        ("legno",    "🪵"),
+        ("petrolio", "🛢"),
+        ("acciaio",  "⚙"),
+        ("pomodoro", "🍅"),
+    ]
+
+    # Barre proporzionali al massimo valore
+    valori  = [farm.inviato_per_risorsa.get(r, 0) for r, _ in RISORSE]
+    max_val = max(valori) if any(v > 0 for v in valori) else 1
+
+    rows_inviato = ""
+    for risorsa, ico in RISORSE:
+        qta = farm.inviato_per_risorsa.get(risorsa, 0)
+        pct = int(qta / max_val * 100) if max_val > 0 else 0
+        lbl = _fmt_m(qta)
+        rows_inviato += f'''
+        <div class="res-row">
+          <span class="res-ico">{ico}</span>
+          <span class="res-name">{risorsa}</span>
+          <div class="res-bar-wrap">
+            <div class="res-bar" style="width:{pct}%"></div>
+          </div>
+          <span class="res-val">{lbl}</span>
+        </div>'''
+
+    # Spedizioni: cumulativo giornaliero vs quota per-ciclo
+    # Semantica: spedizioni_oggi può superare quota_max_per_ciclo (è multi-ciclo)
+    prov_lbl = _fmt_m(farm.provviste_residue)
+
+    # Dettaglio per istanza (compact)
+    detail_rows = ""
+    for d in sorted(farm.istanze_detail, key=lambda x: x.nome):
+        esaurita_css = "color:var(--red)" if d.provviste_esaurite else "color:var(--text-dim)"
+        prov_ist     = _fmt_m(d.provviste_residue)
+        inv_str      = " · ".join(
+            f"{ico}{_fmt_m(d.inviato_oggi.get(r, 0))}"
+            for r, ico in RISORSE
+            if d.inviato_oggi.get(r, 0) > 0
+        ) or "—"
+        detail_rows += f'''
+        <div class="res-row" style="font-size:9px">
+          <span class="res-name" style="color:var(--accent);min-width:52px">{d.nome}</span>
+          <span style="flex:1;color:var(--text-dim)">{inv_str}</span>
+          <span style="{esaurita_css}">{prov_ist}</span>
+        </div>'''
+
+    html = f'''
+    <div class="res-sub">inviato oggi — tutte le istanze</div>
+    {rows_inviato}
+    <div class="res-sub" style="margin-top:10px;display:flex;justify-content:space-between;align-items:center">
+      <span>spedizioni oggi</span>
+      <span style="color:var(--accent)">{farm.spedizioni_oggi}
+        <span style="color:var(--text-dim);font-size:9px">· {farm.quota_max_per_ciclo}/ciclo</span>
+      </span>
     </div>
+    <div class="res-sub" style="display:flex;justify-content:space-between;align-items:center">
+      <span>provviste residue</span>
+      <span style="color:var(--accent)">{prov_lbl}</span>
+    </div>
+    <div class="res-sub" style="margin-top:10px">dettaglio istanze</div>
+    {detail_rows if detail_rows else
+      '<div style="color:var(--text-dim);font-size:9px;padding:4px 0">nessun dato disponibile</div>'}
     '''
     return HTMLResponse(html)
 
 
 @app.get("/ui/partial/res-oraria", include_in_schema=False)
 def partial_res_oraria(request: Request):
-    """Placeholder — dati reali da implementare con stats_reader."""
-    html = '''
-    <div class="res-sub">produzione/ora (ultime 5h)</div>
+    """
+    Pannello risorse farm — blocco produzione/ora.
+    Somma metrics.*_per_ora da tutti gli state/FAU_XX.json.
+    Valori 0.0 normali se bot appena ripartito (metrics aggiornati da raccolta.py).
+    """
+    from dashboard.services.stats_reader import get_risorse_farm
+
+    farm = get_risorse_farm()
+    prod = farm.produzione_per_ora
+
+    RISORSE = [
+        ("pomodoro", "🍅"),
+        ("legno",    "🪵"),
+        ("petrolio", "🛢"),
+        ("acciaio",  "⚙"),
+    ]
+
+    ha_dati = any(prod.get(r, 0.0) > 0 for r, _ in RISORSE)
+
+    if not ha_dati:
+        corpo = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim);padding:6px">in attesa del primo ciclo raccolta</td></tr>'
+    else:
+        max_val   = max(prod.get(r, 0.0) for r, _ in RISORSE) or 1.0
+        riga_vals = ""
+        for risorsa, ico in RISORSE:
+            v   = prod.get(risorsa, 0.0)
+            pct = int(v / max_val * 100)
+            lbl = _fmt_m(v)
+            riga_vals += (
+                f'<td title="{risorsa}: {lbl}/h">'
+                f'<div style="display:flex;flex-direction:column;align-items:center;gap:2px">'
+                f'<div style="width:{max(pct,2)}%;height:4px;background:var(--accent);'
+                f'border-radius:2px;min-width:2px"></div>'
+                f'<span>{lbl}</span></div></td>'
+            )
+        corpo = f'<tr><td style="color:var(--text-dim)">farm</td>{riga_vals}</tr>'
+
+    html = f'''
+    <div class="res-sub">produzione/ora — farm aggregata</div>
     <table class="ora-tbl">
-      <thead><tr><th>ora</th><th>🍅</th><th>🪵</th><th>🛢</th><th>⚙</th></tr></thead>
-      <tbody>
-        <tr><td colspan="5" style="text-align:center;color:var(--text-dim);padding:6px">dati non disponibili</td></tr>
-      </tbody>
+      <thead>
+        <tr>
+          <th></th>
+          {''.join(f'<th>{ico}</th>' for _, ico in RISORSE)}
+        </tr>
+      </thead>
+      <tbody>{corpo}</tbody>
     </table>
+    <div style="color:var(--text-dim);font-size:9px;margin-top:6px;text-align:right">
+      aggiornato ad ogni ciclo raccolta
+    </div>
     '''
     return HTMLResponse(html)
