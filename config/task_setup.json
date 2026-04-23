@@ -10,5 +10,6 @@
   {"class": "RadarTask",        "priority": 80,  "interval_hours": 12.0,  "schedule": "periodic"},
   {"class": "RadarCensusTask",  "priority": 90,  "interval_hours": 12.0,  "schedule": "periodic"},
   {"class": "RifornimentoTask", "priority": 100, "interval_hours": 0.0,   "schedule": "always"},
+  {"class": "DonazioneTask",    "priority": 105, "interval_hours": 0.0,   "schedule": "always"},
   {"class": "RaccoltaTask",     "priority": 110, "interval_hours": 0.0,   "schedule": "always"}
 ]

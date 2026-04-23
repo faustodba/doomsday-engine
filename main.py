@@ -55,6 +55,7 @@ def _import_tasks() -> dict:
     _catalogue = [
         ("tasks.raccolta",       "RaccoltaTask"),
         ("tasks.rifornimento",   "RifornimentoTask"),
+        ("tasks.donazione",      "DonazioneTask"),
         ("tasks.zaino",          "ZainoTask"),
         ("tasks.vip",            "VipTask"),
         ("tasks.alleanza",       "AlleanzaTask"),

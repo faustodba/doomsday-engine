@@ -11,7 +11,9 @@
       "arena": true,
       "arena_mercato": true,
       "boost": true,
-      "store": true
+      "store": true,
+      "donazione": true,
+      "raccolta": true
     },
     "sistema": {
       "max_parallel": 2,

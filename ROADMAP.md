@@ -476,8 +476,7 @@ consolidare la logica raccolta. Baseline test: 42 passed / 57. Post-riscrittura:
 | Issue #26 — Allocazione collegata al bot | `config/config_loader.py`, `tasks/raccolta.py` | `_from_raw` normalizza %→frazioni; `_loop_invio_marce` costruisce `ratio_cfg` da `ctx.config.ALLOCAZIONE_*` e lo passa a `_calcola_sequenza_allocation` (commit `424b440`) |
 | None-safe build_instance_cfg | `config/config_loader.py`, `dashboard/models.py` | Helper `_ovr()` tratta null come miss → fall-through ai default; `RuntimeOverrides.save` con `exclude_none=True` previene riscrittura null (commit `4afb14e`) |
 | Issue #37 — setModeRemote operativo | `dashboard/routers/api_config_overrides.py`, `dashboard/templates/index.html` | Nuovi endpoint PATCH `/api/config/rifornimento-mode/{mappa\|membri}` e `/api/config/zaino-mode/{bag\|svuota}` + JS `setModeRemote(taskName, sub)` fetch + sync UI + refresh task-flags-v2 (commit `c9ced2a`) |
-
-## Fix e implementazioni sessione 22/04/2026
+| DonazioneTask V6 integrata | `tasks/donazione.py` (nuovo), `main.py`, `config/task_setup.json`, `config/runtime_overrides.json`, `templates/pin/pin_marked.png`, `pin_donate.png`, `pin_research.png` | Nuovo task V6 priority=105 tra Rifornimento e Raccolta. Refactor convenzioni V6 (core.task.Task, TaskContext, name()/should_run(), path `pin/pin_xxx.png`, `find_one(screen,...)`, `TaskResult(message=...)`, `task_abilitato()`, `vai_in_home()` no-arg). Back×3 dopo popup research/non_riconosciuto per chiudere catena Alliance→HOME. Test end-to-end FAU_00 validato: pin_marked → pin_donate 30 tap cap → back×3 → HOME → raccolta parte regolarmente. Flag `donazione: true` in runtime_overrides dev (prod NON aggiornato). |
 
 | Area | File | Dettaglio |
 |------|------|-----------|
