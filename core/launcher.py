@@ -122,12 +122,51 @@ def _adb_cmd(porta: int, *args: str, adb_exe: str) -> str:
         return ""
 
 
+def _gioco_process_vivo(porta: int, adb_exe: str) -> bool:
+    """Il processo del gioco esiste (può essere in background/foreground)."""
+    pkg = GAME_ACTIVITY.split("/")[0]
+    out = _adb_cmd(porta, "shell", "ps", "-A", adb_exe=adb_exe) \
+          or _adb_cmd(porta, "shell", "ps", adb_exe=adb_exe)
+    return pkg in out
+
+
+def _gioco_in_foreground(porta: int, adb_exe: str) -> bool:
+    """
+    Check best-effort: gioco presente nell'output dumpsys activity top.
+
+    Nota: check NON STRETTO — può dare falso positivo se pkg appare come
+    task background. Safety-net reale è il monkey recovery in attendi_home,
+    che rilancia monkey se durante il polling schermata resta UNKNOWN per
+    troppo tempo. Preferiamo falso positivo (proseguiamo nel launcher) a
+    falso negativo (rinunciamo lasciando MuMu orfano).
+    """
+    pkg = GAME_ACTIVITY.split("/")[0]
+    out = _adb_cmd(porta, "shell", "dumpsys", "activity", "top", adb_exe=adb_exe)
+    return bool(out) and pkg in out
+
+
 def _avvia_gioco(porta: int, adb_exe: str,
                  log_fn: Optional[Callable] = None) -> bool:
     """
-    Avvia il gioco tramite am start con retry 3 volte.
-    Ritorna True se il comando è andato a buon fine almeno una volta.
+    Avvia il gioco con strategia robusta anti-background.
+
+    Per ogni tentativo (max 3):
+      1. am start -n GAME_ACTIVITY
+      2. sleep 3s (l'intent viaggia)
+      3. monkey -p pkg -c LAUNCHER 1  (SEMPRE — idempotente, porta UI al top)
+      4. sleep 5s (app UI render)
+      5. check foreground via `dumpsys activity top | grep pkg`
+         - se gioco in foreground → OK
+         - altrimenti prossimo tentativo
+
+    Motivazione osservata in prod:
+      - `am start OK` accetta l'intent ma spesso il processo parte in
+        background senza UI al top (schermo resta su HOME Android)
+      - `ps | grep pkg` ritorna match ma il gioco NON è visibile
+      - `monkey LAUNCHER` porta sempre l'app al top (equivalente a tap icona)
+      - `dumpsys activity top` verifica foreground reale, non solo processo vivo
     """
+    pkg = GAME_ACTIVITY.split("/")[0]
     for tentativo in range(1, 4):
         _log(f"am start gioco (tentativo {tentativo}/3)", log_fn)
         out = _adb_cmd(
@@ -135,10 +174,35 @@ def _avvia_gioco(porta: int, adb_exe: str,
             "shell", "am", "start", "-n", GAME_ACTIVITY,
             adb_exe=adb_exe,
         )
-        if out and "Error" not in out and "error" not in out:
+        if not out or "Error" in out or "error" in out:
+            _log(f"am start tentativo {tentativo} output: {out[:80]}", log_fn)
+        else:
             _log(f"am start OK: {out[:80]}", log_fn)
+
+        time.sleep(3.0)
+
+        # SEMPRE monkey dopo am start — idempotente se gioco già in foreground,
+        # forza l'UI al top se processo è in background
+        _log("monkey launcher (porta UI al top)", log_fn)
+        _adb_cmd(
+            porta,
+            "shell", "monkey", "-p", pkg,
+            "-c", "android.intent.category.LAUNCHER", "1",
+            adb_exe=adb_exe,
+        )
+        time.sleep(5.0)
+
+        # Verifica foreground (non solo processo vivo)
+        if _gioco_in_foreground(porta, adb_exe):
+            _log("gioco verificato in foreground", log_fn)
             return True
-        _log(f"am start tentativo {tentativo} fallito: {out[:80]}", log_fn)
+
+        # Fallback diagnosi: se processo vivo ma non in foreground → continua
+        if _gioco_process_vivo(porta, adb_exe):
+            _log("processo gioco vivo ma NON in foreground — retry", log_fn)
+        else:
+            _log("processo gioco NON trovato — retry", log_fn)
+
         if tentativo < 3:
             time.sleep(3.0)
     return False
@@ -377,6 +441,9 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:
     nome = getattr(ctx, "instance_name", "?")
     nav    = getattr(ctx, "navigator", None)
     device = getattr(ctx, "device", None)
+    # Path ADB + porta istanza — necessari per monkey recovery nel polling
+    _adb_path  = os.environ.get("MUMU_ADB_PATH") or _cfg.adb
+    porta_attesa = getattr(device, "port", None) if device is not None else None
 
     # 1. Attesa caricamento con polling attivo (F-B1).
     # Prima t_min s bloccanti (login/splash tipico), poi polling ogni 2s
@@ -417,11 +484,18 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:
         _log(f"[{nome}] loop BACK + polling schermata (max {_cfg.timeout_carica_s}s)", log_fn)
         t_start = time.time()
         trovata = False
+        unknown_streak = 0            # cicli consecutivi Screen.UNKNOWN
+        last_monkey_t = 0.0           # ts ultimo monkey di recovery
+        # Poll meno aggressivo: 7s totali per ciclo (back + sleep + screenshot ≈ 7s)
+        # Riduce stress CPU/IO e dà più tempo alla UI di stabilizzarsi.
+        POLL_BACK_INTERVAL_S = 5.5    # sleep tra back e schermata_corrente
+        MONKEY_EVERY_N = 6            # ~42s UNKNOWN consecutivi prima di monkey
+        MONKEY_COOLDOWN_S = 30.0      # cooldown minimo tra monkey successivi
         while time.time() - t_start < _cfg.timeout_carica_s:
             # BACK chiude eventuali popup sovrapposti (daily login, eventi, ecc.)
             if device is not None:
                 device.back()
-            time.sleep(1.5)
+            time.sleep(POLL_BACK_INTERVAL_S)
 
             try:
                 schermata = nav.schermata_corrente()
@@ -435,6 +509,29 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:
                 _log(f"[{nome}] schermata rilevata: {schermata}", log_fn)
                 trovata = True
                 break
+
+            # Recovery: app uscita dal foreground durante il polling?
+            # Ogni N cicli UNKNOWN consecutivi, rilancia monkey per forzare
+            # il gioco in foreground (idempotente se già al top).
+            unknown_streak += 1
+            now = time.time()
+            if (unknown_streak >= MONKEY_EVERY_N
+                    and (now - last_monkey_t) > MONKEY_COOLDOWN_S
+                    and porta_attesa is not None):
+                try:
+                    pkg = GAME_ACTIVITY.split("/")[0]
+                    _adb_cmd(
+                        porta_attesa,
+                        "shell", "monkey", "-p", pkg,
+                        "-c", "android.intent.category.LAUNCHER", "1",
+                        adb_exe=_adb_path,
+                    )
+                    _log(f"[{nome}] monkey recovery (UNKNOWN {unknown_streak} cicli)", log_fn)
+                    last_monkey_t = now
+                    unknown_streak = 0
+                    time.sleep(3.0)  # attesa UI al top
+                except Exception as exc:
+                    _log(f"[{nome}] monkey recovery errore: {exc}", log_fn)
 
         # 3. Timeout
         if not trovata:
