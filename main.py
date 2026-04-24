@@ -62,6 +62,7 @@ def _import_tasks() -> dict:
         ("tasks.messaggi",       "MessaggiTask"),
         ("tasks.arena",          "ArenaTask"),
         ("tasks.arena_mercato",  "ArenaMercatoTask"),
+        ("tasks.district_showdown", "DistrictShowdownTask"),
         ("tasks.boost",          "BoostTask"),
         ("tasks.store",          "StoreTask"),
         ("tasks.radar",          "RadarTask"),

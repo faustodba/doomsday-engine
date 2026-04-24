@@ -26,7 +26,8 @@
     "boost": true,
     "store": true,
     "radar": true,
-    "radar_census": true
+    "radar_census": true,
+    "district_showdown": false
   },
   "rifornimento_comune": {
     "_note": "Parametri condivisi da entrambe le modalità di rifornimento",

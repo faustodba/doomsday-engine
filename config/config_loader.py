@@ -63,18 +63,20 @@ _DEFAULTS: dict[str, Any] = {
     "max_parallel": 2,
 
     # Task abilitati
-    "task_raccolta":      True,
-    "task_rifornimento":  False,
-    "task_zaino":         False,
-    "task_vip":           True,
-    "task_alleanza":      True,
-    "task_messaggi":      True,
-    "task_arena":         True,
-    "task_arena_mercato": True,
-    "task_boost":         True,
-    "task_store":         True,
-    "task_radar":         True,
-    "task_radar_census":  False,
+    "task_raccolta":          True,
+    "task_rifornimento":      False,
+    "task_donazione":         True,
+    "task_district_showdown": False,
+    "task_zaino":             False,
+    "task_vip":               True,
+    "task_alleanza":          True,
+    "task_messaggi":          True,
+    "task_arena":             True,
+    "task_arena_mercato":     True,
+    "task_boost":             True,
+    "task_store":             True,
+    "task_radar":             True,
+    "task_radar_census":      False,
 
     # Rifornimento — parametri comuni
     "DOOMS_ACCOUNT":                    "",
@@ -377,18 +379,20 @@ class GlobalConfig:
     max_parallel: int   = 2
 
     # Task abilitati
-    task_raccolta:      bool = True
-    task_rifornimento:  bool = False
-    task_zaino:         bool = False
-    task_vip:           bool = True
-    task_alleanza:      bool = True
-    task_messaggi:      bool = True
-    task_arena:         bool = True
-    task_arena_mercato: bool = True
-    task_boost:         bool = True
-    task_store:         bool = True
-    task_radar:         bool = True
-    task_radar_census:  bool = False
+    task_raccolta:          bool = True
+    task_rifornimento:      bool = False
+    task_donazione:         bool = True
+    task_district_showdown: bool = False
+    task_zaino:             bool = False
+    task_vip:               bool = True
+    task_alleanza:          bool = True
+    task_messaggi:          bool = True
+    task_arena:             bool = True
+    task_arena_mercato:     bool = True
+    task_boost:             bool = True
+    task_store:             bool = True
+    task_radar:             bool = True
+    task_radar_census:      bool = False
 
     # Rifornimento — parametri comuni
     dooms_account:                    str   = ""
@@ -471,18 +475,20 @@ class GlobalConfig:
             max_parallel = int(s.get("max_parallel", 2)),
 
             # Task
-            task_raccolta      = bool(t.get("raccolta",      True)),
-            task_rifornimento  = bool(t.get("rifornimento",  False)),
-            task_zaino         = bool(t.get("zaino",         False)),
-            task_vip           = bool(t.get("vip",           True)),
-            task_alleanza      = bool(t.get("alleanza",      True)),
-            task_messaggi      = bool(t.get("messaggi",      True)),
-            task_arena         = bool(t.get("arena",         True)),
-            task_arena_mercato = bool(t.get("arena_mercato", True)),
-            task_boost         = bool(t.get("boost",         True)),
-            task_store         = bool(t.get("store",         True)),
-            task_radar         = bool(t.get("radar",         True)),
-            task_radar_census  = bool(t.get("radar_census",  False)),
+            task_raccolta          = bool(t.get("raccolta",          True)),
+            task_rifornimento      = bool(t.get("rifornimento",      False)),
+            task_donazione         = bool(t.get("donazione",         True)),
+            task_district_showdown = bool(t.get("district_showdown", False)),
+            task_zaino             = bool(t.get("zaino",             False)),
+            task_vip               = bool(t.get("vip",               True)),
+            task_alleanza          = bool(t.get("alleanza",          True)),
+            task_messaggi          = bool(t.get("messaggi",          True)),
+            task_arena             = bool(t.get("arena",             True)),
+            task_arena_mercato     = bool(t.get("arena_mercato",     True)),
+            task_boost             = bool(t.get("boost",             True)),
+            task_store             = bool(t.get("store",             True)),
+            task_radar             = bool(t.get("radar",             True)),
+            task_radar_census      = bool(t.get("radar_census",      False)),
 
             # Rifornimento — comune
             dooms_account                    = str(rc.get("dooms_account",        "")),
@@ -545,18 +551,20 @@ class GlobalConfig:
                 "n_back_pulizia":      self.mumu.n_back_pulizia,
             },
             "task": {
-                "raccolta":      self.task_raccolta,
-                "rifornimento":  self.task_rifornimento,
-                "zaino":         self.task_zaino,
-                "vip":           self.task_vip,
-                "alleanza":      self.task_alleanza,
-                "messaggi":      self.task_messaggi,
-                "arena":         self.task_arena,
-                "arena_mercato": self.task_arena_mercato,
-                "boost":         self.task_boost,
-                "store":         self.task_store,
-                "radar":         self.task_radar,
-                "radar_census":  self.task_radar_census,
+                "raccolta":          self.task_raccolta,
+                "rifornimento":      self.task_rifornimento,
+                "donazione":         self.task_donazione,
+                "district_showdown": self.task_district_showdown,
+                "zaino":             self.task_zaino,
+                "vip":               self.task_vip,
+                "alleanza":          self.task_alleanza,
+                "messaggi":          self.task_messaggi,
+                "arena":             self.task_arena,
+                "arena_mercato":     self.task_arena_mercato,
+                "boost":             self.task_boost,
+                "store":             self.task_store,
+                "radar":             self.task_radar,
+                "radar_census":      self.task_radar_census,
             },
             "rifornimento_comune": {
                 "dooms_account":        self.dooms_account,
@@ -718,6 +726,8 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
                 "rifornimento":          gcfg.task_rifornimento and (gcfg.rifornimento_mappa_abilitato or gcfg.rifornimento_membri_abilitato),
                 "rifornimento_mappa":    gcfg.rifornimento_mappa_abilitato,
                 "rifornimento_membri":   gcfg.rifornimento_membri_abilitato,
+                "donazione":             gcfg.task_donazione,
+                "district_showdown":     gcfg.task_district_showdown,
                 "zaino":                 gcfg.task_zaino,
                 "vip":                   gcfg.task_vip,
                 "alleanza":              gcfg.task_alleanza,

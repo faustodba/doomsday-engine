@@ -54,6 +54,7 @@ class TaskFlags(BaseModel):
     zaino:              bool = True
     arena:              bool = True
     arena_mercato:      bool = True
+    district_showdown:  bool = False     # default OFF — evento mensile
     boost:              bool = True
     store:              bool = True
 

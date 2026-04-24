@@ -312,7 +312,8 @@ def partial_task_flags_v2(request: Request):
     # raccolta esclusa: è sempre attiva, non controllabile da UI
     ORDER = [
         "rifornimento", "vip", "boost", "arena", "store",
-        "alleanza", "donazione", "messaggi", "radar", "zaino", "arena_mercato",
+        "alleanza", "donazione", "messaggi", "radar", "zaino",
+        "arena_mercato", "district_showdown",
     ]
 
     rows     = []
