@@ -189,6 +189,50 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
   UI dashboard → `runtime_overrides.json` → `merge_config` → `_from_raw` (normalize) →
   `ctx.config.ALLOCAZIONE_*` (frazioni) → `ratio_cfg` (mapping) → `_calcola_sequenza_allocation`
 
+### 50. DistrictShowdown — finestre temporali evento (CHIUSA ✅ 24/04/2026)
+- **Contesto**: l'evento District Showdown è attivo solo durante il weekend
+  (Ven 00:00 → Lun 00:00 UTC = 3 giorni esatti). Il bot NON deve cercare
+  l'evento fuori dalla finestra (spreco di tick + log rumorosi).
+- **Finestre implementate in `tasks/district_showdown.py`**:
+  - **Task completo**: attivo `Venerdì 00:00 UTC → Lunedì 00:00 UTC`
+    (esclusi lunedì già dalle 00:00). Fuori → `should_run()` ritorna False
+    → task saltato dall'orchestrator.
+  - **Fase 5 Fund Raid**: attivo `Domenica 20:00 UTC → Lunedì 00:00 UTC`
+    (ultime 4 ore dell'evento, quando Fund Raid si apre in-game).
+    Fuori → `_fund_raid()` logga "fuori finestra" e skip.
+- **Conversione ora Italia** (UTC+2 ora legale / UTC+1 ora solare):
+  - Task DS: **IT Ven 02:00 → IT Lun 02:00** (legale) / Ven 01:00 → Lun 01:00 (solare)
+  - Fund Raid: **IT Dom 22:00 → IT Lun 02:00** (legale) / Dom 21:00 → Lun 01:00 (solare)
+- **Config in `DistrictShowdownConfig`** (UTC):
+  ```python
+  ds_start_weekday        = 4    # venerdì (Python weekday)
+  ds_start_hour           = 0    # 00:00 UTC
+  ds_end_weekday          = 0    # lunedì
+  ds_end_hour             = 0    # 00:00 UTC (lunedì escluso)
+  fund_raid_start_weekday = 6    # domenica
+  fund_raid_start_hour    = 20   # 20:00 UTC
+  ```
+- **Helper**: `_is_in_event_window()` + `_is_in_fund_raid_window()` in
+  `DistrictShowdownTask`. Usano `datetime.now(timezone.utc)`.
+
+### 49. Ottimizzazioni startup istanza (APERTA — bassa priorità)
+- **Contesto**: misurato ciclo 24/04 tipico avvio istanza → `Tick --`:
+  - Happy path: ~130-150s
+  - Medio: ~180-210s
+  - Lento: ~240-270s
+  - Bottleneck: `attesa caricamento fissa 60s` (step 8) + polling MuMu 5s
+- **Ottimizzazioni candidate (non applicate)**:
+  1. `DELAY_POLL_S` 5s → 2s in `core/launcher.py` (poll Android started)
+     → guadagno ~3s per istanza
+  2. Stabilizzazione HOME `stable_polls` 3 → 2 in `attendi_home`
+     → guadagno ~5-8s per istanza
+  3. `delay_carica_iniz_s` 60s → polling adattivo da 15s (già parziale ma
+     spesso non converge presto) → potenziale -30s per istanza su path veloci
+- **Impatto stimato**: -8s × 11 istanze = ~90s per ciclo (trascurabile vs
+  durata tick). Non bloccante — rimandata per ridurre rischio di regressioni
+  in fase di collaudo district_showdown.
+- **Quando applicare**: dopo stabilizzazione district_showdown + Foray + Influence.
+
 ### 48. DistrictShowdown — skip animation check + early-exit loop (CHIUSA ✅ 24/04/2026)
 - **Problema A — loop infinito**: `_loop_monitoring` in district_showdown loggava
   "auto in corso" indefinitamente quando il gioco usciva dalla maschera (crash/background/HOME),
@@ -1479,7 +1523,7 @@ guida per orientarsi nel repo e capire dove intervenire per ogni tipo di modific
 | `raccolta.py` | Invio squadre su nodi risorse. OCR slot squadre X/Y, blacklist nodi fuori-territorio, allocazione risorse, gestione fallimenti (tipo_bloccato/skip_neutro/marcia_fallita). Sempre attivo. | 110 | always |
 | `rifornimento.py` | Invio risorse a FauMorfeus via mappa (tap castello) o membri (lista alleanza). Soglie per risorsa, quota giornaliera osservata (~21-69M per-istanza in base al livello). | 100 | always |
 | `donazione.py` | Donazione tech alleanza marcata "Marked!". HOME→alliance→Technology→scan pin_marked→tap loop donate (max 30). Back x3 su research/non_riconosciuto/not_found. | 105 | always |
-| `district_showdown.py` | Evento mensile Gold Dice. HOME→icona evento (barra top)→tap Auto→popup Auto Roll→Start. Loop monitoring: Gang Leader (Request Help + Assistance), Access Prohibited (wait 70s), Item Source (dadi esauriti → exit). Early-exit su uscita rilevata (3 cicli senza pin) + skip animation check. | 107 | always |
+| `district_showdown.py` | Evento weekend Gold Dice. 5 fasi: (1) loop monitoring Auto Roll + interruzioni, (2) District Foray Collect All, (3) Influence Rewards claim chiavi, (4) Achievement Rewards Claim All, (5) Fund Raid select + loop attack con OCR counter. Gate temporale UTC: intero task attivo **Ven 00:00 → Lun 00:00 UTC** (3gg esatti); Fund Raid attivo solo **Dom 20:00 → Lun 00:00 UTC** (ultime 4h). Navigatore stato-aware `_torna_a_mappa_ds` con rientro automatico se uscito. | 107 | always |
 | `zaino.py` | Modalità `bag` (template match per risorse + tap) o `svuota` (USE MAX sidebar). | 70 | periodic 168h |
 | `vip.py` | Claim giornaliero VIP (cassaforte + free). | 10 | daily 24h |
 | `alleanza.py` | Help alleanza (tap_barra + scroll + click). | 30 | periodic 4h |

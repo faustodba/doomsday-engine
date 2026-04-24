@@ -120,7 +120,16 @@
       "PowerShell(& 'C:\\\\Program Files\\\\Netease\\\\MuMuPlayer\\\\nx_main\\\\adb.exe' -s 127.0.0.1:16480 shell 'dumpsys activity top | head -5' 2>&1)",
       "PowerShell(& 'C:\\\\Program Files\\\\Netease\\\\MuMuPlayer\\\\nx_main\\\\adb.exe' -s 127.0.0.1:16480 shell 'screencap -p /sdcard/fau03.png' 2>&1)",
       "PowerShell(& 'C:\\\\Program Files\\\\Netease\\\\MuMuPlayer\\\\nx_main\\\\adb.exe' -s 127.0.0.1:16480 pull /sdcard/fau03.png 'C:\\\\doomsday-engine\\\\fau03_now.png')",
-      "Bash(py -3.14 -c \"import ast; ast.parse\\(open\\(r'C:\\\\doomsday-engine\\\\tasks\\\\district_showdown.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax OK'\\)\")"
+      "Bash(py -3.14 -c \"import ast; ast.parse\\(open\\(r'C:\\\\doomsday-engine\\\\tasks\\\\district_showdown.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(py -3.14 -c \"import ast; ast.parse\\(open\\(r'C:\\\\doomsday-engine\\\\main.py', encoding='utf-8'\\).read\\(\\)\\); print\\('syntax OK'\\)\")",
+      "Bash(grep -nA5 \"_scrivi_checkpoint\\\\|_leggi_checkpoint\" 'C:\\\\doomsday-engine\\\\main.py')",
+      "PowerShell(& 'C:\\\\Program Files\\\\Netease\\\\MuMuPlayer\\\\nx_main\\\\adb.exe' -s 127.0.0.1:16416 shell 'screencap -p /sdcard/s.png' 2>&1)",
+      "PowerShell(& 'C:\\\\Program Files\\\\Netease\\\\MuMuPlayer\\\\nx_main\\\\adb.exe' -s 127.0.0.1:16416 pull /sdcard/s.png 'C:\\\\doomsday-engine\\\\fau01_live.png' 2>&1)",
+      "PowerShell(& 'C:\\\\Program Files\\\\Netease\\\\MuMuPlayer\\\\nx_main\\\\adb.exe' -s 127.0.0.1:16416 pull /sdcard/s.png 'C:\\\\doomsday-engine\\\\fau01_live2.png' 2>&1)",
+      "Bash(powershell -Command \"Get-CimInstance Win32_Process -Filter 'Name=\\\\\"MuMuNxDevice.exe\\\\\"' | Select-Object CommandLine\")",
+      "PowerShell(& 'C:\\\\Program Files\\\\Netease\\\\MuMuPlayer\\\\nx_main\\\\adb.exe' -s 127.0.0.1:16416 pull /sdcard/s.png 'C:\\\\doomsday-engine\\\\fau01_now.png' 2>&1)",
+      "PowerShell(& 'C:\\\\Program Files\\\\Netease\\\\MuMuPlayer\\\\nx_main\\\\adb.exe' -s 127.0.0.1:16416 pull /sdcard/s.png 'C:\\\\doomsday-engine\\\\fau01_now2.png' 2>&1)",
+      "PowerShell(& 'C:\\\\Program Files\\\\Netease\\\\MuMuPlayer\\\\nx_main\\\\adb.exe' -s 127.0.0.1:16416 pull /sdcard/s.png 'C:\\\\doomsday-engine\\\\fau01_now3.png' 2>&1)"
     ],
     "additionalDirectories": [
       "C:\\doomsday-engine-prod\\config",

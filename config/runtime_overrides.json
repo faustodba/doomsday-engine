@@ -7,17 +7,18 @@
       "radar": true,
       "radar_census": false,
       "rifornimento": true,
+      "donazione": true,
       "zaino": true,
       "arena": true,
       "arena_mercato": true,
       "boost": true,
       "store": true,
-      "donazione": true,
+      "district_showdown": true,
       "raccolta": true
     },
     "sistema": {
-      "max_parallel": 2,
-      "tick_sleep_min": 300
+      "max_parallel": 1,
+      "tick_sleep_min": 30
     },
     "rifugio": {
       "coord_x": 680,
@@ -37,8 +38,8 @@
     },
     "rifornimento": {
       "soglia_campo_m": 5.0,
-      "mappa_abilitata": false,
-      "membri_abilitati": true,
+      "mappa_abilitata": true,
+      "membri_abilitati": false,
       "provviste_max": 100
     },
     "zaino": {
@@ -67,73 +68,109 @@
       "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": ""
+      "fascia_oraria": null,
+      "max_squadre": 5,
+      "layout": null,
+      "livello": 7
     },
     "FAU_01": {
       "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": ""
+      "fascia_oraria": null,
+      "max_squadre": 4,
+      "layout": null,
+      "livello": 6
     },
     "FAU_02": {
       "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": ""
+      "fascia_oraria": null,
+      "max_squadre": 4,
+      "layout": null,
+      "livello": 6
     },
     "FAU_03": {
       "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": ""
+      "fascia_oraria": null,
+      "max_squadre": 4,
+      "layout": null,
+      "livello": 6
     },
     "FAU_04": {
       "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": ""
+      "fascia_oraria": null,
+      "max_squadre": 4,
+      "layout": null,
+      "livello": 6
     },
     "FAU_05": {
       "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": ""
+      "fascia_oraria": null,
+      "max_squadre": 4,
+      "layout": null,
+      "livello": 6
     },
     "FAU_06": {
       "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": ""
+      "fascia_oraria": null,
+      "max_squadre": 4,
+      "layout": null,
+      "livello": 6
     },
     "FAU_07": {
       "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": ""
+      "fascia_oraria": null,
+      "max_squadre": 4,
+      "layout": null,
+      "livello": 6
     },
     "FAU_08": {
       "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": ""
+      "fascia_oraria": null,
+      "max_squadre": 4,
+      "layout": null,
+      "livello": 6
     },
     "FAU_09": {
       "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": ""
+      "fascia_oraria": null,
+      "max_squadre": 4,
+      "layout": null,
+      "livello": 6
     },
     "FauMorfeus": {
       "abilitata": true,
       "truppe": 0,
       "tipologia": "raccolta_only",
-      "fascia_oraria": ""
+      "fascia_oraria": null,
+      "max_squadre": 5,
+      "layout": null,
+      "livello": 7
     },
     "FAU_10": {
       "abilitata": true,
       "truppe": 0,
       "tipologia": "full",
-      "fascia_oraria": ""
+      "fascia_oraria": null,
+      "max_squadre": 4,
+      "layout": null,
+      "livello": 6
     }
   }
 }

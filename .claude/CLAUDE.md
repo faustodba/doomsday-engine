@@ -155,6 +155,8 @@ All'inizio di ogni sessione, in questo ordine:
 | 46 | Launcher — am start OK ma gioco in background + polling troppo rapido | ALTA | ✅ RISOLTA 24/04 (monkey sempre + foreground check + monkey recovery + poll 7s) |
 | 47 | DistrictShowdown — tap hardcoded su Start falliva quando popup shift | ALTA | ✅ RISOLTA 24/04 (tap dinamico su coord match + wait_template_ready adattivo) |
 | 48 | DistrictShowdown — loop infinito quando gioco esce + skip animation | ALTA | ✅ RISOLTA 24/04 (early-exit 3 cicli streak + check skip 840,371) |
+| 49 | Ottimizzazioni startup istanza (DELAY_POLL, stable_polls, delay_carica) | BASSA | 🆕 APERTA 24/04 — guadagno stimato ~90s/ciclo, rimandata post-stabilizzazione DS |
+| 50 | DistrictShowdown — finestre temporali evento (Ven 00:00 → Lun 00:00 UTC, Fund Raid Dom 20:00 → Lun 00:00) | — | ✅ IMPLEMENTATA 24/04 (`_is_in_event_window` + `_is_in_fund_raid_window` in DistrictShowdownTask) |
 
 > Aggiornare questa tabella ad ogni sessione insieme alla ROADMAP.
 

@@ -160,22 +160,61 @@ _TASK_SETUP = _carica_task_setup()
 # ---------------------------------------------------------------------------
 # Cleanup emulator orfani
 # ---------------------------------------------------------------------------
+_MUMU_PROCESSI_KILL = [
+    "MuMuManager.exe",       # CLI control
+    "MuMuPlayer.exe",         # UI launcher (vecchia versione)
+    "MuMuVMMSVC.exe",         # VM service
+    "MuMuVMMHeadless.exe",    # VM hypervisor
+    "MuMuNxMain.exe",         # UI player (versione nuova)
+    "MuMuNxDevice.exe",       # istanze emulatore Android
+    "adb.exe",                # server ADB
+]
+
+
+def _cleanup_globale_startup(log_fn=None) -> None:
+    """
+    Kill GLOBALE di tutti i processi MuMu+adb via `taskkill /F /IM`.
+    Molto più rapido del loop `MuMuManager shutdown` per-istanza
+    (~3s vs ~60s per 12 istanze).
+
+    Safe solo all'avvio bot: nessun'istanza pulita da preservare (non
+    possiamo distinguere orfani da istanze in uso se il bot è appena partito).
+
+    Per il cleanup PRE-CICLO serve invece il loop mirato (`_cleanup_tutti_emulator`)
+    che chiude solo le istanze configurate e preserva MuMuPlayer UI.
+    """
+    import subprocess
+    killed = []
+    for proc in _MUMU_PROCESSI_KILL:
+        try:
+            r = subprocess.run(
+                ["taskkill", "/F", "/IM", proc, "/T"],
+                capture_output=True, timeout=10,
+            )
+            if r.returncode == 0:
+                killed.append(proc)
+        except Exception:
+            pass
+    if log_fn:
+        log_fn(f"taskkill globale: killati {len(killed)}/{len(_MUMU_PROCESSI_KILL)} "
+               f"processi ({', '.join(killed) if killed else 'nessuno'})")
+
+
 def _cleanup_tutti_emulator(istanze: list[dict], dry_run: bool) -> None:
     """
-    Chiude tutti gli emulator MuMu configurati (reset_istanza per ogni istanza).
+    Chiude emulator MuMu configurati (reset_istanza per ogni istanza).
 
-    Invocato:
-      - all'avvio del bot (prima del primo ciclo)
-      - all'inizio di ogni ciclo (prima del for istanze)
+    Invocato all'inizio di ogni ciclo (prima del for istanze).
 
     Motivazione: garantisce che ogni ciclo parta da uno stato MuMu pulito,
     eliminando processi orfani rimasti da:
-      - kill unclean del bot precedente (SIGKILL mid-ciclo)
       - crash/hang di un'istanza nel ciclo precedente
       - esecuzione parallela con altro bot (dry-run orfano, ecc.)
 
     Failsafe: ogni reset è protetto da try/except — un'istanza che fallisce
     il reset non blocca le altre.
+
+    Per il cleanup STARTUP usa `_cleanup_globale_startup()` (più veloce).
     """
     if dry_run:
         return
@@ -732,9 +771,12 @@ def main():
     threading.Thread(target=_status_writer_loop, args=(stop_event, args.status_interval),
                      name="StatusWriter", daemon=True).start()
 
-    # Cleanup emulator orfani all'avvio (kill residui di sessioni precedenti)
-    _log("MAIN", f"Cleanup emulator orfani (startup) — {len(istanze)} istanze")
-    _cleanup_tutti_emulator(istanze, args.dry_run)
+    # Cleanup emulator orfani all'avvio (kill residui di sessioni precedenti).
+    # Usa taskkill globale (~3s) invece del loop MuMuManager shutdown (~60s):
+    # all'avvio non ci sono istanze "buone" da preservare, kill brutale OK.
+    _log("MAIN", "Cleanup emulator orfani (startup) — taskkill globale")
+    if not args.dry_run:
+        _cleanup_globale_startup(lambda msg: _log("MAIN", msg))
 
     # ── Resume checkpoint ────────────────────────────────────
     resume_da: Optional[str] = None
