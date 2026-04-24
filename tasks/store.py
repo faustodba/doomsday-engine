@@ -54,7 +54,7 @@ class StoreConfig:
     """Parametri configurabili per StoreTask."""
 
     # ── Soglie template matching ──────────────────────────────────────────────
-    soglia_store:        float = 0.70
+    soglia_store:        float = 0.675
     soglia_banner:       float = 0.85
     soglia_store_attivo: float = 0.75
     soglia_carrello:     float = 0.65
@@ -226,40 +226,69 @@ class StoreTask(Task):
             else cfg.roi_home_banner_aperto
         )
 
-        # ── Scan griglia spirale ──────────────────────────────────────────────
+        # ── Scan griglia spirale (take-max: scansione completa) ──────────────
         log(f"Scan griglia {len(cfg.griglia)} posizioni  passo={cfg.passo_scan}px")
 
-        trovato    = False
-        cx_fin     = cy_fin = -1
         best_score = -1.0
+        best_step  = -1
+        cum_x = cum_y = 0
+        cumulative: list[tuple[int, int]] = []
 
         for n, (dx, dy) in enumerate(cfg.griglia):
             if dx != 0 or dy != 0:
                 self._swipe_mappa(device, dx, dy, cfg)
+            cum_x += dx
+            cum_y += dy
+            cumulative.append((cum_x, cum_y))
 
             shot = device.screenshot()
             result = matcher.find_one(shot, cfg.tmpl_store,
                                       threshold=cfg.soglia_store,
                                       zone=roi_corrente)
-            ok = result.found
             log(
                 f"passo {n:02d} → score={result.score:.3f} ({result.cx},{result.cy})"
-                + ("  *** TROVATO ***" if ok else "")
+                + ("  *** match ***" if result.found else "")
             )
 
             if result.score > best_score:
                 best_score = result.score
+                best_step  = n
 
-            if ok:
-                trovato        = True
-                cx_fin, cy_fin = result.cx, result.cy
-                break
-
-        if not trovato:
+        if best_score < cfg.soglia_store:
             log(f"Store NON trovato dopo {len(cfg.griglia)} posizioni"
-                f" (best score={best_score:.3f})")
+                f" (best score={best_score:.3f} < soglia={cfg.soglia_store:.2f})")
             self._ripristina_banner(device, stato_banner, log, cfg)
             return _Esito.STORE_NON_TROVATO, 0, False
+
+        # ── Re-navigazione al best step + re-match per coord fresche ─────────
+        end_x, end_y = cumulative[-1]
+        tgt_x, tgt_y = cumulative[best_step]
+        delta_x = tgt_x - end_x
+        delta_y = tgt_y - end_y
+        log(f"Best step={best_step} score={best_score:.3f} — delta swipe ({delta_x},{delta_y})")
+
+        p = cfg.passo_scan
+        if delta_x != 0:
+            sign_x = 1 if delta_x > 0 else -1
+            for _ in range(abs(delta_x) // p):
+                self._swipe_mappa(device, sign_x * p, 0, cfg)
+        if delta_y != 0:
+            sign_y = 1 if delta_y > 0 else -1
+            for _ in range(abs(delta_y) // p):
+                self._swipe_mappa(device, 0, sign_y * p, cfg)
+
+        shot = device.screenshot()
+        result = matcher.find_one(shot, cfg.tmpl_store,
+                                  threshold=cfg.soglia_store,
+                                  zone=roi_corrente)
+        log(f"Re-match al best: score={result.score:.3f} ({result.cx},{result.cy})"
+            + ("  *** TROVATO ***" if result.found else "  FALLITO"))
+
+        if not result.found:
+            self._ripristina_banner(device, stato_banner, log, cfg)
+            return _Esito.STORE_NON_TROVATO, 0, False
+
+        cx_fin, cy_fin = result.cx, result.cy
 
         # ── Gestione negozio ──────────────────────────────────────────────────
         esito_neg, acquistati, refreshed = self._gestisci_negozio(

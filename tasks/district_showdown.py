@@ -124,7 +124,7 @@ class DistrictShowdownConfig:
     delay_dopo_tap_minor: float  = 2.0   # dopo back/tap minore
     delay_monitoring: float      = 15.0  # ciclo monitoring
     delay_access_prohibited: float = 70.0  # wait popup access_prohibited
-    delay_foray: float           = 5.0   # delay tra tap District Foray e verifiche
+    delay_foray: float           = 7.0   # delay tra tap popup ricompense (Foray/Influence/Achievement) e verifiche
 
     # Sicurezza
     max_monitoring_cicli: int    = 200   # ~33 minuti max per sessione
