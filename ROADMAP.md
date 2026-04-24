@@ -189,6 +189,125 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
   UI dashboard → `runtime_overrides.json` → `merge_config` → `_from_raw` (normalize) →
   `ctx.config.ALLOCAZIONE_*` (frazioni) → `ratio_cfg` (mapping) → `_calcola_sequenza_allocation`
 
+### 48. DistrictShowdown — skip animation check + early-exit loop (CHIUSA ✅ 24/04/2026)
+- **Problema A — loop infinito**: `_loop_monitoring` in district_showdown loggava
+  "auto in corso" indefinitamente quando il gioco usciva dalla maschera (crash/background/HOME),
+  senza nessuno dei 3 pin trigger rilevato. Il task restava in loop fino a
+  `max_monitoring_cicli=200 (~50 min)` sprecando il tick dell'istanza.
+- **Problema B — animazione lenta**: il toggle "Skip animation" del gameplay District
+  Showdown non veniva attivato; i 20 dadi impiegavano tempo eccessivo per animarsi.
+- **Fix applicato (`tasks/district_showdown.py`):**
+  1. **Early-exit `_loop_monitoring`**: nuovo contatore `unknown_streak`. Se per
+     3 cicli consecutivi (~45s) nessun pin (gang_leader/access_prohibited/item_source/autoplay)
+     è rilevato → return `"uscita_rilevata"` → graceful exit task.
+  2. **Nuovo caso `pin_autoplay` visibile**: se il pin_autoplay della maschera
+     evento è ancora visibile (`.found`) ma nessuno dei 3 trigger, significa
+     che siamo ancora nell'evento con Auto Roll attivo → reset streak.
+  3. **Check skip animation in `_apri_evento`**: dopo stabilizzazione maschera,
+     verifica `pin_check_auto_roll` in ROI `(810, 340, 870, 400)`. Se non trovato
+     → tap fisso `(840, 371)` per attivare il toggle. Velocizza l'intero gameplay.
+- **Validato**: FAU_07 24/04 ciclo 3, uscita_rilevata dopo 5 cicli streak (poi ridotto
+  a 3 per reattività maggiore) — task esce in ~45s invece di loopare 50 min.
+
+### 47. DistrictShowdown — tap dinamico su coord match (CHIUSA ✅ 24/04/2026)
+- **Problema**: `_attiva_auto_roll` tappava coordinate hardcoded (473, 389) sul
+  pulsante Start, ma il popup Auto Roll ha posizione leggermente diversa su
+  layout/risoluzioni diverse. Risultato: il tap cadeva in zona morta, Auto Roll
+  non avviato, poi pin_item_source (falso positivo) concludeva "dadi esauriti"
+  con 0 dadi rollati.
+- **Fix applicato (`tasks/district_showdown.py`):**
+  1. `_attiva_auto_roll`: tap su `has_start.cx, has_start.cy` dal match (score=1.000
+     garantisce posizione corretta). Fallback hardcoded solo se `find_one` fallisce.
+  2. Stesso fix in `_reenable_auto` per coerenza dopo gang_leader/access_prohibited.
+  3. Tap su `pin_autoplay` (39, 151) → dinamico: cerca pin_autoplay nello screenshot
+     e tappa il match, fallback hardcoded.
+  4. **Attesa adattiva `_wait_template_ready`**: nuova primitiva helper che poll
+     lo screenshot fino a quando un template appare stabilmente. Sostituisce i
+     `time.sleep(X)` fissi con wait semantico (max_wait=15s, stable_polls=2).
+- **Validato**: FAU_01 24/04 — `Auto Roll avviato — tap (479,387)` (coord match,
+  non più 473,389), 17s dopo primo Gang Leader → re-enable → multiple cicli
+  correttamente gestiti, poi "dadi esauriti" legittimo dopo 20 dadi.
+
+### 46. Launcher — post-check gioco foreground + monkey fallback (CHIUSA ✅ 24/04/2026)
+- **Problema**: `am start -n GAME_ACTIVITY` ritornava "OK" ma frequentemente il
+  gioco restava in background (schermo mostra HOME Android MuMu invece del
+  gioco). Il launcher vedeva `am start OK` + processo vivo → dichiarava
+  successo → `attendi_home()` poi falliva per 180s perché il gioco non era
+  realmente in foreground.
+- **Fix applicato (`core/launcher.py`):**
+  1. Nuova `_gioco_process_vivo(porta, adb)` — check ps pkg (ritorna True se
+     processo esiste).
+  2. Nuova `_gioco_in_foreground(porta, adb)` — check `dumpsys activity top`
+     per pkg (ritorna True se l'app è l'activity top visibile).
+  3. `_avvia_gioco()` ridisegnata:
+     - am start
+     - SEMPRE `monkey -p pkg -c LAUNCHER 1` (idempotente: porta UI al top)
+     - `_gioco_in_foreground()` → se True OK, altrimenti retry (max 3)
+  4. **Monkey recovery in `attendi_home`**: durante il loop BACK + polling
+     schermata, se dopo `MONKEY_EVERY_N=6` cicli UNKNOWN consecutivi (~42s)
+     la schermata non è stata ancora rilevata → rilancia monkey (cooldown 30s)
+     per forzare foreground.
+  5. Polling rilassato: sleep tra back e screenshot `1.5s → 5.5s` (ciclo totale
+     ~7s invece di ~3s) — meno stress I/O.
+- **Validato**: istanze dopo il fix hanno sempre rilevato foreground vs pre-fix
+  che falliva su ~30% delle istanze con HOME Android persistente.
+
+### 45. DistrictShowdown — MatchResult.found pattern (CHIUSA ✅ 24/04/2026)
+- **Problema**: `MatchResult` è un `@dataclass` senza `__bool__` custom →
+  `bool(MatchResult(found=False, score=0.589))` è sempre True. Il task
+  district_showdown usava `if has_stop:` / `if result is None:` / `is not None`
+  che danno risultati errati: `if has_stop:` sempre vero anche con score sotto
+  threshold → branch "Auto Roll già attivo" triggerato su falsi positivi.
+- **Osservato**: `Auto Roll già attivo (score=0.589)` — score sotto soglia 0.88
+  ma il codice lo interpretava come trovato.
+- **Fix applicato (`tasks/district_showdown.py`):** 10 check convertiti
+  sistematicamente al pattern corretto:
+  - `if result is None:` → `if not result.found:`
+  - `if has_stop:` → `if has_stop.found:`
+  - `if not has_start:` → `if not has_start.found:`
+  - `matcher.find_one(...) is not None` → `matcher.find_one(...).found`
+  (in `_apri_evento`, `_attiva_auto_roll`, `_verifica_toggle`, `_loop_monitoring`,
+  `_gestisci_gang_leader`, `_reenable_auto`)
+
+### 44. DistrictShowdown — conformità V6 API (CHIUSA ✅ 24/04/2026)
+- **Problema**: il task `tasks/district_showdown.py` committato dal secondo PC
+  aveva 6 bug V6 API che lo facevano crashare al primo tick:
+- **Fix applicati:**
+  1. `@property def name` → metodo `def name(self) -> str`
+  2. `ctx.config.task.district_showdown` (non esiste in V6) →
+     `ctx.config.task_abilitato("district_showdown")`
+  3. `def e_dovuto(self)` senza ctx → `def e_dovuto(self, ctx: TaskContext)`
+  4. `TaskResult(note=...)` → `TaskResult(message=...)` (V6 campo è `message`)
+  5. `matcher.find_one(screen.frame, ...)` → `matcher.find_one(screen, ...)`
+     (in V6 il matcher accetta Screenshot direttamente)
+  6. `matcher.find_one(..., roi=...)` → `matcher.find_one(..., zone=...)`
+     (parametro si chiama zone, non roi)
+- **Supplementari**:
+  - `main.py _import_tasks._catalogue`: aggiunto `DistrictShowdownTask`
+  - `config/task_setup.json` sync dev→prod (entry priority 107 mancava in prod)
+  - `config_loader.py`:
+    - `GlobalConfig` dataclass: + `task_donazione`, `task_district_showdown`
+    - `_InstanceCfg.task_abilitato()` mappa: + `donazione`, `district_showdown`
+    - Defaults + `_from_raw` + `to_dict` aggiornati coerentemente
+  - Template PNG dal secondo PC: 4 file con doppia estensione `.png.png`
+    rinominati, poi 5 pin aggiuntivi sync dev→prod
+
+### 43. Integrazione DistrictShowdownTask nella dashboard (CHIUSA ✅ 24/04/2026)
+- **Obiettivo**: rendere `DistrictShowdownTask` (nuovo task evento mensile
+  Gold Dice auto-roll) controllabile via pill UI e integrato in tutto lo stack.
+- **Fix applicato:**
+  1. `dashboard/models.py` TaskFlags: `+ district_showdown: bool = False`
+     (default OFF, evento mensile, 3 giorni durata)
+  2. `api_config_overrides.py` toggle_task valid_tasks: `+ district_showdown`
+  3. `dashboard/app.py` `partial_task_flags_v2` ORDER: inserito dopo `arena_mercato`
+  4. Template pin catalogo (10 file): `pin_district_showdown, pin_autoplay,
+     pin_check_auto_roll, pin_no_check_auto_roll, pin_start_auto_roll,
+     pin_stop_auto_roll, pin_gang_leader, pin_access_prohibited,
+     pin_item_source, pin_assistance_progress`
+  5. `sync_prod.bat` patch: include `templates/` (prima non sincronizzato)
+- **Validato**: pill renderizzata, toggle on/off funzionante, task registrato
+  nell'orchestrator priority=107 (tra rifornimento=100 e raccolta=110).
+
 ### 42. Donazione — ramo "pin_marked non trovato" non chiude Technology (CHIUSA ✅ 23/04/2026)
 - **Problema:** quando `_cerca_e_dona` esce con `pin_marked non trovato al primo scan`
   (scenario più frequente — quando l'alleanza non ha tech marked), il task NON
@@ -1310,3 +1429,126 @@ pin_acc_500..2500000 (7 file), pin_pet_200..300000 (6 file)  ← NUOVO (zaino BA
 - `pin_acciaio.png` — reale (attuale = pin_pomodoro)
 - `pin_arena_video.png` — popup video primo accesso arena
 - `pin_arena_categoria.png` — popup categoria settimanale (lunedì)
+
+---
+
+## Struttura bot — file e responsabilità
+
+Mappa completa del codice sorgente con ruolo di ciascun modulo. Serve come
+guida per orientarsi nel repo e capire dove intervenire per ogni tipo di modifica.
+
+### Entry point
+
+| File | Descrizione |
+|------|-------------|
+| `main.py` | Entry point del bot. Loop ciclico sequenziale su 12 istanze MuMu. Responsabilità: caricamento `task_setup.json`, gestione resume checkpoint, cleanup orfani MuMu, signal handling SIGINT/SIGTERM, status writer thread. Funzione chiave `_thread_istanza()` — un solo tick per chiamata con context rebuild post-HOME. Hot-check flag `abilitata` prima di ogni istanza (Issue #39). |
+| `run.bat`, `run_dev.bat`, `run_prod.bat` | Launcher Windows per dev/prod. Path assoluti espliciti (no `%~dp0`). Prod: `cd C:\doomsday-engine-prod + DOOMSDAY_ROOT=... + main.py --tick-sleep 60 --no-dashboard --use-runtime --resume`. |
+| `run_dashboard_dev.bat`, `run_dashboard_prod.bat` | Launcher dashboard FastAPI+uvicorn. Dev porta 8766, prod porta 8765. |
+| `sync_prod.bat` | Rilascio dev→prod: sincronizza codice, `main.py`, `task_setup.json`, `templates/`, `dashboard/`, launcher prod. Blacklist: `instances.json`, `runtime_overrides.json`, `global_config.json`, `state/`, `logs/`. |
+| `reset.bat`, `report.py`, `reset_schedule.py` | Utility CLI una-tantum per reset state/schedule. |
+
+### `config/` — configurazione
+
+| File | Descrizione |
+|------|-------------|
+| `config_loader.py` | Caricamento + merge configurazione. `load_global()`, `load_overrides()`, `merge_config()`, `build_instance_cfg()`. Dataclass `GlobalConfig` (task flags, soglie, coordinate). `_InstanceCfg.task_abilitato(nome)` — API che ogni task chiama in `should_run()`. Mappa task_name → bool flag. |
+| `config.py` | Modulo import-friendly con tipi e enumerazioni condivise. |
+| `global_config.json` | Config base (task flags default, soglie, rifornimento_comune, rifornimento_mappa, rifugio, zaino, raccolta/allocazione, sistema/mumu). Read-only dal bot, modificato solo via dashboard. |
+| `runtime_overrides.json` | Overrides dinamici per-istanza e globali. Hot-reload a ogni tick. Struttura: `globali.{task, rifornimento, rifornimento_comune, zaino, raccolta, sistema, rifugio}` + `istanze.{FAU_XX.abilitata/truppe/tipologia/fascia_oraria/max_squadre/layout/livello}`. |
+| `instances.json` | Anagrafica fisica istanze MuMu (nome, indice, porta ADB, truppe, layout, livello, profilo). Read-only dal bot. |
+| `task_setup.json` | Scheduler: lista task con priority, interval_hours, schedule (always/periodic/daily). Priority ascending = esecuzione prima. Hot-reload per-istanza (letto a ogni `_thread_istanza`, no restart richiesto per cambi schedule/priority). |
+
+### `core/` — infrastruttura motore
+
+| File | Descrizione |
+|------|-------------|
+| `orchestrator.py` | Registra task, ordina per priority, gestisce il tick: per ogni task → `should_run()` check → `e_dovuto()` schedule check → gate HOME pre-task → `run()` → aggiornamento schedule. |
+| `task.py` | Classi base V6: `Task` (ABC con `name()/should_run()/run()` astratti), `TaskContext` (device, navigator, matcher, config, state, log_msg), `TaskResult` (success, message, data). |
+| `launcher.py` | Avvio/chiusura istanze MuMu via `MuMuManager.exe` CLI. `avvia_player()` (MuMuNxMain.exe Win11), `avvia_istanza()` (launch + adb connect + `_avvia_gioco()` con am start + monkey + foreground check, Issue #46), `attendi_home()` (polling schermata + monkey recovery, Issue #46), `reset_istanza()`, `chiudi_istanza()`. |
+| `device.py` | Astrazione ADB per singola istanza. `AdbDevice(host, port, name)`: screenshot (Screenshot con `.frame` ndarray), tap, back, swipe. `Screenshot.match_template()` usato da matcher. `@dataclass MatchResult(found, score, cx, cy)`. |
+| `navigator.py` | Navigazione inter-schermata game. `schermata_corrente()` (Screen.HOME/MAP/UNKNOWN via template match), `vai_in_home()`, `vai_in_mappa()`, `tap_barra(ctx, voce)` (barra inferiore: campaign/alliance/hero/bag/beast). |
+| `state.py` | Stato persistente per-istanza. `InstanceState(path)` save/load atomico tmp+fsync+os.replace. Sottocampi: rifornimento, daily_tasks, metrics, schedule, boost, vip, arena. |
+| `scheduler.py` | Gestione interval/daily/always per-task con restart-safe restore da disco. |
+| `logger.py` | Logger strutturato `ctx.log_msg(msg)`. Output duale: bot.log (testuale) + logs/FAU_XX.jsonl (JSONL machine-readable). |
+| `adaptive_timing.py` | Timing per-istanza appreso dall'esperienza (es. `boot_android_s`). `get(key, fallback)` + `record(key, value)`. Salvato in `state/FAU_XX_timing.json`. |
+
+### `tasks/` — implementazione task
+
+| File | Descrizione | Priority | Schedule |
+|------|-------------|:--:|:--:|
+| `raccolta.py` | Invio squadre su nodi risorse. OCR slot squadre X/Y, blacklist nodi fuori-territorio, allocazione risorse, gestione fallimenti (tipo_bloccato/skip_neutro/marcia_fallita). Sempre attivo. | 110 | always |
+| `rifornimento.py` | Invio risorse a FauMorfeus via mappa (tap castello) o membri (lista alleanza). Soglie per risorsa, quota giornaliera osservata (~21-69M per-istanza in base al livello). | 100 | always |
+| `donazione.py` | Donazione tech alleanza marcata "Marked!". HOME→alliance→Technology→scan pin_marked→tap loop donate (max 30). Back x3 su research/non_riconosciuto/not_found. | 105 | always |
+| `district_showdown.py` | Evento mensile Gold Dice. HOME→icona evento (barra top)→tap Auto→popup Auto Roll→Start. Loop monitoring: Gang Leader (Request Help + Assistance), Access Prohibited (wait 70s), Item Source (dadi esauriti → exit). Early-exit su uscita rilevata (3 cicli senza pin) + skip animation check. | 107 | always |
+| `zaino.py` | Modalità `bag` (template match per risorse + tap) o `svuota` (USE MAX sidebar). | 70 | periodic 168h |
+| `vip.py` | Claim giornaliero VIP (cassaforte + free). | 10 | daily 24h |
+| `alleanza.py` | Help alleanza (tap_barra + scroll + click). | 30 | periodic 4h |
+| `messaggi.py` | Claim messaggi alleanza/sistema. | 20 | periodic 4h |
+| `arena.py` | 5 sfide giornaliere. Skip popup primo accesso + categoria settimanale. | 50 | daily 24h |
+| `arena_mercato.py` | Acquisti mercato arena (pack360). | 60 | daily 24h |
+| `boost.py` | Usa speedup 8h/1d per gathered/construction/research. | 5 | periodic 0h |
+| `store.py` | Acquisti VIP Store + Mercante Diretto + Free Refresh. | 40 | periodic 8h |
+| `radar.py` | Tap badge radar rosso + chiusura pallini. | 80 | periodic 12h |
+| `radar_census.py` | Scan mappa per classificazione nodi (currently disabled, templates mancanti). | 90 | periodic 12h |
+| `conftest.py` | Fixture pytest condivise per test dei task. | — | — |
+
+### `shared/` — utility condivise
+
+| File | Descrizione |
+|------|-------------|
+| `template_matcher.py` | Wrapper cv2.matchTemplate + caching template + soglie default per-template. `find_one/find_all/exists/score`. Classe `FakeMatcher` per test. |
+| `ocr_helpers.py` | Wrapper pytesseract. `ocr_risorse()` (OCR 4 valori risorse HOME), `ocr_slot()` (contatore squadre X/Y), `ocr_text()`, sanitize numeri ("5M"/"1.2B"). |
+| `ui_helpers.py` | Helpers UI: pulse tap, swipe scroll, wait_for_template, back_x_volte, ecc. |
+| `rifornimento_base.py` | Logica comune rifornimento (centratura mappa, resource_supply, compila_e_invia). |
+
+### `dashboard/` — FastAPI web dashboard
+
+| File | Descrizione |
+|------|-------------|
+| `app.py` | Entry point FastAPI + HTMX. Monta router API + servizi statici + template Jinja2. Endpoint `/ui` (home dashboard), `/ui/partial/*` (fragments HTMX: task-flags-v2, ist-table, storico, res-totali, status). Include `partial_task_flags_v2()` con ORDER + COMPOUND (rifornimento mappa/membri, zaino bag/svuota). |
+| `models.py` | Modelli Pydantic. `TaskFlags`, `RuntimeOverrides`, `IstanzaOverride`, `RifornimentoOverride`, `ZainoOverride`, `RaccoltaOverride`, `SistemaOverride`. Validazione + serializzazione `exclude_unset=True`. |
+| `routers/api_config_global.py` | GET/PUT `/api/config/globals` per task flags + sistema (merge incrementale `exclude_unset`, Issue #35). |
+| `routers/api_config_overrides.py` | PUT `/api/config/rifornimento`, `/api/config/zaino`, `/api/config/raccolta`. PATCH `/api/config/overrides/task/{name}` (toggle), `/api/config/rifornimento-mode/{sub}`, `/api/config/zaino-mode/{sub}`. Hot-reload al prossimo tick. |
+| `routers/api_log.py` | Tail log per-istanza (bot.log + FAU_XX.jsonl). |
+| `routers/api_stats.py` | Stats aggregate: spedizioni oggi, produzione/ora, totali risorse, provviste. |
+| `routers/api_status.py` | engine_status.json live: stato istanze, tick corrente, uptime. |
+| `services/config_manager.py` | Layer di accesso config+overrides. `get_global_config()`, `get_overrides()`, `get_merged_config()` (UI vede valori reali bot, Issue #18), `save_overrides()`. Usa `DOOMSDAY_ROOT` env var per coerenza dev/prod (Issue #38). |
+| `services/stats_reader.py` | Read-only stats da state/engine_status. `get_engine_status()`, `get_all_stats()`, `get_storico()`, `get_risorse_farm()` (aggregato farm). Filtro OCR anomalie >100M per spedizione (Issue #16/#27). |
+| `services/log_reader.py` | Tail efficiente log file con offset tracking. |
+| `templates/*.html` | Jinja2 template: `index.html` (dashboard principale), `config_global.html` (form parametri globali), `config_overrides.html` (form rifornimento/zaino). |
+| `static/style.css`, `static/app.js` | CSS palette ambra + HTMX bootstrap. |
+
+### `monitor/` — MCP server per Claude Code
+
+| File | Descrizione |
+|------|-------------|
+| `mcp_server.py` | MCP server stdio per analisi log live. Tool: `ciclo_stato`, `anomalie_live`, `istanza_anomalie`, `istanza_raccolta`, `istanza_launcher`, `log_tail`. |
+| `analyzer.py` | Parser + pattern anomalie (ERROR/WARN) da bot.log e jsonl. |
+
+### `radar_tool/` — sottomodulo radar census
+
+Progetto separato per classificazione nodi mappa via ML. Usato da `radar_census.py` (attualmente disabilitato, templates mancanti). `detector.py`, `classifier.py`, `labeler.py`, `scan.py`, `train.py`, `template_builder.py`.
+
+### `data/`, `state/`, `logs/`, `templates/`
+
+| Cartella | Descrizione |
+|----------|-------------|
+| `data/blacklist_fuori_globale.json` | Lista nodi raccolta fuori-territorio (globale tra istanze). |
+| `data/storico_farm.json` | Storico giornaliero produzione per istanza (90gg retention). |
+| `state/FAU_XX.json` | Stato persistente per-istanza (rifornimento, daily_tasks, schedule, metrics). Atomic save. |
+| `state/FAU_XX_timing.json` | Timing appresi per-istanza (boot_android_s, etc.). |
+| `logs/FAU_XX.jsonl` | Log strutturato per-istanza (1 JSON per riga). Ruotato `.bak` a ogni avvio. |
+| `logs/bot.log` | Log testuale globale (MAIN + per-istanza). |
+| `templates/pin/*.png` | Template PNG per matching UI (130+ file). |
+| `engine_status.json` | Snapshot live stato bot (scritto ogni N secondi da status_writer). |
+| `last_checkpoint.json` | Checkpoint per resume (scritto prima di ogni istanza). |
+
+### `.claude/` — istruzioni Claude Code
+
+| File | Descrizione |
+|------|-------------|
+| `CLAUDE.md` | Istruzioni operative complete (regole codice, architettura, issues tracking). Tracked in git. |
+| `SESSION.md` | Handoff di sessione tra browser e VS Code. Local-only (gitignored). |
+| `mcp_servers.json` | Configurazione MCP server (monitor). |
+| `settings.json` | Settings Claude Code (permissions, etc.). Tracked. |
+| `settings.local.json` | Settings locali (gitignored). |

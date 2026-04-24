@@ -149,6 +149,12 @@ All'inizio di ogni sessione, in questo ordine:
 | 40 | Flag rifornimento_mappa duplicato — sub-mode incoerente tra dashboard e bot | MEDIA | ✅ RISOLTA 23/04 (unica fonte rifornimento.mappa_abilitata; eliminato task.rifornimento_mappa) |
 | 41 | Integrazione DonazioneTask nella dashboard (pill + toggle) | — | ✅ IMPLEMENTATA 23/04 (TaskFlags + valid_tasks + ORDER) |
 | 42 | Donazione — ramo "pin_marked non trovato" non chiude Technology → raccolta salta | ALTA | ✅ RISOLTA 23/04 (back x3 nel branch pin_marked assente) |
+| 43 | Integrazione DistrictShowdownTask nella dashboard + pipeline | — | ✅ IMPLEMENTATA 24/04 (TaskFlags + valid_tasks + ORDER + template + sync_prod) |
+| 44 | DistrictShowdownTask — conformità V6 API (6 bug bloccanti) | ALTA | ✅ RISOLTA 24/04 (name metodo, task_abilitato, TaskResult.message, screen no .frame, zone, e_dovuto(ctx)) |
+| 45 | DistrictShowdown — MatchResult sempre truthy, uso `.found` consistente | ALTA | ✅ RISOLTA 24/04 (10 check convertiti al pattern `.found`) |
+| 46 | Launcher — am start OK ma gioco in background + polling troppo rapido | ALTA | ✅ RISOLTA 24/04 (monkey sempre + foreground check + monkey recovery + poll 7s) |
+| 47 | DistrictShowdown — tap hardcoded su Start falliva quando popup shift | ALTA | ✅ RISOLTA 24/04 (tap dinamico su coord match + wait_template_ready adattivo) |
+| 48 | DistrictShowdown — loop infinito quando gioco esce + skip animation | ALTA | ✅ RISOLTA 24/04 (early-exit 3 cicli streak + check skip 840,371) |
 
 > Aggiornare questa tabella ad ogni sessione insieme alla ROADMAP.
 
