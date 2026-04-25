@@ -22,6 +22,17 @@
       </div>
     </div>
 
+    <!-- ── PRODUZIONE PER ISTANZA (auto-WU14) ──────────────── -->
+    <div class="section">
+      <div class="sec-label">produzione per istanza (sessione corrente + precedente)</div>
+      <div id="prod-istanze"
+           hx-get="/ui/partial/produzione-istanze"
+           hx-trigger="load, every 30s"
+           hx-swap="innerHTML">
+        <div style="color:var(--text-dim);text-align:center;padding:12px">caricamento...</div>
+      </div>
+    </div>
+
     <div class="divider"></div>
 
     <!-- ── CONFIGURAZIONE 2x2 ────────────────────────────── -->
@@ -341,16 +352,6 @@
           </table>
         </div>
 
-      </div>
-
-      <!-- auto-WU14: card produzione per istanza -->
-      <div class="res-block" id="prod-istanze"
-           hx-get="/ui/partial/produzione-istanze"
-           hx-trigger="load, every 30s"
-           hx-swap="innerHTML"
-           style="margin-top:10px">
-        <div class="res-sub">produzione per istanza (sessione corrente + precedente)</div>
-        <div style="color:var(--text-dim);text-align:center;padding:12px">caricamento...</div>
       </div>
 
       <!-- slot per blocchi statistiche aggiuntivi -->
