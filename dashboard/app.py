@@ -540,9 +540,9 @@ def partial_res_totali(request: Request):
 @app.get("/ui/partial/produzione-istanze", include_in_schema=False)
 def partial_produzione_istanze(request: Request):
     """
-    Auto-WU14 step3: cards produzione per istanza.
-    Mostra sessione corrente (in-flight) + ultima sessione chiusa con
-    produzione/h calcolata. Refresh ogni 30s via HTMX.
+    Auto-WU14 step3: cards produzione per istanza — compatta.
+    Mostra sessione corrente + sessione precedente in grid 3-col.
+    No scroll: tutte le istanze visibili.
     """
     from dashboard.services.stats_reader import get_produzione_istanze
     dati = get_produzione_istanze()
@@ -560,11 +560,15 @@ def partial_produzione_istanze(request: Request):
             v = float(v)
         except Exception:
             return "—"
-        if abs(v) >= 1_000_000:
-            return f"{v/1_000_000:.2f}M"
-        if abs(v) >= 1_000:
-            return f"{v/1_000:.0f}K"
-        return f"{v:.0f}"
+        if v == 0:
+            return "0"
+        sign = "-" if v < 0 else ""
+        v = abs(v)
+        if v >= 1_000_000:
+            return f"{sign}{v/1_000_000:.1f}M"
+        if v >= 1_000:
+            return f"{sign}{v/1_000:.0f}K"
+        return f"{sign}{v:.0f}"
 
     cards_html = []
     for entry in dati:
@@ -573,7 +577,6 @@ def partial_produzione_istanze(request: Request):
             continue
         corrente   = entry.get("corrente") or {}
         precedente = entry.get("precedente") or {}
-        n_storico  = entry.get("n_storico_24h", 0)
 
         # Sessione corrente
         ris_ini = corrente.get("risorse_iniziali", {}) or {}
@@ -582,44 +585,68 @@ def partial_produzione_istanze(request: Request):
         zaino   = corrente.get("zaino_delta", {}) or {}
         truppe  = corrente.get("truppe_raccolta_inviate", 0)
         provv   = corrente.get("rifornimento_provviste_residue", -1)
-        ts_ini  = corrente.get("ts_inizio", "")
 
-        provv_lbl = "quota esaurita" if provv == 0 else (
-            f"{provv} provviste" if provv > 0 else "—"
+        provv_lbl = "esaurita" if provv == 0 else (f"{provv}" if provv > 0 else "—")
+
+        # Sessione precedente
+        prod_h_prec     = precedente.get("produzione_oraria") or {}
+        ris_ini_prec    = precedente.get("risorse_iniziali") or {}
+        ris_fin_prec    = precedente.get("risorse_finali") or {}
+        rif_inv_prec    = precedente.get("rifornimento_inviato") or {}
+        durata_s        = precedente.get("durata_sec") or 0
+        durata_m        = int(durata_s // 60) if durata_s else 0
+        truppe_prec     = precedente.get("truppe_raccolta_inviate", 0)
+
+        # Riga corrente: per ogni risorsa, "iniziale (+inviato/zaino)"
+        row_curr = "".join(
+            f'<div title="{r}: ini={_fmt_q(ris_ini.get(r,0))} '
+            f'inv={_fmt_q(rif_inv.get(r,0))} tassa={_fmt_q(rif_tax.get(r,0))} '
+            f'zaino={_fmt_q(zaino.get(r,0))}" '
+            f'style="display:flex;flex-direction:column;align-items:center;flex:1">'
+            f'<span style="font-size:9px;color:var(--text-dim)">{ico}</span>'
+            f'<span style="font-weight:600">{_fmt_q(ris_ini.get(r,0))}</span>'
+            f'<span style="font-size:9px;color:var(--accent)">'
+            f'+{_fmt_q(rif_inv.get(r,0))}</span></div>'
+            for r, ico in RISORSE_ICO
         )
 
-        # Sessione precedente chiusa
-        prod_h    = precedente.get("produzione_oraria") or {}
-        durata_s  = precedente.get("durata_sec") or 0
-        durata_m  = int(durata_s // 60) if durata_s else 0
-
-        rows_curr = "".join(
-            f'<tr><td>{ico} {r}</td>'
-            f'<td>{_fmt_q(ris_ini.get(r, 0))}</td>'
-            f'<td>{_fmt_q(rif_inv.get(r, 0))}</td>'
-            f'<td>{_fmt_q(rif_tax.get(r, 0))}</td>'
-            f'<td>{_fmt_q(zaino.get(r, 0))}</td>'
-            f'<td>{_fmt_q(prod_h.get(r, 0))}</td></tr>'
+        # Riga precedente: prod/h per risorsa
+        row_prec = "".join(
+            f'<div title="{r} prec: '
+            f'ini={_fmt_q(ris_ini_prec.get(r,0))} fin={_fmt_q(ris_fin_prec.get(r,0))} '
+            f'inv={_fmt_q(rif_inv_prec.get(r,0))}" '
+            f'style="display:flex;flex-direction:column;align-items:center;flex:1">'
+            f'<span style="font-size:9px;color:var(--text-dim)">{ico}</span>'
+            f'<span style="font-weight:600;color:#7cf">'
+            f'{_fmt_q(prod_h_prec.get(r,0))}/h</span></div>'
             for r, ico in RISORSE_ICO
+        )
+
+        has_prec = bool(prod_h_prec)
+        prec_block = (
+            f'<div style="border-top:1px dashed var(--border);padding-top:4px;margin-top:4px">'
+            f'<div style="font-size:9px;color:var(--text-dim);margin-bottom:2px">'
+            f'precedente · {durata_m}m · truppe={truppe_prec}</div>'
+            f'<div style="display:flex;gap:4px">{row_prec}</div></div>'
+            if has_prec else
+            f'<div style="border-top:1px dashed var(--border);padding-top:4px;margin-top:4px;'
+            f'font-size:9px;color:var(--text-dim);text-align:center">'
+            f'precedente · in attesa</div>'
         )
 
         cards_html.append(f'''
         <div class="prod-card" style="background:var(--bg-card);border:1px solid var(--border);
-             border-radius:6px;padding:8px;margin-bottom:6px;font-size:11px">
+             border-radius:5px;padding:6px 8px;font-size:10px">
           <div style="display:flex;justify-content:space-between;align-items:center;
-               margin-bottom:6px;font-weight:600">
+               margin-bottom:4px;font-weight:600;font-size:11px">
             <span>{nome}</span>
-            <span style="color:var(--text-dim);font-weight:normal">
-              truppe={truppe} · {provv_lbl} · sess.precedente={durata_m}m · 24h={n_storico}
+            <span style="color:var(--text-dim);font-weight:normal;font-size:9px">
+              T:{truppe} · P:{provv_lbl}
             </span>
           </div>
-          <table style="width:100%;font-size:10px;border-collapse:collapse">
-            <thead><tr style="color:var(--text-dim)">
-              <th style="text-align:left">risorsa</th>
-              <th>iniziale</th><th>inviato</th><th>tassa</th><th>zaino±</th><th>prod/h</th>
-            </tr></thead>
-            <tbody>{rows_curr}</tbody>
-          </table>
+          <div style="font-size:9px;color:var(--text-dim);margin-bottom:2px">corrente</div>
+          <div style="display:flex;gap:4px">{row_curr}</div>
+          {prec_block}
         </div>
         ''')
 
@@ -630,7 +657,8 @@ def partial_produzione_istanze(request: Request):
         )
 
     return HTMLResponse(
-        '<div style="max-height:400px;overflow-y:auto">' + "".join(cards_html) + '</div>'
+        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));'
+        'gap:6px">' + "".join(cards_html) + '</div>'
     )
 
 
