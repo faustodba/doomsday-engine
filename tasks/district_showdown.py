@@ -1093,32 +1093,13 @@ class DistrictShowdownTask(Task):
             return
         ctx.log_msg(
             f"[DS-INFL] pagina gioco confermata "
-            f"(pin_dado score={res_dado.score:.3f})"
+            f"(pin_dado score={res_dado.score:.3f}) — fine, resto su mappa DS"
         )
-
-        # 7. Back finale — esce dalla pagina gioco (District Showdown)
-        ctx.log_msg("[DS-INFL] back 3 (esce dalla pagina gioco)")
-        ctx.device.back()
-        time.sleep(cfg.delay_foray)
-
-        # 8. Verifica HOME tramite navigator
-        try:
-            schermata = ctx.navigator.schermata_corrente()
-            ctx.log_msg(f"[DS-INFL] schermata post-exit: {schermata}")
-            # Screen.HOME = HOME del gioco (non HOME Android)
-            from core.navigator import Screen  # lazy
-            if schermata == Screen.HOME:
-                ctx.log_msg("[DS-INFL] HOME confermata")
-            else:
-                ctx.log_msg(
-                    f"[DS-INFL] schermata {schermata} != HOME — vai_in_home sicurezza"
-                )
-                ctx.navigator.vai_in_home()
-        except Exception as exc:
-            ctx.log_msg(
-                f"[DS-INFL] verifica schermata errore: {exc} — vai_in_home sicurezza"
-            )
-            ctx.navigator.vai_in_home()
+        # auto-WU8: rimosso back 3 + verifica HOME + vai_in_home sicurezza.
+        # INFL ora resta sulla mappa DS (pin_dado confermato). ACHV gate
+        # readiness _torna_a_mappa_ds vedrà pin_dado e procederà direttamente
+        # senza round-trip HOME→evento (risparmio ~40s per ciclo DS).
+        # L'uscita finale dalla mappa DS è gestita dal back x4 in run() (WU5).
 
     # ------------------------------------------------------------------
     # Fase 4 — Achievement Rewards (claim totale reward dadi usati)
