@@ -75,6 +75,15 @@ def _iso_to_float(iso: str) -> float:
         return 0.0
 
 
+def _ts_after(iso: str, cutoff: datetime) -> bool:
+    """True se il timestamp ISO è successivo al cutoff (datetime UTC). False se non parsabile."""
+    try:
+        ts = datetime.fromisoformat(iso)
+        return ts > cutoff
+    except (ValueError, TypeError):
+        return False
+
+
 # ==============================================================================
 # RifornimentoState — quota giornaliera spedizioni
 # ==============================================================================
@@ -724,6 +733,90 @@ class DailyTasksState:
 # MetricsState — metriche produzione
 # ==============================================================================
 
+# ==============================================================================
+# ProduzioneSession — auto-WU14: tracciamento produzione oraria per sessione
+# ==============================================================================
+
+@dataclass
+class ProduzioneSession:
+    """
+    Sessione di produzione: dati aggregati tra avvio istanza N e avvio N+1.
+
+    Calcolo produzione (alla chiusura, all'avvio della sessione successiva):
+        delta_castle  = risorse_finali - risorse_iniziali
+        produzione    = delta_castle - zaino_delta + rifornimento_inviato
+        prod_oraria   = produzione / durata_sec × 3600
+
+    Tutti i campi _delta accumulano segno positivo=entrato/segno negativo=uscito
+    dal castello durante la sessione.
+    """
+    ts_inizio: str = ""                                 # ISO timestamp avvio
+    risorse_iniziali: dict = field(default_factory=dict)  # {pomodoro, legno, acciaio, petrolio} (M float)
+    diamanti_iniziali: int = -1                         # snapshot diamanti
+
+    # Cumulativi durante sessione
+    rifornimento_inviato: dict = field(default_factory=dict)  # {risorsa: qta_clamped}
+    rifornimento_tassa:   dict = field(default_factory=dict)  # {risorsa: qta_clamped × tassa}
+    rifornimento_provviste_residue: int = -1                  # 0 = quota esaurita, -1 = mai letto
+    zaino_delta: dict = field(default_factory=dict)           # {risorsa: delta} +entra castle, -esce
+    truppe_raccolta_inviate: int = 0                          # count nodi raccolta avviati
+
+    # Chiusura (popolata dalla sessione successiva)
+    ts_fine:           str | None = None
+    risorse_finali:    dict | None = None
+    durata_sec:        float | None = None
+    produzione_qty:    dict | None = None  # {risorsa: qty totale prodotta}
+    produzione_oraria: dict | None = None  # {risorsa: qty/h}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ProduzioneSession":
+        return cls(
+            ts_inizio=d.get("ts_inizio", ""),
+            risorse_iniziali=dict(d.get("risorse_iniziali", {})),
+            diamanti_iniziali=d.get("diamanti_iniziali", -1),
+            rifornimento_inviato=dict(d.get("rifornimento_inviato", {})),
+            rifornimento_tassa=dict(d.get("rifornimento_tassa", {})),
+            rifornimento_provviste_residue=d.get("rifornimento_provviste_residue", -1),
+            zaino_delta=dict(d.get("zaino_delta", {})),
+            truppe_raccolta_inviate=d.get("truppe_raccolta_inviate", 0),
+            ts_fine=d.get("ts_fine"),
+            risorse_finali=d.get("risorse_finali"),
+            durata_sec=d.get("durata_sec"),
+            produzione_qty=d.get("produzione_qty"),
+            produzione_oraria=d.get("produzione_oraria"),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "ts_inizio": self.ts_inizio,
+            "risorse_iniziali": dict(self.risorse_iniziali),
+            "diamanti_iniziali": self.diamanti_iniziali,
+            "rifornimento_inviato": dict(self.rifornimento_inviato),
+            "rifornimento_tassa": dict(self.rifornimento_tassa),
+            "rifornimento_provviste_residue": self.rifornimento_provviste_residue,
+            "zaino_delta": dict(self.zaino_delta),
+            "truppe_raccolta_inviate": self.truppe_raccolta_inviate,
+            "ts_fine": self.ts_fine,
+            "risorse_finali": self.risorse_finali,
+            "durata_sec": self.durata_sec,
+            "produzione_qty": self.produzione_qty,
+            "produzione_oraria": self.produzione_oraria,
+        }
+
+    def aggiungi_rifornimento(self, risorsa: str, qta_clamped: int, tassa_amount: int) -> None:
+        """Hook chiamato da rifornimento ad ogni spedizione completata."""
+        self.rifornimento_inviato[risorsa] = self.rifornimento_inviato.get(risorsa, 0) + qta_clamped
+        self.rifornimento_tassa[risorsa]   = self.rifornimento_tassa.get(risorsa, 0)   + tassa_amount
+
+    def aggiungi_zaino_delta(self, risorsa: str, delta: int) -> None:
+        """Hook chiamato da zaino post-operazione (positivo=entrato castle)."""
+        self.zaino_delta[risorsa] = self.zaino_delta.get(risorsa, 0) + delta
+
+    def incrementa_truppe(self, n: int = 1) -> None:
+        """Hook chiamato da raccolta ad ogni marcia avviata."""
+        self.truppe_raccolta_inviate += n
+
+
 @dataclass
 class MetricsState:
     """
@@ -821,6 +914,10 @@ class InstanceState:
     vip:          VipState          = field(default_factory=VipState)
     arena:        ArenaState        = field(default_factory=ArenaState)
 
+    # auto-WU14: produzione oraria per sessione
+    produzione_corrente: ProduzioneSession | None = None
+    produzione_storico:  list = field(default_factory=list)  # list[ProduzioneSession] ultime 24h
+
     # Stato runtime non persistito (ricostruito all'avvio)
     attivo: bool = False
     ultimo_errore: str | None = None
@@ -838,12 +935,21 @@ class InstanceState:
             "boost":         self.boost.to_dict(),
             "vip":           self.vip.to_dict(),
             "arena":         self.arena.to_dict(),
+            # auto-WU14: produzione oraria
+            "produzione_corrente": self.produzione_corrente.to_dict() if self.produzione_corrente else None,
+            "produzione_storico":  [s.to_dict() for s in self.produzione_storico],
             "ultimo_errore": self.ultimo_errore,
             "ultimo_avvio":  self.ultimo_avvio,
         }
 
     @classmethod
     def from_dict(cls, d: dict) -> "InstanceState":
+        # auto-WU14: deserializzazione produzione_corrente / storico
+        pc_raw = d.get("produzione_corrente")
+        pc = ProduzioneSession.from_dict(pc_raw) if pc_raw else None
+        ps_raw = d.get("produzione_storico", [])
+        ps = [ProduzioneSession.from_dict(s) for s in ps_raw if s]
+
         return cls(
             instance_name=d.get("instance_name", "UNKNOWN"),
             rifornimento=RifornimentoState.from_dict(d.get("rifornimento", {})),
@@ -853,8 +959,83 @@ class InstanceState:
             boost=BoostState.from_dict(d.get("boost", {})),
             vip=VipState.from_dict(d.get("vip", {})),
             arena=ArenaState.from_dict(d.get("arena", {})),
+            produzione_corrente=pc,
+            produzione_storico=ps,
             ultimo_errore=d.get("ultimo_errore", None),
             ultimo_avvio=d.get("ultimo_avvio", None),
+        )
+
+    # ── auto-WU14: gestione produzione sessione ──────────────────────────────
+
+    def chiudi_sessione_e_calcola(
+        self,
+        risorse_finali: dict,
+        ts_fine: str,
+    ) -> "ProduzioneSession | None":
+        """
+        Chiude la sessione corrente con risorse_finali OCR (lette all'avvio
+        della sessione SUCCESSIVA) e calcola produzione oraria.
+
+        Formula:
+            delta_castle  = risorse_finali - risorse_iniziali
+            produzione    = delta_castle - zaino_delta + rifornimento_inviato
+            prod_oraria   = produzione / durata_sec × 3600
+
+        Archivia in produzione_storico (FIFO 24h) e ritorna la sessione chiusa.
+        Se non c'era sessione corrente, ritorna None.
+        """
+        from datetime import datetime, timezone, timedelta
+
+        sess = self.produzione_corrente
+        if sess is None or not sess.ts_inizio:
+            return None
+
+        try:
+            t0 = datetime.fromisoformat(sess.ts_inizio)
+            t1 = datetime.fromisoformat(ts_fine)
+            durata = max(0.0, (t1 - t0).total_seconds())
+        except Exception:
+            durata = 0.0
+
+        # Calcolo produzione per ogni risorsa nota
+        prod_qty = {}
+        prod_ora = {}
+        for r in ("pomodoro", "legno", "acciaio", "petrolio"):
+            ini = float(sess.risorse_iniziali.get(r, 0) or 0)
+            fin = float(risorse_finali.get(r, 0) or 0)
+            inv = int(sess.rifornimento_inviato.get(r, 0))
+            zd  = int(sess.zaino_delta.get(r, 0))
+            delta_castle = fin - ini
+            prod = delta_castle - zd + inv
+            prod_qty[r] = prod
+            prod_ora[r] = (prod / durata * 3600.0) if durata > 0 else 0.0
+
+        sess.ts_fine        = ts_fine
+        sess.risorse_finali = dict(risorse_finali)
+        sess.durata_sec     = durata
+        sess.produzione_qty = prod_qty
+        sess.produzione_oraria = prod_ora
+
+        # Archivia in storico
+        self.produzione_storico.append(sess)
+
+        # Cleanup FIFO 24h
+        cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+        self.produzione_storico = [
+            s for s in self.produzione_storico
+            if s.ts_fine and _ts_after(s.ts_fine, cutoff)
+        ]
+
+        chiusa = sess
+        self.produzione_corrente = None
+        return chiusa
+
+    def apri_sessione(self, risorse_iniziali: dict, diamanti: int, ts_inizio: str) -> None:
+        """Apre una nuova sessione produzione con snapshot risorse all'avvio."""
+        self.produzione_corrente = ProduzioneSession(
+            ts_inizio=ts_inizio,
+            risorse_iniziali=dict(risorse_iniziali),
+            diamanti_iniziali=diamanti,
         )
 
     # ── Persistenza su disco ──────────────────────────────────────────────────

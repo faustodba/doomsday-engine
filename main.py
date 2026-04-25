@@ -628,6 +628,46 @@ def _thread_istanza(ist, tasks_cls, dry_run):
         except Exception as exc:
             _log(nome, f"[WARN] comprimi_banner_home: {exc}")
 
+        # auto-WU14: snapshot risorse castello + chiusura sessione precedente
+        # + apertura nuova sessione produzione. Le risorse top-bar sono lette
+        # qui (HOME stabile, banner chiuso) per garantire massima accuratezza.
+        try:
+            from shared.ocr_helpers import ocr_risorse
+            from core.state import _ts_now
+            shot_init = ctx.device.screenshot()
+            if shot_init is not None:
+                rd = ocr_risorse(shot_init)
+                ts_now = _ts_now()
+                risorse_now = {
+                    "pomodoro": rd.pomodoro,
+                    "legno":    rd.legno,
+                    "acciaio":  rd.acciaio,
+                    "petrolio": rd.petrolio,
+                }
+                _log(nome,
+                     f"[PROD] risorse castello: pom={rd.pomodoro:.1f}M "
+                     f"leg={rd.legno:.1f}M acc={rd.acciaio:.1f}M "
+                     f"pet={rd.petrolio:.1f}M dia={rd.diamanti}")
+
+                # Chiudi sessione precedente (se esiste) calcolando produzione
+                chiusa = ctx.state.chiudi_sessione_e_calcola(risorse_now, ts_now)
+                if chiusa is not None:
+                    po = chiusa.produzione_oraria or {}
+                    _log(nome,
+                         f"[PROD] sessione chiusa durata={chiusa.durata_sec or 0:.0f}s "
+                         f"prod/h: pom={po.get('pomodoro',0):.0f} "
+                         f"leg={po.get('legno',0):.0f} "
+                         f"acc={po.get('acciaio',0):.0f} "
+                         f"pet={po.get('petrolio',0):.0f}")
+
+                # Apri nuova sessione
+                ctx.state.apri_sessione(risorse_now, rd.diamanti, ts_now)
+                _log(nome, f"[PROD] sessione aperta @ {ts_now}")
+            else:
+                _log(nome, "[PROD] screenshot None — sessione produzione non aperta")
+        except Exception as exc:
+            _log(nome, f"[WARN] produzione snapshot: {exc}")
+
     # ── 2. Rebuild context (rilegge config aggiornata) ───────────────
     _ov_raw     = load_overrides(_OVERRIDES_PATH)
     with open(_GLOBAL_CONFIG_PATH, encoding="utf-8") as _f:
