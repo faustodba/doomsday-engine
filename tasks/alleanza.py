@@ -99,18 +99,34 @@ class AlleanzaTask(Task):
         time.sleep(cfg.wait_tab)
 
         n_rivendiche = 0
+        # auto-WU15: scroll lista quando pin_claim esce viewport (claims sotto).
+        # Reset dopo ogni tap success: se la lista cambia, rivaluta scroll.
+        scroll_used = False
 
         for i in range(cfg.max_rivendica):
             shot   = device.screenshot()
             result = matcher.find_one(shot, cfg.tmpl_claim)
             if not result.found or result.score < cfg.soglia_claim:
-                log(f"pin_claim non trovato (score={result.score:.3f}) — stop a {i}/{cfg.max_rivendica}")
+                if not scroll_used:
+                    log(
+                        f"pin_claim non trovato (score={result.score:.3f}) "
+                        f"— scroll lista per claims sotto viewport"
+                    )
+                    device.swipe(480, 400, 480, 180, duration_ms=400)
+                    time.sleep(cfg.wait_tab)
+                    scroll_used = True
+                    continue
+                log(
+                    f"pin_claim non trovato post-scroll (score={result.score:.3f}) "
+                    f"— stop a {i}/{cfg.max_rivendica}"
+                )
                 break
             cx, cy = result.cx, result.cy
             log(f"Claim tap {i+1}/{cfg.max_rivendica} → ({cx},{cy}) score={result.score:.3f}")
             device.tap(cx, cy)
             time.sleep(cfg.wait_rivendica)
             n_rivendiche += 1
+            scroll_used = False  # reset: lista aggiornata, riconsidera scroll
         else:
             log(f"Claim completato: raggiunto limite {cfg.max_rivendica}")
 
