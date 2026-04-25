@@ -1060,46 +1060,25 @@ class DistrictShowdownTask(Task):
         ctx.device.tap(*cfg.tap_claim_key)
         time.sleep(cfg.delay_foray)
 
-        # 4. Back — chiude sub-popup claim → torna al popup Alliance Influence
+        # 4. Back — chiude sub-popup claim
         ctx.log_msg("[DS-INFL] back 1 (chiude sub-popup claim)")
         ctx.device.back()
         time.sleep(cfg.delay_foray)
 
-        # 5. Back — chiude Alliance Influence → torna pagina gioco
-        ctx.log_msg("[DS-INFL] back 2 (chiude popup Alliance Influence)")
-        ctx.device.back()
-        time.sleep(cfg.delay_foray)
-
-        # 6. Verifica pagina gioco (pin_dado)
-        screen = ctx.device.screenshot()
-        if screen is None:
-            # auto-WU7: screenshot None → recovery adattivo (verifica pin_dado
-            # nei primi tentativi prima di rifugiarsi su HOME).
-            ctx.log_msg("[DS-INFL] screenshot None post-back — recovery adattivo")
-            if not self._torna_a_mappa_ds(ctx, max_attempts=5):
-                ctx.navigator.vai_in_home()
+        # 5. Recovery adattivo — auto-WU9: rimosso back 2 fisso che spesso
+        # andava troppo lontano (back 1 chiudeva GIA' anche Alliance Influence
+        # → back 2 finiva in HOME). _torna_a_mappa_ds verifica pin_dado nei
+        # primi tentativi: se mappa OK → return. Se popup intermedio → back.
+        # Se HOME → re-enter via icona evento. Tutti i casi gestiti.
+        if not self._torna_a_mappa_ds(ctx, max_attempts=5):
+            ctx.log_msg("[DS-INFL] recovery fallito — vai_in_home sicurezza")
+            ctx.navigator.vai_in_home()
             return
-        res_dado = matcher.find_one(
-            screen, cfg.pin_dado,
-            threshold=cfg.tm_threshold,
-        )
-        if not res_dado.found:
-            # auto-WU7: pin_dado assente post-back → recovery adattivo.
-            ctx.log_msg(
-                "[DS-INFL] pin_dado assente post-back — recovery adattivo"
-            )
-            if not self._torna_a_mappa_ds(ctx, max_attempts=5):
-                ctx.navigator.vai_in_home()
-            return
-        ctx.log_msg(
-            f"[DS-INFL] pagina gioco confermata "
-            f"(pin_dado score={res_dado.score:.3f}) — fine, resto su mappa DS"
-        )
+        ctx.log_msg("[DS-INFL] pagina gioco confermata — fine, resto su mappa DS")
         # auto-WU8: rimosso back 3 + verifica HOME + vai_in_home sicurezza.
-        # INFL ora resta sulla mappa DS (pin_dado confermato). ACHV gate
-        # readiness _torna_a_mappa_ds vedrà pin_dado e procederà direttamente
-        # senza round-trip HOME→evento (risparmio ~40s per ciclo DS).
-        # L'uscita finale dalla mappa DS è gestita dal back x4 in run() (WU5).
+        # INFL ora resta sulla mappa DS. ACHV gate readiness _torna_a_mappa_ds
+        # vedrà pin_dado e procederà direttamente senza round-trip HOME→evento.
+        # Uscita finale dalla mappa DS gestita dal back x4 in run() (WU5).
 
     # ------------------------------------------------------------------
     # Fase 4 — Achievement Rewards (claim totale reward dadi usati)
