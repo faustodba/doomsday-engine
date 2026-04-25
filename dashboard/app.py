@@ -597,41 +597,29 @@ def partial_produzione_istanze(request: Request):
         durata_m        = int(durata_s // 60) if durata_s else 0
         truppe_prec     = precedente.get("truppe_raccolta_inviate", 0)
 
-        # Riga corrente: per ogni risorsa, "iniziale (+inviato/zaino)"
-        row_curr = "".join(
+        has_prec = bool(prod_h_prec)
+        # Per ogni risorsa: colonna con icona + 3 valori (iniziale corrente,
+        # inviato corrente, prod/h precedente). Risultato: 4 colonne per card.
+        cols = "".join(
             f'<div title="{r}: ini={_fmt_q(ris_ini.get(r,0))} '
             f'inv={_fmt_q(rif_inv.get(r,0))} tassa={_fmt_q(rif_tax.get(r,0))} '
-            f'zaino={_fmt_q(zaino.get(r,0))}" '
-            f'style="display:flex;flex-direction:column;align-items:center;flex:1">'
-            f'<span style="font-size:9px;color:var(--text-dim)">{ico}</span>'
-            f'<span style="font-weight:600">{_fmt_q(ris_ini.get(r,0))}</span>'
+            f'zaino={_fmt_q(zaino.get(r,0))} | precedente: '
+            f'prod={_fmt_q(prod_h_prec.get(r,0))}/h ini={_fmt_q(ris_ini_prec.get(r,0))} '
+            f'fin={_fmt_q(ris_fin_prec.get(r,0))} inv={_fmt_q(rif_inv_prec.get(r,0))}" '
+            f'style="display:flex;flex-direction:column;align-items:center;flex:1;'
+            f'gap:1px;line-height:1.15">'
+            f'<span style="font-size:11px">{ico}</span>'
+            f'<span style="font-weight:600;font-size:10px">{_fmt_q(ris_ini.get(r,0))}</span>'
             f'<span style="font-size:9px;color:var(--accent)">'
-            f'+{_fmt_q(rif_inv.get(r,0))}</span></div>'
+            f'+{_fmt_q(rif_inv.get(r,0))}</span>'
+            f'<span style="font-size:9px;color:#7cf">'
+            f'{_fmt_q(prod_h_prec.get(r,0)) if has_prec else "—"}/h</span></div>'
             for r, ico in RISORSE_ICO
         )
 
-        # Riga precedente: prod/h per risorsa
-        row_prec = "".join(
-            f'<div title="{r} prec: '
-            f'ini={_fmt_q(ris_ini_prec.get(r,0))} fin={_fmt_q(ris_fin_prec.get(r,0))} '
-            f'inv={_fmt_q(rif_inv_prec.get(r,0))}" '
-            f'style="display:flex;flex-direction:column;align-items:center;flex:1">'
-            f'<span style="font-size:9px;color:var(--text-dim)">{ico}</span>'
-            f'<span style="font-weight:600;color:#7cf">'
-            f'{_fmt_q(prod_h_prec.get(r,0))}/h</span></div>'
-            for r, ico in RISORSE_ICO
-        )
-
-        has_prec = bool(prod_h_prec)
-        prec_block = (
-            f'<div style="border-top:1px dashed var(--border);padding-top:4px;margin-top:4px">'
-            f'<div style="font-size:9px;color:var(--text-dim);margin-bottom:2px">'
-            f'precedente · {durata_m}m · truppe={truppe_prec}</div>'
-            f'<div style="display:flex;gap:4px">{row_prec}</div></div>'
-            if has_prec else
-            f'<div style="border-top:1px dashed var(--border);padding-top:4px;margin-top:4px;'
-            f'font-size:9px;color:var(--text-dim);text-align:center">'
-            f'precedente · in attesa</div>'
+        prec_meta = (
+            f'precedente · {durata_m}m · T={truppe_prec}' if has_prec
+            else 'precedente · in attesa'
         )
 
         cards_html.append(f'''
@@ -644,9 +632,10 @@ def partial_produzione_istanze(request: Request):
               T:{truppe} · P:{provv_lbl}
             </span>
           </div>
-          <div style="font-size:9px;color:var(--text-dim);margin-bottom:2px">corrente</div>
-          <div style="display:flex;gap:4px">{row_curr}</div>
-          {prec_block}
+          <div style="display:flex;gap:4px;justify-content:space-between">{cols}</div>
+          <div style="font-size:9px;color:var(--text-dim);margin-top:3px;text-align:center">
+            {prec_meta}
+          </div>
         </div>
         ''')
 
