@@ -537,6 +537,103 @@ def partial_res_totali(request: Request):
     return HTMLResponse(html)
 
 
+@app.get("/ui/partial/produzione-istanze", include_in_schema=False)
+def partial_produzione_istanze(request: Request):
+    """
+    Auto-WU14 step3: cards produzione per istanza.
+    Mostra sessione corrente (in-flight) + ultima sessione chiusa con
+    produzione/h calcolata. Refresh ogni 30s via HTMX.
+    """
+    from dashboard.services.stats_reader import get_produzione_istanze
+    dati = get_produzione_istanze()
+    if not dati:
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:12px">'
+            'nessuna istanza con dati produzione</div>'
+        )
+
+    RISORSE_ICO = [("pomodoro", "🍅"), ("legno", "🪵"),
+                   ("acciaio", "⚙"),   ("petrolio", "🛢")]
+
+    def _fmt_q(v):
+        try:
+            v = float(v)
+        except Exception:
+            return "—"
+        if abs(v) >= 1_000_000:
+            return f"{v/1_000_000:.2f}M"
+        if abs(v) >= 1_000:
+            return f"{v/1_000:.0f}K"
+        return f"{v:.0f}"
+
+    cards_html = []
+    for entry in dati:
+        nome = entry.get("nome", "?")
+        if not entry.get("abilitata", False):
+            continue
+        corrente   = entry.get("corrente") or {}
+        precedente = entry.get("precedente") or {}
+        n_storico  = entry.get("n_storico_24h", 0)
+
+        # Sessione corrente
+        ris_ini = corrente.get("risorse_iniziali", {}) or {}
+        rif_inv = corrente.get("rifornimento_inviato", {}) or {}
+        rif_tax = corrente.get("rifornimento_tassa", {}) or {}
+        zaino   = corrente.get("zaino_delta", {}) or {}
+        truppe  = corrente.get("truppe_raccolta_inviate", 0)
+        provv   = corrente.get("rifornimento_provviste_residue", -1)
+        ts_ini  = corrente.get("ts_inizio", "")
+
+        provv_lbl = "quota esaurita" if provv == 0 else (
+            f"{provv} provviste" if provv > 0 else "—"
+        )
+
+        # Sessione precedente chiusa
+        prod_h    = precedente.get("produzione_oraria") or {}
+        durata_s  = precedente.get("durata_sec") or 0
+        durata_m  = int(durata_s // 60) if durata_s else 0
+
+        rows_curr = "".join(
+            f'<tr><td>{ico} {r}</td>'
+            f'<td>{_fmt_q(ris_ini.get(r, 0))}</td>'
+            f'<td>{_fmt_q(rif_inv.get(r, 0))}</td>'
+            f'<td>{_fmt_q(rif_tax.get(r, 0))}</td>'
+            f'<td>{_fmt_q(zaino.get(r, 0))}</td>'
+            f'<td>{_fmt_q(prod_h.get(r, 0))}</td></tr>'
+            for r, ico in RISORSE_ICO
+        )
+
+        cards_html.append(f'''
+        <div class="prod-card" style="background:var(--bg-card);border:1px solid var(--border);
+             border-radius:6px;padding:8px;margin-bottom:6px;font-size:11px">
+          <div style="display:flex;justify-content:space-between;align-items:center;
+               margin-bottom:6px;font-weight:600">
+            <span>{nome}</span>
+            <span style="color:var(--text-dim);font-weight:normal">
+              truppe={truppe} · {provv_lbl} · sess.precedente={durata_m}m · 24h={n_storico}
+            </span>
+          </div>
+          <table style="width:100%;font-size:10px;border-collapse:collapse">
+            <thead><tr style="color:var(--text-dim)">
+              <th style="text-align:left">risorsa</th>
+              <th>iniziale</th><th>inviato</th><th>tassa</th><th>zaino±</th><th>prod/h</th>
+            </tr></thead>
+            <tbody>{rows_curr}</tbody>
+          </table>
+        </div>
+        ''')
+
+    if not cards_html:
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:12px">'
+            'nessuna istanza abilitata con dati produzione</div>'
+        )
+
+    return HTMLResponse(
+        '<div style="max-height:400px;overflow-y:auto">' + "".join(cards_html) + '</div>'
+    )
+
+
 @app.get("/ui/partial/res-oraria", include_in_schema=False)
 def partial_res_oraria(request: Request):
     """

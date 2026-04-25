@@ -236,6 +236,59 @@ def get_storico(n: int = 50) -> list[StoricoEntry]:
         return []
 
 
+def get_produzione_istanze() -> list[dict]:
+    """
+    Auto-WU14 step3: ritorna dati produzione per ogni istanza.
+
+    Per ogni istanza presente in instances.json, legge state/<nome>.json
+    e estrae produzione_corrente + ultima sessione chiusa dal storico.
+
+    Schema output:
+    [{
+      "nome": str,
+      "abilitata": bool,
+      "corrente": {
+         "ts_inizio": iso,
+         "risorse_iniziali": {pomodoro, legno, acciaio, petrolio},
+         "diamanti_iniziali": int,
+         "rifornimento_inviato": {risorsa: qty},
+         "rifornimento_tassa": {risorsa: qty},
+         "rifornimento_provviste_residue": int,
+         "zaino_delta": {risorsa: delta},
+         "truppe_raccolta_inviate": int,
+      } | None,
+      "precedente": {
+         "ts_inizio", "ts_fine", "durata_sec",
+         "produzione_qty": {risorsa: qty},
+         "produzione_oraria": {risorsa: qty/h},
+      } | None,
+      "n_storico_24h": int,
+    }, ...]
+    """
+    try:
+        insts = get_instances()
+        result: list[dict] = []
+        for ist in insts:
+            nome = ist.get("nome", "")
+            if not nome:
+                continue
+            state = _load_state(nome)
+            corrente = state.get("produzione_corrente")
+            storico  = state.get("produzione_storico", []) or []
+            # ultima sessione chiusa (più recente)
+            precedente = storico[-1] if storico else None
+            result.append({
+                "nome":          nome,
+                "abilitata":     _abilitata(nome),
+                "corrente":      corrente,
+                "precedente":    precedente,
+                "n_storico_24h": len(storico),
+            })
+        return result
+    except Exception:
+        return []
+
+
 def get_risorse_farm() -> RisorseFarm:
     """
     Aggrega dati risorse da tutti gli state/<nome>.json presenti.
