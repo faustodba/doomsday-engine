@@ -27,7 +27,7 @@ class AlleanzaConfig:
     coord_raccogli:     tuple[int, int] = (856, 505)
     tmpl_claim:         str   = "pin/pin_claim.png"
     soglia_claim:       float = 0.75
-    max_rivendica:      int   = 20
+    max_rivendica:      int   = 30   # auto-WU13: 20 → 30 (alleanza con molti claim disponibili)
     n_back_chiudi:      int   = 3
     wait_open_alleanza: float = 2.0
     wait_open_dono:     float = 2.0
