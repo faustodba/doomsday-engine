@@ -1006,10 +1006,13 @@ class DistrictShowdownTask(Task):
                 f"(pin_dado score={res_dado.score:.3f})"
             )
         else:
+            # auto-WU7: pin_dado assente → _torna_a_mappa_ds (verifica
+            # pin_dado nei primi tentativi, gestisce stato intermedio con
+            # back, rientra solo se HOME). Evita round-trip HOME→evento.
             ctx.log_msg(
-                "[DS-FORAY] pin_dado assente — vai_in_home sicurezza"
+                "[DS-FORAY] pin_dado assente post-back — recovery adattivo"
             )
-            ctx.navigator.vai_in_home()
+            self._torna_a_mappa_ds(ctx, max_attempts=5)
 
     # ------------------------------------------------------------------
     # Fase 3 — Influence Rewards (reclamo chiavi da statue alleanza)
@@ -1070,18 +1073,23 @@ class DistrictShowdownTask(Task):
         # 6. Verifica pagina gioco (pin_dado)
         screen = ctx.device.screenshot()
         if screen is None:
-            ctx.log_msg("[DS-INFL] screenshot None post-back — vai_in_home sicurezza")
-            ctx.navigator.vai_in_home()
+            # auto-WU7: screenshot None → recovery adattivo (verifica pin_dado
+            # nei primi tentativi prima di rifugiarsi su HOME).
+            ctx.log_msg("[DS-INFL] screenshot None post-back — recovery adattivo")
+            if not self._torna_a_mappa_ds(ctx, max_attempts=5):
+                ctx.navigator.vai_in_home()
             return
         res_dado = matcher.find_one(
             screen, cfg.pin_dado,
             threshold=cfg.tm_threshold,
         )
         if not res_dado.found:
+            # auto-WU7: pin_dado assente post-back → recovery adattivo.
             ctx.log_msg(
-                "[DS-INFL] pin_dado assente post-back — vai_in_home sicurezza"
+                "[DS-INFL] pin_dado assente post-back — recovery adattivo"
             )
-            ctx.navigator.vai_in_home()
+            if not self._torna_a_mappa_ds(ctx, max_attempts=5):
+                ctx.navigator.vai_in_home()
             return
         ctx.log_msg(
             f"[DS-INFL] pagina gioco confermata "

@@ -51,7 +51,7 @@ class DonazioneConfig:
     wait_alliance_open: float = 2.0   # dopo tap_barra alliance
     wait_technology_open: float = 4.0 # dopo tap Technology (prima di scan pin_marked)
     wait_marked_tap: float = 2.0      # dopo tap sulla tecnologia marked
-    wait_donate_tap: float = 1.5      # dopo ogni tap Donate
+    wait_donate_tap: float = 0.8      # dopo ogni tap Donate (auto-WU7: era 1.5, dimezzato per velocita')
     wait_back: float = 1.0            # dopo ogni device.back()
 
     # --- Safety ---
