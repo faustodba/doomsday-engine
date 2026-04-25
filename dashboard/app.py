@@ -598,24 +598,38 @@ def partial_produzione_istanze(request: Request):
         truppe_prec     = precedente.get("truppe_raccolta_inviate", 0)
 
         has_prec = bool(prod_h_prec)
-        # Per ogni risorsa: colonna con icona + 3 valori (iniziale corrente,
-        # inviato corrente, prod/h precedente). Risultato: 4 colonne per card.
-        cols = "".join(
-            f'<div title="{r}: ini={_fmt_q(ris_ini.get(r,0))} '
-            f'inv={_fmt_q(rif_inv.get(r,0))} tassa={_fmt_q(rif_tax.get(r,0))} '
-            f'zaino={_fmt_q(zaino.get(r,0))} | precedente: '
-            f'prod={_fmt_q(prod_h_prec.get(r,0))}/h ini={_fmt_q(ris_ini_prec.get(r,0))} '
-            f'fin={_fmt_q(ris_fin_prec.get(r,0))} inv={_fmt_q(rif_inv_prec.get(r,0))}" '
-            f'style="display:flex;flex-direction:column;align-items:center;flex:1;'
-            f'gap:1px;line-height:1.15">'
-            f'<span style="font-size:11px">{ico}</span>'
-            f'<span style="font-weight:600;font-size:10px">{_fmt_q(ris_ini.get(r,0))}</span>'
-            f'<span style="font-size:9px;color:var(--accent)">'
-            f'+{_fmt_q(rif_inv.get(r,0))}</span>'
-            f'<span style="font-size:9px;color:#7cf">'
-            f'{_fmt_q(prod_h_prec.get(r,0)) if has_prec else "—"}/h</span></div>'
-            for r, ico in RISORSE_ICO
-        )
+        # Una riga per risorsa, 4 colonne: risorsa | corrente | precedente | prod/h
+        rows = ""
+        for r, ico in RISORSE_ICO:
+            ini   = _fmt_q(ris_ini.get(r, 0))
+            inv   = _fmt_q(rif_inv.get(r, 0))
+            tax   = _fmt_q(rif_tax.get(r, 0))
+            zd    = _fmt_q(zaino.get(r, 0))
+            ini_p = _fmt_q(ris_ini_prec.get(r, 0))
+            fin_p = _fmt_q(ris_fin_prec.get(r, 0))
+            inv_p = _fmt_q(rif_inv_prec.get(r, 0))
+            ph    = _fmt_q(prod_h_prec.get(r, 0)) if has_prec else "—"
+            tooltip = (
+                f"{r}: corrente ini={ini} inv={inv} tassa={tax} zaino={zd}"
+                f" | precedente ini={ini_p} fin={fin_p} inv={inv_p}"
+            )
+            curr_cell = f'{ini}<span style="color:var(--accent);font-size:9px"> +{inv}</span>'
+            prec_cell = (
+                f'{ini_p}<span style="color:var(--text-dim);font-size:9px"> → {fin_p}</span>'
+                if has_prec else '—'
+            )
+            ph_cell = (
+                f'<span style="color:#7cf;font-weight:600">{ph}/h</span>'
+                if has_prec else '<span style="color:var(--text-dim)">—/h</span>'
+            )
+            rows += (
+                f'<tr title="{tooltip}">'
+                f'<td style="padding:1px 4px">{ico}</td>'
+                f'<td style="padding:1px 4px;text-align:right">{curr_cell}</td>'
+                f'<td style="padding:1px 4px;text-align:right;color:var(--text-dim)">{prec_cell}</td>'
+                f'<td style="padding:1px 4px;text-align:right">{ph_cell}</td>'
+                f'</tr>'
+            )
 
         prec_meta = (
             f'precedente · {durata_m}m · T={truppe_prec}' if has_prec
@@ -626,13 +640,21 @@ def partial_produzione_istanze(request: Request):
         <div class="prod-card" style="background:var(--bg-card);border:1px solid var(--border);
              border-radius:5px;padding:6px 8px;font-size:10px">
           <div style="display:flex;justify-content:space-between;align-items:center;
-               margin-bottom:4px;font-weight:600;font-size:11px">
+               margin-bottom:3px;font-weight:600;font-size:11px">
             <span>{nome}</span>
             <span style="color:var(--text-dim);font-weight:normal;font-size:9px">
               T:{truppe} · P:{provv_lbl}
             </span>
           </div>
-          <div style="display:flex;gap:4px;justify-content:space-between">{cols}</div>
+          <table style="width:100%;border-collapse:collapse;font-size:10px">
+            <thead><tr style="color:var(--text-dim);font-size:9px">
+              <th style="text-align:left">risorsa</th>
+              <th style="text-align:right">corrente</th>
+              <th style="text-align:right">precedente</th>
+              <th style="text-align:right">prod/h</th>
+            </tr></thead>
+            <tbody>{rows}</tbody>
+          </table>
           <div style="font-size:9px;color:var(--text-dim);margin-top:3px;text-align:center">
             {prec_meta}
           </div>
