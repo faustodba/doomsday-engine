@@ -51,11 +51,13 @@ class DonazioneConfig:
     wait_alliance_open: float = 2.0   # dopo tap_barra alliance
     wait_technology_open: float = 4.0 # dopo tap Technology (prima di scan pin_marked)
     wait_marked_tap: float = 2.0      # dopo tap sulla tecnologia marked
-    wait_donate_tap: float = 0.8      # dopo ogni tap Donate (auto-WU7: era 1.5, dimezzato per velocita')
+    wait_donate_tap: float = 0.25     # auto-WU11: tap-burst rapido nel block (era 0.8, ora 0.25 — gioco registra tap a 0.25s)
+    taps_per_block:  int = 30         # auto-WU11: tap consecutivi prima di verifica pin_donate
+    max_blocks:      int = 5          # auto-WU11: blocchi massimi (30*5 = 150 donate cap)
     wait_back: float = 1.0            # dopo ogni device.back()
 
     # --- Safety ---
-    max_donate_tap: int = 30          # cap tap per esecuzione (sicurezza)
+    max_donate_tap: int = 150         # auto-WU11: cap tap totale per esecuzione (era 30, ora 150 = taps_per_block * max_blocks)
     max_marked_scan: int = 10         # max ricerche pin_marked per evitare loop
 
 
@@ -305,49 +307,63 @@ class DonazioneTask(BaseTask):
 
     def _loop_donate(self, ctx: TaskContext) -> int:
         """
-        Tappa il bottone Donate giallo fino a:
-          - pin_donate non più visibile (slot esauriti)
-          - raggiunto max_donate_tap (safety cap)
+        Tappa il bottone Donate giallo a BLOCK di tap rapidi (auto-WU11).
 
-        Nota: il tap viene eseguito sempre su coordinate fisse (cfg.tap_donate_giallo).
-        In assenza di donazioni disponibili, il tap non produce eventi UI —
-        il gate è il TM su pin_donate dopo ogni tap.
+        Strategia: 30 tap consecutivi senza screenshot tra un tap e l'altro
+        (delay ridotto a 0.25s — gioco registra il tap senza render completo
+        del feedback UI). Dopo ogni block, verifica con TM se pin_donate è
+        ancora attivo. Se sì → block successivo. Altrimenti stop.
+
+        Tempo: 30 tap in ~7.5s (vs old 42s) → 5.6× più veloce.
+        Capacità: max 30 × 5 block = 150 donate (safety cap).
 
         Ritorna il numero di tap eseguiti.
         """
         count = 0
 
-        for tap_idx in range(self.cfg.max_donate_tap):
-            # Tap donate giallo
-            ctx.device.tap(*self.cfg.tap_donate_giallo)
-            time.sleep(self.cfg.wait_donate_tap)
-            count += 1
+        for block_idx in range(self.cfg.max_blocks):
+            ctx.log_msg(
+                f"[DONAZIONE] block {block_idx + 1}/{self.cfg.max_blocks} — "
+                f"{self.cfg.taps_per_block} tap rapidi"
+            )
 
-            ctx.log_msg(f"[DONAZIONE] tap donate #{count}")
+            # Burst di tap senza screenshot intermedio
+            for _ in range(self.cfg.taps_per_block):
+                ctx.device.tap(*self.cfg.tap_donate_giallo)
+                time.sleep(self.cfg.wait_donate_tap)
+                count += 1
 
-            # Verifica se donate è ancora disponibile
+            ctx.log_msg(
+                f"[DONAZIONE] block {block_idx + 1} completato — totale tap={count}"
+            )
+
+            # Verifica post-block: pin_donate ancora attivo?
+            time.sleep(0.5)  # attesa stabilizzazione UI dopo burst
             screen = ctx.device.screenshot()
             if screen is None:
-                ctx.log_msg("[DONAZIONE] screenshot fallito durante loop donate — stop")
+                ctx.log_msg("[DONAZIONE] screenshot None post-block — stop")
                 break
 
             res = ctx.matcher.find_one(screen, self.cfg.pin_donate)
             if res is None or res.score < self.cfg.score_donate:
+                actual = res.score if res is not None else 0.0
                 ctx.log_msg(
-                    f"[DONAZIONE] pin_donate non più visibile dopo tap #{count} "
+                    f"[DONAZIONE] pin_donate non più valido post-block "
+                    f"(score={actual:.3f} < soglia={self.cfg.score_donate:.2f}) "
                     f"— slot esauriti, stop"
                 )
                 break
 
             ctx.log_msg(
-                f"[DONAZIONE] pin_donate ancora visibile score={res.score:.3f} "
-                f"— continua"
+                f"[DONAZIONE] pin_donate ancora valido (score={res.score:.3f}) "
+                f"— proseguo block successivo"
             )
 
         else:
             # Loop completato senza break = cap raggiunto
             ctx.log_msg(
-                f"[DONAZIONE] safety cap raggiunto ({self.cfg.max_donate_tap} tap)"
+                f"[DONAZIONE] safety cap raggiunto "
+                f"({self.cfg.max_blocks} block × {self.cfg.taps_per_block} tap = {count})"
             )
 
         return count
