@@ -1121,7 +1121,21 @@ class DistrictShowdownTask(Task):
         ctx.device.tap(*cfg.tap_claim_all)
         time.sleep(cfg.delay_foray)   # attesa animazione claim + chiusura popup
 
-        # 3. Back adattivo fino a mappa DS (gestisce popup residui e uscite)
+        # auto-WU17: poll attivo pin_dado — panel ACHV auto-close lento, evita
+        # cascata 2-back→HOME→rientro icona vista su FAU_01/FAU_02.
+        ready = self._wait_template_ready(
+            ctx, cfg.pin_dado,
+            max_wait=5.0, poll_interval=0.5,
+            threshold=0.80, stable_polls=1,
+        )
+        if ready is not None:
+            ctx.log_msg(
+                f"[DS-ACHV] completato — mappa già raggiunta "
+                f"(pin_dado score={ready.score:.3f})"
+            )
+            return
+
+        # 3. Back adattivo fino a mappa DS (fallback se panel ancora aperto)
         if self._torna_a_mappa_ds(ctx, max_attempts=5):
             ctx.log_msg("[DS-ACHV] completato — mappa DS ripristinata")
         else:
