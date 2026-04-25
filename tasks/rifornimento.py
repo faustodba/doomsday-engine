@@ -99,6 +99,15 @@ _DEFAULTS: dict = {
         "petrolio": (757, 375),
     },
     # Zone OCR maschera
+    # auto-WU12: OCR per leggere valore CLAMPED nel campo input (gioco
+    # auto-aggiusta 999_999_999 al massimo disponibile). Stima ±60x ±15y
+    # attorno al tap center COORD_CAMPO. Da affinare con screenshot reale.
+    "OCR_CAMPO_INPUT": {
+        "pomodoro": (690, 208, 825, 240),
+        "legno":    (690, 258, 825, 290),
+        "acciaio":  (690, 308, 825, 341),
+        "petrolio": (690, 358, 825, 391),
+    },
     "OCR_PROVVISTE":        (155, 230, 360, 262),
     "OCR_TASSA":            (155, 272, 310, 298),
     "OCR_CAMION":           (155, 340, 395, 385),
@@ -469,10 +478,39 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
         ctx.device.key("KEYCODE_BACK")
         return False, 0, False, 0, provviste
 
+    # auto-WU12: leggi valore reale CLAMPED dal campo input + applica tassa.
+    # User: "L'input 999_999_999 il sistema auto-aggiusta sul max, e il valore
+    # effettivo mandato è (input clamped) - tassa". Tassa è %, formula:
+    # qta_effettiva = qta_clamped * (1 - tassa).
+    # screen2 è già il post-tap_OK_TASTIERA, contiene il valore clamped.
+    qta_effettiva = qta  # fallback se OCR fallisce
+    if screen2 is not None:
+        ocr_input_dict = _cfg(ctx, "OCR_CAMPO_INPUT") or {}
+        ocr_input_zone = ocr_input_dict.get(risorsa)
+        if ocr_input_zone:
+            try:
+                from shared.ocr_helpers import ocr_intero, estrai_numero
+                testo_in = ocr_intero(screen2, ocr_input_zone, preprocessor="otsu")
+                qta_clamped = estrai_numero(testo_in)
+                tassa_pct  = _leggi_tassa(screen2, _cfg(ctx, "OCR_TASSA"))
+                if qta_clamped is not None and qta_clamped > 0:
+                    qta_effettiva = int(qta_clamped * (1.0 - tassa_pct))
+                    ctx.log_msg(
+                        f"Rifornimento: input clamped={qta_clamped:,} "
+                        f"tassa={tassa_pct*100:.1f}% → effettiva={qta_effettiva:,}"
+                    )
+                else:
+                    ctx.log_msg(
+                        f"Rifornimento: OCR input fallito (testo='{testo_in}') "
+                        f"— fallback qta={qta:,}"
+                    )
+            except Exception as exc:
+                ctx.log_msg(f"Rifornimento: errore OCR input: {exc} — fallback qta={qta:,}")
+
     ctx.log_msg("Rifornimento: tap VAI")
     ctx.device.tap(coord_vai)
     time.sleep(2.5)
-    return True, eta_sec, False, qta, provviste
+    return True, eta_sec, False, qta_effettiva, provviste
 
 
 # ------------------------------------------------------------------------------
