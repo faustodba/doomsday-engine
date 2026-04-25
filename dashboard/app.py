@@ -579,12 +579,25 @@ def partial_produzione_istanze(request: Request):
         precedente = entry.get("precedente") or {}
 
         # Sessione corrente
-        ris_ini = corrente.get("risorse_iniziali", {}) or {}
-        rif_inv = corrente.get("rifornimento_inviato", {}) or {}
-        rif_tax = corrente.get("rifornimento_tassa", {}) or {}
-        zaino   = corrente.get("zaino_delta", {}) or {}
-        truppe  = corrente.get("truppe_raccolta_inviate", 0)
-        provv   = corrente.get("rifornimento_provviste_residue", -1)
+        ris_ini    = corrente.get("risorse_iniziali", {}) or {}
+        rif_inv    = corrente.get("rifornimento_inviato", {}) or {}
+        rif_tax    = corrente.get("rifornimento_tassa", {}) or {}
+        zaino      = corrente.get("zaino_delta", {}) or {}
+        truppe     = corrente.get("truppe_raccolta_inviate", 0)
+        provv      = corrente.get("rifornimento_provviste_residue", -1)
+        tasks_curr = corrente.get("tasks_count", {}) or {}
+        ts_inizio  = corrente.get("ts_inizio", "")
+
+        # Durata corrente: now - ts_inizio
+        durata_curr_m = 0
+        if ts_inizio:
+            try:
+                from datetime import datetime, timezone
+                t0 = datetime.fromisoformat(ts_inizio)
+                now = datetime.now(timezone.utc)
+                durata_curr_m = int((now - t0).total_seconds() // 60)
+            except Exception:
+                durata_curr_m = 0
 
         provv_lbl = "esaurita" if provv == 0 else (f"{provv}" if provv > 0 else "—")
 
@@ -594,8 +607,9 @@ def partial_produzione_istanze(request: Request):
         ris_fin_prec    = precedente.get("risorse_finali") or {}
         rif_inv_prec    = precedente.get("rifornimento_inviato") or {}
         durata_s        = precedente.get("durata_sec") or 0
-        durata_m        = int(durata_s // 60) if durata_s else 0
+        durata_prec_m   = int(durata_s // 60) if durata_s else 0
         truppe_prec     = precedente.get("truppe_raccolta_inviate", 0)
+        tasks_prec      = precedente.get("tasks_count", {}) or {}
 
         has_prec = bool(prod_h_prec)
         # Una riga per risorsa, 4 colonne: risorsa | corrente | precedente | prod/h
@@ -631,10 +645,54 @@ def partial_produzione_istanze(request: Request):
                 f'</tr>'
             )
 
-        prec_meta = (
-            f'precedente · {durata_m}m · T={truppe_prec}' if has_prec
-            else 'precedente · in attesa'
+        # Compatta task count: "msg+aleanza+donaz+rifor+racc+ds" o lista nominata
+        def _tasks_brief(tdict: dict) -> tuple[str, str]:
+            """Ritorna (compact_text, tooltip_full) — compact ordina per priority."""
+            if not tdict:
+                return ("—", "nessuno")
+            ABBREV = {
+                "boost":"boost","vip":"vip","messaggi":"msg","alleanza":"alleanza",
+                "store":"store","arena":"arena","arena_mercato":"arenaM",
+                "zaino":"zaino","radar":"radar","radar_census":"radCens",
+                "rifornimento":"rifor","donazione":"donaz",
+                "district_showdown":"DS","raccolta":"racc",
+            }
+            parts = []
+            full  = []
+            for k, v in tdict.items():
+                lbl = ABBREV.get(k, k)
+                parts.append(f"{lbl}({v})" if v > 1 else lbl)
+                full.append(f"{k}={v}")
+            return (" · ".join(parts), " | ".join(full))
+
+        tasks_curr_short, tasks_curr_tip = _tasks_brief(tasks_curr)
+        tasks_prec_short, tasks_prec_tip = _tasks_brief(tasks_prec)
+
+        # Riga corrente: durata, truppe, tasks
+        # Riga precedente: durata, truppe, tasks
+        sess_corr_line = (
+            f'<div title="{tasks_curr_tip}" style="font-size:9px;color:var(--text-dim);'
+            f'margin-top:3px;display:flex;justify-content:space-between;gap:4px">'
+            f'<span><b style="color:var(--accent)">corrente</b> · {durata_curr_m}m · T={truppe}</span>'
+            f'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+            f'max-width:60%;text-align:right">{tasks_curr_short}</span>'
+            f'</div>'
         )
+
+        if has_prec:
+            sess_prec_line = (
+                f'<div title="{tasks_prec_tip}" style="font-size:9px;color:var(--text-dim);'
+                f'display:flex;justify-content:space-between;gap:4px">'
+                f'<span><b style="color:#7cf">precedente</b> · {durata_prec_m}m · T={truppe_prec}</span>'
+                f'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+                f'max-width:60%;text-align:right">{tasks_prec_short}</span>'
+                f'</div>'
+            )
+        else:
+            sess_prec_line = (
+                '<div style="font-size:9px;color:var(--text-dim);text-align:center">'
+                '<b>precedente</b> · in attesa</div>'
+            )
 
         cards_html.append(f'''
         <div class="prod-card" style="background:var(--bg-card);border:1px solid var(--border);
@@ -643,7 +701,7 @@ def partial_produzione_istanze(request: Request):
                margin-bottom:3px;font-weight:600;font-size:11px">
             <span>{nome}</span>
             <span style="color:var(--text-dim);font-weight:normal;font-size:9px">
-              T:{truppe} · P:{provv_lbl}
+              P:{provv_lbl}
             </span>
           </div>
           <table style="width:100%;border-collapse:collapse;font-size:10px">
@@ -655,9 +713,8 @@ def partial_produzione_istanze(request: Request):
             </tr></thead>
             <tbody>{rows}</tbody>
           </table>
-          <div style="font-size:9px;color:var(--text-dim);margin-top:3px;text-align:center">
-            {prec_meta}
-          </div>
+          {sess_corr_line}
+          {sess_prec_line}
         </div>
         ''')
 

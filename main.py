@@ -682,7 +682,19 @@ def _thread_istanza(ist, tasks_cls, dry_run):
     _aggiorna_stato_istanza(nome, {"stato": "running", "scheduler": _scheduler_prossimi(orc)})
     _log(nome, f"Tick -- {orc.n_dovuti()} task dovuti su {len(orc)} registrati")
 
+    _tick_start_ts = time.time()
     results = orc.tick()
+
+    # auto-WU14: incrementa tasks_count solo per task con last_run >= tick_start
+    # (cioè eseguiti effettivamente in QUESTO tick, non quelli storici)
+    try:
+        if ctx.state and ctx.state.produzione_corrente and results:
+            for entry in orc._entries:
+                if entry.last_run and entry.last_run >= _tick_start_ts:
+                    tname = entry.task.name() if callable(entry.task.name) else entry.task.name
+                    ctx.state.produzione_corrente.incrementa_task(tname, 1)
+    except Exception as exc:
+        _log(nome, f"[PROD] hook tasks_count: {exc}")
 
     with _contatori_lock:
         cnts = _contatori[nome]

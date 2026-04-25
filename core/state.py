@@ -760,6 +760,7 @@ class ProduzioneSession:
     rifornimento_provviste_residue: int = -1                  # 0 = quota esaurita, -1 = mai letto
     zaino_delta: dict = field(default_factory=dict)           # {risorsa: delta} +entra castle, -esce
     truppe_raccolta_inviate: int = 0                          # count nodi raccolta avviati
+    tasks_count: dict = field(default_factory=dict)           # auto-WU14: {task_name: count} eseguiti in sessione
 
     # Chiusura (popolata dalla sessione successiva)
     ts_fine:           str | None = None
@@ -779,6 +780,7 @@ class ProduzioneSession:
             rifornimento_provviste_residue=d.get("rifornimento_provviste_residue", -1),
             zaino_delta=dict(d.get("zaino_delta", {})),
             truppe_raccolta_inviate=d.get("truppe_raccolta_inviate", 0),
+            tasks_count=dict(d.get("tasks_count", {})),
             ts_fine=d.get("ts_fine"),
             risorse_finali=d.get("risorse_finali"),
             durata_sec=d.get("durata_sec"),
@@ -796,6 +798,7 @@ class ProduzioneSession:
             "rifornimento_provviste_residue": self.rifornimento_provviste_residue,
             "zaino_delta": dict(self.zaino_delta),
             "truppe_raccolta_inviate": self.truppe_raccolta_inviate,
+            "tasks_count": dict(self.tasks_count),
             "ts_fine": self.ts_fine,
             "risorse_finali": self.risorse_finali,
             "durata_sec": self.durata_sec,
@@ -815,6 +818,10 @@ class ProduzioneSession:
     def incrementa_truppe(self, n: int = 1) -> None:
         """Hook chiamato da raccolta ad ogni marcia avviata."""
         self.truppe_raccolta_inviate += n
+
+    def incrementa_task(self, task_name: str, n: int = 1) -> None:
+        """Hook chiamato dall'orchestrator per task eseguiti nel tick."""
+        self.tasks_count[task_name] = self.tasks_count.get(task_name, 0) + n
 
 
 @dataclass
