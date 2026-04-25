@@ -230,12 +230,16 @@ class DonazioneTask(BaseTask):
                 time.sleep(self.cfg.wait_back)
                 break
 
-            # Dopo _gestisci_popup siamo già tornati alla schermata Technology
-            # (back×1 dal popup). Se n==0 il popup era Research o donate esaurito:
-            # non ha senso continuare a cercare altri marked in questa esecuzione.
+            # auto-WU18: _gestisci_popup chiude back×3 (HOME) sia in caso A
+            # (research) che in caso B (donate). Non ha senso scansionare di
+            # nuovo pin_marked su HOME. Se n>0 i slot alleanza sono esauriti
+            # (pin_donate caduto sotto soglia in _loop_donate). Se n==0 popup
+            # Research o non riconosciuto. In entrambi i casi: exit.
             if n == 0:
                 ctx.log_msg("[DONAZIONE] donate non disponibile — exit scan")
-                break
+            else:
+                ctx.log_msg(f"[DONAZIONE] donate completati ({n}) — slot esauriti, exit scan")
+            break
 
         return donate_count
 
