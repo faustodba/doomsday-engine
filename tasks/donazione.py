@@ -168,6 +168,12 @@ class DonazioneTask(BaseTask):
         """
         donate_count = 0
 
+        # Auto-WU6 (25/04): retry vero su scan pin_marked (era break al primo).
+        # Pattern: 86% donate=0 (38/44) vs solo 6 successi → sospetto timing/loading.
+        # Ora: scan fino a 3 volte con sleep 1s tra retry. Log dello score
+        # effettivo per diagnosi (prima diceva solo "non trovato").
+        SCAN_RETRY_MAX = 3
+        not_found_score = 0.0
         for scan_idx in range(self.cfg.max_marked_scan):
             screen = ctx.device.screenshot()
             if screen is None:
@@ -177,9 +183,19 @@ class DonazioneTask(BaseTask):
             result = ctx.matcher.find_one(screen, self.cfg.pin_marked)
 
             if result is None or result.score < self.cfg.score_marked:
+                actual_score = result.score if result is not None else 0.0
+                not_found_score = max(not_found_score, actual_score)
                 ctx.log_msg(
-                    f"[DONAZIONE] pin_marked non trovato "
-                    f"(scan {scan_idx + 1}) — nessuna tecnologia donabile"
+                    f"[DONAZIONE] pin_marked NON trovato (scan {scan_idx + 1}) "
+                    f"score={actual_score:.3f} (soglia={self.cfg.score_marked:.2f})"
+                )
+                if scan_idx + 1 < SCAN_RETRY_MAX:
+                    time.sleep(1.0)
+                    continue
+                # Esauriti retry → conferma assenza tech donabile
+                ctx.log_msg(
+                    f"[DONAZIONE] {SCAN_RETRY_MAX} scan falliti — best score "
+                    f"{not_found_score:.3f}. Nessuna tecnologia donabile."
                 )
                 # Chiudi Technology + menu Alliance prima del break, così
                 # vai_in_home() successivo trova HOME e non si stucca su 8
