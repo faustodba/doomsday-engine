@@ -402,7 +402,15 @@ class DistrictShowdownTask(Task):
                 f"— esito='{esito}' (reward disponibili solo dopo dadi completati)"
             )
 
-        # 7. Torna home (safety, idempotente se _influence_rewards gia' in HOME)
+        # 7. Esci dalla mappa evento DS prima di tornare in HOME.
+        # Bug 25/04 (auto-WU5): _fund_raid/_achievement_rewards possono lasciare
+        # il bot sulla mappa DS (pin_dado=1.0 ma navigator vede UNKNOWN).
+        # vai_in_home alterna tap_overlay/back e il tap_overlay puo' riaprire
+        # il popup evento, impedendo l'uscita. Soluzione: 4 back() puri prima
+        # di vai_in_home() per scappare popup/mappa evento DS.
+        for _ in range(4):
+            ctx.device.back()
+            time.sleep(cfg.delay_dopo_tap_minor)
         ctx.navigator.vai_in_home()
         return TaskResult(success=True, message=esito)
 
