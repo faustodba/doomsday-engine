@@ -413,7 +413,8 @@ def avvia_istanza(ist: dict, log_fn: Optional[Callable] = None) -> bool:
     return True
 
 
-def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:
+def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
+    """[auto-WU16] Stabilizzazione adattiva: poll più rapido + tracking."""
     """
     Attende che l'istanza raggiunga la schermata HOME dopo l'avvio del gioco.
 
@@ -445,10 +446,13 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:
     _adb_path  = os.environ.get("MUMU_ADB_PATH") or _cfg.adb
     porta_attesa = getattr(device, "port", None) if device is not None else None
 
+    # auto-WU16: tracking adaptive — misura tempo totale attendi_home
+    _t_attesa_home_start = time.time()
+    _tm = AdaptiveTiming(nome)
+
     # 1. Attesa caricamento con polling attivo (F-B1).
-    # Prima t_min s bloccanti (login/splash tipico), poi polling ogni 2s
-    # fino a delay_carica_iniz_s. Se HOME/MAP rilevata -> skip residuo.
-    t_min = 15.0
+    # auto-WU16: t_min ridotto 15→10s (splash gioco tipico è 8-12s post-load)
+    t_min = 10.0
     t_max = float(_cfg.delay_carica_iniz_s)
     _log(
         f"[{nome}] attesa caricamento min={t_min:.0f}s max={t_max:.0f}s "
@@ -486,10 +490,10 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:
         trovata = False
         unknown_streak = 0            # cicli consecutivi Screen.UNKNOWN
         last_monkey_t = 0.0           # ts ultimo monkey di recovery
-        # Poll meno aggressivo: 7s totali per ciclo (back + sleep + screenshot ≈ 7s)
-        # Riduce stress CPU/IO e dà più tempo alla UI di stabilizzarsi.
-        POLL_BACK_INTERVAL_S = 5.5    # sleep tra back e schermata_corrente
-        MONKEY_EVERY_N = 6            # ~42s UNKNOWN consecutivi prima di monkey
+        # auto-WU16: poll più reattivo (5.5→3.5s). Mantiene back+sleep+screenshot
+        # ma rileva HOME prima nei casi normali. Slow PC: ~5s totali per ciclo.
+        POLL_BACK_INTERVAL_S = 3.5    # sleep tra back e schermata_corrente
+        MONKEY_EVERY_N = 8            # auto-WU16: 6→8 cicli (~28s con poll 3.5s = ~42s prima)
         MONKEY_COOLDOWN_S = 30.0      # cooldown minimo tra monkey successivi
         while time.time() - t_start < _cfg.timeout_carica_s:
             # BACK chiude eventuali popup sovrapposti (daily login, eventi, ecc.)
@@ -540,15 +544,14 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:
             return False
 
     # 4. Stabilizzazione: attende HOME stabile senza popup/overlay
-    # Un singolo rilevamento HOME non basta — il gioco mostra banner e
-    # popup per 10-30s dopo il caricamento. Aspettiamo che la HOME sia
-    # stabile per 3 poll consecutivi con score mappa nel range normale.
+    # auto-WU16: sleep 5.0→3.0s, timeout 60→40s, mantenuto stable_count >= 3
+    # per evitare false positive da banner/animazioni.
     if nav is not None:
-        _log(f"[{nome}] stabilizzazione HOME (max 60s)...", log_fn)
+        _log(f"[{nome}] stabilizzazione HOME (max 40s)...", log_fn)
         stable_count = 0
         t_stab = time.time()
-        while time.time() - t_stab < 60:
-            time.sleep(5.0)
+        while time.time() - t_stab < 40:
+            time.sleep(3.0)
             try:
                 schermata = nav.schermata_corrente()
             except Exception:
@@ -571,7 +574,13 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:
         _log(f"[{nome}] vai_in_home() verifica finale", log_fn)
         ok = nav.vai_in_home()
         if ok:
-            _log(f"[{nome}] HOME raggiunto", log_fn)
+            # auto-WU16: traccia tempo totale attendi_home per AdaptiveTiming
+            home_total_s = time.time() - _t_attesa_home_start
+            try:
+                _tm.record("attendi_home_total_s", home_total_s)
+            except Exception:
+                pass
+            _log(f"[{nome}] HOME raggiunto in {home_total_s:.0f}s", log_fn)
         else:
             _log(f"[{nome}] vai_in_home() FALLITO", log_fn)
         return ok
