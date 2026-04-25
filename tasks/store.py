@@ -54,7 +54,7 @@ class StoreConfig:
     """Parametri configurabili per StoreTask."""
 
     # ── Soglie template matching ──────────────────────────────────────────────
-    soglia_store:        float = 0.675
+    soglia_store:        float = 0.65   # 0.675 → 0.65 (auto-WU4): cattura re-match drift su take-max (FAU_09 caso 0.665)
     soglia_banner:       float = 0.85
     soglia_store_attivo: float = 0.75
     soglia_carrello:     float = 0.65
