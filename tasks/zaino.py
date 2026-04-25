@@ -1039,6 +1039,15 @@ class ZainoTask(Task):
             esiti  = _esegui_svuota(ctx)
             totale = sum(esiti.values())
             ctx.log_msg(f"[ZAINO][SV] Completato — {totale:.3f}M totale")
+            # auto-WU14 step2: svuota = entra castle → delta POSITIVO
+            try:
+                if hasattr(ctx, "state") and ctx.state and ctx.state.produzione_corrente:
+                    for r, qty_m in esiti.items():
+                        delta = int(qty_m * 1_000_000)  # converti M → unità
+                        if delta != 0:
+                            ctx.state.produzione_corrente.aggiungi_zaino_delta(r, +delta)
+            except Exception as exc:
+                ctx.log_msg(f"[PROD] hook zaino svuota: {exc}")
             return TaskResult(
                 success=True,
                 message=f"svuotato {totale:.3f}M totale",
@@ -1086,4 +1095,14 @@ class ZainoTask(Task):
         totale = sum(esiti.values())
         msg    = f"{'[DRY] ' if dry_run else ''}scaricato {totale:.3f}M totale"
         ctx.log_msg(f"[ZAINO]{modo}Completato — {msg}")
+        # auto-WU14 step2: bag = esce dal castle → delta NEGATIVO
+        if not dry_run:
+            try:
+                if hasattr(ctx, "state") and ctx.state and ctx.state.produzione_corrente:
+                    for r, qty_m in esiti.items():
+                        delta = int(qty_m * 1_000_000)
+                        if delta != 0:
+                            ctx.state.produzione_corrente.aggiungi_zaino_delta(r, -delta)
+            except Exception as exc:
+                ctx.log_msg(f"[PROD] hook zaino bag: {exc}")
         return TaskResult(success=True, message=msg, data=esiti)

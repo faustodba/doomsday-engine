@@ -1371,6 +1371,13 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
     ttl_log = f"ETA={eta_s}s" if eta_s else f"TTL={_cfg(ctx, 'BLACKLIST_COMMITTED_TTL')}s"
     ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} COMMITTED ({ttl_log})")
 
+    # auto-WU14 step2: hook produzione — incrementa truppe raccolta inviate
+    try:
+        if hasattr(ctx, "state") and ctx.state and ctx.state.produzione_corrente:
+            ctx.state.produzione_corrente.incrementa_truppe(1)
+    except Exception as exc:
+        ctx.log_msg(f"[PROD] hook raccolta: {exc}")
+
     return True, False, False
 
 

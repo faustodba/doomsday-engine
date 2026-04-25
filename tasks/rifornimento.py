@@ -483,7 +483,9 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
     # effettivo mandato è (input clamped) - tassa". Tassa è %, formula:
     # qta_effettiva = qta_clamped * (1 - tassa).
     # screen2 è già il post-tap_OK_TASTIERA, contiene il valore clamped.
-    qta_effettiva = qta  # fallback se OCR fallisce
+    qta_effettiva     = qta  # fallback se OCR fallisce
+    qta_clamped_real  = qta  # valore totale uscito dal castello
+    tassa_amount      = 0
     if screen2 is not None:
         ocr_input_dict = _cfg(ctx, "OCR_CAMPO_INPUT") or {}
         ocr_input_zone = ocr_input_dict.get(risorsa)
@@ -494,7 +496,9 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
                 qta_clamped = estrai_numero(testo_in)
                 tassa_pct  = _leggi_tassa(screen2, _cfg(ctx, "OCR_TASSA"))
                 if qta_clamped is not None and qta_clamped > 0:
-                    qta_effettiva = int(qta_clamped * (1.0 - tassa_pct))
+                    qta_effettiva    = int(qta_clamped * (1.0 - tassa_pct))
+                    qta_clamped_real = qta_clamped
+                    tassa_amount     = qta_clamped_real - qta_effettiva
                     ctx.log_msg(
                         f"Rifornimento: input clamped={qta_clamped:,} "
                         f"tassa={tassa_pct*100:.1f}% → effettiva={qta_effettiva:,}"
@@ -510,6 +514,18 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
     ctx.log_msg("Rifornimento: tap VAI")
     ctx.device.tap(coord_vai)
     time.sleep(2.5)
+
+    # auto-WU14 step2: hook produzione corrente
+    try:
+        if hasattr(ctx, "state") and ctx.state and ctx.state.produzione_corrente:
+            ctx.state.produzione_corrente.aggiungi_rifornimento(
+                risorsa, qta_clamped_real, tassa_amount
+            )
+            if provviste >= 0:
+                ctx.state.produzione_corrente.rifornimento_provviste_residue = provviste
+    except Exception as exc:
+        ctx.log_msg(f"[PROD] hook rifornimento: {exc}")
+
     return True, eta_sec, False, qta_effettiva, provviste
 
 
