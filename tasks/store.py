@@ -257,7 +257,7 @@ class StoreTask(Task):
         if best_score < cfg.soglia_store:
             log(f"Store NON trovato dopo {len(cfg.griglia)} posizioni"
                 f" (best score={best_score:.3f} < soglia={cfg.soglia_store:.2f})")
-            self._ripristina_banner(device, stato_banner, log, cfg)
+            # auto-WU10: rimosso _ripristina_banner — banner resta chiuso post-store
             return _Esito.STORE_NON_TROVATO, 0, False
 
         # ── Re-navigazione al best step + re-match per coord fresche ─────────
@@ -285,7 +285,7 @@ class StoreTask(Task):
             + ("  *** TROVATO ***" if result.found else "  FALLITO"))
 
         if not result.found:
-            self._ripristina_banner(device, stato_banner, log, cfg)
+            # auto-WU10: rimosso _ripristina_banner — banner resta chiuso post-store
             return _Esito.STORE_NON_TROVATO, 0, False
 
         cx_fin, cy_fin = result.cx, result.cy
@@ -295,8 +295,8 @@ class StoreTask(Task):
             device, matcher, cx_fin, cy_fin, log, cfg
         )
 
-        # ── Ripristina banner ─────────────────────────────────────────────────
-        self._ripristina_banner(device, stato_banner, log, cfg)
+        # auto-WU10: rimosso _ripristina_banner — banner resta chiuso permanentemente
+        # (closed at startup in main.py via comprimi_banner_home, persists across tasks)
 
         # ── Verifica HOME finale ──────────────────────────────────────────────
         shot = device.screenshot()

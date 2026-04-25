@@ -620,6 +620,14 @@ def _thread_istanza(ist, tasks_cls, dry_run):
             _aggiorna_stato_istanza(nome, {"stato": "idle"})
             return
 
+        # auto-WU10: chiusura definitiva banner eventi HOME post-stabilizzazione
+        # → maggiore zona visibile (+45px) per i task successivi.
+        try:
+            from shared.ui_helpers import comprimi_banner_home
+            comprimi_banner_home(ctx, _log_fn)
+        except Exception as exc:
+            _log(nome, f"[WARN] comprimi_banner_home: {exc}")
+
     # ── 2. Rebuild context (rilegge config aggiornata) ───────────────
     _ov_raw     = load_overrides(_OVERRIDES_PATH)
     with open(_GLOBAL_CONFIG_PATH, encoding="utf-8") as _f:

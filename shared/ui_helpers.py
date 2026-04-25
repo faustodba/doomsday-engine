@@ -100,3 +100,65 @@ def attendi_scomparsa_template(
             return True
         time.sleep(poll)
     return False
+
+
+# ==============================================================================
+# Banner eventi HOME — collasso permanente per migliorare visibilità campo
+# ==============================================================================
+
+# Coordinate e template del banner eventi (ROI in alto sulla HOME).
+# Stessi valori di tasks/store.py (StoreConfig.banner_*) — duplicati qui per
+# evitare import circolare. Aggiornare insieme se i template cambiano.
+_BANNER_TAP_X       = 345
+_BANNER_TAP_Y       = 63
+_BANNER_ROI_PIN     = (330, 40, 365, 90)
+_BANNER_TMPL_APERTO = "pin/pin_banner_aperto.png"
+_BANNER_TMPL_CHIUSO = "pin/pin_banner_chiuso.png"
+_BANNER_SOGLIA      = 0.85
+
+
+def comprimi_banner_home(ctx: "TaskContext", log_fn=None) -> str:
+    """
+    Collassa il banner eventi della HOME una volta per tutte (auto-WU10).
+
+    Da chiamare DOPO `attendi_home()` all'avvio dell'istanza, non durante
+    i task: chiudere il banner aumenta la zona visibile del campo gioco
+    (ROI utili passano da y=115 a y=70, +45px) e migliora i template match
+    di tutti i task successivi.
+
+    Idempotente: se il banner è già chiuso o non rilevato, non fa nulla.
+
+    Returns:
+        "aperto"      — banner era aperto, è stato collassato
+        "chiuso"      — banner già chiuso, no-op
+        "sconosciuto" — non rilevato, no-op
+    """
+    log = log_fn or (lambda _msg: None)
+    screen = ctx.device.screenshot()
+    if screen is None:
+        log("[BANNER] screenshot None — skip")
+        return "sconosciuto"
+
+    s_ap = ctx.matcher.score(screen, _BANNER_TMPL_APERTO, zone=_BANNER_ROI_PIN)
+    s_ch = ctx.matcher.score(screen, _BANNER_TMPL_CHIUSO, zone=_BANNER_ROI_PIN)
+
+    if s_ap >= _BANNER_SOGLIA and s_ap > s_ch:
+        log(f"[BANNER] aperto (score={s_ap:.3f}) — tap collasso ({_BANNER_TAP_X},{_BANNER_TAP_Y})")
+        ctx.device.tap(_BANNER_TAP_X, _BANNER_TAP_Y)
+        time.sleep(0.6)
+        # Verifica chiusura
+        shot2 = ctx.device.screenshot()
+        if shot2 is not None:
+            s_ch2 = ctx.matcher.score(shot2, _BANNER_TMPL_CHIUSO, zone=_BANNER_ROI_PIN)
+            if s_ch2 >= _BANNER_SOGLIA:
+                log(f"[BANNER] chiuso ✓ (score={s_ch2:.3f})")
+            else:
+                log(f"[BANNER] chiusura non confermata (score chiuso={s_ch2:.3f}) — procedo")
+        return "aperto"
+
+    if s_ch >= _BANNER_SOGLIA and s_ch > s_ap:
+        log(f"[BANNER] già chiuso (score={s_ch:.3f}) — no-op")
+        return "chiuso"
+
+    log(f"[BANNER] non rilevato (aperto={s_ap:.3f} chiuso={s_ch:.3f}) — no-op")
+    return "sconosciuto"
