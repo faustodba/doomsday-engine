@@ -271,6 +271,26 @@ class DistrictShowdownTask(Task):
                         threshold=cfg.tm_threshold,
                         zone=cfg.roi_barra_eventi,
                     )
+                    # auto-WU20: se icona non trovata, prova comprimi_banner_home
+                    # + 1s wait + re-screenshot + retry. Pattern visto su
+                    # FAU_00/02/03: HOME rilevata ma banner/popup nasconde icona.
+                    if not res.found:
+                        ctx.log_msg(
+                            "[DS-NAV] icona DS non trovata — provo comprimi banner + retry"
+                        )
+                        try:
+                            from shared.ui_helpers import comprimi_banner_home
+                            comprimi_banner_home(ctx, ctx.log_msg)
+                        except Exception as exc:
+                            ctx.log_msg(f"[DS-NAV] comprimi_banner errore: {exc}")
+                        time.sleep(1.0)
+                        screen2 = ctx.device.screenshot()
+                        if screen2 is not None:
+                            res = matcher.find_one(
+                                screen2, cfg.pin_district_showdown,
+                                threshold=cfg.tm_threshold,
+                                zone=cfg.roi_barra_eventi,
+                            )
                     if res.found:
                         ctx.device.tap(res.cx, res.cy)
                         # Wait adattivo su pin_dado dopo re-entry
