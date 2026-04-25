@@ -140,11 +140,21 @@ class GameNavigator:
         """Porta il bot in HOME. Ritorna True se raggiunto."""
         cfg = self.config
         none_streak = 0
+        adb_recovery_done = False
         for attempt in range(cfg.max_attempts):
             shot = self.device.screenshot()
             if shot is None:
                 none_streak += 1
                 if none_streak >= 3:
+                    if not adb_recovery_done and hasattr(self.device, "reconnect"):
+                        self._log(
+                            f"[NAV] screenshot None {none_streak}x — tento reconnect ADB"
+                        )
+                        if self.device.reconnect():
+                            self._log("[NAV] reconnect ADB OK — retry vai_in_home")
+                            none_streak = 0
+                            adb_recovery_done = True
+                            continue
                     self._log(
                         f"[NAV] vai_in_home ABORT — screenshot None {none_streak}x "
                         f"consecutive (ADB unhealthy)"

@@ -382,11 +382,12 @@ class AdbDevice:
 
     # ── Screenshot ────────────────────────────────────────────────────────────
 
-    def screenshot(self) -> Optional["Screenshot"]:
+    def _screenshot_raw(self) -> Optional["Screenshot"]:
         """
         Screenshot via screencap + pull — copia esatta del metodo V5 adb.py.
         screencap viene passato come stringa unica al shell (non argomenti separati).
         Lock per porta: istanze parallele non si bloccano a vicenda.
+        Livello base senza retry/reconnect: usato da screenshot() pubblico.
         """
         import tempfile
 
@@ -422,6 +423,50 @@ class AdbDevice:
                     os.remove(local)
                 except Exception:
                     pass
+
+    def reconnect(self) -> bool:
+        """
+        Disconnect + connect del device ADB.
+        Usato come recovery quando screenshot ripetuti ritornano None
+        (mitigazione cascata ADB unhealthy mid-tick — fix 25/04/2026).
+        Ritorna True se riconnessione riuscita.
+        """
+        try:
+            subprocess.run(
+                [self.ADB, "disconnect", self._serial],
+                capture_output=True, timeout=10,
+            )
+        except Exception:
+            pass
+        return self.connect(max_retry=2, retry_delay=1.0)
+
+    def screenshot(self) -> Optional["Screenshot"]:
+        """
+        Screenshot con retry + auto-reconnect su None persistente.
+
+        Strategia (max 3 tentativi):
+          1. screenshot raw
+          2. se None → sleep 0.5s + retry raw
+          3. se ancora None → reconnect() + retry finale
+
+        Mitiga cascata ADB unhealthy mid-tick: prima del fix il bot loopava
+        in vai_in_home ABORT per ore senza recuperare il device.
+        """
+        import time as _time
+
+        shot = self._screenshot_raw()
+        if shot is not None:
+            return shot
+
+        _time.sleep(0.5)
+        shot = self._screenshot_raw()
+        if shot is not None:
+            return shot
+
+        # Doppio fallimento → tenta recovery ADB
+        if self.reconnect():
+            return self._screenshot_raw()
+        return None
 
     def screenshot_sync(self) -> Optional["Screenshot"]:
         """Alias di screenshot() — compatibilità navigator."""
