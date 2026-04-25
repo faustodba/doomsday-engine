@@ -645,9 +645,9 @@ def _thread_istanza(ist, tasks_cls, dry_run):
                     "petrolio": rd.petrolio,
                 }
                 _log(nome,
-                     f"[PROD] risorse castello: pom={rd.pomodoro:.1f}M "
-                     f"leg={rd.legno:.1f}M acc={rd.acciaio:.1f}M "
-                     f"pet={rd.petrolio:.1f}M dia={rd.diamanti}")
+                     f"[PROD] risorse castello: pom={rd.pomodoro/1e6:.1f}M "
+                     f"leg={rd.legno/1e6:.1f}M acc={rd.acciaio/1e6:.1f}M "
+                     f"pet={rd.petrolio/1e6:.1f}M dia={rd.diamanti}")
 
                 # Chiudi sessione precedente (se esiste) calcolando produzione
                 chiusa = ctx.state.chiudi_sessione_e_calcola(risorse_now, ts_now)
