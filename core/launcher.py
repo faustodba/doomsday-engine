@@ -686,10 +686,36 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
     # 4. Stabilizzazione: attende HOME stabile senza popup/overlay
     # auto-WU16: sleep 5.0→3.0s, timeout 60→40s, mantenuto stable_count >= 3
     # per evitare false positive da banner/animazioni.
+    # auto-WU23: snapshot quando HOME instabile (reset contatore) — cattura
+    # i banner che appaiono DOPO la prima rilevazione HOME (es. AFK loot
+    # banner che è il primo ad apparire post-stabilizzazione iniziale).
     if nav is not None:
         _log(f"[{nome}] stabilizzazione HOME (max 40s)...", log_fn)
         stable_count = 0
         t_stab = time.time()
+        post_home_snapshots_taken = 0
+        post_home_max_snapshots = 3  # cap
+
+        def _snap_post_home(label_suffix: str):
+            nonlocal post_home_snapshots_taken
+            if post_home_snapshots_taken >= post_home_max_snapshots:
+                return
+            try:
+                import cv2
+                from datetime import datetime as _dt
+                shot = device.screenshot() if device is not None else None
+                if shot is None or getattr(shot, "frame", None) is None:
+                    return
+                out_dir = Path(__file__).resolve().parents[1] / "debug_task" / "boot_unknown"
+                out_dir.mkdir(parents=True, exist_ok=True)
+                ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+                fname = f"{nome}_post_home_{label_suffix}_{ts}.png"
+                cv2.imwrite(str(out_dir / fname), shot.frame)
+                _log(f"[{nome}] discovery post-HOME [{label_suffix}]: debug_task/boot_unknown/{fname}", log_fn)
+                post_home_snapshots_taken += 1
+            except Exception as exc:
+                _log(f"[{nome}] post-HOME snapshot errore: {exc}", log_fn)
+
         while time.time() - t_stab < 40:
             time.sleep(3.0)
             try:
@@ -705,9 +731,14 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
             else:
                 if stable_count > 0:
                     _log(f"[{nome}] HOME instabile ({schermata}) — reset contatore", log_fn)
+                    # auto-WU23: snapshot del banner che ha causato il reset
+                    # (insight utente: primo banner = AFK loot recovery)
+                    _snap_post_home(f"reset_at_stable_{stable_count}")
                 stable_count = 0
         else:
             _log(f"[{nome}] stabilizzazione timeout — procedo comunque", log_fn)
+            # Snapshot finale dello stato pre-vai_in_home per analisi popup persistente
+            _snap_post_home("stab_timeout")
 
     # 5. vai_in_home() verifica finale
     if nav is not None:

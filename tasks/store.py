@@ -226,13 +226,19 @@ class StoreTask(Task):
             else cfg.roi_home_banner_aperto
         )
 
-        # ── Scan griglia spirale (take-max: scansione completa) ──────────────
+        # ── Scan griglia spirale (take-max + multi-candidate auto-WU23) ─────
+        # WU23: invece di salvare solo il best step, accumula TUTTI i match
+        # >= soglia_store. Permette fallback al 2°/3° best se il delta-swipe
+        # del best fallisce per swipe non-idempotente sui bordi mappa.
+        # Bug osservato 26/04: best step alto ma re-match score=0.439 perché
+        # swipe parzialmente assorbito dal bordo mappa.
         log(f"Scan griglia {len(cfg.griglia)} posizioni  passo={cfg.passo_scan}px")
 
         best_score = -1.0
         best_step  = -1
         cum_x = cum_y = 0
         cumulative: list[tuple[int, int]] = []
+        candidates: list[tuple[int, float]] = []  # (step_n, score) — tutti i match
 
         for n, (dx, dy) in enumerate(cfg.griglia):
             if dx != 0 or dy != 0:
@@ -250,45 +256,66 @@ class StoreTask(Task):
                 + ("  *** match ***" if result.found else "")
             )
 
+            if result.found:
+                candidates.append((n, result.score))
+
             if result.score > best_score:
                 best_score = result.score
                 best_step  = n
 
-        if best_score < cfg.soglia_store:
+        if not candidates:
             log(f"Store NON trovato dopo {len(cfg.griglia)} posizioni"
                 f" (best score={best_score:.3f} < soglia={cfg.soglia_store:.2f})")
-            # auto-WU10: rimosso _ripristina_banner — banner resta chiuso post-store
             return _Esito.STORE_NON_TROVATO, 0, False
 
-        # ── Re-navigazione al best step + re-match per coord fresche ─────────
-        end_x, end_y = cumulative[-1]
-        tgt_x, tgt_y = cumulative[best_step]
-        delta_x = tgt_x - end_x
-        delta_y = tgt_y - end_y
-        log(f"Best step={best_step} score={best_score:.3f} — delta swipe ({delta_x},{delta_y})")
+        # Sort candidate per score desc — tentativi in cascata
+        candidates.sort(key=lambda c: -c[1])
+        log(f"Candidati validi: {len(candidates)} match >= {cfg.soglia_store:.2f}. "
+            f"Top: {[(s,f'{sc:.3f}') for s,sc in candidates[:5]]}")
 
+        # ── Re-navigazione + re-match per ogni candidato in cascata ──────────
         p = cfg.passo_scan
-        if delta_x != 0:
-            sign_x = 1 if delta_x > 0 else -1
-            for _ in range(abs(delta_x) // p):
-                self._swipe_mappa(device, sign_x * p, 0, cfg)
-        if delta_y != 0:
-            sign_y = 1 if delta_y > 0 else -1
-            for _ in range(abs(delta_y) // p):
-                self._swipe_mappa(device, 0, sign_y * p, cfg)
+        end_x, end_y = cumulative[-1]
+        result = None
+        cx_fin = cy_fin = -1
 
-        shot = device.screenshot()
-        result = matcher.find_one(shot, cfg.tmpl_store,
-                                  threshold=cfg.soglia_store,
-                                  zone=roi_corrente)
-        log(f"Re-match al best: score={result.score:.3f} ({result.cx},{result.cy})"
-            + ("  *** TROVATO ***" if result.found else "  FALLITO"))
+        for cand_idx, (cand_step, cand_score) in enumerate(candidates):
+            tgt_x, tgt_y = cumulative[cand_step]
+            delta_x = tgt_x - end_x
+            delta_y = tgt_y - end_y
+            log(f"Tentativo {cand_idx+1}/{len(candidates)}: step={cand_step} "
+                f"score_atteso={cand_score:.3f} — delta swipe ({delta_x},{delta_y})")
 
-        if not result.found:
-            # auto-WU10: rimosso _ripristina_banner — banner resta chiuso post-store
+            # Apply delta swipes
+            if delta_x != 0:
+                sign_x = 1 if delta_x > 0 else -1
+                for _ in range(abs(delta_x) // p):
+                    self._swipe_mappa(device, sign_x * p, 0, cfg)
+            if delta_y != 0:
+                sign_y = 1 if delta_y > 0 else -1
+                for _ in range(abs(delta_y) // p):
+                    self._swipe_mappa(device, 0, sign_y * p, cfg)
+
+            # Aggiorna end_x/end_y per il prossimo delta-from
+            end_x, end_y = tgt_x, tgt_y
+
+            shot = device.screenshot()
+            result = matcher.find_one(shot, cfg.tmpl_store,
+                                      threshold=cfg.soglia_store,
+                                      zone=roi_corrente)
+            log(f"  Re-match: score={result.score:.3f} ({result.cx},{result.cy})"
+                + ("  *** TROVATO ***" if result.found else "  fallito"))
+
+            if result.found:
+                cx_fin, cy_fin = result.cx, result.cy
+                if cand_idx > 0:
+                    log(f"  ✓ Recovery via candidate fallback (best falliva)")
+                break
+            # else: continua al prossimo candidato
+
+        if not result or not result.found:
+            log(f"Store re-match fallito per tutti i {len(candidates)} candidati")
             return _Esito.STORE_NON_TROVATO, 0, False
-
-        cx_fin, cy_fin = result.cx, result.cy
 
         # ── Gestione negozio ──────────────────────────────────────────────────
         esito_neg, acquistati, refreshed = self._gestisci_negozio(
