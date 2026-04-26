@@ -823,6 +823,56 @@ def _leggi_coord_nodo(ctx: TaskContext) -> Optional[str]:
 # Step 5 — OCR livello nodo dal titolo popup (V5 raccolta._leggi_livello_nodo_da_img)
 # ==============================================================================
 
+def _salva_debug_panel(label: str, frame, roi, bw, x1: int, y1: int,
+                        x2: int, y2: int, tipo: str, instance: str,
+                        log_fn=None) -> None:
+    """
+    Salva 3 immagini di debug per OCR livello pannello:
+      - <ts>_<inst>_<tipo>_<label>_full.png   = screenshot completo + box ROI rosso
+      - <ts>_<inst>_<tipo>_<label>_roi.png    = solo ROI a risoluzione originale
+      - <ts>_<inst>_<tipo>_<label>_roi_bw.png = ROI preprocessato (5x + binario)
+    Cartella: debug_task/livello_panel/
+
+    Cap MAX_DEBUG_FILES per evitare accumulo (Issue #59 lesson learned).
+    Le immagini più vecchie vengono eliminate quando il cap viene raggiunto.
+    """
+    MAX_DEBUG_FILES = 60   # 20 set da 3 file
+    try:
+        import cv2
+        import numpy as np
+        from datetime import datetime as _dt
+        from pathlib import Path as _P
+        out_dir = _P(__file__).resolve().parents[1] / "debug_task" / "livello_panel"
+        out_dir.mkdir(parents=True, exist_ok=True)
+        # Cap rotazione: cancella i file più vecchi se sopra il cap
+        existing = sorted(out_dir.glob("*.png"), key=lambda p: p.stat().st_mtime)
+        while len(existing) >= MAX_DEBUG_FILES:
+            try:
+                existing[0].unlink()
+                existing.pop(0)
+            except Exception:
+                break
+        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+        prefix = f"{ts}_{instance}_{tipo}_{label}"
+        # Full + box rosso
+        full = frame.copy()
+        cv2.rectangle(full, (x1, y1), (x2, y2), (0, 0, 255), 2)
+        cv2.imwrite(str(out_dir / f"{prefix}_full.png"), full)
+        # ROI raw
+        cv2.imwrite(str(out_dir / f"{prefix}_roi.png"), roi)
+        # ROI preprocessed (PIL → numpy)
+        try:
+            arr = np.array(bw)
+            cv2.imwrite(str(out_dir / f"{prefix}_roi_bw.png"), arr)
+        except Exception:
+            pass
+        if log_fn is not None:
+            log_fn(f"[LV-PANEL-DBG] salvati 3 file in debug_task/livello_panel/{prefix}_*.png")
+    except Exception as exc:
+        if log_fn is not None:
+            log_fn(f"[LV-PANEL-DBG] save fallito: {exc}")
+
+
 def _leggi_livello_panel(ctx: TaskContext, tipo: str) -> int:
     """
     auto-WU11 (26/04 anti-reset): legge il livello correntemente impostato
@@ -832,8 +882,13 @@ def _leggi_livello_panel(ctx: TaskContext, tipo: str) -> int:
     Usato in _cerca_nodo per evitare il reset (7× meno + piu × (target-1))
     quando il pannello mostra già il livello richiesto.
 
+    Debug 26/04: log dettagliato (ROI coords, testo grezzo, valore parsed)
+    + screenshot di verifica solo su FAILURE (debug_task/livello_panel/),
+    cap 60 file (20 set × 3 immagini) con rotazione FIFO.
+
     Ritorna int 1-7 se leggibile, -1 se OCR fallisce o valore fuori range.
     """
+    instance = getattr(ctx, "instance_name", "?")
     try:
         import pytesseract
         import os
@@ -850,9 +905,11 @@ def _leggi_livello_panel(ctx: TaskContext, tipo: str) -> int:
         x1, y1, x2, y2 = mx - 30, my - 20, mx + 30, my + 20
         screen = ctx.device.screenshot()
         if screen is None:
+            ctx.log_msg(f"[LV-PANEL] {tipo} screenshot None — abort")
             return -1
         frame = getattr(screen, "frame", None)
         if frame is None:
+            ctx.log_msg(f"[LV-PANEL] {tipo} frame None — abort")
             return -1
         roi = frame[y1:y2, x1:x2]
         pil = Image.fromarray(roi[:, :, ::-1])
@@ -860,15 +917,25 @@ def _leggi_livello_panel(ctx: TaskContext, tipo: str) -> int:
         big = pil.resize((w * 5, h * 5), Image.LANCZOS)
         bw = big.convert("L").point(lambda p: 255 if p > 130 else 0)
         cfg_ocr = "--psm 8 -c tessedit_char_whitelist=0123456789"
-        testo = pytesseract.image_to_string(bw, config=cfg_ocr).strip()
-        m = _re.search(r"(\d+)", testo)
+        testo_raw = pytesseract.image_to_string(bw, config=cfg_ocr).strip()
+        m = _re.search(r"(\d+)", testo_raw)
+        ctx.log_msg(
+            f"[LV-PANEL] {tipo} ROI=({x1},{y1},{x2},{y2}) "
+            f"OCR='{testo_raw!r}' match={m.group(1) if m else None}"
+        )
         if not m:
+            _salva_debug_panel("nomatch", frame, roi, bw, x1, y1, x2, y2,
+                               tipo, instance, log_fn=ctx.log_msg)
             return -1
         val = int(m.group(1))
         if 1 <= val <= 7:
             return val
+        # Valore fuori range → debug
+        _salva_debug_panel(f"oor{val}", frame, roi, bw, x1, y1, x2, y2,
+                           tipo, instance, log_fn=ctx.log_msg)
         return -1
-    except Exception:
+    except Exception as exc:
+        ctx.log_msg(f"[LV-PANEL] {tipo} eccezione: {exc}")
         return -1
 
 
