@@ -675,13 +675,34 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
                 time.sleep(0.5)
                 return False
 
-    for _ in range(7):
-        ctx.device.tap(coord_lv["meno"])
-        time.sleep(0.2)               # FIX F: 0.15 → 0.2
-    time.sleep(0.3)
-    for _ in range(livello - 1):
-        ctx.device.tap(coord_lv["piu"])
-        time.sleep(0.25)              # FIX F: 0.2 → 0.25
+    # auto-WU11 (26/04 ottimizzazione anti-reset): leggi livello già
+    # impostato nel pannello. Se == target → skip reset (7× meno + piu ×
+    # (target-1)) e tap CERCA diretto. Risparmio: ~1.4s/raccolta + meno
+    # tap stress UI. Se OCR fallisce (-1) o livello diverso → procedura
+    # standard classica.
+    livello_panel = _leggi_livello_panel(ctx, tipo)
+    if livello_panel == livello:
+        ctx.log_msg(
+            f"Raccolta: pannello già su Lv.{livello_panel} == target — "
+            f"skip reset"
+        )
+    else:
+        if livello_panel == -1:
+            ctx.log_msg(
+                f"Raccolta: OCR livello pannello fallito — reset standard"
+            )
+        else:
+            ctx.log_msg(
+                f"Raccolta: pannello su Lv.{livello_panel} != target Lv.{livello} "
+                f"— reset standard"
+            )
+        for _ in range(7):
+            ctx.device.tap(coord_lv["meno"])
+            time.sleep(0.2)               # FIX F: 0.15 → 0.2
+        time.sleep(0.3)
+        for _ in range(livello - 1):
+            ctx.device.tap(coord_lv["piu"])
+            time.sleep(0.25)              # FIX F: 0.2 → 0.25
 
     ctx.device.tap(coord_lv["search"])
     time.sleep(delay_cerca)
@@ -801,6 +822,55 @@ def _leggi_coord_nodo(ctx: TaskContext) -> Optional[str]:
 # ==============================================================================
 # Step 5 — OCR livello nodo dal titolo popup (V5 raccolta._leggi_livello_nodo_da_img)
 # ==============================================================================
+
+def _leggi_livello_panel(ctx: TaskContext, tipo: str) -> int:
+    """
+    auto-WU11 (26/04 anti-reset): legge il livello correntemente impostato
+    nel pannello LENTE (numero visualizzato tra i bottoni "-" e "+").
+    ROI calcolata dinamicamente come midpoint(meno, piu) ± 30×20px.
+
+    Usato in _cerca_nodo per evitare il reset (7× meno + piu × (target-1))
+    quando il pannello mostra già il livello richiesto.
+
+    Ritorna int 1-7 se leggibile, -1 se OCR fallisce o valore fuori range.
+    """
+    try:
+        import pytesseract
+        import os
+        from PIL import Image
+        pytesseract.pytesseract.tesseract_cmd = os.environ.get(
+            "TESSERACT_EXE",
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        )
+        coord_lv = _cfg(ctx, "COORD_LIVELLO").get(
+            tipo, _cfg(ctx, "COORD_LIVELLO")["campo"]
+        )
+        mx = (coord_lv["meno"][0] + coord_lv["piu"][0]) // 2
+        my = (coord_lv["meno"][1] + coord_lv["piu"][1]) // 2
+        x1, y1, x2, y2 = mx - 30, my - 20, mx + 30, my + 20
+        screen = ctx.device.screenshot()
+        if screen is None:
+            return -1
+        frame = getattr(screen, "frame", None)
+        if frame is None:
+            return -1
+        roi = frame[y1:y2, x1:x2]
+        pil = Image.fromarray(roi[:, :, ::-1])
+        w, h = pil.size
+        big = pil.resize((w * 5, h * 5), Image.LANCZOS)
+        bw = big.convert("L").point(lambda p: 255 if p > 130 else 0)
+        cfg_ocr = "--psm 8 -c tessedit_char_whitelist=0123456789"
+        testo = pytesseract.image_to_string(bw, config=cfg_ocr).strip()
+        m = _re.search(r"(\d+)", testo)
+        if not m:
+            return -1
+        val = int(m.group(1))
+        if 1 <= val <= 7:
+            return val
+        return -1
+    except Exception:
+        return -1
+
 
 def _leggi_livello_nodo(ctx: TaskContext, screen) -> int:
     """
@@ -1723,6 +1793,30 @@ class RaccoltaTask(Task):
             ctx.log_msg("Raccolta: modulo disabilitato — skip")
             return TaskResult(success=True, message="disabilitato", data={"inviate": 0})
 
+        # Issue #64 — sync con rifornimento: se l'ultima spedizione rifornimento
+        # è ancora in volo, gli slot squadra OCR risulterebbero occupati. Wait
+        # SEMPRE fino al rientro per leggere slot reali (no soglia, no skip).
+        # Cap safety 600s (10 min) per evitare blocco indefinito su ts corrotto.
+        # Issue futura #65: quando wait>60s, anticipare task post-raccolta nel
+        # tempo morto e tornare a raccolta dopo aver verificato il rientro.
+        try:
+            if hasattr(ctx, "state") and ctx.state is not None:
+                rif_state = getattr(ctx.state, "rifornimento", None)
+                eta_iso = getattr(rif_state, "eta_rientro_ultima", None) if rif_state else None
+                if eta_iso:
+                    from datetime import datetime as _dt, timezone as _tz
+                    ts_rientro = _dt.fromisoformat(eta_iso)
+                    wait_s = (ts_rientro - _dt.now(_tz.utc)).total_seconds()
+                    if wait_s > 0:
+                        actual_wait = min(wait_s + 2, 600.0)  # cap 10 min safety
+                        ctx.log_msg(
+                            f"Raccolta: attendo rientro rifornimento (eta={wait_s:.0f}s, "
+                            f"wait_effettivo={actual_wait:.0f}s)"
+                        )
+                        time.sleep(actual_wait)
+        except Exception as exc:
+            ctx.log_msg(f"[WARN] check eta_rientro_rifornimento: {exc}")
+
         # Legge max_squadre dall'istanza (instances.json) come obiettivo reale.
         # Fallback a RACCOLTA_OBIETTIVO se non disponibile.
         obiettivo = int(ctx.config.get("max_squadre", _cfg(ctx, "RACCOLTA_OBIETTIVO")))
@@ -1931,3 +2025,27 @@ class RaccoltaTask(Task):
             message=f"{inviate_totali} squadre inviate",
             data={"inviate": inviate_totali, "slot_pieni": slot_pieni},
         )
+
+
+# ==============================================================================
+# RaccoltaChiusuraTask — re-run raccolta in chiusura tick
+# ==============================================================================
+#
+# Issue #62 (26/04/2026) — esegue stessa logica di RaccoltaTask come ULTIMO
+# task del tick per chiudere il ciclo con slot pieni: durante l'esecuzione
+# degli altri task (donazione, store, arena, ds, ecc.) possono essersi
+# liberati slot squadra (marce concluse, attacchi finiti, ecc.). Riprovare
+# la raccolta a fine tick massimizza il throughput nodi/giorno.
+#
+# Sottoclasse di RaccoltaTask: eredita run() e tutta la logica. Differisce
+# solo nel `name()` per non collidere con la prima registrazione (RaccoltaTask
+# priority bassa) e mantenere log/state distinguibili. should_run() usa lo
+# stesso flag "raccolta" — abilitazione coerente.
+#
+# Se non ci sono slot liberi, run() esce in <2s con "nessuna squadra libera".
+
+class RaccoltaChiusuraTask(RaccoltaTask):
+    """Re-run di RaccoltaTask come ultimo task del tick (chiusura slot pieni)."""
+
+    def name(self) -> str:
+        return "raccolta_chiusura"
