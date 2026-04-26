@@ -900,9 +900,15 @@ def _leggi_livello_panel(ctx: TaskContext, tipo: str) -> int:
         coord_lv = _cfg(ctx, "COORD_LIVELLO").get(
             tipo, _cfg(ctx, "COORD_LIVELLO")["campo"]
         )
+        # auto-WU13 (26/04 ROI fix verificata su screenshot reali):
+        # il testo "Level: X" è ~30px SOPRA i bottoni - / +.
+        # Pre-fix: my = midpoint(meno.y, piu.y) ≈ 294 → ROI catturava
+        # solo la barra slider tra i bottoni, OCR sempre stringa vuota.
+        # Post-fix: my = meno.y - 30 (~265) + ROI larga 140px per
+        # contenere "Level: X" intero, psm 7 (single line) + regex.
         mx = (coord_lv["meno"][0] + coord_lv["piu"][0]) // 2
-        my = (coord_lv["meno"][1] + coord_lv["piu"][1]) // 2
-        x1, y1, x2, y2 = mx - 30, my - 20, mx + 30, my + 20
+        my = coord_lv["meno"][1] - 30
+        x1, y1, x2, y2 = mx - 70, my - 15, mx + 70, my + 15
         screen = ctx.device.screenshot()
         if screen is None:
             ctx.log_msg(f"[LV-PANEL] {tipo} screenshot None — abort")
@@ -914,11 +920,15 @@ def _leggi_livello_panel(ctx: TaskContext, tipo: str) -> int:
         roi = frame[y1:y2, x1:x2]
         pil = Image.fromarray(roi[:, :, ::-1])
         w, h = pil.size
-        big = pil.resize((w * 5, h * 5), Image.LANCZOS)
+        big = pil.resize((w * 4, h * 4), Image.LANCZOS)
         bw = big.convert("L").point(lambda p: 255 if p > 130 else 0)
-        cfg_ocr = "--psm 8 -c tessedit_char_whitelist=0123456789"
+        cfg_ocr = ("--psm 7 -c tessedit_char_whitelist="
+                   "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789:. ")
         testo_raw = pytesseract.image_to_string(bw, config=cfg_ocr).strip()
-        m = _re.search(r"(\d+)", testo_raw)
+        m = _re.search(r"[Ll]evel\s*:?\s*(\d+)", testo_raw)
+        if m is None:
+            # Fallback: cerca solo cifra isolata (in caso "Level:" non leggibile)
+            m = _re.search(r"\b(\d)\b", testo_raw)
         ctx.log_msg(
             f"[LV-PANEL] {tipo} ROI=({x1},{y1},{x2},{y2}) "
             f"OCR='{testo_raw!r}' match={m.group(1) if m else None}"
