@@ -217,24 +217,73 @@ def dismiss_banners_loop(ctx, max_iter: int = 8, log_fn=None) -> dict[str, int]:
                 continue
 
             if score >= spec.threshold:
-                # Apply dismiss action
-                if spec.dismiss_action == "back":
-                    ctx.device.back()
+                # Apply dismiss action — auto-WU22 supporta 2 pattern principali
+                # ("tap_template" per pulsanti dinamici, "tap_x_topright" per X)
+                # + legacy ("back", "tap_coords", "tap_center").
+                action_done = False
+                action_label = ""
+
+                if spec.dismiss_action == "tap_template" and spec.dismiss_template:
+                    # PATTERN 1 — pulsante con scritta (Continue/OK/Skip/...).
+                    # find_one del template e tap sulla posizione del match.
+                    btn_roi = spec.dismiss_template_roi or spec.roi
+                    btn_soglia = spec.dismiss_template_soglia or spec.threshold
+                    try:
+                        match = ctx.matcher.find_one(
+                            screen, spec.dismiss_template,
+                            threshold=btn_soglia, zone=btn_roi,
+                        )
+                    except FileNotFoundError:
+                        log(f"[BANNER-LOOP] {spec.name} dismiss_template non trovato: {spec.dismiss_template} — skip")
+                        continue
+                    except Exception as exc:
+                        log(f"[BANNER-LOOP] {spec.name} dismiss_template errore: {exc}")
+                        continue
+                    if match is not None and match.found:
+                        ctx.device.tap(match.cx, match.cy)
+                        action_label = f"tap_template@({match.cx},{match.cy}) score={match.score:.3f}"
+                        action_done = True
+                    else:
+                        # Pulsante non rilevato sebbene banner sì → fallback X top-right
+                        from shared.banner_catalog import DEFAULT_X_TOPRIGHT
+                        x, y = spec.dismiss_coords or DEFAULT_X_TOPRIGHT
+                        ctx.device.tap(x, y)
+                        action_label = f"tap_template→fallback_X@({x},{y})"
+                        action_done = True
+
+                elif spec.dismiss_action == "tap_x_topright":
+                    # PATTERN 2 — X close in alto a destra (canonico o override)
+                    from shared.banner_catalog import DEFAULT_X_TOPRIGHT
+                    x, y = spec.dismiss_coords or DEFAULT_X_TOPRIGHT
+                    ctx.device.tap(x, y)
+                    action_label = f"tap_X@({x},{y})"
+                    action_done = True
+
                 elif spec.dismiss_action == "tap_coords" and spec.dismiss_coords:
                     ctx.device.tap(*spec.dismiss_coords)
+                    action_label = f"tap_coords@{spec.dismiss_coords}"
+                    action_done = True
+
                 elif spec.dismiss_action == "tap_center":
                     ctx.device.tap(480, 270)
-                elif spec.dismiss_action == "tap_x_topright":
-                    ctx.device.tap(910, 80)
+                    action_label = "tap_center"
+                    action_done = True
+
+                elif spec.dismiss_action == "back":
+                    ctx.device.back()
+                    action_label = "back"
+                    action_done = True
+
                 else:
                     log(f"[BANNER-LOOP] {spec.name} dismiss_action sconosciuta: {spec.dismiss_action} — skip")
                     continue
 
-                _t.sleep(spec.wait_after_s)
-                counts[spec.name] = counts.get(spec.name, 0) + 1
-                any_dismissed = True
-                log(f"[BANNER-LOOP] {spec.name} chiuso (score={score:.3f}) iter {it+1}")
-                break  # ricomincia screenshot da zero
+                if action_done:
+                    _t.sleep(spec.wait_after_s)
+                    counts[spec.name] = counts.get(spec.name, 0) + 1
+                    any_dismissed = True
+                    log(f"[BANNER-LOOP] {spec.name} chiuso (score={score:.3f}) {action_label} iter {it+1}")
+                    break  # ricomincia screenshot da zero
 
         if not any_dismissed:
             # Nessun banner riconosciuto in questa iter → HOME pulita o popup non catalogato

@@ -32,30 +32,53 @@ class BannerSpec:
     """
     Specifica di un banner/popup riconoscibile.
 
+    DUE PATTERN DI CHIUSURA principali (auto-WU22):
+      1. PULSANTE — tap su un bottone con scritta variabile (Continue/OK/
+         Skip/Confirm/Salta/Annulla/Più tardi/Later/...). Usa
+         `dismiss_action="tap_template"` con `dismiss_template` per find_one
+         dinamico → tap sulla posizione del match.
+      2. X TOP-RIGHT — tap su icona X close in alto a destra (canonico
+         (910, 80) ma override possibile via `dismiss_coords`). Usa
+         `dismiss_action="tap_x_topright"`.
+
+    Altri dismiss_action legacy: "back", "tap_coords", "tap_center".
+
     Attributi:
-        name:           identificativo univoco (es. "daily_login_calendar")
-        template:       path relativo template (es. "pin/pin_daily_login_x.png")
-        roi:            (x1, y1, x2, y2) per limitare ricerca → ridurre falsi positivi
-        threshold:      soglia score minima per considerare "trovato"
-        dismiss_action: una di:
-                          "back"          → device.back()
-                          "tap_coords"    → device.tap(*dismiss_coords)
-                          "tap_center"    → device.tap(480, 270)
-                          "tap_x_topright"→ device.tap(910, 80) (default)
-        dismiss_coords: usato solo se dismiss_action == "tap_coords"
-        wait_after_s:   sleep dopo l'azione per consentire animazione UI
-        priority:       ordine di check (0=alta priorità, controllato per primo)
-                        priorità alte = popup MODALI che bloccano UI
-                        priorità basse = banner non-modali (come laterale)
+        name:             identificativo univoco (es. "daily_login_calendar")
+        template:         path relativo template per DETECTION (es. "pin/pin_daily_login_x.png")
+        roi:              (x1, y1, x2, y2) per limitare ricerca → ridurre falsi positivi
+        threshold:        soglia score minima per considerare "trovato"
+        dismiss_action:   una di:
+                            "tap_template"   → find_one(dismiss_template) + tap match
+                            "tap_x_topright" → tap su (910,80) o dismiss_coords se set
+                            "tap_coords"     → tap su dismiss_coords fisso
+                            "tap_center"     → tap (480, 270)
+                            "back"           → device.back()
+        dismiss_template: path template del PULSANTE da tappare (per "tap_template")
+        dismiss_template_roi: ROI ricerca pulsante (default = roi)
+        dismiss_template_soglia: soglia match pulsante (default = threshold)
+        dismiss_coords:   coords fisse (per "tap_coords" / override "tap_x_topright")
+        wait_after_s:     sleep dopo l'azione per consentire animazione UI
+        priority:         ordine di check (0=alta priorità)
+                          - priorità basse 0-3 = popup MODALI che bloccano UI
+                          - priorità medie 4-6 = banner non-modali
+                          - priorità alte 7-9 = ultimi tentativi generici
     """
     name: str
     template: str
     roi: tuple[int, int, int, int]
     threshold: float = 0.80
-    dismiss_action: str = "back"
+    dismiss_action: str = "tap_x_topright"
+    dismiss_template: str | None = None
+    dismiss_template_roi: tuple[int, int, int, int] | None = None
+    dismiss_template_soglia: float | None = None
     dismiss_coords: tuple[int, int] | None = None
     wait_after_s: float = 1.0
     priority: int = 5
+
+
+# Coordinate canoniche per X close in alto a destra (override per popup specifici)
+DEFAULT_X_TOPRIGHT = (910, 80)
 
 
 # ==============================================================================

@@ -200,6 +200,101 @@ def _cleanup_globale_startup(log_fn=None) -> None:
                f"processi ({', '.join(killed) if killed else 'nessuno'})")
 
 
+def _cleanup_orfani_processi_startup(log_fn=None) -> None:
+    """
+    Kill processi cmd.exe + python.exe orfani da sessioni precedenti del bot,
+    PRESERVANDO il bot corrente.
+
+    Tipi di orfani gestiti:
+      - cmd.exe con cmdline matching run_prod.bat o run_dashboard_prod.bat
+        e PID diverso dal cmd parent del bot corrente
+      - python.exe con cmdline 'main.py' e PID != current process
+
+    Da chiamare all'avvio bot, DOPO _cleanup_globale_startup (MuMu),
+    PRIMA del loop principale. Risolve il problema delle finestre cmd
+    orfane accumulate (vedi WU19) e dei python.exe duplicati lasciati
+    da kill brutali precedenti.
+
+    Safe: usa CommandLine matching specifico, non killa altri python/cmd.
+    """
+    import subprocess
+    import os as _os
+    import json as _json
+
+    current_pid = _os.getpid()
+    parent_pid = None
+    try:
+        parent_pid = _os.getppid()
+    except Exception:
+        pass
+
+    log = log_fn or (lambda _msg: None)
+
+    # Helper: get processes via PowerShell WMI
+    def _wmi_query(name: str, pattern: str) -> list[tuple[int, int, str]]:
+        try:
+            ps_cmd = (
+                f"Get-WmiObject Win32_Process -Filter \"Name='{name}'\" | "
+                f"Where-Object {{ $_.CommandLine -like '*{pattern}*' }} | "
+                f"ForEach-Object {{ '{{0}}|{{1}}'.f($_.ProcessId, $_.ParentProcessId) }}"
+            )
+            # Usa formato JSON via PowerShell per evitare parsing fragile
+            ps_cmd = (
+                f"Get-WmiObject Win32_Process -Filter \"Name='{name}'\" | "
+                f"Where-Object {{ $_.CommandLine -like '*{pattern}*' }} | "
+                f"Select-Object ProcessId,ParentProcessId,CommandLine | "
+                f"ConvertTo-Json -Compress"
+            )
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps_cmd],
+                capture_output=True, text=True, timeout=15,
+            )
+            if r.returncode != 0 or not r.stdout.strip():
+                return []
+            data = _json.loads(r.stdout)
+            if isinstance(data, dict):
+                data = [data]
+            return [(int(d["ProcessId"]), int(d.get("ParentProcessId") or 0),
+                     str(d.get("CommandLine") or "")) for d in data]
+        except Exception as exc:
+            log(f"[CLEANUP-ORFANI] WMI query {name} errore: {exc}")
+            return []
+
+    killed_cmd = []
+    killed_py = []
+
+    # 1. cmd.exe orfani con cmdline run_prod.bat o run_dashboard_prod.bat
+    for pattern in ("run_prod.bat", "run_dashboard_prod.bat"):
+        for pid, ppid, cmdline in _wmi_query("cmd.exe", pattern):
+            if pid in (current_pid, parent_pid):
+                continue
+            try:
+                subprocess.run(
+                    ["taskkill", "/F", "/PID", str(pid)],
+                    capture_output=True, timeout=5,
+                )
+                killed_cmd.append(pid)
+            except Exception:
+                pass
+
+    # 2. python.exe orfani con cmdline 'main.py' (NON il bot corrente)
+    for pid, ppid, cmdline in _wmi_query("python.exe", "main.py"):
+        if pid == current_pid:
+            continue
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/PID", str(pid)],
+                capture_output=True, timeout=5,
+            )
+            killed_py.append(pid)
+        except Exception:
+            pass
+
+    log(f"cleanup orfani: cmd killed={len(killed_cmd)} {killed_cmd if killed_cmd else ''} | "
+        f"python killed={len(killed_py)} {killed_py if killed_py else ''} | "
+        f"current_pid={current_pid} parent={parent_pid}")
+
+
 def _cleanup_tutti_emulator(istanze: list[dict], dry_run: bool) -> None:
     """
     Chiude emulator MuMu configurati (reset_istanza per ogni istanza).
@@ -837,6 +932,16 @@ def main():
     _log("MAIN", "Cleanup emulator orfani (startup) — taskkill globale")
     if not args.dry_run:
         _cleanup_globale_startup(lambda msg: _log("MAIN", msg))
+
+    # auto-WU22: cleanup processi orfani cmd.exe + python.exe da sessioni
+    # precedenti (finestre orfane accumulate, python duplicati). Preserva
+    # bot corrente via PID matching. Risolve issue WU19 e analoghi.
+    _log("MAIN", "Cleanup processi orfani (cmd/python sessioni precedenti)")
+    if not args.dry_run:
+        try:
+            _cleanup_orfani_processi_startup(lambda msg: _log("MAIN", msg))
+        except Exception as exc:
+            _log("MAIN", f"[WARN] cleanup orfani errore: {exc}")
 
     # ── Resume checkpoint ────────────────────────────────────
     resume_da: Optional[str] = None
