@@ -529,8 +529,44 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
         except Exception:
             _dbl = None
 
+        # auto-WU22: helper splash detection (Live Chat invariante in basso-sx)
+        try:
+            from shared.ui_helpers import is_loading_splash as _is_splash
+        except Exception:
+            _is_splash = None
+
         while time.time() - t_start < _cfg.timeout_carica_s:
-            # auto-WU22: catalog dismiss INTRA-loop per intercettare popup
+            # auto-WU22 step1: check loading splash. Se siamo in caricamento
+            # (template "Live Chat" rilevato), NON fare BACK — il gioco sta
+            # caricando, qualsiasi BACK è inutile o controproducente
+            # (rischio: trigger "Exit game?" dialog se splash finisce mentre
+            # il bot sta facendo BACK). Wait passivo + re-check schermata.
+            if (_is_splash is not None and hasattr(ctx, 'matcher')
+                    and ctx.matcher is not None):
+                try:
+                    class _Mini:
+                        pass
+                    mini = _Mini()
+                    mini.device = device
+                    mini.matcher = ctx.matcher
+                    if _is_splash(mini, log_fn=lambda m: _log(f"[{nome}] {m}", log_fn)):
+                        # Splash → wait passivo, nessuna azione device
+                        time.sleep(POLL_BACK_INTERVAL_S)
+                        try:
+                            schermata = nav.schermata_corrente()
+                        except Exception:
+                            schermata = Screen.UNKNOWN
+                        elapsed = time.time() - t_start
+                        _log(f"[{nome}] schermata={schermata} ({elapsed:.0f}s) [splash wait]", log_fn)
+                        if schermata != Screen.UNKNOWN:
+                            _log(f"[{nome}] schermata rilevata: {schermata}", log_fn)
+                            trovata = True
+                            break
+                        continue
+                except Exception as exc:
+                    _log(f"[{nome}] splash detection errore: {exc}", log_fn)
+
+            # auto-WU22 step2: catalog dismiss INTRA-loop per intercettare popup
             # aperti dal BACK precedente (es. "Exit game?" dialog).
             if _dbl is not None and hasattr(ctx, 'matcher') and ctx.matcher is not None:
                 try:

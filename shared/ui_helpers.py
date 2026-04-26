@@ -165,6 +165,58 @@ def comprimi_banner_home(ctx: "TaskContext", log_fn=None) -> str:
 
 
 # ==============================================================================
+# Loading splash detection (auto-WU22)
+# ==============================================================================
+
+# "Live Chat" testo+icona in basso a sinistra durante caricamento gioco.
+# Posizione invariante (la sfondo cambia per evento, ma "Live Chat" no).
+# Usato per distinguere splash naturale (wait passivo) da popup persistente
+# (richiede dismiss action).
+_SPLASH_TMPL_LIVECHAT = "pin/pin_loading_livechat.png"
+_SPLASH_ROI_LIVECHAT  = (20, 470, 160, 525)  # x1,y1,x2,y2 — basso-sx, larga
+_SPLASH_SOGLIA        = 0.75
+
+
+def is_loading_splash(ctx, log_fn=None) -> bool:
+    """
+    Verifica se la schermata corrente è il LOADING SPLASH del gioco.
+
+    Detection: cerca template `pin_loading_livechat.png` nella ROI bottom-left.
+    "Live Chat" è invariante (testo + icona cuffia) — la grafica di sfondo
+    cambia per evento ma quell'angolo resta identico.
+
+    Da chiamare quando schermata == UNKNOWN per decidere strategia:
+      - splash=True  → wait passivo (no BACK, lascia caricare)
+      - splash=False → popup persistente, prova dismiss_banners_loop / BACK
+
+    Args:
+        ctx: oggetto con .device + .matcher
+        log_fn: logger opzionale
+
+    Returns:
+        True se siamo in loading splash, False altrimenti.
+    """
+    log = log_fn or (lambda _msg: None)
+    if ctx.device is None or ctx.matcher is None:
+        return False
+    try:
+        screen = ctx.device.screenshot()
+        if screen is None:
+            return False
+        score = ctx.matcher.score(screen, _SPLASH_TMPL_LIVECHAT, zone=_SPLASH_ROI_LIVECHAT)
+        if score >= _SPLASH_SOGLIA:
+            log(f"[SPLASH] Live Chat rilevato (score={score:.3f}) — gioco in caricamento")
+            return True
+        return False
+    except FileNotFoundError:
+        # Template non ancora deployato → fallback safe
+        return False
+    except Exception as exc:
+        log(f"[SPLASH] errore detection: {exc}")
+        return False
+
+
+# ==============================================================================
 # Banner catalog — dismissal pipeline (auto-WU21)
 # ==============================================================================
 
