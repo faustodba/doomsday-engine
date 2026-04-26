@@ -162,3 +162,88 @@ def comprimi_banner_home(ctx: "TaskContext", log_fn=None) -> str:
 
     log(f"[BANNER] non rilevato (aperto={s_ap:.3f} chiuso={s_ch:.3f}) — no-op")
     return "sconosciuto"
+
+
+# ==============================================================================
+# Banner catalog — dismissal pipeline (auto-WU21)
+# ==============================================================================
+
+def dismiss_banners_loop(ctx, max_iter: int = 8, log_fn=None) -> dict[str, int]:
+    """
+    Itera screenshot + match contro BANNER_CATALOG e applica l'azione di
+    chiusura specifica per ogni banner riconosciuto. Continua finché:
+      - nessun banner viene trovato in un'iterazione (uscita pulita), OR
+      - max_iter raggiunto (safety cap).
+
+    Da chiamare in `attendi_home` PRIMA del polling cieco BACK per ridurre
+    UNKNOWN polls e tempo di stabilizzazione.
+
+    Args:
+        ctx:      TaskContext con device + matcher
+        max_iter: cap iterazioni (default 8)
+        log_fn:   logger opzionale
+
+    Returns:
+        dict {banner_name: count} = quante volte ogni banner è stato chiuso.
+        Vuoto se nessun banner trovato.
+    """
+    import time as _t
+    from shared.banner_catalog import BANNER_CATALOG
+
+    log = log_fn or (lambda _msg: None)
+    counts: dict[str, int] = {}
+
+    if ctx.device is None or ctx.matcher is None:
+        return counts
+
+    # Catalog ordinato per priority
+    catalog = sorted(BANNER_CATALOG, key=lambda b: b.priority)
+
+    for it in range(max_iter):
+        screen = ctx.device.screenshot()
+        if screen is None:
+            log(f"[BANNER-LOOP] iter {it+1}: screenshot None — break")
+            break
+
+        any_dismissed = False
+        for spec in catalog:
+            try:
+                score = ctx.matcher.score(screen, spec.template, zone=spec.roi)
+            except FileNotFoundError:
+                # Template placeholder non ancora estratto — ignora silenziosamente
+                continue
+            except Exception as exc:
+                log(f"[BANNER-LOOP] {spec.name} match errore: {exc}")
+                continue
+
+            if score >= spec.threshold:
+                # Apply dismiss action
+                if spec.dismiss_action == "back":
+                    ctx.device.back()
+                elif spec.dismiss_action == "tap_coords" and spec.dismiss_coords:
+                    ctx.device.tap(*spec.dismiss_coords)
+                elif spec.dismiss_action == "tap_center":
+                    ctx.device.tap(480, 270)
+                elif spec.dismiss_action == "tap_x_topright":
+                    ctx.device.tap(910, 80)
+                else:
+                    log(f"[BANNER-LOOP] {spec.name} dismiss_action sconosciuta: {spec.dismiss_action} — skip")
+                    continue
+
+                _t.sleep(spec.wait_after_s)
+                counts[spec.name] = counts.get(spec.name, 0) + 1
+                any_dismissed = True
+                log(f"[BANNER-LOOP] {spec.name} chiuso (score={score:.3f}) iter {it+1}")
+                break  # ricomincia screenshot da zero
+
+        if not any_dismissed:
+            # Nessun banner riconosciuto in questa iter → HOME pulita o popup non catalogato
+            if it == 0:
+                log("[BANNER-LOOP] nessun banner riconosciuto al primo scan")
+            else:
+                log(f"[BANNER-LOOP] completato dopo {it} iter, dismissed={counts}")
+            break
+    else:
+        log(f"[BANNER-LOOP] max_iter={max_iter} raggiunto, dismissed={counts}")
+
+    return counts

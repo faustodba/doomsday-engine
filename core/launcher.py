@@ -485,6 +485,27 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
     if nav is None:
         _log(f"[{nome}] navigator non disponibile — skip polling", log_fn)
     else:
+        # auto-WU21: dismiss banners catalog PRIMA del polling cieco BACK.
+        # Identifica banner/popup specifici e applica dismiss action mirata
+        # (tap_X / tap_centro / tap_coords) invece di BACK indiscriminato.
+        # Deploy 1: catalog ha solo banner_eventi_laterale; placeholder per
+        # daily_login, news_feed, event_modal etc da popolare post-discovery.
+        try:
+            from shared.ui_helpers import dismiss_banners_loop
+            class _MiniCtx:
+                pass
+            mini = _MiniCtx()
+            mini.device = device
+            mini.matcher = ctx.matcher if hasattr(ctx, 'matcher') else None
+            if mini.matcher is not None:
+                bdism = dismiss_banners_loop(mini, max_iter=8,
+                                             log_fn=lambda m: _log(f"[{nome}] {m}", log_fn))
+                if bdism:
+                    _log(f"[{nome}] banner pre-polling dismissed: {bdism}", log_fn)
+                    time.sleep(2.0)  # consenti UI di stabilizzarsi
+        except Exception as exc:
+            _log(f"[{nome}] banner dismiss errore (non bloccante): {exc}", log_fn)
+
         _log(f"[{nome}] loop BACK + polling schermata (max {_cfg.timeout_carica_s}s)", log_fn)
         t_start = time.time()
         trovata = False
@@ -495,6 +516,10 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
         POLL_BACK_INTERVAL_S = 3.5    # sleep tra back e schermata_corrente
         MONKEY_EVERY_N = 8            # auto-WU16: 6→8 cicli (~28s con poll 3.5s = ~42s prima)
         MONKEY_COOLDOWN_S = 30.0      # cooldown minimo tra monkey successivi
+        # auto-WU21: discovery — salva screenshot quando UNKNOWN persiste,
+        # per estrarre template di popup non catalogati.
+        UNKNOWN_SNAPSHOT_AT = 5
+        snapshot_taken = False
         while time.time() - t_start < _cfg.timeout_carica_s:
             # BACK chiude eventuali popup sovrapposti (daily login, eventi, ecc.)
             if device is not None:
@@ -518,6 +543,27 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
             # Ogni N cicli UNKNOWN consecutivi, rilancia monkey per forzare
             # il gioco in foreground (idempotente se già al top).
             unknown_streak += 1
+
+            # auto-WU21 discovery: 1 screenshot quando UNKNOWN streak == 5,
+            # per analisi visiva offline → estrazione template banner.
+            if (unknown_streak == UNKNOWN_SNAPSHOT_AT
+                    and not snapshot_taken
+                    and device is not None):
+                try:
+                    import cv2
+                    from datetime import datetime as _dt
+                    shot = device.screenshot()
+                    if shot is not None and getattr(shot, "frame", None) is not None:
+                        out_dir = Path(__file__).resolve().parents[1] / "debug_task" / "boot_unknown"
+                        out_dir.mkdir(parents=True, exist_ok=True)
+                        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+                        fname = f"{nome}_streak{unknown_streak}_{ts}.png"
+                        cv2.imwrite(str(out_dir / fname), shot.frame)
+                        _log(f"[{nome}] discovery screenshot salvato: debug_task/boot_unknown/{fname}", log_fn)
+                        snapshot_taken = True
+                except Exception as exc:
+                    _log(f"[{nome}] discovery screenshot errore: {exc}", log_fn)
+
             now = time.time()
             if (unknown_streak >= MONKEY_EVERY_N
                     and (now - last_monkey_t) > MONKEY_COOLDOWN_S
