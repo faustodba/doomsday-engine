@@ -516,10 +516,36 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
         POLL_BACK_INTERVAL_S = 3.5    # sleep tra back e schermata_corrente
         MONKEY_EVERY_N = 8            # auto-WU16: 6→8 cicli (~28s con poll 3.5s = ~42s prima)
         MONKEY_COOLDOWN_S = 30.0      # cooldown minimo tra monkey successivi
-        # auto-WU21: discovery — salva screenshot quando UNKNOWN persiste,
-        # per estrarre template di popup non catalogati.
-        UNKNOWN_SNAPSHOT_AT = 5
-        snapshot_taken = False
+        # auto-WU21+22: discovery multi-snapshot per catturare popup distinti
+        # che si succedono durante il polling. Il primo snapshot al streak 5
+        # cattura il primo banner; al 10 il secondo (se cambia); ecc.
+        # Inoltre snapshot quando dismiss_banners_loop NON trova match e
+        # restiamo UNKNOWN — sintomo certo di popup non catalogato.
+        UNKNOWN_SNAPSHOT_STREAKS = {5, 10, 15, 20}  # multi-streak triggers
+        snapshot_streaks_taken = set()
+        snapshot_max_per_cycle = 4  # safety cap
+        snapshot_count = 0
+
+        def _save_discovery_snapshot(label: str, shot=None):
+            nonlocal snapshot_count
+            if snapshot_count >= snapshot_max_per_cycle:
+                return
+            try:
+                import cv2
+                from datetime import datetime as _dt
+                if shot is None:
+                    shot = device.screenshot() if device is not None else None
+                if shot is None or getattr(shot, "frame", None) is None:
+                    return
+                out_dir = Path(__file__).resolve().parents[1] / "debug_task" / "boot_unknown"
+                out_dir.mkdir(parents=True, exist_ok=True)
+                ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+                fname = f"{nome}_{label}_{ts}.png"
+                cv2.imwrite(str(out_dir / fname), shot.frame)
+                _log(f"[{nome}] discovery screenshot [{label}]: debug_task/boot_unknown/{fname}", log_fn)
+                snapshot_count += 1
+            except Exception as exc:
+                _log(f"[{nome}] discovery screenshot errore: {exc}", log_fn)
         # auto-WU22: ad ogni iter, prima del BACK cieco prova catalog dismiss.
         # Critico per "Exit game?" dialog (priority=0): se il polling BACK
         # apre il dialog, il dismiss_banners_loop lo intercetta e tappa CANCEL
@@ -590,6 +616,14 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
                             break
                         # Continua loop ma senza BACK (popup era qui, BACK probabilmente lo riapriva)
                         continue
+                    else:
+                        # auto-WU22 discovery: dismiss_loop NON ha trovato match
+                        # ma siamo UNKNOWN. Sintomo certo di popup NON catalogato.
+                        # Snapshot mirato (1 sola volta per streak per evitare burst).
+                        if (unknown_streak >= 3
+                                and unknown_streak not in snapshot_streaks_taken):
+                            _save_discovery_snapshot(f"unknown_unmatched_streak{unknown_streak}")
+                            snapshot_streaks_taken.add(unknown_streak)
                 except Exception as exc:
                     _log(f"[{nome}] dismiss intra-loop errore: {exc}", log_fn)
 
@@ -616,25 +650,13 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
             # il gioco in foreground (idempotente se già al top).
             unknown_streak += 1
 
-            # auto-WU21 discovery: 1 screenshot quando UNKNOWN streak == 5,
-            # per analisi visiva offline → estrazione template banner.
-            if (unknown_streak == UNKNOWN_SNAPSHOT_AT
-                    and not snapshot_taken
+            # auto-WU21+22 discovery: multi-snapshot a streak 5/10/15/20.
+            # Cattura banner DIVERSI che si succedono durante polling lungo.
+            if (unknown_streak in UNKNOWN_SNAPSHOT_STREAKS
+                    and unknown_streak not in snapshot_streaks_taken
                     and device is not None):
-                try:
-                    import cv2
-                    from datetime import datetime as _dt
-                    shot = device.screenshot()
-                    if shot is not None and getattr(shot, "frame", None) is not None:
-                        out_dir = Path(__file__).resolve().parents[1] / "debug_task" / "boot_unknown"
-                        out_dir.mkdir(parents=True, exist_ok=True)
-                        ts = _dt.now().strftime("%Y%m%d_%H%M%S")
-                        fname = f"{nome}_streak{unknown_streak}_{ts}.png"
-                        cv2.imwrite(str(out_dir / fname), shot.frame)
-                        _log(f"[{nome}] discovery screenshot salvato: debug_task/boot_unknown/{fname}", log_fn)
-                        snapshot_taken = True
-                except Exception as exc:
-                    _log(f"[{nome}] discovery screenshot errore: {exc}", log_fn)
+                _save_discovery_snapshot(f"streak{unknown_streak}")
+                snapshot_streaks_taken.add(unknown_streak)
 
             now = time.time()
             if (unknown_streak >= MONKEY_EVERY_N
