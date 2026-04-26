@@ -176,6 +176,27 @@ class GameNavigator:
                 time.sleep(cfg.wait_after_action)
                 continue
 
+            # auto-WU22: prima di tap/back cieco, prova catalog banner.
+            # Critico per "Exit game?" dialog: se il loop alternato
+            # tap_overlay / BACK apre il dialog, dismiss_banners_loop lo
+            # intercetta e tappa CANCEL invece di accumulare BACK / OK.
+            try:
+                from shared.ui_helpers import dismiss_banners_loop
+                # Stub minimo ctx con device + matcher
+                if hasattr(self, 'matcher') and self.matcher is not None:
+                    class _Mini:
+                        pass
+                    mini = _Mini()
+                    mini.device = self.device
+                    mini.matcher = self.matcher
+                    bd = dismiss_banners_loop(mini, max_iter=2, log_fn=self._log)
+                    if bd:
+                        # Banner trovato e chiuso, salta tap/back di questa iter
+                        time.sleep(1.0)
+                        continue
+            except Exception:
+                pass
+
             # UNKNOWN/OVERLAY: prova tap overlay poi BACK alternati
             if attempt % 2 == 0:
                 self.device.tap(*cfg.overlay_tap)

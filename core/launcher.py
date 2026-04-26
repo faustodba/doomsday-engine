@@ -520,7 +520,43 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
         # per estrarre template di popup non catalogati.
         UNKNOWN_SNAPSHOT_AT = 5
         snapshot_taken = False
+        # auto-WU22: ad ogni iter, prima del BACK cieco prova catalog dismiss.
+        # Critico per "Exit game?" dialog (priority=0): se il polling BACK
+        # apre il dialog, il dismiss_banners_loop lo intercetta e tappa CANCEL
+        # invece di confermare OK (catastrofico) o accumulare BACK→dialog.
+        try:
+            from shared.ui_helpers import dismiss_banners_loop as _dbl
+        except Exception:
+            _dbl = None
+
         while time.time() - t_start < _cfg.timeout_carica_s:
+            # auto-WU22: catalog dismiss INTRA-loop per intercettare popup
+            # aperti dal BACK precedente (es. "Exit game?" dialog).
+            if _dbl is not None and hasattr(ctx, 'matcher') and ctx.matcher is not None:
+                try:
+                    class _Mini:
+                        pass
+                    mini = _Mini()
+                    mini.device = device
+                    mini.matcher = ctx.matcher
+                    bd = _dbl(mini, max_iter=2,
+                             log_fn=lambda m: _log(f"[{nome}] {m}", log_fn))
+                    if bd:
+                        # Banner trovato e chiuso, salta il BACK di questa iter
+                        time.sleep(1.0)
+                        try:
+                            schermata = nav.schermata_corrente()
+                        except Exception:
+                            schermata = Screen.UNKNOWN
+                        if schermata != Screen.UNKNOWN:
+                            _log(f"[{nome}] schermata rilevata post-dismiss: {schermata}", log_fn)
+                            trovata = True
+                            break
+                        # Continua loop ma senza BACK (popup era qui, BACK probabilmente lo riapriva)
+                        continue
+                except Exception as exc:
+                    _log(f"[{nome}] dismiss intra-loop errore: {exc}", log_fn)
+
             # BACK chiude eventuali popup sovrapposti (daily login, eventi, ecc.)
             if device is not None:
                 device.back()

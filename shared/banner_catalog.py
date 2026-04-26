@@ -97,7 +97,34 @@ DEFAULT_X_TOPRIGHT = (910, 80)
 # ==============================================================================
 
 BANNER_CATALOG: list[BannerSpec] = [
+    # ==================================================================
+    # PRIORITY 0 — CRITICO. "Exit game?" dialog (auto-WU22 discovery).
+    # ==================================================================
+    # CAUSA ROOT del pattern UNKNOWN persistente vai_in_home FALLITO 8/8:
+    # il polling cieco BACK del launcher PREMENDO BACK su HOME apre il dialog
+    # di sistema "Exit game?". Senza catalogazione il bot loop su BACK→dialog
+    # → BACK→dialog senza progresso fino a timeout. Se per caso seleziona OK
+    # il gioco viene CHIUSO (catastrofico).
+    # Mitigazione: rilevare il dialog (testo "Exit game?") e tappare il
+    # bottone CANCEL (template grigio bordo bottone) per chiuderlo.
+    # ROI dialog: testo centrato a (~430, 220) – ROI larga per tolleranza.
+    # ROI cancel: bottone (~290-455, 355-405) – ROI dello stesso button.
+    BannerSpec(
+        name="exit_game_dialog",
+        template="pin/pin_exit_game_dialog.png",
+        roi=(380, 200, 580, 280),
+        threshold=0.80,
+        dismiss_action="tap_template",
+        dismiss_template="pin/pin_btn_cancel.png",
+        dismiss_template_roi=(270, 340, 470, 415),
+        dismiss_template_soglia=0.75,
+        wait_after_s=1.5,  # animazione chiusura dialog
+        priority=0,
+    ),
+
+    # ==================================================================
     # PRIORITY 5 — banner laterale eventi (HOME, non-modale)
+    # ==================================================================
     # Template esistente, già usato da comprimi_banner_home.
     # Inclusione qui: discovery uniforme via dismiss_banners_loop, ma
     # comprimi_banner_home() resta funzionale come pre-catalog.
@@ -112,7 +139,7 @@ BANNER_CATALOG: list[BannerSpec] = [
         priority=5,
     ),
 
-    # PLACEHOLDER — popolare dopo discovery screenshot
+    # PLACEHOLDER — popolare dopo discovery screenshot ulteriore:
     # BannerSpec(name="daily_login_calendar", ...),
     # BannerSpec(name="welcome_back", ...),
     # BannerSpec(name="news_feed", ...),
