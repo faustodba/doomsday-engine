@@ -97,7 +97,15 @@ class DistrictShowdownConfig:
     # Fund Raid attack — bottone colpo + OCR box contatore chiavi residue
     tap_fund_raid_attack: tuple  = field(default_factory=lambda: (443, 450))  # tap raid ripetuto
     roi_fund_counter:     tuple  = field(default_factory=lambda: (384, 386, 560, 428))  # OCR counter
-    max_fund_raid_attacks: int   = 20   # safety cap iterazioni loop (ripristinato post-test)
+    max_fund_raid_attacks: int   = 20   # safety cap iterazioni loop (legacy, non usato post-WU14)
+    # auto-WU14 (26/04 fund raid burst): tap-burst rapido a blocchi.
+    # Modello mutuato da DonazioneTask._loop_donate (auto-WU11): N tap
+    # consecutivi senza screenshot intermedio → screenshot+OCR counter
+    # post-block → loop finché counter=0 o cap max_blocks raggiunto.
+    fund_raid_taps_per_block:  int   = 30      # tap consecutivi prima di check OCR
+    fund_raid_wait_tap:        float = 0.25    # delay tra tap nel block
+    fund_raid_max_blocks:      int   = 5       # cap blocchi (30×5 = 150 attack safety)
+    fund_raid_wait_post_block: float = 1.0     # attesa stabilizzazione UI dopo burst prima OCR
 
     # --- Finestre temporali evento (UTC) ---
     # Evento District Showdown: VEN 00:00 UTC → LUN 00:00 UTC (3 giorni esatti).
@@ -1226,13 +1234,24 @@ class DistrictShowdownTask(Task):
 
     def _fund_raid_loop_attack(self, ctx: TaskContext) -> None:
         """
-        Loop colpi Fund Raid: tap attack_coord finché OCR counter = 0.
+        Loop colpi Fund Raid a BLOCCHI di tap rapidi (auto-WU14).
 
-        Flusso per iterazione:
-          1. Screenshot → OCR cifre del box roi_fund_counter
-          2. Se testo parseato = "0" → break (raid finiti)
-          3. Tap tap_fund_raid_attack → sleep delay_foray
-        Safety: max_fund_raid_attacks iterazioni totali.
+        Pre-fix: tap singolo + screenshot + OCR + sleep delay_foray=7s ogni
+        iterazione. 20 colpi * ~7.5s/iter ≈ 150s.
+        Post-fix: blocchi di N tap consecutivi (delay 0.25s) senza
+        screenshot intermedio. Dopo ogni block: screenshot + OCR counter
+        per decidere se serve un altro block.
+        Modello mutuato da DonazioneTask._loop_donate.
+
+        Tempo: 30 tap in ~7.5s vs 30*7s=210s old → ~28× più veloce.
+        Capacità: 30 × 5 block = 150 attack safety cap.
+
+        Flusso per block:
+          1. Burst di taps_per_block tap consecutivi
+          2. Sleep wait_post_block (stabilizzazione UI)
+          3. Screenshot → OCR counter chiavi/colpi residui
+          4. Se counter="0" o cap max_blocks → stop
+          5. Altrimenti next block
         """
         cfg = self._cfg
         try:
@@ -1241,35 +1260,50 @@ class DistrictShowdownTask(Task):
             ctx.log_msg("[DS-RAID] ocr_cifre non disponibile — skip loop")
             return
 
-        for i in range(cfg.max_fund_raid_attacks):
+        total_taps = 0
+        for block_idx in range(cfg.fund_raid_max_blocks):
+            ctx.log_msg(
+                f"[DS-RAID] block {block_idx + 1}/{cfg.fund_raid_max_blocks} — "
+                f"{cfg.fund_raid_taps_per_block} tap rapidi @ {cfg.tap_fund_raid_attack}"
+            )
+
+            # Burst di tap senza screenshot intermedio
+            for _ in range(cfg.fund_raid_taps_per_block):
+                ctx.device.tap(*cfg.tap_fund_raid_attack)
+                time.sleep(cfg.fund_raid_wait_tap)
+                total_taps += 1
+
+            # Attesa stabilizzazione UI dopo burst
+            time.sleep(cfg.fund_raid_wait_post_block)
+
+            # Screenshot + OCR counter post-block
             screen = ctx.device.screenshot()
             if screen is None:
-                ctx.log_msg(f"[DS-RAID] iter {i}: screenshot None — stop")
+                ctx.log_msg(
+                    f"[DS-RAID] block {block_idx + 1}: screenshot None — stop"
+                )
                 break
 
-            # OCR counter chiavi/colpi residui
             try:
                 testo = ocr_cifre(screen.frame, zone=cfg.roi_fund_counter).strip()
             except Exception as exc:
                 testo = ""
-                ctx.log_msg(f"[DS-RAID] iter {i}: OCR errore {exc}")
+                ctx.log_msg(f"[DS-RAID] block {block_idx + 1}: OCR errore {exc}")
 
-            ctx.log_msg(f"[DS-RAID] iter {i}: counter OCR='{testo}'")
+            ctx.log_msg(
+                f"[DS-RAID] block {block_idx + 1} completato — "
+                f"totale tap={total_taps}, counter OCR='{testo}'"
+            )
 
-            # Condizione stop: il testo contiene "0" come primo carattere
-            # (gestisce casi "0", "0/N", "0 chiavi", ecc.)
-            if testo.startswith("0") or testo == "":
-                if testo.startswith("0"):
-                    ctx.log_msg(f"[DS-RAID] counter=0 dopo {i} attacchi — stop")
-                    break
-                # testo vuoto = OCR fail, continua con safety dopo max iter
-
-            # Tap attack
-            ctx.log_msg(f"[DS-RAID] iter {i}: tap {cfg.tap_fund_raid_attack}")
-            ctx.device.tap(*cfg.tap_fund_raid_attack)
-            time.sleep(cfg.delay_foray)
+            # Stop: counter inizia con "0" (gestisce "0", "0/N", "0 chiavi").
+            if testo.startswith("0"):
+                ctx.log_msg(
+                    f"[DS-RAID] counter=0 dopo {total_taps} attack — stop"
+                )
+                break
+            # testo vuoto = OCR fail → prosegue con prossimo block fino al cap
         else:
             ctx.log_msg(
-                f"[DS-RAID] max_fund_raid_attacks={cfg.max_fund_raid_attacks} "
-                f"raggiunto — stop safety"
+                f"[DS-RAID] max_blocks={cfg.fund_raid_max_blocks} raggiunto "
+                f"— totale tap={total_taps}, stop safety"
             )
