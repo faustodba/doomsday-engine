@@ -934,15 +934,17 @@ def _leggi_livello_panel(ctx: TaskContext, tipo: str) -> int:
             f"OCR='{testo_raw!r}' match={m.group(1) if m else None}"
         )
         if not m:
-            _salva_debug_panel("nomatch", frame, roi, bw, x1, y1, x2, y2,
-                               tipo, instance, log_fn=ctx.log_msg)
+            # DEBUG DISATTIVATO 26/04/2026 — ROI fix verificata su screenshot
+            # reali (auto-WU13). Per riabilitare: decommenta la chiamata sotto.
+            # _salva_debug_panel("nomatch", frame, roi, bw, x1, y1, x2, y2,
+            #                    tipo, instance, log_fn=ctx.log_msg)
             return -1
         val = int(m.group(1))
         if 1 <= val <= 7:
             return val
-        # Valore fuori range → debug
-        _salva_debug_panel(f"oor{val}", frame, roi, bw, x1, y1, x2, y2,
-                           tipo, instance, log_fn=ctx.log_msg)
+        # Valore fuori range → debug (DISATTIVATO, decommenta per riabilitare)
+        # _salva_debug_panel(f"oor{val}", frame, roi, bw, x1, y1, x2, y2,
+        #                    tipo, instance, log_fn=ctx.log_msg)
         return -1
     except Exception as exc:
         ctx.log_msg(f"[LV-PANEL] {tipo} eccezione: {exc}")
