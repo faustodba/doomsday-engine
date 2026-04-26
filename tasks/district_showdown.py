@@ -1290,18 +1290,27 @@ class DistrictShowdownTask(Task):
                 testo = ""
                 ctx.log_msg(f"[DS-RAID] block {block_idx + 1}: OCR errore {exc}")
 
+            # auto-WU15 (26/04 fix stop OCR): il counter ritorna come
+            # "m,684" / "m.,384" / "m,0" — il prefisso "m" del formato
+            # gioco confonde startswith("0"). Pre-fix: stop solo se intero
+            # testo iniziava con "0" → mai matchato → 30 tap inutili nel
+            # block finale. Post-fix: estrai ULTIMO numero dal testo;
+            # se == 0 → stop.
+            import re as _re_local
+            nums = _re_local.findall(r"\d+", testo)
+            last_num = int(nums[-1]) if nums else None
             ctx.log_msg(
                 f"[DS-RAID] block {block_idx + 1} completato — "
-                f"totale tap={total_taps}, counter OCR='{testo}'"
+                f"totale tap={total_taps}, counter OCR='{testo}' "
+                f"(last_num={last_num})"
             )
 
-            # Stop: counter inizia con "0" (gestisce "0", "0/N", "0 chiavi").
-            if testo.startswith("0"):
+            if last_num == 0:
                 ctx.log_msg(
                     f"[DS-RAID] counter=0 dopo {total_taps} attack — stop"
                 )
                 break
-            # testo vuoto = OCR fail → prosegue con prossimo block fino al cap
+            # OCR fail (nessun numero) o counter > 0 → prosegue prossimo block
         else:
             ctx.log_msg(
                 f"[DS-RAID] max_blocks={cfg.fund_raid_max_blocks} raggiunto "
