@@ -401,15 +401,26 @@ class StoreTask(Task):
 
             log(f"Tap carrello ({r_carr.cx},{r_carr.cy})")
             device.tap(r_carr.cx, r_carr.cy)
-            time.sleep(0.3)  # minimo animazione tap
+            # auto-WU12 (26/04): regola DELAY UI — 0.3s → 2.0s.
+            # Pre-fix: screenshot subito dopo tap catturava frame transiente
+            # con BOTH tmpl_merchant=0.94 e tmpl_merchant_close=0.99 alti
+            # (animazione overlay non finita). Polling rompeva al primo
+            # match open>=0.75, ma post-loop close>open → abort "VIP Store".
+            # Post-fix: 2.0s permettono al popup di stabilizzarsi prima
+            # del primo screenshot.
+            time.sleep(2.0)
 
         # Verifica merchant aperto: doppio match open vs close
-        # (attendi apertura popup — polling con retry interno al check)
+        # auto-WU12 (26/04): polling con stability check — break solo se
+        # OPEN > CLOSE (popup mercante stabile, non frame transiente).
+        # Pre-fix: break al primo open>=0.75 → spesso esce con close>open
+        # → false abort "VIP Store" su animazione lenta.
         for _tent in range(8):
             shot = device.screenshot()
             if shot is not None:
-                s = matcher.score(shot, cfg.tmpl_merchant)
-                if s >= cfg.soglia_merchant:
+                s_open  = matcher.score(shot, cfg.tmpl_merchant)
+                s_close = matcher.score(shot, cfg.tmpl_merchant_close)
+                if s_open >= cfg.soglia_merchant and s_open > s_close:
                     break
             time.sleep(0.5)
         s_merch_open  = matcher.score(shot, cfg.tmpl_merchant)
