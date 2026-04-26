@@ -72,6 +72,9 @@ if TYPE_CHECKING:
 # Debug — salvataggio screenshot per ispezione UI
 # ==============================================================================
 
+# DEBUG DISATTIVATO 26/04/2026 — Issue #13 risolta (wait_after_tap_speed: 2.0s)
+# Funzione mantenuta per riattivazione futura. Per riabilitare, decommentare le
+# chiamate `_salva_debug_shot(...)` in _esegui_boost (cerca "DEBUG DISATTIVATO").
 def _salva_debug_shot(screen, suffisso: str, log) -> None:
     """
     Salva screenshot corrente in debug_task/boost/.
@@ -285,12 +288,11 @@ class BoostTask(Task):
         # (test: verificare se tap su (speed_cx, speed_cy) centra correttamente
         # la riga sull'icona pin_speed senza passare per ricentro mini-swipe).
 
-        # DEBUG 19/04/2026: screenshot PRE-TAP per ispezionare lo stato della
-        # lista boost prima del tap Gathering Speed. Utile per capire perche'
-        # il tap non apre la sotto-maschera USE (score pin_speed_use stabile).
-        shot_pre = device.screenshot()
-        if shot_pre is not None:
-            _salva_debug_shot(shot_pre, "pre_tap", log)
+        # DEBUG DISATTIVATO 26/04/2026 — Issue #13 risolta. Per riabilitare,
+        # decommentare le 3 righe sotto.
+        # shot_pre = device.screenshot()
+        # if shot_pre is not None:
+        #     _salva_debug_shot(shot_pre, "pre_tap", log)
 
         # STEP 5 — tap riga Gathering Speed
         # TEST ISOLATO 19/04/2026: tap su (speed_cx, speed_cy) invece di
@@ -310,43 +312,75 @@ class BoostTask(Task):
         time.sleep(cfg.wait_after_tap_speed)  # attesa rendering popup USE (regola DELAY UI — da fix rifornimento 20/04/2026)
         shot = self._attendi_frame_use(device, matcher, cfg, log)
 
-        # DEBUG 19/04/2026: screenshot POST-TAP (ultimo frame polling).
-        if shot is not None:
-            _salva_debug_shot(shot, "post_tap", log)
+        # DEBUG DISATTIVATO 26/04/2026 — Issue #13 risolta. Per riabilitare,
+        # decommentare le 2 righe sotto.
+        # if shot is not None:
+        #     _salva_debug_shot(shot, "post_tap", log)
 
         if shot is None:
             log("Screenshot fallito dopo tap speed — abort")
             self._chiudi_popup(device, cfg)
             return _Outcome.ERRORE, None
 
-        # STEP 7 — boost 8h (preferito)
-        score_8h  = matcher.score(shot, cfg.tmpl_speed_8h)
+        # STEP 7-8 — boost 8h preferito, 1d fallback.
+        # FIX 26/04 (auto-WU9): row alignment check tra template durata e
+        # bottone USE. Pre-fix: `matcher.score()` ritornava la correlazione
+        # max nell'INTERA immagine, sensibile a falsi positivi (pin_speed_8h
+        # matchava elementi UI fuori dal popup), causando registrazione "8h"
+        # quando in realtà il bot tappava USE associato al 1d.
+        # Post-fix: `find_one()` con soglia + verifica |cy_durata - cy_use|
+        # < 50px → garantisce che la durata associata a USE sia quella
+        # registrata (stessa riga del popup).
+        match_8h  = matcher.find_one(shot, cfg.tmpl_speed_8h, threshold=cfg.soglia_8h)
+        match_1d  = matcher.find_one(shot, cfg.tmpl_speed_1d, threshold=cfg.soglia_1d)
         match_use = matcher.find_one(shot, cfg.tmpl_speed_use, threshold=cfg.soglia_use)
-        score_use = match_use.score if (match_use and match_use.found) else -1.0
-        log(f"pin_speed_8h={score_8h:.3f}  pin_speed_use={score_use:.3f}")
 
-        if score_8h >= cfg.soglia_8h and match_use is not None and match_use.found:
-            log(f"Boost 8h → tap USE ({match_use.cx},{match_use.cy})")
+        score_8h  = match_8h.score  if (match_8h  and match_8h.found)  else -1.0
+        score_1d  = match_1d.score  if (match_1d  and match_1d.found)  else -1.0
+        score_use = match_use.score if (match_use and match_use.found) else -1.0
+
+        cy_8h     = match_8h.cy     if (match_8h  and match_8h.found)  else None
+        cy_1d     = match_1d.cy     if (match_1d  and match_1d.found)  else None
+        cy_use    = match_use.cy    if (match_use and match_use.found) else None
+
+        log(f"pin_speed_8h={score_8h:.3f} (cy={cy_8h})  "
+            f"pin_speed_1d={score_1d:.3f} (cy={cy_1d})  "
+            f"pin_speed_use={score_use:.3f} (cy={cy_use})")
+
+        if match_use is None or not match_use.found:
+            log("Nessun pin_speed_use — chiudo popup")
+            self._chiudi_popup(device, cfg)
+            return _Outcome.NESSUN_BOOST, None
+
+        ROW_TOL = 50  # tolleranza Y per "stessa riga"
+        aligned_8h = cy_8h is not None and abs(cy_8h - cy_use) < ROW_TOL
+        aligned_1d = cy_1d is not None and abs(cy_1d - cy_use) < ROW_TOL
+
+        # Preferenza 8h (se allineato), altrimenti 1d (se allineato)
+        if aligned_8h:
+            log(f"Boost 8h ALLINEATO USE (Δcy={abs(cy_8h-cy_use)}) → tap USE "
+                f"({match_use.cx},{match_use.cy})")
             device.tap(match_use.cx, match_use.cy)
             time.sleep(cfg.wait_after_use)
             device.back()
             time.sleep(cfg.wait_after_back)
             return _Outcome.ATTIVATO_8H, "8h"
 
-        # STEP 8 — fallback boost 1d (rileggi pin_speed_use: posizione
-        # potrebbe differire con solo 1d visibile, come in V5)
-        score_1d  = matcher.score(shot, cfg.tmpl_speed_1d)
-        match_use = matcher.find_one(shot, cfg.tmpl_speed_use, threshold=cfg.soglia_use)
-        score_use = match_use.score if (match_use and match_use.found) else -1.0
-        log(f"pin_speed_1d={score_1d:.3f}  pin_speed_use={score_use:.3f}")
-
-        if score_1d >= cfg.soglia_1d and match_use is not None and match_use.found:
-            log(f"Boost 1d → tap USE ({match_use.cx},{match_use.cy})")
+        if aligned_1d:
+            log(f"Boost 1d ALLINEATO USE (Δcy={abs(cy_1d-cy_use)}) → tap USE "
+                f"({match_use.cx},{match_use.cy})")
             device.tap(match_use.cx, match_use.cy)
             time.sleep(cfg.wait_after_use)
             device.back()
             time.sleep(cfg.wait_after_back)
             return _Outcome.ATTIVATO_1D, "1d"
+
+        log(f"USE presente ma nessuna durata (8h/1d) allineata sulla stessa riga "
+            f"(Δcy_8h={abs(cy_8h-cy_use) if cy_8h is not None else 'n/a'}, "
+            f"Δcy_1d={abs(cy_1d-cy_use) if cy_1d is not None else 'n/a'}) — "
+            f"skip per evitare registrazione errata")
+        self._chiudi_popup(device, cfg)
+        return _Outcome.NESSUN_BOOST, None
 
         log("Nessun boost gratuito disponibile — chiudo popup")
         self._chiudi_popup(device, cfg)

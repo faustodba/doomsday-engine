@@ -55,8 +55,9 @@ class StoreConfig:
 
     # ── Soglie template matching ──────────────────────────────────────────────
     soglia_store:        float = 0.65   # 0.675 → 0.65 (auto-WU4): cattura re-match drift su take-max (FAU_09 caso 0.665)
+    soglia_store_early_exit: float = 0.80  # Issue #71 (26/04/2026): se score >= early_exit, interrompi scan e procedi diretto
     soglia_banner:       float = 0.85
-    soglia_store_attivo: float = 0.75
+    soglia_store_attivo: float = 0.65
     soglia_carrello:     float = 0.65
     soglia_merchant:     float = 0.75
     soglia_mercante:     float = 0.75
@@ -262,6 +263,16 @@ class StoreTask(Task):
             if result.score > best_score:
                 best_score = result.score
                 best_step  = n
+
+            # Issue #71 — early exit: score molto alto = match certo dello store.
+            # Interrompi scan immediatamente per risparmiare tempo (~30-40s
+            # quando il match avviene precocemente) e procedi diretto al tap.
+            if result.score >= cfg.soglia_store_early_exit:
+                log(
+                    f"Score {result.score:.3f} >= {cfg.soglia_store_early_exit:.2f} "
+                    f"— early exit scan al passo {n}"
+                )
+                break
 
         if not candidates:
             log(f"Store NON trovato dopo {len(cfg.griglia)} posizioni"

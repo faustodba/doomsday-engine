@@ -19,6 +19,7 @@ Priority: 105 (dopo RifornimentoTask=100, prima RaccoltaTask=110)
 
 from __future__ import annotations
 
+import random
 import time
 from dataclasses import dataclass, field
 from typing import Optional
@@ -52,12 +53,16 @@ class DonazioneConfig:
     wait_technology_open: float = 4.0 # dopo tap Technology (prima di scan pin_marked)
     wait_marked_tap: float = 2.0      # dopo tap sulla tecnologia marked
     wait_donate_tap: float = 0.25     # auto-WU11: tap-burst rapido nel block (era 0.8, ora 0.25 — gioco registra tap a 0.25s)
-    taps_per_block:  int = 30         # auto-WU11: tap consecutivi prima di verifica pin_donate
-    max_blocks:      int = 5          # auto-WU11: blocchi massimi (30*5 = 150 donate cap)
+    # auto-WU10 (anti-ban 26/04): taps_per_block randomizzato per ogni block
+    # in [taps_per_block_min, taps_per_block_max] — pattern di tap meno
+    # uniforme/prevedibile per evitare detection lato server.
+    taps_per_block_min: int = 15      # minimo tap per block (anti-ban random)
+    taps_per_block_max: int = 30      # massimo tap per block (anti-ban random)
+    max_blocks:      int = 5          # blocchi massimi (cap teorico = 30*5 = 150)
     wait_back: float = 1.0            # dopo ogni device.back()
 
     # --- Safety ---
-    max_donate_tap: int = 150         # auto-WU11: cap tap totale per esecuzione (era 30, ora 150 = taps_per_block * max_blocks)
+    max_donate_tap: int = 150         # cap tap totale per esecuzione (= taps_per_block_max * max_blocks)
     max_marked_scan: int = 10         # max ricerche pin_marked per evitare loop
 
 
@@ -313,26 +318,34 @@ class DonazioneTask(BaseTask):
         """
         Tappa il bottone Donate giallo a BLOCK di tap rapidi (auto-WU11).
 
-        Strategia: 30 tap consecutivi senza screenshot tra un tap e l'altro
+        Strategia: tap consecutivi senza screenshot tra un tap e l'altro
         (delay ridotto a 0.25s — gioco registra il tap senza render completo
         del feedback UI). Dopo ogni block, verifica con TM se pin_donate è
         ancora attivo. Se sì → block successivo. Altrimenti stop.
 
-        Tempo: 30 tap in ~7.5s (vs old 42s) → 5.6× più veloce.
-        Capacità: max 30 × 5 block = 150 donate (safety cap).
+        auto-WU10 (anti-ban 26/04): il numero di tap per block è randomizzato
+        in [taps_per_block_min, taps_per_block_max] (default 15-30) per
+        rendere il pattern meno regolare e ridurre rischio detection.
+
+        Capacità: max taps_per_block_max × max_blocks (safety cap).
 
         Ritorna il numero di tap eseguiti.
         """
         count = 0
 
         for block_idx in range(self.cfg.max_blocks):
+            taps_this_block = random.randint(
+                self.cfg.taps_per_block_min,
+                self.cfg.taps_per_block_max,
+            )
             ctx.log_msg(
                 f"[DONAZIONE] block {block_idx + 1}/{self.cfg.max_blocks} — "
-                f"{self.cfg.taps_per_block} tap rapidi"
+                f"{taps_this_block} tap rapidi (random "
+                f"{self.cfg.taps_per_block_min}-{self.cfg.taps_per_block_max})"
             )
 
             # Burst di tap senza screenshot intermedio
-            for _ in range(self.cfg.taps_per_block):
+            for _ in range(taps_this_block):
                 ctx.device.tap(*self.cfg.tap_donate_giallo)
                 time.sleep(self.cfg.wait_donate_tap)
                 count += 1
@@ -367,7 +380,7 @@ class DonazioneTask(BaseTask):
             # Loop completato senza break = cap raggiunto
             ctx.log_msg(
                 f"[DONAZIONE] safety cap raggiunto "
-                f"({self.cfg.max_blocks} block × {self.cfg.taps_per_block} tap = {count})"
+                f"({self.cfg.max_blocks} block, totale tap={count})"
             )
 
         return count

@@ -132,17 +132,27 @@ def _gioco_process_vivo(porta: int, adb_exe: str) -> bool:
 
 def _gioco_in_foreground(porta: int, adb_exe: str) -> bool:
     """
-    Check best-effort: gioco presente nell'output dumpsys activity top.
+    Check stretto: gioco è la window correntemente focusata (mCurrentFocus).
 
-    Nota: check NON STRETTO — può dare falso positivo se pkg appare come
-    task background. Safety-net reale è il monkey recovery in attendi_home,
-    che rilancia monkey se durante il polling schermata resta UNKNOWN per
-    troppo tempo. Preferiamo falso positivo (proseguiamo nel launcher) a
-    falso negativo (rinunciamo lasciando MuMu orfano).
+    FIX 26/04/2026 (Issue #60) — sostituzione `dumpsys activity top` (che
+    matchava pkg anche come task background → falso positivo dopo
+    kill+restart bot, perdita ~43s/istanza prima del monkey recovery).
+    Ora usa `dumpsys window | mCurrentFocus`: c'è UNA SOLA window con
+    focus utente per volta, quella effettivamente visibile e interattiva.
+    Esempio output:
+      mCurrentFocus=Window{abc u0 com.igg.android.doomsdaylastsurvivors/...}
+    Se il pacchetto del gioco è presente in quella riga → davvero in
+    foreground. Se è ancora la HOME Android (com.mumu.launcher o simile)
+    → falso, retry am start + monkey.
     """
     pkg = GAME_ACTIVITY.split("/")[0]
-    out = _adb_cmd(porta, "shell", "dumpsys", "activity", "top", adb_exe=adb_exe)
-    return bool(out) and pkg in out
+    out = _adb_cmd(porta, "shell", "dumpsys", "window", adb_exe=adb_exe)
+    if not out:
+        return False
+    for line in out.splitlines():
+        if "mCurrentFocus" in line and pkg in line:
+            return True
+    return False
 
 
 def _avvia_gioco(porta: int, adb_exe: str,
@@ -450,33 +460,62 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
     _t_attesa_home_start = time.time()
     _tm = AdaptiveTiming(nome)
 
-    # 1. Attesa caricamento con polling attivo (F-B1).
-    # auto-WU16: t_min ridotto 15→10s (splash gioco tipico è 8-12s post-load)
+    # 1. Attesa caricamento — Issue #69 (26/04/2026):
+    # NUOVO flow basato su Live Chat splash (template invariante basso-sx):
+    #   1. Sleep 10s iniziale (splash gioco rendering tipico 8-12s)
+    #   2. Check is_loading_splash:
+    #      - se splash attivo → loop polling LIVE CHAT scomparsa
+    #        (sleep 3s, exit alla 1ª scomparsa = caricamento terminato)
+    #      - se splash NON attivo → exit subito (gioco già caricato)
+    #   3. Timeout safety = t_max (default 60s)
+    # PRE-fix: polling HOME/MAP ogni 2s (25 cicli × 50ms screenshot+match =
+    # ~1.25s costo CPU, classify HOME instabile durante load = false negatives).
+    # POST-fix: polling Live Chat ogni 3s (mirato + affidabile + meno CPU).
     t_min = 10.0
     t_max = float(_cfg.delay_carica_iniz_s)
     _log(
         f"[{nome}] attesa caricamento min={t_min:.0f}s max={t_max:.0f}s "
-        f"(polling attivo)",
+        f"(polling Live Chat)",
         log_fn,
     )
     time.sleep(t_min)
 
-    if nav is not None:
+    if nav is not None and hasattr(ctx, 'matcher') and ctx.matcher is not None:
+        try:
+            from shared.ui_helpers import is_loading_splash as _is_splash_f4
+        except Exception:
+            _is_splash_f4 = None
+
+        class _MiniF4:
+            pass
+        _mini_f4 = _MiniF4()
+        _mini_f4.device = device
+        _mini_f4.matcher = ctx.matcher
+
         t_poll = time.time()
-        while time.time() - t_poll < (t_max - t_min):
-            time.sleep(2.0)
+        splash_attivo_iniziale = False
+        if _is_splash_f4 is not None:
             try:
-                schermata_early = nav.schermata_corrente()
+                splash_attivo_iniziale = _is_splash_f4(_mini_f4)
             except Exception:
-                schermata_early = Screen.UNKNOWN
-            if schermata_early in (Screen.HOME, Screen.MAP):
-                elapsed = t_min + (time.time() - t_poll)
-                _log(
-                    f"[{nome}] schermata={schermata_early} rilevata a {elapsed:.0f}s "
-                    f"— skip attesa residua",
-                    log_fn,
-                )
-                break
+                pass
+
+        if not splash_attivo_iniziale:
+            _log(f"[{nome}] no Live Chat splash — exit attesa caricamento", log_fn)
+        else:
+            _log(f"[{nome}] Live Chat splash attivo — aggancio fino a scomparsa", log_fn)
+            while time.time() - t_poll < (t_max - t_min):
+                time.sleep(3.0)
+                try:
+                    splash_ancora = _is_splash_f4(_mini_f4) if _is_splash_f4 else False
+                except Exception:
+                    splash_ancora = False
+                if not splash_ancora:
+                    elapsed = t_min + (time.time() - t_poll)
+                    _log(f"[{nome}] Live Chat scomparso a {elapsed:.0f}s — caricamento terminato", log_fn)
+                    break
+            else:
+                _log(f"[{nome}] Live Chat polling timeout {t_max:.0f}s — procedo", log_fn)
     else:
         # Fallback: nessun nav, pausa completa
         time.sleep(max(0.0, t_max - t_min))
@@ -627,10 +666,43 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
                 except Exception as exc:
                     _log(f"[{nome}] dismiss intra-loop errore: {exc}", log_fn)
 
-            # BACK chiude eventuali popup sovrapposti (daily login, eventi, ecc.)
-            if device is not None:
-                device.back()
-            time.sleep(POLL_BACK_INTERVAL_S)
+            # auto-WU8 (Issue #73 26/04): foreground-check pre-BACK.
+            # Se il gioco è in BACKGROUND (es. il BACK precedente l'ha fatto
+            # uscire all'home Android perché lo splash non era ancora
+            # renderizzato, oppure il gioco non è ancora salito al top dopo
+            # am start), NON fare un altro BACK: lo splash non viene mai
+            # rilevato e il polling sterile dura ~50s fino al monkey ogni 8
+            # cicli. Invece: monkey preventivo (cooldown 15s) e skip BACK.
+            gioco_fg = True  # default conservativo se check fallisce
+            if porta_attesa is not None:
+                try:
+                    gioco_fg = _gioco_in_foreground(porta_attesa, _adb_path)
+                except Exception as exc:
+                    _log(f"[{nome}] foreground check errore: {exc}", log_fn)
+                    gioco_fg = True
+            if not gioco_fg:
+                now_fg = time.time()
+                if (now_fg - last_monkey_t) > 15.0:
+                    try:
+                        pkg = GAME_ACTIVITY.split("/")[0]
+                        _adb_cmd(
+                            porta_attesa,
+                            "shell", "monkey", "-p", pkg,
+                            "-c", "android.intent.category.LAUNCHER", "1",
+                            adb_exe=_adb_path,
+                        )
+                        _log(f"[{nome}] gioco non in foreground — monkey preventivo (skip BACK)", log_fn)
+                        last_monkey_t = now_fg
+                    except Exception as exc:
+                        _log(f"[{nome}] monkey preventivo errore: {exc}", log_fn)
+                else:
+                    _log(f"[{nome}] gioco non in foreground — skip BACK (monkey in cooldown)", log_fn)
+                time.sleep(POLL_BACK_INTERVAL_S)
+            else:
+                # BACK chiude eventuali popup sovrapposti (daily login, eventi, ecc.)
+                if device is not None:
+                    device.back()
+                time.sleep(POLL_BACK_INTERVAL_S)
 
             try:
                 schermata = nav.schermata_corrente()
@@ -684,37 +756,41 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
             return False
 
     # 4. Stabilizzazione: attende HOME stabile senza popup/overlay
-    # auto-WU16: sleep 5.0→3.0s, timeout 60→40s, mantenuto stable_count >= 3
-    # per evitare false positive da banner/animazioni.
-    # auto-WU23: snapshot quando HOME instabile (reset contatore) — cattura
-    # i banner che appaiono DOPO la prima rilevazione HOME (es. AFK loot
-    # banner che è il primo ad apparire post-stabilizzazione iniziale).
+    # auto-WU16: sleep 5.0→3.0s, timeout 60→40s, stable_count >= 3
+    # Issue #68 (26/04/2026) — quando HOME instabile (reset contatore),
+    # invocare ATTIVAMENTE dismiss_banners_loop per chiudere il banner che
+    # ha causato l'instabilità (tipicamente AFK loot recovery). Pre-fix:
+    # passive polling fino a stab_timeout 40s. Post-fix: <5s recovery se
+    # banner catalogato.
     if nav is not None:
         _log(f"[{nome}] stabilizzazione HOME (max 40s)...", log_fn)
         stable_count = 0
         t_stab = time.time()
-        post_home_snapshots_taken = 0
-        post_home_max_snapshots = 3  # cap
 
-        def _snap_post_home(label_suffix: str):
-            nonlocal post_home_snapshots_taken
-            if post_home_snapshots_taken >= post_home_max_snapshots:
-                return
+        # Stub ctx per dismiss_banners_loop — necessita .device, .matcher
+        class _MiniCtx:
+            pass
+        mini_ctx = _MiniCtx()
+        mini_ctx.device = device
+        mini_ctx.matcher = getattr(nav, "matcher", None)
+        mini_ctx.instance_name = nome
+
+        def _try_dismiss():
+            """Issue #68 — chiama dismiss_banners_loop in caso instabilità."""
             try:
-                import cv2
-                from datetime import datetime as _dt
-                shot = device.screenshot() if device is not None else None
-                if shot is None or getattr(shot, "frame", None) is None:
-                    return
-                out_dir = Path(__file__).resolve().parents[1] / "debug_task" / "boot_unknown"
-                out_dir.mkdir(parents=True, exist_ok=True)
-                ts = _dt.now().strftime("%Y%m%d_%H%M%S")
-                fname = f"{nome}_post_home_{label_suffix}_{ts}.png"
-                cv2.imwrite(str(out_dir / fname), shot.frame)
-                _log(f"[{nome}] discovery post-HOME [{label_suffix}]: debug_task/boot_unknown/{fname}", log_fn)
-                post_home_snapshots_taken += 1
+                from shared.ui_helpers import dismiss_banners_loop
+                if mini_ctx.matcher is None:
+                    return {}
+                return dismiss_banners_loop(mini_ctx, max_iter=4, log_fn=log_fn)
             except Exception as exc:
-                _log(f"[{nome}] post-HOME snapshot errore: {exc}", log_fn)
+                _log(f"[{nome}] dismiss_banners_loop errore: {exc}", log_fn)
+                return {}
+
+        # Issue #68 — primo dismiss attivo PRIMA del polling stabilizzazione
+        # (cattura banner AFK che appare immediatamente post-splash).
+        _bd = _try_dismiss()
+        if _bd:
+            _log(f"[{nome}] banner pre-stab chiusi: {_bd}", log_fn)
 
         while time.time() - t_stab < 40:
             time.sleep(3.0)
@@ -730,15 +806,16 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
                     break
             else:
                 if stable_count > 0:
-                    _log(f"[{nome}] HOME instabile ({schermata}) — reset contatore", log_fn)
-                    # auto-WU23: snapshot del banner che ha causato il reset
-                    # (insight utente: primo banner = AFK loot recovery)
-                    _snap_post_home(f"reset_at_stable_{stable_count}")
+                    _log(f"[{nome}] HOME instabile ({schermata}) — reset + dismiss", log_fn)
+                    # Issue #68 — dismiss attivo invece di solo polling passivo
+                    _bd = _try_dismiss()
+                    if _bd:
+                        _log(f"[{nome}] banner chiusi: {_bd}", log_fn)
                 stable_count = 0
         else:
             _log(f"[{nome}] stabilizzazione timeout — procedo comunque", log_fn)
-            # Snapshot finale dello stato pre-vai_in_home per analisi popup persistente
-            _snap_post_home("stab_timeout")
+            # Issue #68 — ultimo tentativo dismiss prima di vai_in_home finale
+            _try_dismiss()
 
     # 5. vai_in_home() verifica finale
     if nav is not None:
