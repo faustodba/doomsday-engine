@@ -123,21 +123,47 @@ BANNER_CATALOG: list[BannerSpec] = [
     ),
 
     # ==================================================================
+    # PRIORITY 1 — "Auto collect AFK resources" (discovery 26/04/2026)
+    # ==================================================================
+    # Modale post-launch deterministico: appare alla prima HOME/MAP read
+    # quando ci sono risorse AFK accumulate dal Mysterious Merchant.
+    # NON ha X in alto a destra → unica via di chiusura: bottone "Confirm"
+    # in basso (centrato, giallo arrotondato). BACK funziona ma più lento.
+    # Detection: testo "AFK resources" giallo discriminante (ROI banda alta).
+    # Dismiss: tap su pulsante Confirm template-matched (varia leggermente
+    # in posizione tra versioni, no coords fisse).
+    BannerSpec(
+        name="auto_collect_afk_banner",
+        template="pin/pin_auto_collect_banner.png",
+        roi=(530, 60, 780, 115),
+        threshold=0.80,
+        dismiss_action="tap_template",
+        dismiss_template="pin/pin_btn_confirm.png",
+        dismiss_template_roi=(480, 460, 730, 515),
+        dismiss_template_soglia=0.75,
+        wait_after_s=2.0,  # animazione acquisizione risorse
+        priority=1,
+    ),
+
+    # ==================================================================
     # PRIORITY 5 — banner laterale eventi (HOME, non-modale)
     # ==================================================================
-    # Template esistente, già usato da comprimi_banner_home.
-    # Inclusione qui: discovery uniforme via dismiss_banners_loop, ma
-    # comprimi_banner_home() resta funzionale come pre-catalog.
-    BannerSpec(
-        name="banner_eventi_laterale",
-        template="pin/pin_banner_aperto.png",
-        roi=(330, 40, 365, 90),
-        threshold=0.85,
-        dismiss_action="tap_coords",
-        dismiss_coords=(345, 63),
-        wait_after_s=0.6,
-        priority=5,
-    ),
+    # DISABILITATO 26/04/2026 (auto-WU16) — il tap di chiusura su (345,63)
+    # nascondeva l'icona DS quando questa scivolava sotto la prima riga
+    # della barra eventi (FAU_00/04/06 ciclo 22:45-23:25 skip "icona DS
+    # non trovata" con HOME score 0.994). Lasciando il banner aperto
+    # all'avvio l'icona resta accessibile al task DS.
+    # Per riabilitare: decommenta il blocco sotto.
+    # BannerSpec(
+    #     name="banner_eventi_laterale",
+    #     template="pin/pin_banner_aperto.png",
+    #     roi=(330, 40, 365, 90),
+    #     threshold=0.85,
+    #     dismiss_action="tap_coords",
+    #     dismiss_coords=(345, 63),
+    #     wait_after_s=0.6,
+    #     priority=5,
+    # ),
 
     # PLACEHOLDER — popolare dopo discovery screenshot ulteriore:
     # BannerSpec(name="daily_login_calendar", ...),
