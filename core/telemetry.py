@@ -289,6 +289,223 @@ def iter_events_range(days: int = 1):
 
 
 # ==============================================================================
+# Rollup engine (Step 4) — aggregazione giornaliera deterministica
+# ==============================================================================
+
+_RETENTION_DAYS_ROLLUP = 365
+
+
+def _percentile(values: list, pct: float) -> float:
+    """Percentile semplice (no numpy). pct in [0..100]. Vuoto → 0.0."""
+    if not values:
+        return 0.0
+    sv = sorted(values)
+    if pct <= 0:
+        return float(sv[0])
+    if pct >= 100:
+        return float(sv[-1])
+    k = (len(sv) - 1) * (pct / 100.0)
+    lo = int(k)
+    hi = min(lo + 1, len(sv) - 1)
+    frac = k - lo
+    return float(sv[lo] * (1 - frac) + sv[hi] * frac)
+
+
+def _aggregate_outputs(events_for_task: list) -> dict:
+    """
+    Aggrega TaskTelemetry.output di tutti gli eventi di un task.
+    Regole:
+      - bool=True  → counter "<key>_true"
+      - bool=False → counter "<key>_false"
+      - int/float  → somma "<key>_sum" + max "<key>_max"
+      - str        → counter "<key>__<value>" (categorico)
+      - list       → ignorato
+    Failsafe: errori per-key non interrompono l'aggregazione.
+    """
+    agg: dict = {}
+    for ev in events_for_task:
+        out = ev.output or {}
+        for k, v in out.items():
+            try:
+                # bool prima di int (bool è subclass di int)
+                if isinstance(v, bool):
+                    sub = "true" if v else "false"
+                    key = f"{k}_{sub}"
+                    agg[key] = int(agg.get(key, 0)) + 1
+                elif isinstance(v, (int, float)):
+                    agg[f"{k}_sum"] = agg.get(f"{k}_sum", 0) + v
+                    agg[f"{k}_max"] = max(agg.get(f"{k}_max", v), v)
+                elif isinstance(v, str) and v:
+                    key = f"{k}__{v[:30]}"
+                    agg[key] = int(agg.get(key, 0)) + 1
+                # list/dict/None → skip
+            except Exception:
+                continue
+    return agg
+
+
+def compute_rollup(date_str: Optional[str] = None) -> dict:
+    """
+    Calcola il rollup giornaliero leggendo events_<date>.jsonl.
+
+    Schema:
+      {
+        "date":          "YYYY-MM-DD",
+        "computed_at":   "ISO ts",
+        "totals":        {events, success, fail, abort, skip},
+        "per_task":      {task_name: {exec, ok, skip, fail, abort, ok_pct,
+                          duration_avg_s, duration_p50, duration_p95,
+                          anomalies, output_aggregates}},
+        "per_instance":  {ist_name: {exec, ok, skip, fail, abort,
+                          tasks_breakdown, anomalies_total}},
+        "anomalies_global": {tag: count}
+      }
+    """
+    date_str = date_str or _today_utc_str()
+    events = list(iter_events(date_str))
+
+    rollup = {
+        "date":             date_str,
+        "computed_at":      _iso_now(),
+        "totals":           {"events": 0, "ok": 0, "skip": 0, "fail": 0, "abort": 0, "no_op": 0},
+        "per_task":         {},
+        "per_instance":     {},
+        "anomalies_global": {},
+    }
+    if not events:
+        return rollup
+
+    # Group per task & per instance
+    by_task: dict = {}
+    by_inst: dict = {}
+    for ev in events:
+        by_task.setdefault(ev.task, []).append(ev)
+        by_inst.setdefault(ev.instance, []).append(ev)
+        # Totali
+        rollup["totals"]["events"] += 1
+        oc = ev.outcome if ev.outcome in rollup["totals"] else "no_op"
+        rollup["totals"][oc] = rollup["totals"].get(oc, 0) + 1
+        # Anomalie globali
+        for tag in (ev.anomalies or []):
+            rollup["anomalies_global"][tag] = rollup["anomalies_global"].get(tag, 0) + 1
+
+    # per_task
+    for task_name, evs in by_task.items():
+        outc = {"ok": 0, "skip": 0, "fail": 0, "abort": 0, "no_op": 0}
+        durs = []
+        anom: dict = {}
+        for ev in evs:
+            outc[ev.outcome] = outc.get(ev.outcome, 0) + 1
+            if ev.duration_s > 0:
+                durs.append(ev.duration_s)
+            for tag in (ev.anomalies or []):
+                anom[tag] = anom.get(tag, 0) + 1
+        exec_n = len(evs)
+        ok_n   = outc["ok"] + outc["skip"]
+        rollup["per_task"][task_name] = {
+            "exec":             exec_n,
+            "ok":               outc["ok"],
+            "skip":             outc["skip"],
+            "fail":             outc["fail"],
+            "abort":            outc["abort"],
+            "no_op":            outc["no_op"],
+            "ok_pct":           round(100.0 * ok_n / exec_n, 1) if exec_n else 0.0,
+            "duration_avg_s":   round(sum(durs) / len(durs), 3) if durs else 0.0,
+            "duration_p50":     round(_percentile(durs, 50), 3),
+            "duration_p95":     round(_percentile(durs, 95), 3),
+            "duration_max_s":   round(max(durs), 3) if durs else 0.0,
+            "anomalies":        anom,
+            "output_aggregates": _aggregate_outputs(evs),
+        }
+
+    # per_instance
+    for ist_name, evs in by_inst.items():
+        outc = {"ok": 0, "skip": 0, "fail": 0, "abort": 0, "no_op": 0}
+        breakdown: dict = {}
+        anom_total = 0
+        for ev in evs:
+            outc[ev.outcome] = outc.get(ev.outcome, 0) + 1
+            breakdown[ev.task] = breakdown.get(ev.task, 0) + 1
+            anom_total += len(ev.anomalies or [])
+        rollup["per_instance"][ist_name] = {
+            "exec":            len(evs),
+            "ok":              outc["ok"],
+            "skip":            outc["skip"],
+            "fail":            outc["fail"],
+            "abort":           outc["abort"],
+            "no_op":           outc["no_op"],
+            "tasks_breakdown": breakdown,
+            "anomalies_total": anom_total,
+        }
+
+    return rollup
+
+
+def save_rollup(rollup: dict, date_str: Optional[str] = None) -> bool:
+    """Atomic write rollup_<date>.json. Failsafe."""
+    try:
+        date_str = date_str or rollup.get("date") or _today_utc_str()
+        rollup_dir = _rollup_dir()
+        rollup_dir.mkdir(parents=True, exist_ok=True)
+        path = rollup_dir / f"rollup_{date_str}.json"
+        tmp = path.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(rollup, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        return False
+
+
+def load_rollup(date_str: Optional[str] = None) -> Optional[dict]:
+    """Legge rollup_<date>.json. None se mancante o corrotto."""
+    try:
+        date_str = date_str or _today_utc_str()
+        path = _rollup_dir() / f"rollup_{date_str}.json"
+        if not path.exists():
+            return None
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def compute_and_save_rollup(date_str: Optional[str] = None) -> Optional[dict]:
+    """Convenience: calcola + salva. Ritorna rollup o None se fallito."""
+    r = compute_rollup(date_str)
+    if save_rollup(r, date_str):
+        return r
+    return None
+
+
+def cleanup_old_rollups(retention_days: int = _RETENTION_DAYS_ROLLUP) -> int:
+    """Rimuove rollup_*.json più vecchi di N giorni. Ritorna numero file rimossi."""
+    try:
+        rollup_dir = _rollup_dir()
+        if not rollup_dir.exists():
+            return 0
+        cutoff = datetime.now(timezone.utc).date() - timedelta(days=retention_days)
+        removed = 0
+        for fp in rollup_dir.glob("rollup_*.json"):
+            stem = fp.stem.replace("rollup_", "")
+            try:
+                d = datetime.strptime(stem, "%Y-%m-%d").date()
+            except ValueError:
+                continue
+            if d < cutoff:
+                try:
+                    fp.unlink()
+                    removed += 1
+                except Exception:
+                    pass
+        return removed
+    except Exception:
+        return 0
+
+
+# ==============================================================================
 # Self-test (eseguibile diretto)
 # ==============================================================================
 
