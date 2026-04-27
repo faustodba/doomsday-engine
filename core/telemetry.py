@@ -1011,6 +1011,27 @@ def live_writer_loop(stop_event: "threading.Event",
 _CICLI_RETENTION = 100  # ultimi N cicli mantenuti su disco
 _CICLI_LOCK = threading.Lock()
 
+# WU48 — Numerazione globale crescente. Il counter ciclo del bot riparte da 1
+# ad ogni restart, causando duplicati visivi nello storico (3× CICLO 1 stale).
+# La numerazione globale (numero_g) cresce monotona attraverso tutti i restart.
+# Run ID = timestamp boot del processo (singleton per-process).
+_RUN_ID: Optional[str] = None
+_RUN_LOCK = threading.Lock()
+
+
+def _get_run_id() -> str:
+    """Singleton run_id per il processo bot corrente. Boot ts UTC."""
+    global _RUN_ID
+    with _RUN_LOCK:
+        if _RUN_ID is None:
+            _RUN_ID = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S")
+        return _RUN_ID
+
+
+def _next_numero_globale(cicli: List[dict]) -> int:
+    """Calcola il prossimo numero ciclo globale (max esistente + 1)."""
+    return max((int(c.get("numero", 0)) for c in cicli), default=0) + 1
+
 
 def _read_cicli_raw() -> List[dict]:
     """Legge cicli.json. Failsafe (file mancante/corrotto → [])."""
@@ -1062,13 +1083,32 @@ def load_cicli() -> List[dict]:
     return _read_cicli_raw()
 
 
-def record_cicle_start(numero: int) -> None:
-    """Apri nuovo ciclo. Chiamato da main.py al log 'MAIN CICLO N'."""
+def record_cicle_start(numero_locale: int) -> None:
+    """
+    Apri nuovo ciclo. Chiamato da main.py al log 'MAIN CICLO N'.
+
+    `numero_locale` è il counter del bot (riparte da 1 ad ogni restart).
+    Persistiamo `numero` GLOBALE crescente (max esistente + 1) per evitare
+    duplicati visivi nello storico cicli (WU48).
+    """
     try:
         with _CICLI_LOCK:
             cicli = _read_cicli_raw()
+
+            # WU48 — auto-close cicli stale dello stesso run/precedenti.
+            # Se ci sono cicli IN CORSO mai chiusi (restart bot mid-ciclo),
+            # marcali come 'aborted' invece di lasciarli IN CORSO perpetui.
+            for c in cicli:
+                if not c.get("completato") and not c.get("aborted"):
+                    c["aborted"]    = True
+                    c["completato"] = True  # rimuove dal pool "in corso"
+                    if not c.get("end_ts"):
+                        c["end_ts"] = _iso_now()
+
             cicli.append({
-                "numero":     int(numero),
+                "numero":     _next_numero_globale(cicli),
+                "run_id":     _get_run_id(),
+                "run_local":  int(numero_locale),
                 "start_ts":   _iso_now(),
                 "end_ts":     None,
                 "durata_s":   0,
@@ -1080,41 +1120,50 @@ def record_cicle_start(numero: int) -> None:
         pass
 
 
-def record_cicle_end(numero: int) -> None:
-    """Chiudi ciclo corrente. Chiamato a 'MAIN Ciclo N completato'."""
+def _find_current_cicle(cicli: List[dict]) -> Optional[dict]:
+    """Trova ciclo attivo del run corrente (l'ultimo aperto, run_id matching)."""
+    run_id = _get_run_id()
+    for c in reversed(cicli):
+        if c.get("run_id") == run_id and not c.get("completato"):
+            return c
+    return None
+
+
+def record_cicle_end(numero_locale: int = -1) -> None:
+    """
+    Chiudi ciclo corrente. Chiamato a 'MAIN Ciclo N completato'.
+    Match su run_id corrente (non sul numero, che ora è globale).
+    """
     try:
         with _CICLI_LOCK:
             cicli = _read_cicli_raw()
             if not cicli:
                 return
-            # Cerca l'ULTIMO ciclo con numero matching e non completato
-            for c in reversed(cicli):
-                if c.get("numero") == int(numero) and not c.get("completato"):
-                    c["end_ts"]     = _iso_now()
-                    c["completato"] = True
-                    try:
-                        c["durata_s"] = max(0, int(
-                            _iso_to_epoch(c["end_ts"]) -
-                            _iso_to_epoch(c["start_ts"])
-                        ))
-                    except Exception:
-                        c["durata_s"] = 0
-                    break
+            current = _find_current_cicle(cicli)
+            if not current:
+                return
+            current["end_ts"]     = _iso_now()
+            current["completato"] = True
+            try:
+                current["durata_s"] = max(0, int(
+                    _iso_to_epoch(current["end_ts"]) -
+                    _iso_to_epoch(current["start_ts"])
+                ))
+            except Exception:
+                current["durata_s"] = 0
             _write_cicli_raw(cicli)
     except Exception:
         pass
 
 
 def record_istanza_tick_start(istanza: str) -> None:
-    """Registra inizio tick istanza nel ciclo corrente (l'ultimo aperto)."""
+    """Registra inizio tick istanza nel ciclo del run corrente."""
     try:
         with _CICLI_LOCK:
             cicli = _read_cicli_raw()
-            if not cicli:
+            current = _find_current_cicle(cicli)
+            if not current:
                 return
-            current = cicli[-1]
-            if current.get("completato"):
-                return  # ciclo già chiuso, ignoro
             istanze = current.setdefault("istanze", {})
             if istanza not in istanze:
                 istanze[istanza] = {
@@ -1129,13 +1178,13 @@ def record_istanza_tick_start(istanza: str) -> None:
 
 
 def record_istanza_tick_end(istanza: str, esito: str = "ok") -> None:
-    """Registra fine tick istanza nel ciclo corrente."""
+    """Registra fine tick istanza nel ciclo del run corrente."""
     try:
         with _CICLI_LOCK:
             cicli = _read_cicli_raw()
-            if not cicli:
+            current = _find_current_cicle(cicli)
+            if not current:
                 return
-            current = cicli[-1]
             info = (current.get("istanze") or {}).get(istanza)
             if not info or info.get("end_ts"):
                 return
@@ -1241,22 +1290,58 @@ def backfill_cicli_from_botlog(paths: List[Path]) -> int:
         except Exception:
             continue
 
-    # Merge dedup su (numero, start_ts)
+    # WU48 — Numerazione globale crescente al merge.
+    # Il backfill estrae `run_local` (numero locale del bot per restart),
+    # poi riassegna `numero` globale crescente al merge in cicli.json.
     with _CICLI_LOCK:
         existing = _read_cicli_raw()
-        existing_keys = {(c.get("numero"), c.get("start_ts")) for c in existing}
-        added = 0
+        # Chiave di dedup: start_ts (univoco temporalmente)
+        existing_starts = {c.get("start_ts") for c in existing}
+        added_entries = []
         for p in parsed:
-            key = (p["numero"], p["start_ts"])
-            if key not in existing_keys:
-                existing.append(p)
-                existing_keys.add(key)
-                added += 1
-        # Riordina per start_ts
+            if p["start_ts"] in existing_starts:
+                continue
+            # Sposta numero (locale del bot) in run_local
+            p["run_local"] = p.pop("numero", 0)
+            p["run_id"]    = "backfill"  # marker per cicli da bot.log
+            added_entries.append(p)
+            existing_starts.add(p["start_ts"])
+
+        if not added_entries:
+            return 0
+
+        # Merge + sort per start_ts + rinumera GLOBALE crescente
+        existing.extend(added_entries)
         existing.sort(key=lambda x: x.get("start_ts", ""))
-        if added:
-            _write_cicli_raw(existing)
-        return added
+        for i, c in enumerate(existing, start=1):
+            c["numero"] = i
+        _write_cicli_raw(existing)
+        return len(added_entries)
+
+
+def renumber_cicli_globally() -> int:
+    """
+    Manutenzione: rinumera tutti i cicli in cicli.json con numerazione
+    globale crescente per start_ts. Utile dopo migration legacy.
+
+    Returns:
+        Numero totale cicli rinumerati.
+    """
+    try:
+        with _CICLI_LOCK:
+            cicli = _read_cicli_raw()
+            if not cicli:
+                return 0
+            cicli.sort(key=lambda x: x.get("start_ts", ""))
+            for i, c in enumerate(cicli, start=1):
+                # Preserva il numero locale se non già fatto
+                if "run_local" not in c:
+                    c["run_local"] = c.get("numero", 0)
+                c["numero"] = i
+            _write_cicli_raw(cicli)
+            return len(cicli)
+    except Exception:
+        return 0
 
 
 # ==============================================================================

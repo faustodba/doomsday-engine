@@ -85,12 +85,14 @@ class CicloStatus:
 @dataclass
 class CicloStorico:
     """Singolo ciclo completato con durata e istanze processate."""
-    numero:        int
+    numero:        int          # globale crescente (WU48)
     start_hhmm:    str          # "14:46"
     end_hhmm:      str          # "18:06" o "—" se in corso
     durata_s:      int          # durata totale in secondi
     n_istanze:     int          # numero istanze processate
     completato:    bool
+    aborted:       bool = False # WU48 — ciclo interrotto (restart bot mid-ciclo)
+    run_local:     int  = 0     # numero locale del bot (debug)
 
 
 @dataclass
@@ -543,6 +545,8 @@ def get_storico_cicli(n: int = 20) -> List[CicloStorico]:
             durata_s    = int(c.get("durata_s", 0)),
             n_istanze   = len(c.get("istanze", {})),
             completato  = bool(c.get("completato", False)),
+            aborted     = bool(c.get("aborted",    False)),
+            run_local   = int(c.get("run_local",   0)),
         ))
     return list(reversed(out))
 

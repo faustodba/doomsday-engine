@@ -1433,7 +1433,11 @@ def partial_telemetria_storico_cicli(request: Request):
 
     body = []
     for c in rows:
-        if c.completato:
+        if c.aborted:
+            esito_badge = '<span style="color:var(--text-dim);font-weight:600" title="ciclo interrotto da restart bot">⊘</span>'
+            esito_col   = "var(--text-dim)"
+            dur_lbl     = _fmt_min(c.durata_s) if c.durata_s > 0 else "abort"
+        elif c.completato:
             esito_badge = '<span style="color:var(--green);font-weight:600">✓</span>'
             esito_col   = "var(--green)"
             dur_lbl     = _fmt_min(c.durata_s)
@@ -1441,9 +1445,11 @@ def partial_telemetria_storico_cicli(request: Request):
             esito_badge = '<span style="color:var(--accent);font-weight:700">▸</span>'
             esito_col   = "var(--accent)"
             dur_lbl     = "in corso"
+        run_tag = (f'<span style="color:var(--text-dim);font-size:9px;margin-left:4px" '
+                   f'title="run_local={c.run_local}">·{c.run_local}</span>') if c.run_local else ''
         body.append(
             f'<tr><td style="width:18px">{esito_badge}</td>'
-            f'<td style="color:var(--accent);font-weight:600">CICLO {c.numero}</td>'
+            f'<td style="color:var(--accent);font-weight:600">CICLO {c.numero}{run_tag}</td>'
             f'<td style="color:var(--text-dim);font-size:11px">{c.start_hhmm} → {c.end_hhmm}</td>'
             f'<td style="text-align:right;color:{esito_col};font-weight:600">{dur_lbl}</td>'
             f'<td style="text-align:right;color:var(--text-dim);font-size:11px">{c.n_istanze} ist</td></tr>'
