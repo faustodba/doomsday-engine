@@ -58,6 +58,46 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 27/04/2026 — serata — Cicli persistenti + race state + dashboard fix
+
+Sessione serale focused su gap dashboard telemetria + race condition state.
+6 commit `8b0091f` → `6498d11`.
+
+#### 49. Cicli persistenti + numerazione globale (CHIUSA ✅ 27/04/2026 — WU46/48)
+
+**Problema duplice rilevato dall'utente**:
+1. Dashboard mostrava **CICLO #0** (counter `engine_status.ciclo` mai aggiornato dal bot), `in_corso_da=4h` (calcolato da `storico[0].ts` rolling, non start ciclo), durate per istanza sempre 0
+2. **Storico cicli mancante** — nessun pannello dashboard, info esisteva solo in bot.log come pattern `MAIN CICLO N` / `Ciclo N completato`
+3. Counter ciclo del bot **riparte da 1 ad ogni restart** → 3× "CICLO 1 in corso" stale visivi nello storico
+
+**Design originale Issue #53 violato**: avevo inizialmente parsato bot.log da reader (file volatile, ruota a 5MB → dati persi). Refactor completo:
+
+- **WU46** (`41711bd`): API persistenza in `core/telemetry.py` — `record_cicle_start/end(numero)` + `record_istanza_tick_start/end(istanza, esito)`. Storage `data/telemetry/cicli.json` (atomic write, retention ultimi 100, lock thread-safe). Hooks in `main.py` ai punti CICLO N / Avvio istanza X / Istanza X completata / Ciclo N completato. Backfill one-shot da bot.log via `backfill_cicli_from_botlog()` per dati storici (idempotente, dedup su start_ts). Pannello dashboard `📚 storico cicli` con tabella ultimi 15 cicli + ciclo corrente con durate per istanza dai timestamp registrati.
+
+- **WU48** (`6498d11`): numerazione globale crescente — `numero` = `max(cicli.numero) + 1`, mai più reset. `run_id` = boot ts UTC del processo bot (singleton per-process). `run_local` = numero locale del bot preservato per debug. `_find_current_cicle(cicli)` matching su run_id (non più su numero). Auto-close cicli stale di run precedenti come `aborted=True` quando un nuovo `record_cicle_start` parte. Dashboard 3 icone: ✓ COMPL / ▸ IN CORSO / ⊘ ABORT. Tag `·N` accanto al numero ciclo = run_local. Utility `renumber_cicli_globally()` per migration legacy.
+
+**Verifica runtime**: bot riavviato 21:26:14, CICLO 4 (run.1, globale) registrato live, 7 istanze tracciate con durate (FAU_01 8.1m, FAU_02 8.0m, FAU_03 3.7m, FAU_04 5.0m, FAU_05 6.7m, FAU_06 4.6m, FAU_07 in corso).
+
+#### 47. Pannello produzione/ora — farm aggregata sempre vuoto (CHIUSA ✅ 27/04/2026 — WU47)
+
+- **Bug**: `MetricsState.aggiorna_risorse()` mai invocato da nessun caller. `chiudi_sessione_e_calcola()` calcolava `prod_ora` per la sessione MA lo salvava SOLO in `sess.produzione_oraria` (campo della singola sessione). Risultato: tutti gli `state/FAU_*.json` avevano `metrics.{pomodoro,legno,petrolio,acciaio}_per_ora=0.0` per sempre. Il pannello sommava 0+0+...+0 → "in attesa del primo ciclo raccolta" perpetuo.
+- **Fix** (`aeaa6fb`): in `chiudi_sessione_e_calcola()` aggiunta propagazione `self.metrics.aggiorna_risorse(...)` se `durata_sec >= 300s` (filtro tick brevissimi che darebbero swing spurious).
+- **Verifica runtime**: dopo restart bot 21:26, prima sessione FAU_05 chiusa con durata 4451s ha popolato metrics. Pannello laterale mostra ora **1.4M/h pomodoro + 1.4M/h legno** aggregati.
+
+#### 46. Race state.rifornimento azzerato post-restart (CHIUSA ✅ 27/04/2026 — WU45)
+
+- **Sintomo**: card FAU_00 mostrava `spediz=0 / inv.netto=0 / inv.lordo=0 / tassa=0 / provv.lorde=— / provv.nette=—` anche se il bot aveva fatto 9 spedizioni nella mattina (verificato via telemetry events FAU_00: 4 spedizioni alle 10:11 UTC).
+- **Causa root**: race con `_controlla_reset()` post-restart. Lo state `state/FAU_00.json` viene resettato per data_riferimento mismatch durante un tick post-restart, perdendo `inviato_oggi`/`spedizioni_oggi`.
+- **Fix dashboard fallback** (`8b0091f`): in `dashboard/services/stats_reader.py:get_produzione_istanze()`, se `state.rifornimento` è vuoto AND non `provviste_esau` → fallback automatico su `data/storico_farm.json[today][istanza]`. `storico_farm.json` è scritto ad ogni spedizione (sopravvive ai reset state) — fonte di verità daily più robusta. Recovera spedizioni, inviato per risorsa, provviste_residue.
+- **Verifica**: card FAU_00 ora mostra `spediz=9 / inv.netto=31.5M / provv.lorde=33.2M / provv.nette=25.6M`.
+- **Note**: `inv.lordo` e `tassa` restano 0 perché `storico_farm.json` non traccia campi WU34. Si popolano alle prossime spedizioni post-restart con state nuovo. Issue root del reset spurious resta da indagare separatamente.
+
+#### Note operative sessione
+
+- **Memory pressure** segnalato dall'utente: VS Code (2.5GB) + Claude (900MB) + bot 12 istanze MuMu (~10-12GB) → ~17GB su sistema 16GB → swap intensivo (Memory Compression 992MB). Documentato in `run_prod.bat` modalità #6 "RIDOTTA RAM (4 istanze)" come workaround per dev concomitante.
+- **`run_prod.bat`** rifattorizzato (`1a960c1`) con header documentato + 9 modalità preconfigurate commentate.
+- **`run_dashboard_prod.bat`** prod era ROTTO (chiamava `dashboard_server.py` inesistente). Fix (`eddefc6`) con corretto `uvicorn dashboard.app:app` + cleanup porta 8765 + 7 modalità documentate.
+
 ### Sessione 27/04/2026 — Telemetria pipeline + Morfeus OCR + Risorse netto
 
 Maxi-sessione che ha chiuso **Issue #53** (telemetria) e **Issue #44/45** (semantica
@@ -2143,11 +2183,11 @@ guida per orientarsi nel repo e capire dove intervenire per ogni tipo di modific
 |------|-------------|
 | `orchestrator.py` | Registra task, ordina per priority, gestisce il tick: per ogni task → `should_run()` check → `e_dovuto()` schedule check → gate HOME pre-task → `run()` → aggiornamento schedule. **WU38**: hook automatico TaskTelemetry per ogni run (start/finish/record), include cycle da ctx.extras + ADB cascade tagging. |
 | `task.py` | Classi base V6: `Task` (ABC con `name()/should_run()/run()` astratti), `TaskContext` (device, navigator, matcher, config, state, log_msg), `TaskResult` (success, message, data). |
-| `telemetry.py` | **WU38-44 (Issue #53)** — pipeline telemetria. `TaskTelemetry` dataclass + writer `record()` + reader `iter_events()/iter_events_range()` + rollup engine (`compute_rollup`, `save_rollup`, `cleanup_old_rollups`) + live writer (`compute_live_24h`, `live_writer_loop`) + backfill (`backfill_from_logs`) + anomaly detector (`detect_anomaly_patterns`). Storage `data/telemetry/{events,rollup,live.json}`. Self-test integrato. |
+| `telemetry.py` | **WU38-48 (Issue #53/49)** — pipeline telemetria. `TaskTelemetry` dataclass + writer `record()` + reader `iter_events()/iter_events_range()` + rollup engine (`compute_rollup`, `save_rollup`, `cleanup_old_rollups`) + live writer (`compute_live_24h`, `live_writer_loop`) + backfill (`backfill_from_logs`) + anomaly detector (`detect_anomaly_patterns`). **WU46/48 cicli persistenti**: `record_cicle_start/end()`, `record_istanza_tick_start/end()`, `load_cicli()`, `backfill_cicli_from_botlog()`, `renumber_cicli_globally()`. Numerazione globale crescente + `run_id` per evitare duplicati cross-restart. Storage `data/telemetry/{events,rollup,cicli.json,live.json}`. Self-test integrato. |
 | `launcher.py` | Avvio/chiusura istanze MuMu via `MuMuManager.exe` CLI. `avvia_player()` (MuMuNxMain.exe Win11), `avvia_istanza()` (launch + adb connect + `_avvia_gioco()` con am start + monkey + foreground check, Issue #46), `attendi_home()` (polling schermata + monkey recovery, Issue #46), `reset_istanza()`, `chiudi_istanza()`. |
 | `device.py` | Astrazione ADB per singola istanza. `AdbDevice(host, port, name)`: screenshot (Screenshot con `.frame` ndarray), tap, back, swipe. `Screenshot.match_template()` usato da matcher. `@dataclass MatchResult(found, score, cx, cy)`. |
 | `navigator.py` | Navigazione inter-schermata game. `schermata_corrente()` (Screen.HOME/MAP/UNKNOWN via template match), `vai_in_home()`, `vai_in_mappa()`, `tap_barra(ctx, voce)` (barra inferiore: campaign/alliance/hero/bag/beast). |
-| `state.py` | Stato persistente per-istanza. `InstanceState(path)` save/load atomico tmp+fsync+os.replace. Sottocampi: rifornimento, daily_tasks, metrics, schedule, boost, vip, arena. **WU34**: `RifornimentoState` esteso con `inviato_lordo_oggi`, `tassa_oggi`, `tassa_pct_avg` (running average), `eta_rientro_ultima` (sync raccolta-rifornimento Issue #64). |
+| `state.py` | Stato persistente per-istanza. `InstanceState(path)` save/load atomico tmp+fsync+os.replace. Sottocampi: rifornimento, daily_tasks, metrics, schedule, boost, vip, arena. **WU34**: `RifornimentoState` esteso con `inviato_lordo_oggi`, `tassa_oggi`, `tassa_pct_avg` (running average), `eta_rientro_ultima` (sync raccolta-rifornimento Issue #64). **WU47**: `chiudi_sessione_e_calcola()` propaga `produzione_oraria` calcolata a `metrics.aggiorna_risorse()` se `durata_sec≥300s` (Issue #47 — pannello produzione/ora ora popolato). |
 | `scheduler.py` | Gestione interval/daily/always per-task con restart-safe restore da disco. |
 | `logger.py` | Logger strutturato `ctx.log_msg(msg)`. Output duale: bot.log (testuale) + logs/FAU_XX.jsonl (JSONL machine-readable). Rotazione automatica a 5MB → `.jsonl.1`. |
 | `adaptive_timing.py` | Timing per-istanza appreso dall'esperienza (es. `boot_android_s`). `get(key, fallback)` + `record(key, value)`. Salvato in `state/FAU_XX_timing.json`. |
@@ -2195,9 +2235,9 @@ guida per orientarsi nel repo e capire dove intervenire per ogni tipo di modific
 | `routers/api_stats.py` | Stats aggregate: spedizioni oggi, produzione/ora, totali risorse, provviste. |
 | `routers/api_status.py` | engine_status.json live: stato istanze, tick corrente, uptime. |
 | `services/config_manager.py` | Layer di accesso config+overrides. `get_global_config()`, `get_overrides()`, `get_merged_config()` (UI vede valori reali bot, Issue #18), `save_overrides()`. Usa `DOOMSDAY_ROOT` env var per coerenza dev/prod (Issue #38). |
-| `services/stats_reader.py` | Read-only stats da state/engine_status. `get_engine_status()`, `get_all_stats()`, `get_storico()`, `get_risorse_farm()` (aggregato farm). Filtro OCR anomalie >100M per spedizione (Issue #16/#27). **WU34/35**: `MorfeusState`, `RifornimentoIstanza` esteso con `provviste_residue_netta` + `tassa_pct_avg`. **WU39**: `_load_morfeus_state()` legge `data/morfeus_state.json`. |
+| `services/stats_reader.py` | Read-only stats da state/engine_status. `get_engine_status()`, `get_all_stats()`, `get_storico()`, `get_risorse_farm()` (aggregato farm). Filtro OCR anomalie >100M per spedizione (Issue #16/#27). **WU34/35**: `MorfeusState`, `RifornimentoIstanza` esteso con `provviste_residue_netta` + `tassa_pct_avg`. **WU39**: `_load_morfeus_state()` legge `data/morfeus_state.json`. **WU45**: fallback automatico su `data/storico_farm.json` quando `state.rifornimento` è vuoto (race post-restart `_controlla_reset` Issue #46). |
 | `services/log_reader.py` | Tail efficiente log file con offset tracking. |
-| `services/telemetry_reader.py` | **WU37+42 (Issue #53)** — reader API dual-source per dashboard. `get_task_kpi_24h()`, `get_health_24h()`, `get_ciclo_status()`, `get_trend_7gg()`. Source primaria: `data/telemetry/live.json` (precomputato). Fallback automatico al log scan WU37 (rolling 24h su `logs/FAU_*.jsonl` + `bot.log`). Cache TTL 30s. Pattern detector (WU44) integrato in health. |
+| `services/telemetry_reader.py` | **WU37+42+46+48 (Issue #53/49)** — reader API dual-source per dashboard. `get_task_kpi_24h()`, `get_health_24h()`, `get_ciclo_status()`, `get_storico_cicli(n)`, `get_trend_7gg()`. Source primaria: `data/telemetry/{live.json,cicli.json}` (precomputato). Fallback automatico al log scan WU37 (rolling 24h su `logs/FAU_*.jsonl` + `bot.log`). Cache TTL 30s. Pattern detector (WU44) integrato in health. **WU48**: `CicloStorico` con `aborted` flag per cicli interrotti da restart bot. |
 | `templates/*.html` | Jinja2 template: `index.html` (dashboard principale), `config_global.html` (form parametri globali), `config_overrides.html` (form rifornimento/zaino). |
 | `static/style.css`, `static/app.js` | CSS palette ambra + HTMX bootstrap. |
 
@@ -2230,6 +2270,7 @@ Progetto separato per classificazione nodi mappa via ML. Usato da `radar_census.
 | `data/telemetry/events/events_<date>.jsonl` | **WU38** — eventi TaskTelemetry append-only (1 riga per esecuzione task). Retention 30gg. |
 | `data/telemetry/rollup/rollup_<date>.json` | **WU40** — rollup giornaliero (totals/per_task/per_instance/anomalies/patterns_detected). Retention 365gg. |
 | `data/telemetry/live.json` | **WU41** — sliding window 24h. Aggiornato dal LiveTelemetry thread ogni 60s. Source primaria della dashboard. |
+| `data/telemetry/cicli.json` | **WU46/48** — cicli completi + per-istanza con durate. Numerazione globale crescente, `run_id` per discriminare restart. Retention ultimi 100. Aggiornato in tempo reale dal bot via hooks main.py. |
 | `state/FAU_XX.json` | Stato persistente per-istanza (rifornimento, daily_tasks, schedule, metrics). Atomic save. |
 | `state/FAU_XX_timing.json` | Timing appresi per-istanza (boot_android_s, etc.). |
 | `logs/FAU_XX.jsonl` | Log strutturato per-istanza (1 JSON per riga). Ruotato `.bak` a ogni avvio. |

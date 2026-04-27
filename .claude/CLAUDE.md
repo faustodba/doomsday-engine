@@ -181,6 +181,11 @@ All'inizio di ogni sessione, in questo ordine:
 | 39 | OCR "Daily Receiving Limit" FauMorfeus + dashboard | MEDIA | ✅ RISOLTA 27/04 (WU39 commit `ef81639` — `OCR_DAILY_RECV_LIMIT` 547,146,666,173 + `shared/morfeus_state.py` storage globale + dashboard riga capienza con color coding) |
 | 53 | Telemetria task & dashboard analytics — events JSONL + rollup + KPI | — | ✅ CHIUSA 27/04 (WU38-44 — pipeline 8/8 step, 9 commit `5153733`→`399eba0`, 19/19 test verdi). Vedi sezione "Sessione 27/04/2026" in ROADMAP.md |
 | 54 | Banner catalog & dismissal pipeline boot stabilization | — | 🟡 parziale (estesa con `pin_btn_x_close` + `pin_btn_back_arrow` in WU26/66) |
+| 46 | state.rifornimento azzerato post-restart bot — race con `_controlla_reset` | ALTA | ✅ MITIGATO 27/04 (WU45 commit `8b0091f` — dashboard fallback su `data/storico_farm.json` quando state vuoto). Issue root da indagare separatamente |
+| 47 | Pannello dashboard 'produzione/ora' sempre vuoto — `metrics.*_per_ora` mai popolati | MEDIA | ✅ RISOLTA 27/04 (WU47 commit `aeaa6fb` — `chiudi_sessione_e_calcola()` propaga `prod_ora` a `metrics.aggiorna_risorse()` se durata≥300s) |
+| 49 | Cicli persistenti su file dedicato + numerazione globale crescente | MEDIA | ✅ RISOLTA 27/04 (WU46 `41711bd` storage `data/telemetry/cicli.json` + hooks main.py + pannello dashboard `📚 storico cicli`. WU48 `6498d11` numerazione globale + run_id + auto-close stale `aborted=True`) |
+| — | run_dashboard_prod.bat rotto (chiamava `dashboard_server.py` inesistente) | MEDIA | ✅ RISOLTA 27/04 (`eddefc6` corretto `uvicorn dashboard.app:app` + 7 modalità doc) |
+| — | run_prod.bat senza commenti / modalità multiple | BASSA | ✅ RISOLTA 27/04 (`1a960c1` 9 modalità preconfigurate documentate, modalità #6 RIDOTTA RAM 4 istanze per memory pressure dev tools) |
 
 > Aggiornare questa tabella ad ogni sessione insieme alla ROADMAP.
 
