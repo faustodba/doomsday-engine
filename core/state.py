@@ -1073,6 +1073,23 @@ class InstanceState:
         sess.produzione_qty = prod_qty
         sess.produzione_oraria = prod_ora
 
+        # WU47 — propaga produzione_oraria a metrics.*_per_ora.
+        # La dashboard "produzione/ora — farm aggregata" somma questi valori
+        # tra tutte le istanze. Senza propagazione metrics restano 0.0 e il
+        # pannello mostra "in attesa del primo ciclo raccolta" perpetuo.
+        # Filtro: solo sessioni con durata >= 300s (5 min) per evitare swing
+        # spurious da tick brevissimi.
+        if durata >= 300:
+            try:
+                self.metrics.aggiorna_risorse(
+                    pomodoro = float(prod_ora.get("pomodoro", 0.0)),
+                    legno    = float(prod_ora.get("legno",    0.0)),
+                    petrolio = float(prod_ora.get("petrolio", 0.0)),
+                    acciaio  = float(prod_ora.get("acciaio",  0.0)),
+                )
+            except Exception:
+                pass
+
         # Archivia in storico
         self.produzione_storico.append(sess)
 
