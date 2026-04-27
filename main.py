@@ -1024,6 +1024,15 @@ def main():
         istanze_ciclo = _carica_istanze_ciclo(filtro=filtro)
         _log("MAIN", f"CICLO {ciclo} — {[i['nome'] for i in istanze_ciclo]}")
 
+        # WU46 — Telemetria cicli persistenti (Issue #53 estesa).
+        # Scrive data/telemetry/cicli.json con start/end/durata per ciclo +
+        # per istanza. Failsafe: telemetria silenziosa.
+        try:
+            from core.telemetry import record_cicle_start
+            record_cicle_start(ciclo)
+        except Exception:
+            pass
+
         # Cleanup orfani a inizio ciclo (robustezza contro crash mid-ciclo)
         _log("MAIN", f"Cleanup emulator orfani (pre-ciclo) — {len(istanze_ciclo)} istanze")
         _cleanup_tutti_emulator(istanze_ciclo, args.dry_run)
@@ -1063,6 +1072,14 @@ def main():
             _log("MAIN", f"--- Avvio istanza {nome} ---")
             if not args.dry_run:
                 _launcher.reset_istanza(ist, lambda msg: _log(nome, msg))
+
+            # WU46 — telemetria: registro start tick istanza
+            try:
+                from core.telemetry import record_istanza_tick_start
+                record_istanza_tick_start(nome)
+            except Exception:
+                pass
+
             t = threading.Thread(
                 target=_thread_istanza,
                 args=(ist, tasks_cls, args.dry_run),
@@ -1070,6 +1087,14 @@ def main():
             )
             t.start()
             t.join()
+
+            # WU46 — telemetria: registro end tick istanza
+            try:
+                from core.telemetry import record_istanza_tick_end
+                record_istanza_tick_end(nome, esito="ok")
+            except Exception:
+                pass
+
             _log("MAIN", f"--- Istanza {nome} completata ---")
 
         # Fine ciclo — cancella checkpoint solo se completato senza interruzioni
@@ -1078,6 +1103,13 @@ def main():
 
         if stop_event.is_set():
             break
+
+        # WU46 — telemetria: registro end ciclo
+        try:
+            from core.telemetry import record_cicle_end
+            record_cicle_end(ciclo)
+        except Exception:
+            pass
 
         _log("MAIN", f"Ciclo {ciclo} completato — sleep {SLEEP_CICLO//60} minuti")
         for _ in range(SLEEP_CICLO):

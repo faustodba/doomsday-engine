@@ -294,6 +294,17 @@
           <div class="tel-foot">engine_status.json · refresh 10s</div>
         </div>
 
+        <div class="tel-card">
+          <div class="tel-head">📚 storico cicli</div>
+          <div id="tel-storico-cicli"
+               hx-get="/ui/partial/telemetria-storico-cicli"
+               hx-trigger="load, every 60s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">data/telemetry/cicli.json · ultimi 15 cicli</div>
+        </div>
+
         <div class="tel-card tel-full">
           <div class="tel-head">📈 trend 7gg</div>
           <div id="tel-trend"

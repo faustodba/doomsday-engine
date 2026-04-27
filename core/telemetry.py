@@ -62,6 +62,10 @@ def _live_path() -> Path:
     return _telemetry_root() / "live.json"
 
 
+def _cicli_path() -> Path:
+    return _telemetry_root() / "cicli.json"
+
+
 # ==============================================================================
 # Outcome canonici
 # ==============================================================================
@@ -998,6 +1002,261 @@ def live_writer_loop(stop_event: "threading.Event",
             compute_and_save_live()
         except Exception:
             pass
+
+
+# ==============================================================================
+# Cicli persistenti (Step bonus — scritti dal bot, no parsing log volatili)
+# ==============================================================================
+
+_CICLI_RETENTION = 100  # ultimi N cicli mantenuti su disco
+_CICLI_LOCK = threading.Lock()
+
+
+def _read_cicli_raw() -> List[dict]:
+    """Legge cicli.json. Failsafe (file mancante/corrotto → [])."""
+    try:
+        path = _cicli_path()
+        if not path.exists():
+            return []
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        return d.get("cicli", []) if isinstance(d, dict) else []
+    except Exception:
+        return []
+
+
+def _write_cicli_raw(cicli: List[dict]) -> bool:
+    """Atomic write cicli.json. Failsafe."""
+    try:
+        path = _cicli_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        # FIFO retention: tieni gli ultimi N
+        tail = cicli[-_CICLI_RETENTION:] if len(cicli) > _CICLI_RETENTION else cicli
+        tmp = path.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump({"cicli": tail}, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        return False
+
+
+def load_cicli() -> List[dict]:
+    """
+    API pubblica: ritorna lista cicli persistiti, ordinati cronologicamente.
+
+    Schema entry:
+      {
+        "numero": int,                 # numero ciclo (può ripartire da 1 dopo restart)
+        "start_ts": ISO,
+        "end_ts": ISO | None,
+        "durata_s": int,
+        "completato": bool,
+        "istanze": {
+          nome: {"start_ts": ISO, "end_ts": ISO|None, "durata_s": int, "esito": str}
+        }
+      }
+    """
+    return _read_cicli_raw()
+
+
+def record_cicle_start(numero: int) -> None:
+    """Apri nuovo ciclo. Chiamato da main.py al log 'MAIN CICLO N'."""
+    try:
+        with _CICLI_LOCK:
+            cicli = _read_cicli_raw()
+            cicli.append({
+                "numero":     int(numero),
+                "start_ts":   _iso_now(),
+                "end_ts":     None,
+                "durata_s":   0,
+                "completato": False,
+                "istanze":    {},
+            })
+            _write_cicli_raw(cicli)
+    except Exception:
+        pass
+
+
+def record_cicle_end(numero: int) -> None:
+    """Chiudi ciclo corrente. Chiamato a 'MAIN Ciclo N completato'."""
+    try:
+        with _CICLI_LOCK:
+            cicli = _read_cicli_raw()
+            if not cicli:
+                return
+            # Cerca l'ULTIMO ciclo con numero matching e non completato
+            for c in reversed(cicli):
+                if c.get("numero") == int(numero) and not c.get("completato"):
+                    c["end_ts"]     = _iso_now()
+                    c["completato"] = True
+                    try:
+                        c["durata_s"] = max(0, int(
+                            _iso_to_epoch(c["end_ts"]) -
+                            _iso_to_epoch(c["start_ts"])
+                        ))
+                    except Exception:
+                        c["durata_s"] = 0
+                    break
+            _write_cicli_raw(cicli)
+    except Exception:
+        pass
+
+
+def record_istanza_tick_start(istanza: str) -> None:
+    """Registra inizio tick istanza nel ciclo corrente (l'ultimo aperto)."""
+    try:
+        with _CICLI_LOCK:
+            cicli = _read_cicli_raw()
+            if not cicli:
+                return
+            current = cicli[-1]
+            if current.get("completato"):
+                return  # ciclo già chiuso, ignoro
+            istanze = current.setdefault("istanze", {})
+            if istanza not in istanze:
+                istanze[istanza] = {
+                    "start_ts": _iso_now(),
+                    "end_ts":   None,
+                    "durata_s": 0,
+                    "esito":    "running",
+                }
+                _write_cicli_raw(cicli)
+    except Exception:
+        pass
+
+
+def record_istanza_tick_end(istanza: str, esito: str = "ok") -> None:
+    """Registra fine tick istanza nel ciclo corrente."""
+    try:
+        with _CICLI_LOCK:
+            cicli = _read_cicli_raw()
+            if not cicli:
+                return
+            current = cicli[-1]
+            info = (current.get("istanze") or {}).get(istanza)
+            if not info or info.get("end_ts"):
+                return
+            info["end_ts"] = _iso_now()
+            info["esito"]  = esito
+            try:
+                info["durata_s"] = max(0, int(
+                    _iso_to_epoch(info["end_ts"]) -
+                    _iso_to_epoch(info["start_ts"])
+                ))
+            except Exception:
+                info["durata_s"] = 0
+            _write_cicli_raw(cicli)
+    except Exception:
+        pass
+
+
+def backfill_cicli_from_botlog(paths: List[Path]) -> int:
+    """
+    Backfill one-shot da bot.log per popolare cicli.json con dati storici.
+    Idempotente: dedup su (numero, start_ts).
+
+    Pattern bot.log:
+      [HH:MM:SS] MAIN CICLO N — [...]
+      [HH:MM:SS] FAU_XX [LAUNCHER] [FAU_XX] reset pre-ciclo ...
+      [HH:MM:SS] MAIN --- Istanza FAU_XX completata ---
+      [HH:MM:SS] MAIN Ciclo N completato — sleep ...
+
+    Args:
+        paths: lista bot.log da scandire (es. [bot.log.bak, bot.log])
+    Returns:
+        Numero cicli aggiunti.
+    """
+    import re as _re
+    re_cycle_start = _re.compile(r"^\[(\d{2}:\d{2}:\d{2})\]\s+MAIN CICLO (\d+)")
+    re_cycle_end   = _re.compile(r"^\[(\d{2}:\d{2}:\d{2})\]\s+MAIN Ciclo (\d+) completato")
+    re_ist_start   = _re.compile(r"^\[(\d{2}:\d{2}:\d{2})\]\s+(\S+)\s+\[LAUNCHER\]\s+\[\S+\]\s+reset pre-ciclo")
+    re_ist_end     = _re.compile(r"^\[(\d{2}:\d{2}:\d{2})\]\s+MAIN --- Istanza (\S+) completata ---")
+
+    today_iso = datetime.now().date().isoformat()
+    def _hhmm_to_iso(hhmm: str) -> str:
+        return f"{today_iso}T{hhmm}"
+
+    parsed: List[dict] = []
+    current: Optional[dict] = None
+    for path in paths:
+        try:
+            with open(path, encoding="utf-8", errors="replace") as f:
+                for line in f:
+                    if not line.startswith("["):
+                        continue
+                    m = re_cycle_start.match(line)
+                    if m:
+                        current = {
+                            "numero":     int(m.group(2)),
+                            "start_ts":   _hhmm_to_iso(m.group(1)),
+                            "end_ts":     None,
+                            "durata_s":   0,
+                            "completato": False,
+                            "istanze":    {},
+                        }
+                        parsed.append(current)
+                        continue
+                    m = re_cycle_end.match(line)
+                    if m and current and current["numero"] == int(m.group(2)):
+                        ts = _hhmm_to_iso(m.group(1))
+                        current["end_ts"]     = ts
+                        current["completato"] = True
+                        try:
+                            current["durata_s"] = max(0, int(
+                                _iso_to_epoch(ts) - _iso_to_epoch(current["start_ts"])
+                            ))
+                        except Exception:
+                            current["durata_s"] = 0
+                        continue
+                    if not current:
+                        continue
+                    m = re_ist_start.match(line)
+                    if m:
+                        nome = m.group(2)
+                        if nome not in current["istanze"]:
+                            current["istanze"][nome] = {
+                                "start_ts": _hhmm_to_iso(m.group(1)),
+                                "end_ts":   None,
+                                "durata_s": 0,
+                                "esito":    "running",
+                            }
+                        continue
+                    m = re_ist_end.match(line)
+                    if m:
+                        nome = m.group(2)
+                        info = current["istanze"].get(nome)
+                        if info and not info["end_ts"]:
+                            ts = _hhmm_to_iso(m.group(1))
+                            info["end_ts"] = ts
+                            info["esito"]  = "ok"
+                            try:
+                                info["durata_s"] = max(0, int(
+                                    _iso_to_epoch(ts) - _iso_to_epoch(info["start_ts"])
+                                ))
+                            except Exception:
+                                info["durata_s"] = 0
+        except Exception:
+            continue
+
+    # Merge dedup su (numero, start_ts)
+    with _CICLI_LOCK:
+        existing = _read_cicli_raw()
+        existing_keys = {(c.get("numero"), c.get("start_ts")) for c in existing}
+        added = 0
+        for p in parsed:
+            key = (p["numero"], p["start_ts"])
+            if key not in existing_keys:
+                existing.append(p)
+                existing_keys.add(key)
+                added += 1
+        # Riordina per start_ts
+        existing.sort(key=lambda x: x.get("start_ts", ""))
+        if added:
+            _write_cicli_raw(existing)
+        return added
 
 
 # ==============================================================================

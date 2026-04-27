@@ -83,6 +83,17 @@ class CicloStatus:
 
 
 @dataclass
+class CicloStorico:
+    """Singolo ciclo completato con durata e istanze processate."""
+    numero:        int
+    start_hhmm:    str          # "14:46"
+    end_hhmm:      str          # "18:06" o "—" se in corso
+    durata_s:      int          # durata totale in secondi
+    n_istanze:     int          # numero istanze processate
+    completato:    bool
+
+
+@dataclass
 class TrendSeries:
     label:     str
     sparkline: str        # "▂▃▄▆▇█▇▆"
@@ -490,63 +501,135 @@ def _compute_health_24h() -> List[HealthIssue]:
 # 3. Ciclo corrente
 # ==============================================================================
 
+def _load_cicli_persistent() -> List[dict]:
+    """
+    Legge cicli da data/telemetry/cicli.json (file persistente scritto dal bot).
+    Auto-backfill da bot.log al primo accesso se file non esiste o vuoto.
+
+    Returns:
+        Lista cicli ordinati cronologicamente. Vuoto se nessuna fonte.
+    """
+    try:
+        from core.telemetry import load_cicli, backfill_cicli_from_botlog
+        cicli = load_cicli()
+        if not cicli:
+            # Auto-backfill one-shot: leggiamo bot.log per popolare il file
+            bak = _BOT_LOG.parent / "bot.log.bak"
+            paths = [p for p in (bak, _BOT_LOG) if p.exists()]
+            if paths:
+                backfill_cicli_from_botlog(paths)
+                cicli = load_cicli()
+        return cicli or []
+    except Exception:
+        return []
+
+
 def get_ciclo_status() -> CicloStatus:
     return _cached("ciclo_status", _compute_ciclo_status)
 
 
+def get_storico_cicli(n: int = 20) -> List[CicloStorico]:
+    """
+    Ritorna ultimi N cicli completati o in corso (più recenti prima).
+    Source: data/telemetry/cicli.json (file persistente).
+    """
+    cycles = _load_cicli_persistent()
+    out: List[CicloStorico] = []
+    for c in cycles[-n:]:
+        out.append(CicloStorico(
+            numero      = c["numero"],
+            start_hhmm  = c["start_ts"][11:16] if c.get("start_ts") else "—",
+            end_hhmm    = c["end_ts"][11:16]   if c.get("end_ts")   else "—",
+            durata_s    = int(c.get("durata_s", 0)),
+            n_istanze   = len(c.get("istanze", {})),
+            completato  = bool(c.get("completato", False)),
+        ))
+    return list(reversed(out))
+
+
 def _compute_ciclo_status() -> CicloStatus:
+    # Source: data/telemetry/cicli.json (persistente, scritto dal bot)
+    cycles = _load_cicli_persistent()
+    current = cycles[-1] if cycles else None
+    completati = [c for c in cycles if c.get("completato")]
+
+    # engine_status per stato live istanze
     try:
         with open(_STATUS, encoding="utf-8") as f:
             es = json.load(f)
     except Exception:
-        return CicloStatus(numero=0, in_corso_da_s=0, media_durata_s=0,
-                           eta_fine_s=0, completate=0, totale=0,
-                           prossima="—", istanze=[])
-
-    numero = int(es.get("ciclo", 0))
-    storico = es.get("storico", [])
+        es = {}
     istanze_dict = es.get("istanze", {})
 
-    # Calcolo durata medie ciclo: prendi timestamp del primo e ultimo task del ciclo precedente
-    # (non sempre disponibile — fallback 150min)
-    media_dur = 150 * 60
+    # Numero ciclo + durata in corso
+    if current:
+        numero = int(current["numero"])
+        try:
+            in_corso_da_s = max(0, int(
+                (datetime.now() - datetime.fromisoformat(current["start_ts"])).total_seconds()
+            ))
+        except Exception:
+            in_corso_da_s = 0
+    else:
+        numero = 0
+        in_corso_da_s = 0
 
-    # Istanza corrente: la prima con stato=running
+    # Media durata: ultimi 5 cicli completati (esclude quello corrente se ancora aperto)
+    if completati:
+        ultimi = completati[-5:]
+        media_dur = int(sum(c["durata_s"] for c in ultimi) / len(ultimi))
+    else:
+        media_dur = 150 * 60  # fallback 150 min
+
+    # Costruzione tabella istanze del ciclo corrente
     prossima = "—"
     completate = 0
-    totale = len(istanze_dict)
     rows: List[IstanzaCiclo] = []
+    cur_istanze = (current or {}).get("istanze", {}) if current else {}
+    totale = len(istanze_dict) or len(cur_istanze)
 
-    for nome in sorted(istanze_dict.keys()):
-        ist = istanze_dict[nome]
+    for nome in sorted(istanze_dict.keys() | cur_istanze.keys()):
+        ist = istanze_dict.get(nome, {})
         stato = ist.get("stato", "?")
         ut = ist.get("ultimo_task") or {}
         nome_t = ut.get("nome", "?")
         esito_t = ut.get("esito", "?")
-        ts = ut.get("ts", "")
-        msg = ut.get("msg", "")[:30]
-        durata_s = ut.get("durata_s", 0) or 0
+        msg = (ut.get("msg") or "")[:30]
+
+        # Durata: priorità a parser bot.log (più affidabile dell'ultimo task)
+        info = cur_istanze.get(nome)
+        if info and info.get("end_ts"):
+            dur_s = int(info["durata_s"])
+            durata = f"{dur_s/60:.1f}m"
+        elif info and not info.get("end_ts") and stato == "running":
+            try:
+                dur_s = max(0, int(
+                    (datetime.now() - datetime.fromisoformat(info["start_ts"])).total_seconds()
+                ))
+                durata = f"{dur_s/60:.1f}m"
+            except Exception:
+                durata = "in corso"
+        else:
+            durata = "—"
 
         if stato == "running":
             riga_esito = "live"
-            durata = "in corso"
             tasks = f"task={nome_t}"
             badge = "▸"
             prossima = nome
-        elif esito_t == "ok":
-            riga_esito = "ok"
-            completate += 1
-            durata = f"{durata_s/60:.1f}m" if durata_s > 0 else "—"
-            tasks = msg or nome_t
-            badge = ""
-        elif "ADB" in msg.upper() or "abort" in (msg or "").lower():
-            riga_esito = "abort"
-            durata = f"{durata_s/60:.1f}m" if durata_s > 0 else "—"
-            tasks = "ADB cascade abort"
-            badge = "ADB"
+        elif info and info.get("end_ts"):
+            # istanza già completata in questo ciclo
+            if "ADB" in msg.upper() or "abort" in msg.lower():
+                riga_esito = "abort"
+                tasks = "ADB cascade abort"
+                badge = "ADB"
+            else:
+                riga_esito = "ok"
+                completate += 1
+                tasks = msg or nome_t or "—"
+                badge = ""
         else:
             riga_esito = "wait"
-            durata = "—"
             tasks = "in coda"
             badge = ""
 
@@ -555,21 +638,9 @@ def _compute_ciclo_status() -> CicloStatus:
             tasks=tasks, badge=badge,
         ))
 
-    # ETA fine ciclo: (totale - completate) × media-istanza
-    media_istanza_s = media_dur // max(totale, 1)
+    # ETA fine: residue × media-istanza basata su completate effettive
+    media_istanza_s = (media_dur // max(totale, 1)) if totale else 0
     eta_s = max(0, (totale - completate) * media_istanza_s)
-
-    in_corso_da_s = 0
-    if storico:
-        try:
-            primo_ts = storico[0].get("ts", "")
-            # storico ts sono "HH:MM:SS" senza data → calcola con "oggi"
-            if primo_ts:
-                today = datetime.now().date().isoformat()
-                start = datetime.fromisoformat(f"{today}T{primo_ts}")
-                in_corso_da_s = max(0, int((datetime.now() - start).total_seconds()))
-        except Exception:
-            pass
 
     return CicloStatus(
         numero=numero,

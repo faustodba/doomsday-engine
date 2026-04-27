@@ -1407,3 +1407,52 @@ def partial_telemetria_trend(request: Request):
         for t in rows
     )
     return HTMLResponse(f'<table class="tel-table"><tbody>{body}</tbody></table>')
+
+
+@app.get("/ui/partial/telemetria-storico-cicli", include_in_schema=False)
+def partial_telemetria_storico_cicli(request: Request):
+    """
+    WU46 — pannello storico cicli con durate.
+    Source: data/telemetry/cicli.json (auto-backfill da bot.log al primo accesso).
+    """
+    from dashboard.services.telemetry_reader import get_storico_cicli
+    rows = get_storico_cicli(15)
+    if not rows:
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:8px">'
+            'nessun ciclo registrato</div>'
+        )
+
+    def _fmt_min(s: int) -> str:
+        if s <= 0:
+            return "—"
+        m = s // 60
+        if m < 60:
+            return f"{m}m"
+        return f"{m // 60}h{m % 60:02d}m"
+
+    body = []
+    for c in rows:
+        if c.completato:
+            esito_badge = '<span style="color:var(--green);font-weight:600">✓</span>'
+            esito_col   = "var(--green)"
+            dur_lbl     = _fmt_min(c.durata_s)
+        else:
+            esito_badge = '<span style="color:var(--accent);font-weight:700">▸</span>'
+            esito_col   = "var(--accent)"
+            dur_lbl     = "in corso"
+        body.append(
+            f'<tr><td style="width:18px">{esito_badge}</td>'
+            f'<td style="color:var(--accent);font-weight:600">CICLO {c.numero}</td>'
+            f'<td style="color:var(--text-dim);font-size:11px">{c.start_hhmm} → {c.end_hhmm}</td>'
+            f'<td style="text-align:right;color:{esito_col};font-weight:600">{dur_lbl}</td>'
+            f'<td style="text-align:right;color:var(--text-dim);font-size:11px">{c.n_istanze} ist</td></tr>'
+        )
+    return HTMLResponse(
+        '<table class="tel-table"><thead><tr>'
+        '<th></th><th>ciclo</th><th>finestra</th>'
+        '<th style="text-align:right">durata</th>'
+        '<th style="text-align:right">istanze</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table>'
+    )
