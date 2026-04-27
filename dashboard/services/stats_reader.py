@@ -123,6 +123,25 @@ def _load_engine_status() -> EngineStatus:
     return es
 
 
+def _load_storico_farm_today(istanza: str) -> Optional[dict]:
+    """
+    Legge entry odierna per istanza da data/storico_farm.json.
+    Fonte di verità DAILY scritta ad ogni spedizione (sopravvive ai reset state).
+    Returns None se file mancante o nessun dato per oggi/istanza.
+    """
+    try:
+        from datetime import datetime, timezone
+        path = _PROD_ROOT / "data" / "storico_farm.json"
+        if not path.exists():
+            return None
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        today = datetime.now(timezone.utc).date().isoformat()
+        return d.get(today, {}).get(istanza)
+    except Exception:
+        return None
+
+
 def _load_morfeus_state() -> MorfeusState:
     """Legge data/morfeus_state.json. Ritorna stato 'mai letto' se file mancante."""
     try:
@@ -339,6 +358,31 @@ def get_produzione_istanze() -> list[dict]:
             inviato_lordo_tot  = sum(int(v or 0) for v in inviato_lordo_oggi.values())
             tassa_tot          = sum(int(v or 0) for v in tassa_oggi.values())
             tassa_pct_avg      = float(rif.get("tassa_pct_avg", 0.23))
+
+            # auto-WU45 (27/04 fix race): fallback su data/storico_farm.json se
+            # state.rifornimento è stato resettato dal bot durante il giorno
+            # (es. _controlla_reset spurious dopo restart, race con _build_ctx).
+            # storico_farm.json è scritto ad ogni spedizione e sopravvive ai
+            # reset state — è la fonte di verità DAILY più affidabile.
+            try:
+                if (spedizioni_oggi == 0 and inviato_totale == 0
+                        and not provviste_esau):
+                    sf = _load_storico_farm_today(nome)
+                    if sf:
+                        spedizioni_oggi = int(sf.get("spedizioni", 0))
+                        sf_inviato = {
+                            r: int(sf.get(r, 0))
+                            for r in ("pomodoro", "legno", "petrolio", "acciaio")
+                        }
+                        if any(v > 0 for v in sf_inviato.values()):
+                            inviato_oggi    = sf_inviato
+                            inviato_totale  = sum(sf_inviato.values())
+                            quota_esaurita  = quota_max > 0 and spedizioni_oggi >= quota_max
+                        # provviste_residue da storico (LORDO ultimo OCR)
+                        if provviste_res < 0:
+                            provviste_res = int(sf.get("provviste_residue", -1) or -1)
+            except Exception:
+                pass
             # Stima provviste residue NETTA = lordo × (1 - tassa_pct_avg)
             if provviste_res > 0:
                 provviste_res_netta = int(provviste_res * (1.0 - tassa_pct_avg))
