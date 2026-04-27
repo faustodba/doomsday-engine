@@ -499,9 +499,11 @@ def partial_res_totali(request: Request):
 
     # Spedizioni: cumulativo giornaliero vs quota per-ciclo
     # Semantica: spedizioni_oggi può superare quota_max_per_ciclo (è multi-ciclo)
-    prov_lbl = _fmt_m(farm.provviste_residue)
+    # WU34: panel pulito a NETTO. Lordo OCR esposto solo in tooltip.
+    prov_netta_lbl = _fmt_m(farm.provviste_residue_netta)
+    prov_lordo_lbl = _fmt_m(farm.provviste_residue)
 
-    # Dettaglio per istanza (compact)
+    # Dettaglio per istanza (compact) — provviste in NETTO
     _ZERO_INVIATO = {r: 0 for r in ("pomodoro", "legno", "petrolio", "acciaio")}
 
     detail_rows = ""
@@ -509,9 +511,12 @@ def partial_res_totali(request: Request):
         # Skip istanze senza mai spedizioni (es. raccolta_only come FauMorfeus)
         if d.inviato_oggi == _ZERO_INVIATO and d.spedizioni_oggi == 0:
             continue
-        esaurita_css = "color:var(--red)" if d.provviste_esaurite else "color:var(--text-dim)"
-        prov_ist     = _fmt_m(d.provviste_residue)
-        inv_str      = " · ".join(
+        esaurita_css   = "color:var(--red)" if d.provviste_esaurite else "color:var(--text-dim)"
+        prov_netta_ist = _fmt_m(d.provviste_residue_netta)
+        prov_lordo_ist = _fmt_m(d.provviste_residue)
+        tassa_pct      = d.tassa_pct_avg * 100
+        tooltip        = f"lordo {prov_lordo_ist} · tassa {tassa_pct:.1f}%"
+        inv_str        = " · ".join(
             f"{ico}{_fmt_m(d.inviato_oggi.get(r, 0))}"
             for r, ico in RISORSE
             if d.inviato_oggi.get(r, 0) > 0
@@ -520,7 +525,7 @@ def partial_res_totali(request: Request):
         <div class="res-row" style="font-size:9px">
           <span class="res-name" style="color:var(--accent);min-width:52px">{d.nome}</span>
           <span style="flex:1;color:var(--text-dim)">{inv_str}</span>
-          <span style="{esaurita_css}">{prov_ist}</span>
+          <span style="{esaurita_css}" title="{tooltip}">{prov_netta_ist}</span>
         </div>'''
 
     html = f'''
@@ -532,11 +537,12 @@ def partial_res_totali(request: Request):
         <span style="color:var(--text-dim);font-size:9px">· {farm.quota_max_per_ciclo}/ciclo</span>
       </span>
     </div>
-    <div class="res-sub" style="display:flex;justify-content:space-between;align-items:center">
-      <span>provviste residue</span>
-      <span style="color:var(--accent)">{prov_lbl}</span>
+    <div class="res-sub" style="display:flex;justify-content:space-between;align-items:center"
+         title="lordo OCR: {prov_lordo_lbl}">
+      <span>provviste residue (netto)</span>
+      <span style="color:var(--accent)">{prov_netta_lbl}</span>
     </div>
-    <div class="res-sub" style="margin-top:10px">dettaglio istanze</div>
+    <div class="res-sub" style="margin-top:10px">dettaglio istanze (netto)</div>
     {detail_rows if detail_rows else
       '<div style="color:var(--text-dim);font-size:9px;padding:4px 0">nessun dato disponibile</div>'}
     '''

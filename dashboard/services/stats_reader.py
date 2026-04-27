@@ -62,12 +62,14 @@ _RISORSE_STANDARD = ("pomodoro", "legno", "petrolio", "acciaio")
 @dataclass
 class RifornimentoIstanza:
     """Dati rifornimento di una singola istanza (da state/<nome>.json)."""
-    nome:                str
-    spedizioni_oggi:     int
-    quota_max_per_ciclo: int
-    provviste_residue:   int
-    provviste_esaurite:  bool
-    inviato_oggi:        Dict[str, int] = field(default_factory=dict)
+    nome:                  str
+    spedizioni_oggi:       int
+    quota_max_per_ciclo:   int
+    provviste_residue:     int                        # LORDO (OCR raw)
+    provviste_residue_netta: int                      # = lordo × (1 - tassa_pct_avg)
+    provviste_esaurite:    bool
+    tassa_pct_avg:         float = 0.23
+    inviato_oggi:          Dict[str, int] = field(default_factory=dict)
 
 
 @dataclass
@@ -76,22 +78,22 @@ class RisorseFarm:
     Aggregato risorse per tutte le istanze con state persistito.
 
     Campi:
-      - inviato_per_risorsa   : totale inviato oggi per risorsa (somma tutte istanze)
-                                Fonte: dettaglio_oggi[*].qta_inviata (non inviato_oggi)
-                                Filtro: spedizioni > 100M escluse (falsi positivi OCR)
-      - provviste_residue     : somma provviste residue tutte istanze
-      - spedizioni_oggi       : somma spedizioni oggi (cumulativo giornaliero)
-      - quota_max_per_ciclo   : somma quota_max per-ciclo tutte istanze
-                                Nota: NON confrontabile con spedizioni_oggi (cumulativo)
-      - istanze_detail        : lista RifornimentoIstanza per dettaglio per-istanza
-      - produzione_per_ora    : somma metrics.*_per_ora da tutte le istanze
+      - inviato_per_risorsa     : totale inviato oggi per risorsa (NETTO)
+                                  Fonte: dettaglio_oggi[*].qta_inviata
+      - provviste_residue       : somma provviste residue LORDE (OCR raw)
+      - provviste_residue_netta : somma provviste residue NETTE (post-tassa stimata)
+      - spedizioni_oggi         : somma spedizioni oggi (cumulativo giornaliero)
+      - quota_max_per_ciclo     : somma quota_max per-ciclo tutte istanze
+      - istanze_detail          : lista RifornimentoIstanza
+      - produzione_per_ora      : somma metrics.*_per_ora da tutte le istanze
     """
-    inviato_per_risorsa:  Dict[str, int]            = field(default_factory=dict)
-    provviste_residue:    int                        = 0
-    spedizioni_oggi:      int                        = 0
-    quota_max_per_ciclo:  int                        = 0
-    istanze_detail:       List[RifornimentoIstanza] = field(default_factory=list)
-    produzione_per_ora:   Dict[str, float]           = field(default_factory=dict)
+    inviato_per_risorsa:    Dict[str, int]             = field(default_factory=dict)
+    provviste_residue:      int                         = 0
+    provviste_residue_netta: int                        = 0
+    spedizioni_oggi:        int                         = 0
+    quota_max_per_ciclo:    int                         = 0
+    istanze_detail:         List[RifornimentoIstanza]  = field(default_factory=list)
+    produzione_per_ora:     Dict[str, float]            = field(default_factory=dict)
 
 
 # ==============================================================================
@@ -364,12 +366,13 @@ def get_risorse_farm() -> RisorseFarm:
         insts = get_instances()
 
         # Inizializza tutte le risorse a 0 — garantisce presenza nel dict
-        inviato:     Dict[str, int]   = {r: 0 for r in _RISORSE_STANDARD}
-        provviste:   int              = 0
-        sped_oggi:   int              = 0
-        quota_ciclo: int              = 0
-        prod_ora:    Dict[str, float] = {r: 0.0 for r in _RISORSE_STANDARD}
-        detail:      List[RifornimentoIstanza] = []
+        inviato:         Dict[str, int]   = {r: 0 for r in _RISORSE_STANDARD}
+        provviste:       int              = 0
+        provviste_netta: int              = 0
+        sped_oggi:       int              = 0
+        quota_ciclo:     int              = 0
+        prod_ora:        Dict[str, float] = {r: 0.0 for r in _RISORSE_STANDARD}
+        detail:          List[RifornimentoIstanza] = []
 
         for ist in insts:
             nome = ist.get("nome", "")
@@ -400,18 +403,23 @@ def get_risorse_farm() -> RisorseFarm:
                 inviato[risorsa] += qta
 
             # --- Provviste e spedizioni ---
-            prov        = int(rif.get("provviste_residue", 0))
-            provviste   += prov
-            sped_oggi   += int(rif.get("spedizioni_oggi", 0))
-            quota_ciclo += int(rif.get("quota_max", 0))
+            prov          = int(rif.get("provviste_residue", 0))
+            tassa_pct_avg = float(rif.get("tassa_pct_avg", 0.23) or 0.23)
+            prov_netta    = int(prov * (1.0 - tassa_pct_avg)) if prov > 0 else 0
+            provviste       += prov
+            provviste_netta += prov_netta
+            sped_oggi       += int(rif.get("spedizioni_oggi", 0))
+            quota_ciclo     += int(rif.get("quota_max", 0))
 
             detail.append(RifornimentoIstanza(
-                nome                = nome,
-                spedizioni_oggi     = int(rif.get("spedizioni_oggi", 0)),
-                quota_max_per_ciclo = int(rif.get("quota_max", 0)),
-                provviste_residue   = prov,
-                provviste_esaurite  = bool(rif.get("provviste_esaurite", False)),
-                inviato_oggi        = inviato_ist,
+                nome                    = nome,
+                spedizioni_oggi         = int(rif.get("spedizioni_oggi", 0)),
+                quota_max_per_ciclo     = int(rif.get("quota_max", 0)),
+                provviste_residue       = prov,
+                provviste_residue_netta = prov_netta,
+                provviste_esaurite      = bool(rif.get("provviste_esaurite", False)),
+                tassa_pct_avg           = tassa_pct_avg,
+                inviato_oggi            = inviato_ist,
             ))
 
             # --- Metrics (produzione/ora) ---
@@ -420,12 +428,13 @@ def get_risorse_farm() -> RisorseFarm:
                 prod_ora[r] = round(prod_ora[r] + float(m.get(f"{r}_per_ora", 0.0)), 2)
 
         return RisorseFarm(
-            inviato_per_risorsa = inviato,
-            provviste_residue   = provviste,
-            spedizioni_oggi     = sped_oggi,
-            quota_max_per_ciclo = quota_ciclo,
-            istanze_detail      = detail,
-            produzione_per_ora  = prod_ora,
+            inviato_per_risorsa     = inviato,
+            provviste_residue       = provviste,
+            provviste_residue_netta = provviste_netta,
+            spedizioni_oggi         = sped_oggi,
+            quota_max_per_ciclo     = quota_ciclo,
+            istanze_detail          = detail,
+            produzione_per_ora      = prod_ora,
         )
 
     except Exception:
