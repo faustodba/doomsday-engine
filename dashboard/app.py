@@ -636,8 +636,29 @@ def partial_produzione_istanze(request: Request):
         provv      = corrente.get("rifornimento_provviste_residue", -1)
         tasks_curr = corrente.get("tasks_count", {}) or {}
         ts_inizio  = corrente.get("ts_inizio", "")
-        # Avvio in formato HH:MM (UTC dell'ts_inizio)
-        avvio_lbl  = ts_inizio[11:16] if ts_inizio and len(ts_inizio) >= 16 else "—"
+        # auto-WU29 (27/04): avvio in orario LOCALE (era UTC), formato HH:MM
+        # + live_dur_m calcolato da ts_inizio→ultimo_task.ts (= durata tick exec)
+        avvio_lbl   = "—"
+        live_dur_m  = 0  # durata tick exec (avvio → ultimo task)
+        ts_inizio_local = None
+        if ts_inizio:
+            try:
+                from datetime import datetime as _dt, time as _dtime
+                t0 = _dt.fromisoformat(ts_inizio.replace("Z", "+00:00"))
+                ts_inizio_local = t0.astimezone()
+                avvio_lbl = ts_inizio_local.strftime("%H:%M")
+                # live_dur = ultimo task ts (HH:MM:SS local) - ts_inizio_local
+                if ut_ts and len(ut_ts) >= 8:
+                    h, m, s = map(int, ut_ts[:8].split(":"))
+                    today = ts_inizio_local.date()
+                    ut_dt_local = _dt.combine(
+                        today, _dtime(h, m, s),
+                    ).astimezone(ts_inizio_local.tzinfo)
+                    delta_s = (ut_dt_local - ts_inizio_local).total_seconds()
+                    if delta_s > 0:
+                        live_dur_m = int(delta_s // 60)
+            except Exception:
+                avvio_lbl = ts_inizio[11:16] if len(ts_inizio) >= 16 else "—"
 
         # Durata corrente: now - ts_inizio
         durata_curr_m = 0
@@ -745,13 +766,15 @@ def partial_produzione_istanze(request: Request):
         else:
             task_col      = "var(--text-dim)"
             task_show_lbl = "—"
-        # auto-WU28: durata solo se LIVE — quando idle la sessione resta
-        # aperta fino al prossimo tick (~1h30) e durata cresce indefinitamente,
-        # fuorviante. Mostra solo durante esecuzione attiva.
-        durata_show = (
-            f' · <b style="color:var(--text)">{durata_curr_m}m</b>'
-            if is_live and durata_curr_m > 0 else ""
-        )
+        # auto-WU28+29: durata adattiva.
+        # - LIVE: durata corrente cresce real-time (now - ts_inizio)
+        # - IDLE/altro: live_dur_m = avvio → ultimo task (durata tick FROZEN)
+        if is_live and durata_curr_m > 0:
+            durata_show = f' · <b style="color:var(--text)">{durata_curr_m}m</b>'
+        elif live_dur_m > 0:
+            durata_show = f' · live <b style="color:var(--text)">{live_dur_m}m</b>'
+        else:
+            durata_show = ""
         header_status = (
             f'<div style="display:flex;justify-content:space-between;'
             f'gap:6px;font-size:11px;color:var(--text-dim);margin-bottom:2px">'
