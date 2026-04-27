@@ -814,13 +814,30 @@ def partial_produzione_istanze(request: Request):
                 f'title="{value}">{value}</span></div>'
             )
 
-        # auto-WU31: spediz = daily count (era q:N/M con max ciclo confuso).
-        # quota_max è max per CICLO non daily — fraction è semantically broken.
-        # Ora mostriamo solo il count daily; il blocco terminale resta su
-        # "Provv: esaurita" (provviste_esaurite=true dal gioco).
+        # auto-WU31+32: corrente block con stats giornaliere rifornimento.
+        # spediz = daily count (era q:N/M con max ciclo confuso, semantically broken).
+        # inviato = totale risorse inviate oggi (sum di inviato_oggi).
+        # residuo = provviste residue (= "quota disponibile per altre spedizioni").
+        inviato_totale = int(entry.get("inviato_totale", 0) or 0)
+        provviste_res  = int(entry.get("provviste_residue", -1) or -1)
+        provviste_esau_state = bool(entry.get("provviste_esaurite", False))
+        # Format
+        inviato_lbl = _fmt_q(inviato_totale) if inviato_totale > 0 else "0"
+        if provviste_esau_state or provviste_res == 0:
+            residuo_lbl = "esaurita"
+            residuo_col = "var(--red,#f87171)"
+        elif provviste_res > 0:
+            residuo_lbl = _fmt_q(provviste_res)
+            residuo_col = "var(--text)"
+        else:
+            residuo_lbl = "—"
+            residuo_col = "var(--text-dim)"
+
         corr_kvs = [
             _kv("truppe", str(truppe), truppe_col),
             _kv("spediz", str(sped_oggi)),
+            _kv("inviato", inviato_lbl, "#7cf" if inviato_totale > 0 else "var(--text)"),
+            _kv("residuo", residuo_lbl, residuo_col),
         ]
         corr_block = (
             f'<div style="font-size:11px;color:var(--text-dim)">'
@@ -873,10 +890,7 @@ def partial_produzione_istanze(request: Request):
                 font-weight:600;padding:1px 6px;border-radius:3px;text-transform:uppercase;
                 letter-spacing:0.5px">{stato}</span>
             </span>
-            <span style="color:var(--text-dim);font-weight:normal;font-size:11px"
-                  title="Provviste residue: stock per spedizioni rifornimento (consumate × 1+tassa per qta inviata)">
-              Provv: <b>{provv_lbl}</b>
-            </span>
+            <span style="color:var(--text-dim);font-weight:normal;font-size:10px"></span>
           </div>
           {header_status}
           {header_lastmsg}

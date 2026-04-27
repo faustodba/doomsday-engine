@@ -292,6 +292,12 @@ def get_produzione_istanze() -> list[dict]:
             quota_max       = int(rif.get("quota_max", 0) or 0)
             spedizioni_oggi = int(rif.get("spedizioni_oggi", 0) or 0)
             quota_esaurita  = quota_max > 0 and spedizioni_oggi >= quota_max
+            # auto-WU32: totale risorse inviate oggi (sum inviato_oggi)
+            # + provviste residue = quota residua da inviare
+            inviato_oggi    = rif.get("inviato_oggi", {}) or {}
+            inviato_totale  = sum(int(v or 0) for v in inviato_oggi.values())
+            provviste_res   = int(rif.get("provviste_residue", -1) or -1)
+            provviste_esau  = bool(rif.get("provviste_esaurite", False))
 
             result.append({
                 "nome":              nome,
@@ -306,6 +312,9 @@ def get_produzione_istanze() -> list[dict]:
                 "quota_max":         quota_max,
                 "spedizioni_oggi":   spedizioni_oggi,
                 "quota_esaurita":    quota_esaurita,
+                "inviato_totale":    inviato_totale,
+                "provviste_residue": provviste_res,
+                "provviste_esaurite": provviste_esau,
                 "corrente":          corrente,
                 "precedente":        precedente,
                 "n_storico_24h":     len(storico),
