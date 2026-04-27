@@ -173,10 +173,10 @@ html, body {
   font-size: 13px; letter-spacing: 2px; color: var(--text-dim);
   text-transform: uppercase; margin-bottom: 8px;
 }
-.res-row { display: flex; align-items: center; gap: 6px; margin-bottom: 6px; }
+.res-row { display: flex; align-items: center; gap: 10px; margin-bottom: 7px; }
 .res-ico  { font-size: 17px; width: 18px; text-align: center; flex-shrink: 0; }
-.res-name { font-size: 14px; color: var(--text-dim); width: 52px; flex-shrink: 0; }
-.res-bar-wrap { flex: 1; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; }
+.res-name { font-size: 14px; color: var(--text-dim); width: 64px; flex-shrink: 0; padding-right: 4px; }
+.res-bar-wrap { flex: 1; height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; margin-left: 2px; }
 .res-bar { height: 100%; border-radius: 2px; background: var(--accent); }
 .res-bar.green { background: var(--green); }
 .res-val { font-size: 15px; color: var(--text); text-align: right; min-width: 44px; white-space: nowrap; }
