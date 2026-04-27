@@ -650,7 +650,13 @@ def partial_produzione_istanze(request: Request):
             except Exception:
                 durata_curr_m = 0
 
-        provv_lbl = "esaurita" if provv == 0 else (f"{provv}" if provv > 0 else "—")
+        # auto-WU27: provviste formattato in milioni (era integer raw)
+        if provv == 0:
+            provv_lbl = "esaurita"
+        elif provv > 0:
+            provv_lbl = _fmt_q(provv)
+        else:
+            provv_lbl = "—"
 
         # Sessione precedente
         prod_h_prec     = precedente.get("produzione_oraria") or {}
@@ -675,12 +681,20 @@ def partial_produzione_istanze(request: Request):
             inv_p = _fmt_q(rif_inv_prec.get(r, 0))
             ph    = _fmt_q(prod_h_prec.get(r, 0)) if has_prec else "—"
             tooltip = (
-                f"{r}: corrente ini={ini} inv={inv} tassa={tax} zaino={zd}"
+                f"{r}: corrente ini(castle alla apertura sess)={ini} "
+                f"inv(spedito a FauMorfeus durante sess)={inv} "
+                f"tassa={tax} zaino={zd}"
                 f" | precedente ini={ini_p} fin={fin_p} inv={inv_p}"
             )
-            curr_cell = f'{ini}<span style="color:var(--accent);font-size:9px"> +{inv}</span>'
+            # auto-WU27 (27/04): label esplicite "ini" e "inv" invece di "+"
+            # ambiguo. ini = valore castle al momento apri_sessione (snapshot
+            # OCR top-bar). inv = quantità spedita a FauMorfeus in sessione.
+            curr_cell = (
+                f'<span title="{tooltip}">{ini}'
+                f'<span style="color:var(--accent);font-size:10px"> ▸{inv}</span></span>'
+            )
             prec_cell = (
-                f'{ini_p}<span style="color:var(--text-dim);font-size:9px"> → {fin_p}</span>'
+                f'{ini_p}<span style="color:var(--text-dim);font-size:10px"> → {fin_p}</span>'
                 if has_prec else '—'
             )
             ph_cell = (
@@ -805,8 +819,9 @@ def partial_produzione_istanze(request: Request):
                 font-weight:600;padding:1px 6px;border-radius:3px;text-transform:uppercase;
                 letter-spacing:0.5px">{stato}</span>
             </span>
-            <span style="color:var(--text-dim);font-weight:normal;font-size:11px">
-              P:{provv_lbl}
+            <span style="color:var(--text-dim);font-weight:normal;font-size:11px"
+                  title="Provviste residue: stock per spedizioni rifornimento (consumate × 1+tassa per qta inviata)">
+              Provv: <b>{provv_lbl}</b>
             </span>
           </div>
           {header_status}
