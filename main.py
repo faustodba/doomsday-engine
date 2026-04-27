@@ -965,6 +965,21 @@ def main():
     threading.Thread(target=_status_writer_loop, args=(stop_event, args.status_interval),
                      name="StatusWriter", daemon=True).start()
 
+    # WU41 — telemetria live writer (rolling 24h, refresh 60s)
+    # Failsafe: se core.telemetry non importa per qualche motivo, il bot
+    # prosegue normalmente — la telemetria è opzionale.
+    try:
+        from core.telemetry import live_writer_loop
+        threading.Thread(
+            target=live_writer_loop,
+            args=(stop_event, 60),
+            name="LiveTelemetry",
+            daemon=True,
+        ).start()
+        _log("MAIN", "Telemetria live writer avviato (refresh 60s)")
+    except Exception as exc:
+        _log("MAIN", f"[WARN] live writer non avviato: {exc}")
+
     # Cleanup emulator orfani all'avvio (kill residui di sessioni precedenti).
     # Usa taskkill globale (~3s) invece del loop MuMuManager shutdown (~60s):
     # all'avvio non ci sono istanze "buone" da preservare, kill brutale OK.

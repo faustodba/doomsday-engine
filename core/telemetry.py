@@ -350,94 +350,19 @@ def compute_rollup(date_str: Optional[str] = None) -> dict:
 
     Schema:
       {
-        "date":          "YYYY-MM-DD",
-        "computed_at":   "ISO ts",
-        "totals":        {events, success, fail, abort, skip},
-        "per_task":      {task_name: {exec, ok, skip, fail, abort, ok_pct,
-                          duration_avg_s, duration_p50, duration_p95,
-                          anomalies, output_aggregates}},
-        "per_instance":  {ist_name: {exec, ok, skip, fail, abort,
-                          tasks_breakdown, anomalies_total}},
+        "date":             "YYYY-MM-DD",
+        "computed_at":      "ISO ts",
+        "totals":           {events, ok, skip, fail, abort, no_op},
+        "per_task":         {task: {exec, ok, ok_pct, durations, anomalies, output_aggregates}},
+        "per_instance":     {ist: {exec, tasks_breakdown, anomalies_total}},
         "anomalies_global": {tag: count}
       }
     """
     date_str = date_str or _today_utc_str()
     events = list(iter_events(date_str))
-
-    rollup = {
-        "date":             date_str,
-        "computed_at":      _iso_now(),
-        "totals":           {"events": 0, "ok": 0, "skip": 0, "fail": 0, "abort": 0, "no_op": 0},
-        "per_task":         {},
-        "per_instance":     {},
-        "anomalies_global": {},
-    }
-    if not events:
-        return rollup
-
-    # Group per task & per instance
-    by_task: dict = {}
-    by_inst: dict = {}
-    for ev in events:
-        by_task.setdefault(ev.task, []).append(ev)
-        by_inst.setdefault(ev.instance, []).append(ev)
-        # Totali
-        rollup["totals"]["events"] += 1
-        oc = ev.outcome if ev.outcome in rollup["totals"] else "no_op"
-        rollup["totals"][oc] = rollup["totals"].get(oc, 0) + 1
-        # Anomalie globali
-        for tag in (ev.anomalies or []):
-            rollup["anomalies_global"][tag] = rollup["anomalies_global"].get(tag, 0) + 1
-
-    # per_task
-    for task_name, evs in by_task.items():
-        outc = {"ok": 0, "skip": 0, "fail": 0, "abort": 0, "no_op": 0}
-        durs = []
-        anom: dict = {}
-        for ev in evs:
-            outc[ev.outcome] = outc.get(ev.outcome, 0) + 1
-            if ev.duration_s > 0:
-                durs.append(ev.duration_s)
-            for tag in (ev.anomalies or []):
-                anom[tag] = anom.get(tag, 0) + 1
-        exec_n = len(evs)
-        ok_n   = outc["ok"] + outc["skip"]
-        rollup["per_task"][task_name] = {
-            "exec":             exec_n,
-            "ok":               outc["ok"],
-            "skip":             outc["skip"],
-            "fail":             outc["fail"],
-            "abort":            outc["abort"],
-            "no_op":            outc["no_op"],
-            "ok_pct":           round(100.0 * ok_n / exec_n, 1) if exec_n else 0.0,
-            "duration_avg_s":   round(sum(durs) / len(durs), 3) if durs else 0.0,
-            "duration_p50":     round(_percentile(durs, 50), 3),
-            "duration_p95":     round(_percentile(durs, 95), 3),
-            "duration_max_s":   round(max(durs), 3) if durs else 0.0,
-            "anomalies":        anom,
-            "output_aggregates": _aggregate_outputs(evs),
-        }
-
-    # per_instance
-    for ist_name, evs in by_inst.items():
-        outc = {"ok": 0, "skip": 0, "fail": 0, "abort": 0, "no_op": 0}
-        breakdown: dict = {}
-        anom_total = 0
-        for ev in evs:
-            outc[ev.outcome] = outc.get(ev.outcome, 0) + 1
-            breakdown[ev.task] = breakdown.get(ev.task, 0) + 1
-            anom_total += len(ev.anomalies or [])
-        rollup["per_instance"][ist_name] = {
-            "exec":            len(evs),
-            "ok":              outc["ok"],
-            "skip":            outc["skip"],
-            "fail":            outc["fail"],
-            "abort":           outc["abort"],
-            "no_op":           outc["no_op"],
-            "tasks_breakdown": breakdown,
-            "anomalies_total": anom_total,
-        }
-
+    rollup = _build_rollup_from_events(events)
+    rollup["date"]        = date_str
+    rollup["computed_at"] = _iso_now()
     return rollup
 
 
@@ -503,6 +428,178 @@ def cleanup_old_rollups(retention_days: int = _RETENTION_DAYS_ROLLUP) -> int:
         return removed
     except Exception:
         return 0
+
+
+# ==============================================================================
+# Live writer (Step 5) — rolling 24h, refresh periodico
+# ==============================================================================
+
+_LIVE_REFRESH_DEFAULT_S = 60
+
+
+def compute_live_24h(now: Optional[datetime] = None) -> dict:
+    """
+    Aggrega TaskTelemetry degli ultimi 24h (sliding window).
+    Legge events di oggi + ieri (UTC) e filtra per ts >= now - 24h.
+
+    Schema identico al rollup ma con campi window_start/window_end al posto di date.
+    """
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=24)
+    cutoff_iso = cutoff.isoformat()
+
+    today_str     = now.date().isoformat()
+    yesterday_str = (now.date() - timedelta(days=1)).isoformat()
+
+    # Carica eventi da ieri + oggi, filtra per ts >= cutoff
+    events = []
+    for d_str in (yesterday_str, today_str):
+        for ev in iter_events(d_str):
+            if ev.ts_start >= cutoff_iso:
+                events.append(ev)
+
+    # Riusa _build_rollup_from_events (refactor minimale)
+    rollup = _build_rollup_from_events(events)
+    rollup.pop("date", None)
+    rollup["window_start"] = cutoff_iso
+    rollup["window_end"]   = now.isoformat()
+    rollup["computed_at"]  = now.isoformat()
+    return rollup
+
+
+def _build_rollup_from_events(events: list) -> dict:
+    """
+    Logica core di aggregazione condivisa tra compute_rollup() e
+    compute_live_24h(). Ritorna dict con totals/per_task/per_instance/anomalies.
+    """
+    rollup = {
+        "totals":           {"events": 0, "ok": 0, "skip": 0, "fail": 0, "abort": 0, "no_op": 0},
+        "per_task":         {},
+        "per_instance":     {},
+        "anomalies_global": {},
+    }
+    if not events:
+        return rollup
+
+    by_task: dict = {}
+    by_inst: dict = {}
+    for ev in events:
+        by_task.setdefault(ev.task, []).append(ev)
+        by_inst.setdefault(ev.instance, []).append(ev)
+        rollup["totals"]["events"] += 1
+        oc = ev.outcome if ev.outcome in rollup["totals"] else "no_op"
+        rollup["totals"][oc] = rollup["totals"].get(oc, 0) + 1
+        for tag in (ev.anomalies or []):
+            rollup["anomalies_global"][tag] = rollup["anomalies_global"].get(tag, 0) + 1
+
+    for task_name, evs in by_task.items():
+        outc = {"ok": 0, "skip": 0, "fail": 0, "abort": 0, "no_op": 0}
+        durs = []
+        anom: dict = {}
+        for ev in evs:
+            outc[ev.outcome] = outc.get(ev.outcome, 0) + 1
+            if ev.duration_s > 0:
+                durs.append(ev.duration_s)
+            for tag in (ev.anomalies or []):
+                anom[tag] = anom.get(tag, 0) + 1
+        exec_n = len(evs)
+        ok_n = outc["ok"] + outc["skip"]
+        rollup["per_task"][task_name] = {
+            "exec":             exec_n,
+            "ok":               outc["ok"],
+            "skip":             outc["skip"],
+            "fail":             outc["fail"],
+            "abort":            outc["abort"],
+            "no_op":            outc["no_op"],
+            "ok_pct":           round(100.0 * ok_n / exec_n, 1) if exec_n else 0.0,
+            "duration_avg_s":   round(sum(durs) / len(durs), 3) if durs else 0.0,
+            "duration_p50":     round(_percentile(durs, 50), 3),
+            "duration_p95":     round(_percentile(durs, 95), 3),
+            "duration_max_s":   round(max(durs), 3) if durs else 0.0,
+            "anomalies":        anom,
+            "output_aggregates": _aggregate_outputs(evs),
+        }
+
+    for ist_name, evs in by_inst.items():
+        outc = {"ok": 0, "skip": 0, "fail": 0, "abort": 0, "no_op": 0}
+        breakdown: dict = {}
+        anom_total = 0
+        for ev in evs:
+            outc[ev.outcome] = outc.get(ev.outcome, 0) + 1
+            breakdown[ev.task] = breakdown.get(ev.task, 0) + 1
+            anom_total += len(ev.anomalies or [])
+        rollup["per_instance"][ist_name] = {
+            "exec":            len(evs),
+            "ok":              outc["ok"],
+            "skip":            outc["skip"],
+            "fail":            outc["fail"],
+            "abort":           outc["abort"],
+            "no_op":           outc["no_op"],
+            "tasks_breakdown": breakdown,
+            "anomalies_total": anom_total,
+        }
+
+    return rollup
+
+
+def save_live(live: dict) -> bool:
+    """Atomic write data/telemetry/live.json. Failsafe."""
+    try:
+        path = _live_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(".json.tmp")
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(live, f, indent=2, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+        return True
+    except Exception:
+        return False
+
+
+def load_live() -> Optional[dict]:
+    """Legge data/telemetry/live.json. None se mancante o corrotto."""
+    try:
+        path = _live_path()
+        if not path.exists():
+            return None
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def compute_and_save_live() -> Optional[dict]:
+    """Convenience: calcola + salva live.json. Ritorna dict o None se fallito."""
+    live = compute_live_24h()
+    if save_live(live):
+        return live
+    return None
+
+
+def live_writer_loop(stop_event: "threading.Event",
+                     refresh_s: int = _LIVE_REFRESH_DEFAULT_S) -> None:
+    """
+    Loop daemon per aggiornare live.json ogni `refresh_s` secondi.
+    Hookable da main.py:
+        threading.Thread(target=live_writer_loop,
+                         args=(stop_event, 60),
+                         name="LiveTelemetry", daemon=True).start()
+
+    Failsafe: ogni iterazione cattura eccezioni — loop non termina mai
+    spontaneamente (solo via stop_event).
+    """
+    # Una passata immediata all'avvio così la dashboard non aspetta refresh_s
+    try:
+        compute_and_save_live()
+    except Exception:
+        pass
+    while not stop_event.wait(refresh_s):
+        try:
+            compute_and_save_live()
+        except Exception:
+            pass
 
 
 # ==============================================================================

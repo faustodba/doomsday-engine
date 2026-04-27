@@ -196,3 +196,75 @@ def test_percentile_simple():
     # p95 di 100 elementi 0..99 → ~94
     p95 = _percentile(list(range(100)), 95)
     assert 93 < p95 < 96
+
+
+# ==============================================================================
+# 9. Live writer (Step 5) — compute_live_24h + save_live + writer loop
+# ==============================================================================
+
+def test_compute_live_24h_empty(telemetry_root):
+    from core.telemetry import compute_live_24h
+    r = compute_live_24h()
+    assert "window_start" in r
+    assert "window_end" in r
+    assert r["totals"]["events"] == 0
+
+
+def test_compute_live_24h_filters_by_window(telemetry_root):
+    from core.telemetry import compute_live_24h
+    # Eventi correnti
+    record(_make_event("raccolta", "FAU_00", OUTCOME_OK))
+    record(_make_event("raccolta", "FAU_01", OUTCOME_OK))
+
+    # Evento "vecchio" simulato — manipolo direttamente events file
+    from core.telemetry import _events_dir, _today_utc_str
+    from datetime import datetime, timezone, timedelta
+    import json
+    old_path = _events_dir() / f"events_{_today_utc_str()}.jsonl"
+    with open(old_path, "a", encoding="utf-8") as f:
+        # ts_start 25 ore fa → fuori finestra 24h
+        old_ts = (datetime.now(timezone.utc) - timedelta(hours=25)).isoformat()
+        f.write(json.dumps({
+            "event_id": "OLD12345", "ts_start": old_ts, "ts_end": old_ts,
+            "duration_s": 1.0, "task": "old_raccolta", "instance": "FAU_OLD",
+            "cycle": 0, "success": True, "outcome": "ok", "msg": "",
+            "output": {}, "anomalies": [], "retry_count": 0,
+        }) + "\n")
+
+    r = compute_live_24h()
+    assert r["totals"]["events"] == 2  # solo i 2 nuovi, l'old è fuori finestra
+    assert "raccolta" in r["per_task"]
+    assert "old_raccolta" not in r["per_task"]
+
+
+def test_save_and_load_live(telemetry_root):
+    from core.telemetry import compute_and_save_live, load_live
+    record(_make_event("raccolta", "FAU_00", OUTCOME_OK, dur=5.0))
+    live = compute_and_save_live()
+    assert live is not None
+    loaded = load_live()
+    assert loaded["totals"]["events"] == 1
+    assert "window_start" in loaded
+    assert "raccolta" in loaded["per_task"]
+
+
+def test_live_writer_loop_runs_and_stops(telemetry_root):
+    """Il loop scrive almeno una volta poi si ferma quando stop_event è set."""
+    import threading, time as _time
+    from core.telemetry import live_writer_loop, load_live
+
+    record(_make_event("raccolta", "FAU_00", OUTCOME_OK, dur=2.0))
+
+    stop = threading.Event()
+    th = threading.Thread(target=live_writer_loop, args=(stop, 0.2), daemon=True)
+    th.start()
+
+    # Aspetta la prima scrittura (immediata all'avvio)
+    _time.sleep(0.1)
+    live = load_live()
+    assert live is not None
+    assert live["totals"]["events"] == 1
+
+    stop.set()
+    th.join(timeout=2)
+    assert not th.is_alive()
