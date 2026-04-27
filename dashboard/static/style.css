@@ -257,6 +257,38 @@ html, body {
 .tog-c.off .subs,
 .tog-c.off .tog-vsep { display: none; }
 
+/* auto-WU22: task-row checkbox (2-col grid in #task-flags) */
+.task-row {
+  display: flex; align-items: center; gap: 6px;
+  padding: 3px 6px; border-radius: 3px;
+  cursor: pointer; user-select: none;
+  font-size: 14px; color: var(--text-dim);
+  min-width: 0;  /* per ellipsis nel grid cell */
+}
+.task-row:hover { background: var(--bg2); }
+.task-row.on  { color: var(--green); }
+.task-row.off { color: var(--red); opacity: 0.65; }
+.task-row .task-cb {
+  margin: 0; cursor: pointer; flex-shrink: 0;
+  accent-color: var(--green);
+  width: 13px; height: 13px;
+}
+.task-row.off .task-cb { accent-color: var(--red); }
+.task-row .task-name {
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.task-row .task-subs {
+  display: inline-flex; gap: 0; font-size: 12px; flex-shrink: 0;
+}
+.task-row .task-sub {
+  padding: 1px 5px; cursor: pointer;
+  color: var(--text-dim);
+}
+.task-row .task-sub.active { color: var(--accent); font-weight: 600; }
+.task-row .task-sub:hover { color: var(--text-mid); }
+.task-row .task-sub + .task-sub { border-left: 0.5px solid var(--border); }
+.task-row.off .task-subs { display: none; }
+
 /* ── Config 3 colonne ────────────────────────────────────── */
 .cfg4 { display: grid; grid-template-columns: repeat(4, 1fr); gap: var(--gap); }
 @media (max-width: 1400px) {

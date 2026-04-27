@@ -316,6 +316,7 @@ def partial_task_flags_v2(request: Request):
         "arena_mercato", "district_showdown",
     ]
 
+    # auto-WU22 (27/04): rewrite as 2-col checkbox rows (style rifornimento .rr-cb)
     rows     = []
     rendered = set()
 
@@ -324,40 +325,32 @@ def partial_task_flags_v2(request: Request):
             continue
         rendered.add(name)
 
-        on       = flags.get(name, True)
-        on_css   = "on" if on else "off"
-        next_val = "false" if on else "true"
+        on      = flags.get(name, True)
+        on_cls  = "on" if on else "off"
+        checked = "checked" if on else ""
 
         if name in COMPOUND:
-            c         = COMPOUND[name]
-            subs_html = ""
+            c    = COMPOUND[name]
+            subs = []
             for s in c["subtypes"]:
-                active_css = " active" if s == c["active"] else ""
-                if name == "rifornimento":
-                    patch_url = f"/api/config/rifornimento-mode/{s}"
-                else:
-                    patch_url = f"/api/config/zaino-mode/{s}"
-                subs_html += f'<span class="sub{active_css}" onclick="setModeRemote(\'{name}\',\'{s}\')">{s}</span>'
-
-            rows.append(f'''<span class="tog-c {on_css}">
-              <span class="tog-main"
-                hx-patch="/api/config/overrides/task/{name}"
-                hx-vals='{{"abilitato":"{next_val}"}}'
-                hx-swap="none"
-                hx-on::after-request="htmx.ajax('GET','/ui/partial/task-flags-v2',{{target:'#task-flags',swap:'innerHTML'}})">
-                <span class="tog-dot" style="width:5px;height:5px;border-radius:50%;background:currentColor;flex-shrink:0"></span>{name}
-              </span>
-              <span class="tog-vsep"></span>
-              <span class="subs">{subs_html}</span>
-            </span>''')
+                active_cls = "active" if s == c["active"] else ""
+                subs.append(
+                    f'<span class="task-sub {active_cls}" '
+                    f'onclick="event.preventDefault();setModeRemote(\'{name}\',\'{s}\')">{s}</span>'
+                )
+            subs_html = '<span class="task-subs">' + "".join(subs) + '</span>'
+            rows.append(f'''<label class="task-row {on_cls}">
+              <input type="checkbox" class="task-cb" {checked}
+                     onchange="toggleTaskFlag('{name}', this.checked)">
+              <span class="task-name">{name}</span>
+              {subs_html}
+            </label>''')
         else:
-            rows.append(f'''<span class="tog {on_css}"
-              hx-patch="/api/config/overrides/task/{name}"
-              hx-vals='{{"abilitato":"{next_val}"}}'
-              hx-swap="none"
-              hx-on::after-request="htmx.ajax('GET','/ui/partial/task-flags-v2',{{target:'#task-flags',swap:'innerHTML'}})">
-              <span class="tog-dot"></span>{name}
-            </span>''')
+            rows.append(f'''<label class="task-row {on_cls}">
+              <input type="checkbox" class="task-cb" {checked}
+                     onchange="toggleTaskFlag('{name}', this.checked)">
+              <span class="task-name">{name}</span>
+            </label>''')
 
     return HTMLResponse(''.join(rows))
 

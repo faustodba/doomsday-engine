@@ -51,7 +51,7 @@
                  hx-get="/ui/partial/task-flags-v2"
                  hx-trigger="load"
                  hx-swap="innerHTML"
-                 style="display:flex;flex-wrap:wrap;gap:6px">
+                 style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px">
             </div>
           </div>
           <div class="col-foot">
@@ -387,6 +387,24 @@ function setMode(mode) {
 
 function setZainoMode(mode) {
   ['bag','svuota'].forEach(m => g('z-mode-'+m)?.classList.toggle('active', m===mode));
+}
+
+// auto-WU22: toggle checkbox task flag (sostituisce hx-patch su pill)
+async function toggleTaskFlag(name, checked) {
+  try {
+    const resp = await fetch(`/api/config/overrides/task/${name}`, {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+      body: `abilitato=${checked ? 'true' : 'false'}`
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    if (typeof htmx !== 'undefined') {
+      htmx.ajax('GET', '/ui/partial/task-flags-v2',
+                {target: '#task-flags', swap: 'innerHTML'});
+    }
+  } catch (err) {
+    console.error('toggleTaskFlag fallito:', err);
+  }
 }
 
 // Cambio modalità remoto per pill compound in task-flags-v2
