@@ -745,8 +745,13 @@ def partial_produzione_istanze(request: Request):
         else:
             task_col      = "var(--text-dim)"
             task_show_lbl = "—"
-        # durata: avvio → now (solo se sessione corrente attiva)
-        durata_show = f' · <b style="color:var(--text)">{durata_curr_m}m</b>' if durata_curr_m > 0 else ""
+        # auto-WU28: durata solo se LIVE — quando idle la sessione resta
+        # aperta fino al prossimo tick (~1h30) e durata cresce indefinitamente,
+        # fuorviante. Mostra solo durante esecuzione attiva.
+        durata_show = (
+            f' · <b style="color:var(--text)">{durata_curr_m}m</b>'
+            if is_live and durata_curr_m > 0 else ""
+        )
         header_status = (
             f'<div style="display:flex;justify-content:space-between;'
             f'gap:6px;font-size:11px;color:var(--text-dim);margin-bottom:2px">'
