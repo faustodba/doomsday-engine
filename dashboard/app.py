@@ -573,8 +573,9 @@ def partial_produzione_istanze(request: Request):
     cards_html = []
     for entry in dati:
         nome = entry.get("nome", "?")
-        if not entry.get("abilitata", False):
-            continue
+        # auto-WU21 (27/04): istanze disabilitate continuano a comparire
+        # con gli ultimi dati persistiti. Stile faded + badge DISABLED.
+        is_abilitata = bool(entry.get("abilitata", False))
         corrente   = entry.get("corrente") or {}
         precedente = entry.get("precedente") or {}
 
@@ -593,24 +594,32 @@ def partial_produzione_istanze(request: Request):
         ut_esito = entry.get("ultimo_task_esito") or None
         # task da mostrare: priorità a task_corrente, fallback a ultimo task
         task_lbl = task_corrente if task_corrente else (ut_nome or "—")
+        # auto-WU21: istanze disabilitate → stato visivo "disabled"
+        # (override stato runtime, mostriamo sempre "DISABLED" badge)
+        if not is_abilitata:
+            stato = "disabled"
         # Stato pill colors
         STATO_COLOR = {
             "online":     "#4ade80",  # green
             "running":    "#4ade80",
             "idle":       "#94a3b8",  # gray
             "error":      "#f87171",  # red
+            "disabled":   "#64748b",  # dim gray
             "unknown":    "#64748b",
         }
         stato_col = STATO_COLOR.get(stato, "#64748b")
         # Badge stato a destra (stile inst-grid IDLE/RUNNING)
         STATO_BADGE_BG = {
-            "online":  "rgba(74,222,128,0.18)",
-            "running": "rgba(74,222,128,0.18)",
-            "idle":    "rgba(148,163,184,0.15)",
-            "error":   "rgba(248,113,113,0.20)",
-            "unknown": "rgba(100,116,139,0.18)",
+            "online":   "rgba(74,222,128,0.18)",
+            "running":  "rgba(74,222,128,0.18)",
+            "idle":     "rgba(148,163,184,0.15)",
+            "error":    "rgba(248,113,113,0.20)",
+            "disabled": "rgba(100,116,139,0.10)",
+            "unknown":  "rgba(100,116,139,0.18)",
         }
         badge_bg = STATO_BADGE_BG.get(stato, "rgba(100,116,139,0.18)")
+        # Card opacity ridotta per disabilitate (dati storici visibili)
+        card_opacity = "0.55" if not is_abilitata else "1"
 
         # Sessione corrente
         ris_ini    = corrente.get("risorse_iniziali", {}) or {}
@@ -766,7 +775,7 @@ def partial_produzione_istanze(request: Request):
 
         cards_html.append(f'''
         <div class="prod-card" style="background:var(--bg-card);border:1px solid var(--border);
-             border-radius:5px;padding:8px 10px;font-size:12px">
+             border-radius:5px;padding:8px 10px;font-size:12px;opacity:{card_opacity}">
           <div style="display:flex;justify-content:space-between;align-items:center;
                margin-bottom:4px;font-weight:600;font-size:14px">
             <span style="display:flex;align-items:center;gap:6px">
