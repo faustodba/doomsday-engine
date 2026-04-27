@@ -59,11 +59,12 @@ COORD_CAMPO: dict[str, tuple[int, int]] = {
 COORD_VAI: tuple[int, int] = (480, 448)   # pulsante VAI
 
 # Zone OCR nella maschera
-OCR_NOME_DEST:  tuple[int, int, int, int] = (265, 90,  620, 138)  # nome destinatario
-OCR_PROVVISTE:  tuple[int, int, int, int] = (155, 230, 360, 262)  # provviste rimanenti
-OCR_TASSA:      tuple[int, int, int, int] = (155, 272, 310, 298)  # "Tasse: 23.0%"
-OCR_CAMION:     tuple[int, int, int, int] = (155, 340, 395, 385)  # "0/1,200,000"
-OCR_TEMPO:      tuple[int, int, int, int] = (350, 398, 620, 438)  # ETA "00:00:54"
+OCR_NOME_DEST:        tuple[int, int, int, int] = (265, 90,  620, 138)  # nome destinatario
+OCR_DAILY_RECV_LIMIT: tuple[int, int, int, int] = (547, 146, 666, 173)  # "Daily Receiving Limit" — cap intake destinatario
+OCR_PROVVISTE:        tuple[int, int, int, int] = (155, 230, 360, 262)  # "Today's Remaining Supplies" — cap output mittente
+OCR_TASSA:            tuple[int, int, int, int] = (155, 272, 310, 298)  # "Tasse: 23.0%"
+OCR_CAMION:           tuple[int, int, int, int] = (155, 340, 395, 385)  # "0/1,200,000"
+OCR_TEMPO:            tuple[int, int, int, int] = (350, 398, 620, 438)  # ETA "00:00:54"
 
 # Zona pulsante VAI (per rilevamento colore giallo)
 VAI_ZONA: tuple[int, int, int, int] = (270, 420, 690, 480)
@@ -129,12 +130,30 @@ def vai_abilitato(screenshot: "Screenshot") -> bool:
 
 def leggi_provviste(screenshot: "Screenshot") -> int:
     """
-    Legge 'Provviste rimanenti di oggi' dalla maschera.
+    Legge 'Today's Remaining Supplies' dalla maschera (cap output del MITTENTE).
 
     Returns:
         Valore intero (≥ 0), oppure -1 se OCR fallisce.
     """
     testo = ocr_intero(screenshot, OCR_PROVVISTE, preprocessor="otsu")
+    val = estrai_numero(testo)
+    if val is None:
+        return -1
+    return val
+
+
+def leggi_daily_recv_limit(screenshot: "Screenshot") -> int:
+    """
+    Legge 'Daily Receiving Limit' dalla maschera — capacità giornaliera residua
+    del DESTINATARIO (FauMorfeus) di accettare risorse oggi.
+
+    Valore globale: tutte le istanze inviano alla stessa Morfeus, vedono lo
+    stesso numero. Quando arriva a 0 → spedizioni inutili (bloccate dal gioco).
+
+    Returns:
+        Valore intero (≥ 0), oppure -1 se OCR fallisce.
+    """
+    testo = ocr_intero(screenshot, OCR_DAILY_RECV_LIMIT, preprocessor="otsu")
     val = estrai_numero(testo)
     if val is None:
         return -1

@@ -424,12 +424,38 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
     coord_campo  = _cfg(ctx, "COORD_CAMPO")
     coord_vai    = _cfg(ctx, "COORD_VAI")
 
-    # Leggi provviste
+    # Leggi provviste (mittente)
     provviste = _leggi_provviste(screen, ocr_provv)
     if provviste >= 0:
         ctx.log_msg(f"Rifornimento: provviste rimanenti={provviste:,}")
     else:
         ctx.log_msg("Rifornimento: provviste OCR fallito — procedo")
+
+    # Leggi Daily Receiving Limit del destinatario (cap intake giornaliero
+    # FauMorfeus). Valore globale: salvato in data/morfeus_state.json,
+    # condiviso tra tutte le istanze, mostrato in dashboard.
+    try:
+        from shared.rifornimento_base import leggi_daily_recv_limit
+        from shared import morfeus_state
+        recv_limit = leggi_daily_recv_limit(screen)
+        if recv_limit >= 0:
+            ctx.log_msg(
+                f"Rifornimento: Daily Receiving Limit {nome_rifugio}={recv_limit:,}"
+            )
+            tassa_pct = None
+            try:
+                tassa_pct = float(ctx.state.rifornimento.tassa_pct_avg)
+            except Exception:
+                pass
+            morfeus_state.save(
+                daily_recv_limit=recv_limit,
+                letto_da=ctx.instance_name,
+                tassa_pct=tassa_pct,
+            )
+        else:
+            ctx.log_msg("Rifornimento: Daily Receiving Limit OCR fallito — skip salvataggio")
+    except Exception as exc:
+        ctx.log_msg(f"Rifornimento: errore lettura Daily Receiving Limit: {exc}")
 
     if provviste == 0:
         ctx.log_msg("Rifornimento: provviste esaurite → stop")

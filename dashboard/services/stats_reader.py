@@ -46,6 +46,7 @@ _PROD_ROOT     = Path(os.environ.get("DOOMSDAY_ROOT", str(_ROOT)))
 _ENGINE_STATUS = _PROD_ROOT / "engine_status.json"
 _STATE_DIR     = _PROD_ROOT / "state"
 _LOGS_DIR      = _PROD_ROOT / "logs"
+_MORFEUS_STATE = _PROD_ROOT / "data" / "morfeus_state.json"
 
 # Soglia anti-falso-positivo OCR (Issue #16: legno=999M da FAU_10).
 # Una singola spedizione reale non supera mai 100M.
@@ -73,6 +74,19 @@ class RifornimentoIstanza:
 
 
 @dataclass
+class MorfeusState:
+    """
+    Capienza giornaliera residua del destinatario (FauMorfeus).
+    Letto da data/morfeus_state.json — aggiornato dall'ultima istanza che
+    apre la maschera di invio.
+    """
+    daily_recv_limit: int    = -1            # -1 = mai letto
+    ts:               str    = ""            # ISO ts ultimo update
+    letto_da:         str    = ""            # nome istanza che ha letto
+    tassa_pct:        float  = 0.0
+
+
+@dataclass
 class RisorseFarm:
     """
     Aggregato risorse per tutte le istanze con state persistito.
@@ -86,6 +100,7 @@ class RisorseFarm:
       - quota_max_per_ciclo     : somma quota_max per-ciclo tutte istanze
       - istanze_detail          : lista RifornimentoIstanza
       - produzione_per_ora      : somma metrics.*_per_ora da tutte le istanze
+      - morfeus                 : stato globale destinatario (Daily Receiving Limit)
     """
     inviato_per_risorsa:    Dict[str, int]             = field(default_factory=dict)
     provviste_residue:      int                         = 0
@@ -94,6 +109,7 @@ class RisorseFarm:
     quota_max_per_ciclo:    int                         = 0
     istanze_detail:         List[RifornimentoIstanza]  = field(default_factory=list)
     produzione_per_ora:     Dict[str, float]            = field(default_factory=dict)
+    morfeus:                MorfeusState                = field(default_factory=MorfeusState)
 
 
 # ==============================================================================
@@ -105,6 +121,23 @@ def _load_engine_status() -> EngineStatus:
     for nome, ist in es.istanze.items():
         ist.nome = nome
     return es
+
+
+def _load_morfeus_state() -> MorfeusState:
+    """Legge data/morfeus_state.json. Ritorna stato 'mai letto' se file mancante."""
+    try:
+        if not _MORFEUS_STATE.exists():
+            return MorfeusState()
+        with open(_MORFEUS_STATE, encoding="utf-8") as f:
+            d = json.load(f)
+        return MorfeusState(
+            daily_recv_limit = int(d.get("daily_recv_limit", -1)),
+            ts               = str(d.get("ts", "")),
+            letto_da         = str(d.get("letto_da", "")),
+            tassa_pct        = float(d.get("tassa_pct", 0.0) or 0.0),
+        )
+    except Exception:
+        return MorfeusState()
 
 
 def _load_state(nome: str) -> dict:
@@ -435,6 +468,7 @@ def get_risorse_farm() -> RisorseFarm:
             quota_max_per_ciclo     = quota_ciclo,
             istanze_detail          = detail,
             produzione_per_ora      = prod_ora,
+            morfeus                 = _load_morfeus_state(),
         )
 
     except Exception:

@@ -773,6 +773,38 @@ def partial_res_totali(request: Request):
           <span style="{esaurita_css}" title="{tooltip}">{prov_netta_ist}</span>
         </div>'''
 
+    # WU39 — Capienza giornaliera residua FauMorfeus (Daily Receiving Limit)
+    morf = farm.morfeus
+    if morf.daily_recv_limit < 0:
+        morf_html = (
+            '<div class="res-sub" style="display:flex;justify-content:space-between;align-items:center">'
+            '<span>capienza morfeus</span>'
+            '<span style="color:var(--text-dim)" title="OCR mai eseguito — attendere primo rifornimento">—</span>'
+            '</div>'
+        )
+    else:
+        recv_lbl = _fmt_m(morf.daily_recv_limit)
+        if morf.daily_recv_limit == 0:
+            recv_col = "var(--red,#f87171)"
+            recv_warn = " ⚠ saturo"
+        elif morf.daily_recv_limit < 5_000_000:
+            recv_col = "#fbbf24"
+            recv_warn = ""
+        else:
+            recv_col = "var(--accent)"
+            recv_warn = ""
+        # ts compatto HH:MM
+        ts_short = morf.ts[11:16] if len(morf.ts) >= 16 else "—"
+        morf_html = (
+            f'<div class="res-sub" style="display:flex;justify-content:space-between;align-items:center" '
+            f'title="aggiornato {morf.ts[:19]} da {morf.letto_da}">'
+            f'<span>capienza morfeus</span>'
+            f'<span style="color:{recv_col}">{recv_lbl}{recv_warn}'
+            f'<span style="color:var(--text-dim);font-size:9px"> · {ts_short} {morf.letto_da}</span>'
+            f'</span>'
+            f'</div>'
+        )
+
     html = f'''
     <div class="res-sub">inviato oggi — tutte le istanze</div>
     {rows_inviato}
@@ -782,6 +814,7 @@ def partial_res_totali(request: Request):
         <span style="color:var(--text-dim);font-size:9px">· {farm.quota_max_per_ciclo}/ciclo</span>
       </span>
     </div>
+    {morf_html}
     <div class="res-sub" style="display:flex;justify-content:space-between;align-items:center"
          title="lordo OCR: {prov_lordo_lbl}">
       <span>provviste residue (netto)</span>
