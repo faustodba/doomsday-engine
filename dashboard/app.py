@@ -142,6 +142,251 @@ def ui_index(request: Request):
     })
 
 
+@app.get("/ui/mockup/telemetria", include_in_schema=False)
+def ui_mockup_telemetria(request: Request):
+    """
+    Mockup statico — validation layout pannelli telemetria proposti.
+    Dati hardcoded realistici (memoria notte 26/04 + sessione corrente).
+    Da rimuovere dopo validazione utente.
+    """
+    html = _render_mockup_telemetria()
+    return HTMLResponse(html)
+
+
+def _render_mockup_telemetria() -> str:
+    # Dati di esempio realistici da memoria progetto (notte 26/04 + sessione corrente)
+    task_kpi = [
+        # (nome,            esec, ok%,   avg,     last,    err)
+        ("boost",            187,  98,  "42s",   "12:31", "—"),
+        ("rifornimento",      92,  85,  "3m12s", "12:24", "OCR provviste fail ×3"),
+        ("raccolta",         145,  71,  "8m40s", "12:33", "nessuna squadra ×12"),
+        ("donazione",         45,  91,  "1m05s", "12:18", "—"),
+        ("districtshowdown",   8,  50,  "12m00", "11:55", "early-exit ×2"),
+        ("arena",             45,  93,  "1m20s", "12:19", "timeout 300s ×3"),
+        ("zaino",             38, 100,  "55s",   "12:22", "—"),
+        ("vip",               42, 100,  "18s",   "12:30", "—"),
+    ]
+
+    health = [
+        ("warn", "Stab HOME timeout",        "18/23 boot (78%)",       "issue notte 26/04 #2"),
+        ("warn", "ADB cascade abort",        "3 (FAU_02 ×2, FAU_04)",  "abort tick + reset emergenz."),
+        ("warn", "ARENA recovery cascade",   "4 (FAU_05/07/07/09)",    "issue notte 26/04 #3"),
+        ("warn", "Banner unmatched",         "14 tap X auto-fallback", "issue #54"),
+        ("warn", "Boot foreground recov",    "2 (~90s/recovery)",      "WU60 — fix attivo"),
+        ("ok",   "Spedizioni inviate",       "104/110 (94%)",          ""),
+        ("ok",   "Cycle completati 24h",     "8 round (12 ist × 8)",   ""),
+    ]
+
+    ist_status = [
+        # (nome, esito, durata, tasks_str, badge)
+        ("FAU_00", "ok",     "12.4m",  "boost rif×2 racc×4",     ""),
+        ("FAU_01", "ok",     "11.8m",  "rif×2 racc×5 don",       ""),
+        ("FAU_02", "abort",  "09.2m",  "ADB cascade abort",      "ADB"),
+        ("FAU_03", "live",   "08.5m",  "task=raccolta segh L7",  "▸"),
+        ("FAU_04", "wait",   "—",      "in coda",                ""),
+        ("FAU_05", "wait",   "—",      "in coda",                ""),
+        ("FAU_06", "wait",   "—",      "in coda",                ""),
+        ("FAU_07", "wait",   "—",      "in coda",                "DEF"),  # deficit
+        ("FAU_08", "wait",   "—",      "in coda",                ""),
+        ("FAU_09", "wait",   "—",      "in coda",                ""),
+        ("FAU_10", "wait",   "—",      "in coda",                ""),
+    ]
+
+    trend = [
+        # (label, sparkline ascii, attuale, delta)
+        ("Spedizioni/gg",  "▂▃▄▆▇█▇▆", "104",   "↑13% vs avg"),
+        ("Tassa media",    "▆▆▇▆▆▆▆▇", "23.0%", "stable"),
+        ("Cycle time",     "▅▆▇█▇▆▅▅", "150m",  "avg 152m"),
+        ("Anomalie/gg",    "▂▂▃▄█▆▃▂", "37",    "ARENA cascade ×4"),
+    ]
+
+    # ── HTML build ─────────────────────────────────────────────────────────
+    def _ok_pill(pct):
+        col = "var(--green)" if pct >= 90 else ("#fbbf24" if pct >= 70 else "var(--red,#f87171)")
+        return f'<span style="color:{col};font-weight:600">{pct}%</span>'
+
+    rows_kpi = "".join(
+        f'<tr><td style="color:var(--accent)">{n}</td>'
+        f'<td style="text-align:right">{e}</td>'
+        f'<td style="text-align:right">{_ok_pill(p)}</td>'
+        f'<td style="text-align:right;color:var(--text-dim)">{a}</td>'
+        f'<td style="text-align:right;color:var(--text-dim)">{l}</td>'
+        f'<td style="color:var(--text-dim);font-size:11px">{er}</td></tr>'
+        for n, e, p, a, l, er in task_kpi
+    )
+
+    def _hbadge(kind):
+        if kind == "ok":   return '<span style="color:var(--green);font-weight:600">✓</span>'
+        return '<span style="color:#fbbf24;font-weight:600">⚠</span>'
+
+    rows_health = "".join(
+        f'<tr><td>{_hbadge(k)}</td>'
+        f'<td style="color:var(--text)">{lbl}</td>'
+        f'<td style="text-align:right;color:var(--accent);font-weight:600">{val}</td>'
+        f'<td style="color:var(--text-dim);font-size:11px">{note}</td></tr>'
+        for k, lbl, val, note in health
+    )
+
+    def _isth_badge(b):
+        if b == "ADB": return '<span style="color:var(--red);font-size:10px;border:1px solid var(--red);padding:1px 5px;border-radius:3px">ADB</span>'
+        if b == "DEF": return '<span style="color:#fbbf24;font-size:10px;border:1px solid #fbbf24;padding:1px 5px;border-radius:3px" title="netto deficit risorse">DEF</span>'
+        if b == "▸":   return '<span style="color:var(--accent);font-weight:700">▸</span>'
+        return ""
+
+    def _isth_color(esito):
+        return {
+            "ok":    "var(--green)",
+            "abort": "var(--red)",
+            "live":  "var(--accent)",
+            "wait":  "var(--text-dim)",
+        }.get(esito, "var(--text)")
+
+    rows_ist = "".join(
+        f'<tr><td style="color:var(--accent);font-weight:600">{n}</td>'
+        f'<td style="color:{_isth_color(es)}">{es}</td>'
+        f'<td style="text-align:right">{d}</td>'
+        f'<td style="color:var(--text-dim)">{t}</td>'
+        f'<td style="text-align:center">{_isth_badge(b)}</td></tr>'
+        for n, es, d, t, b in ist_status
+    )
+
+    rows_trend = "".join(
+        f'<tr><td style="color:var(--text-dim)">{lbl}</td>'
+        f'<td style="font-family:monospace;font-size:14px;color:var(--accent);letter-spacing:1px">{spark}</td>'
+        f'<td style="text-align:right;color:var(--text);font-weight:600">{cur}</td>'
+        f'<td style="color:var(--text-dim);font-size:11px">{delta}</td></tr>'
+        for lbl, spark, cur, delta in trend
+    )
+
+    return f"""<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <title>Mockup Telemetria — Doomsday V6</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .mock-banner {{
+      background: #fbbf24; color: #000; padding: 8px 16px;
+      text-align: center; font-weight: 600; letter-spacing: 1px;
+    }}
+    .mock-grid {{
+      display: grid; grid-template-columns: 1fr 1fr; gap: 16px;
+      padding: 16px; max-width: 1400px; margin: 0 auto;
+    }}
+    .mock-grid > .full {{ grid-column: 1 / -1; }}
+    .mock-card {{
+      background: var(--bg-2, #1a1a24);
+      border: 0.5px solid var(--border);
+      border-radius: 6px; padding: 14px;
+    }}
+    .mock-card h3 {{
+      margin: 0 0 10px 0;
+      font-size: 13px;
+      letter-spacing: 2px;
+      text-transform: uppercase;
+      color: var(--accent);
+      border-bottom: 0.5px solid var(--border);
+      padding-bottom: 6px;
+    }}
+    .mock-card table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
+    .mock-card th {{
+      text-align: left; color: var(--text-dim);
+      font-weight: 400; font-size: 10px; text-transform: uppercase;
+      letter-spacing: 1px; padding: 4px 6px; border-bottom: 0.5px solid var(--border);
+    }}
+    .mock-card td {{ padding: 4px 6px; border-bottom: 0.5px solid rgba(255,255,255,0.04); }}
+    .mock-card tr:last-child td {{ border-bottom: none; }}
+    .mock-card .footnote {{
+      margin-top: 8px; color: var(--text-dim); font-size: 10px;
+      font-style: italic;
+    }}
+  </style>
+</head>
+<body>
+  <div class="mock-banner">⚠ MOCKUP STATICO — dati di esempio per validazione layout. URL: /ui/mockup/telemetria</div>
+
+  <div class="mock-grid">
+
+    <!-- 1. TELEMETRIA TASK ──────────────────────────────────────── -->
+    <div class="mock-card full">
+      <h3>📊 Telemetria task</h3>
+      <table>
+        <thead>
+          <tr><th>task</th><th style="text-align:right">esec</th>
+              <th style="text-align:right">ok%</th>
+              <th style="text-align:right">avg durata</th>
+              <th style="text-align:right">last run</th>
+              <th>ultimo errore</th></tr>
+        </thead>
+        <tbody>{rows_kpi}</tbody>
+      </table>
+      <div class="footnote">
+        sorgenti: <code>engine_status.istanze[].task_eseguiti</code> + scan rolling 24h <code>logs/FAU_*.jsonl</code> (pattern <code>Orchestrator: task '*' completato/failed</code>). Refresh 30s.
+      </div>
+    </div>
+
+    <!-- 2. HEALTH 24h ────────────────────────────────────────────── -->
+    <div class="mock-card">
+      <h3>⚠️ Health 24h</h3>
+      <table>
+        <tbody>{rows_health}</tbody>
+      </table>
+      <div class="footnote">
+        regex su 24h logs JSONL — pattern noti dalla memoria (notte 26/04, banner #54, WU60 foreground).
+      </div>
+    </div>
+
+    <!-- 3. CICLO CORRENTE ───────────────────────────────────────── -->
+    <div class="mock-card">
+      <h3>🔄 Ciclo corrente</h3>
+      <div style="display:flex;justify-content:space-between;margin-bottom:10px;font-size:12px">
+        <div>
+          <div style="color:var(--text-dim)">CICLO #14</div>
+          <div style="color:var(--accent);font-size:18px;font-weight:600">23m 14s</div>
+        </div>
+        <div>
+          <div style="color:var(--text-dim);text-align:right">prossima</div>
+          <div style="color:var(--text);font-weight:600;text-align:right">FAU_04</div>
+        </div>
+        <div>
+          <div style="color:var(--text-dim);text-align:right">ETA fine</div>
+          <div style="color:var(--text);font-weight:600;text-align:right">~127m</div>
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr><th>ist</th><th>esito</th>
+              <th style="text-align:right">durata</th>
+              <th>task</th><th style="text-align:center"></th></tr>
+        </thead>
+        <tbody>{rows_ist}</tbody>
+      </table>
+      <div class="footnote">
+        sorgenti: <code>engine_status.istanze[].ultimo_task</code> + <code>stato</code>. ETA = (12 - completate) × media ultimi 10.
+      </div>
+    </div>
+
+    <!-- 4. TREND 7gg ─────────────────────────────────────────────── -->
+    <div class="mock-card full">
+      <h3>📈 Trend ultimi 7 giorni</h3>
+      <table>
+        <tbody>{rows_trend}</tbody>
+      </table>
+      <div class="footnote">
+        sparkline ASCII (no librerie) da <code>data/storico_farm.json</code> (retention 90gg già esistente).
+      </div>
+    </div>
+
+  </div>
+
+  <div style="text-align:center;padding:20px;color:var(--text-dim);font-size:11px">
+    <a href="/ui" style="color:var(--accent)">← back to dashboard</a>
+    &nbsp;·&nbsp; pannelli aggiunti come HTMX partial sotto RISORSE FARM
+  </div>
+</body>
+</html>"""
+
+
 @app.get("/ui/instance/{nome}", include_in_schema=False)
 def ui_instance(request: Request, nome: str):
     from dashboard.services.stats_reader import get_instance_stats
@@ -971,3 +1216,158 @@ def partial_res_oraria(request: Request):
     </div>
     '''
     return HTMLResponse(html)
+
+
+# ==============================================================================
+# Telemetria — 4 partial HTMX (WU37 — Issue #53 MVP)
+# ==============================================================================
+
+def _fmt_dur(s: float) -> str:
+    if s <= 0:
+        return "—"
+    if s < 60:
+        return f"{s:.0f}s"
+    m = s / 60
+    if m < 60:
+        return f"{int(m)}m{int(s % 60):02d}s"
+    h = m / 60
+    return f"{int(h)}h{int(m % 60):02d}m"
+
+
+@app.get("/ui/partial/telemetria-task", include_in_schema=False)
+def partial_telemetria_task(request: Request):
+    from dashboard.services.telemetry_reader import get_task_kpi_24h
+    rows = get_task_kpi_24h()
+    if not rows:
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:8px">'
+            'nessun task eseguito nelle ultime 24h</div>'
+        )
+    body = []
+    for k in rows:
+        col = "var(--green)" if k.ok_pct >= 90 else ("#fbbf24" if k.ok_pct >= 70 else "var(--red,#f87171)")
+        err = k.last_err if k.last_err and k.last_err != "—" else "—"
+        body.append(
+            f'<tr><td style="color:var(--accent)">{k.nome}</td>'
+            f'<td style="text-align:right">{k.esec_24h}</td>'
+            f'<td style="text-align:right;color:{col};font-weight:600">{k.ok_pct}%</td>'
+            f'<td style="text-align:right;color:var(--text-dim)">{_fmt_dur(k.avg_dur_s)}</td>'
+            f'<td style="text-align:right;color:var(--text-dim)">{k.last_ts or "—"}</td>'
+            f'<td style="color:var(--text-dim);font-size:11px">{err}</td></tr>'
+        )
+    html = (
+        '<table class="tel-table">'
+        '<thead><tr>'
+        '<th>task</th>'
+        '<th style="text-align:right">esec</th>'
+        '<th style="text-align:right">ok%</th>'
+        '<th style="text-align:right">avg dur</th>'
+        '<th style="text-align:right">last</th>'
+        '<th>ultimo errore</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table>'
+    )
+    return HTMLResponse(html)
+
+
+@app.get("/ui/partial/telemetria-health", include_in_schema=False)
+def partial_telemetria_health(request: Request):
+    from dashboard.services.telemetry_reader import get_health_24h
+    rows = get_health_24h()
+    if not rows:
+        return HTMLResponse(
+            '<div style="color:var(--green);text-align:center;padding:8px">'
+            '✓ nessuna anomalia rilevata 24h</div>'
+        )
+    body = []
+    for h in rows:
+        if h.kind == "ok":
+            badge = '<span style="color:var(--green);font-weight:600">✓</span>'
+            val_col = "var(--green)"
+        else:
+            badge = '<span style="color:#fbbf24;font-weight:600">⚠</span>'
+            val_col = "var(--accent)"
+        body.append(
+            f'<tr><td style="width:18px">{badge}</td>'
+            f'<td>{h.label}</td>'
+            f'<td style="text-align:right;color:{val_col};font-weight:600">{h.value}</td>'
+            f'<td style="color:var(--text-dim);font-size:11px">{h.note}</td></tr>'
+        )
+    return HTMLResponse(f'<table class="tel-table"><tbody>{"".join(body)}</tbody></table>')
+
+
+@app.get("/ui/partial/telemetria-ciclo", include_in_schema=False)
+def partial_telemetria_ciclo(request: Request):
+    from dashboard.services.telemetry_reader import get_ciclo_status
+    cs = get_ciclo_status()
+
+    def _isth_badge(b):
+        if b == "ADB": return '<span style="color:var(--red);font-size:10px;border:1px solid var(--red);padding:1px 5px;border-radius:3px">ADB</span>'
+        if b == "DEF": return '<span style="color:#fbbf24;font-size:10px;border:1px solid #fbbf24;padding:1px 5px;border-radius:3px">DEF</span>'
+        if b == "▸":   return '<span style="color:var(--accent);font-weight:700">▸</span>'
+        return ""
+
+    def _isth_color(esito):
+        return {"ok":"var(--green)","abort":"var(--red)","live":"var(--accent)","wait":"var(--text-dim)"}.get(esito,"var(--text)")
+
+    def _hms(s: int) -> str:
+        if s <= 0:
+            return "—"
+        m = s // 60
+        if m < 60:
+            return f"{m}m {s % 60}s"
+        return f"{m // 60}h {m % 60:02d}m"
+
+    rows = "".join(
+        f'<tr><td style="color:var(--accent);font-weight:600">{r.nome}</td>'
+        f'<td style="color:{_isth_color(r.esito)}">{r.esito}</td>'
+        f'<td style="text-align:right">{r.durata}</td>'
+        f'<td style="color:var(--text-dim)">{r.tasks}</td>'
+        f'<td style="text-align:center">{_isth_badge(r.badge)}</td></tr>'
+        for r in cs.istanze
+    )
+
+    html = f'''
+    <div style="display:flex;justify-content:space-between;margin-bottom:10px;font-size:12px">
+      <div>
+        <div style="color:var(--text-dim)">CICLO #{cs.numero}</div>
+        <div style="color:var(--accent);font-size:18px;font-weight:600">{_hms(cs.in_corso_da_s)}</div>
+      </div>
+      <div>
+        <div style="color:var(--text-dim);text-align:right">prossima</div>
+        <div style="color:var(--text);font-weight:600;text-align:right">{cs.prossima}</div>
+      </div>
+      <div>
+        <div style="color:var(--text-dim);text-align:right">ETA fine</div>
+        <div style="color:var(--text);font-weight:600;text-align:right">~{_hms(cs.eta_fine_s)}</div>
+      </div>
+    </div>
+    <table class="tel-table">
+      <thead><tr>
+        <th>ist</th><th>esito</th>
+        <th style="text-align:right">durata</th>
+        <th>task</th><th></th>
+      </tr></thead>
+      <tbody>{rows}</tbody>
+    </table>
+    '''
+    return HTMLResponse(html)
+
+
+@app.get("/ui/partial/telemetria-trend", include_in_schema=False)
+def partial_telemetria_trend(request: Request):
+    from dashboard.services.telemetry_reader import get_trend_7gg
+    rows = get_trend_7gg()
+    if not rows:
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:8px">'
+            'nessun dato storico (data/storico_farm.json vuoto)</div>'
+        )
+    body = "".join(
+        f'<tr><td style="color:var(--text-dim)">{t.label}</td>'
+        f'<td style="font-family:monospace;font-size:14px;color:var(--accent);letter-spacing:1px">{t.sparkline}</td>'
+        f'<td style="text-align:right;color:var(--text);font-weight:600">{t.current}</td>'
+        f'<td style="color:var(--text-dim);font-size:11px">{t.delta}</td></tr>'
+        for t in rows
+    )
+    return HTMLResponse(f'<table class="tel-table"><tbody>{body}</tbody></table>')

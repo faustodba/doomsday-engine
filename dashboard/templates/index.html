@@ -256,6 +256,60 @@
 
     <div class="divider"></div>
 
+    <!-- ── TELEMETRIA (WU37 — Issue #53 MVP) ──────────────── -->
+    <div class="section">
+      <div class="sec-label">telemetria 24h</div>
+      <div class="tel-grid">
+
+        <div class="tel-card tel-full">
+          <div class="tel-head">📊 telemetria task</div>
+          <div id="tel-task"
+               hx-get="/ui/partial/telemetria-task"
+               hx-trigger="load, every 30s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">scan rolling 24h logs/FAU_*.jsonl · refresh 30s</div>
+        </div>
+
+        <div class="tel-card">
+          <div class="tel-head">⚠️ health 24h</div>
+          <div id="tel-health"
+               hx-get="/ui/partial/telemetria-health"
+               hx-trigger="load, every 30s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">pattern noti su 24h (memoria progetto)</div>
+        </div>
+
+        <div class="tel-card">
+          <div class="tel-head">🔄 ciclo corrente</div>
+          <div id="tel-ciclo"
+               hx-get="/ui/partial/telemetria-ciclo"
+               hx-trigger="load, every 10s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">engine_status.json · refresh 10s</div>
+        </div>
+
+        <div class="tel-card tel-full">
+          <div class="tel-head">📈 trend 7gg</div>
+          <div id="tel-trend"
+               hx-get="/ui/partial/telemetria-trend"
+               hx-trigger="load, every 300s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">data/storico_farm.json (90gg retention)</div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
     <!-- ── STORICO EVENTI ─────────────────────────────────── -->
     <div class="section">
       <div class="sec-label">storico eventi</div>
