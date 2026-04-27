@@ -578,6 +578,24 @@ def partial_produzione_istanze(request: Request):
         corrente   = entry.get("corrente") or {}
         precedente = entry.get("precedente") or {}
 
+        # auto-WU18: stato live + task corrente + errori + quota
+        stato         = entry.get("stato", "unknown")
+        task_corrente = entry.get("task_corrente") or "—"
+        errori_live   = int(entry.get("errori_live", 0) or 0)
+        quota_max     = int(entry.get("quota_max", 0) or 0)
+        sped_oggi     = int(entry.get("spedizioni_oggi", 0) or 0)
+        quota_esau    = bool(entry.get("quota_esaurita", False))
+        quota_lbl     = f"{sped_oggi}/{quota_max}" if quota_max > 0 else "—"
+        # Stato pill colors
+        STATO_COLOR = {
+            "online":     "#4ade80",  # green
+            "running":    "#4ade80",
+            "idle":       "#94a3b8",  # gray
+            "error":      "#f87171",  # red
+            "unknown":    "#64748b",
+        }
+        stato_col = STATO_COLOR.get(stato, "#64748b")
+
         # Sessione corrente
         ris_ini    = corrente.get("risorse_iniziali", {}) or {}
         rif_inv    = corrente.get("rifornimento_inviato", {}) or {}
@@ -587,6 +605,8 @@ def partial_produzione_istanze(request: Request):
         provv      = corrente.get("rifornimento_provviste_residue", -1)
         tasks_curr = corrente.get("tasks_count", {}) or {}
         ts_inizio  = corrente.get("ts_inizio", "")
+        # Avvio in formato HH:MM (UTC dell'ts_inizio)
+        avvio_lbl  = ts_inizio[11:16] if ts_inizio and len(ts_inizio) >= 16 else "—"
 
         # Durata corrente: now - ts_inizio
         durata_curr_m = 0
@@ -668,24 +688,41 @@ def partial_produzione_istanze(request: Request):
         tasks_curr_short, tasks_curr_tip = _tasks_brief(tasks_curr)
         tasks_prec_short, tasks_prec_tip = _tasks_brief(tasks_prec)
 
-        # Riga corrente: durata, truppe, tasks
-        # Riga precedente: durata, truppe, tasks
+        # auto-WU18: header secondaria con avvio + task corrente + errori live
+        # (prima del tabella risorse)
+        err_color = "var(--red,#f87171)" if errori_live > 0 else "var(--text-dim)"
+        header_status = (
+            f'<div style="display:flex;justify-content:space-between;'
+            f'gap:6px;font-size:9px;color:var(--text-dim);margin-bottom:3px">'
+            f'<span>avvio <b style="color:var(--text)">{avvio_lbl}</b></span>'
+            f'<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
+            f'text-align:center">task: <b style="color:var(--accent)">{task_corrente}</b></span>'
+            f'<span style="color:{err_color}">err:{errori_live}</span>'
+            f'</div>'
+        )
+
+        # Riga corrente: durata, truppe (raccoglitori), quota rifornimento + flag esaurita
+        quota_flag = " 🔴" if quota_esau else ""
         sess_corr_line = (
             f'<div title="{tasks_curr_tip}" style="font-size:9px;color:var(--text-dim);'
             f'margin-top:3px;display:flex;justify-content:space-between;gap:4px">'
-            f'<span><b style="color:var(--accent)">corrente</b> · {durata_curr_m}m · T={truppe}</span>'
+            f'<span><b style="color:var(--accent)">corrente</b> · {durata_curr_m}m · '
+            f'racc:{truppe} · q:{quota_lbl}{quota_flag}</span>'
             f'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
-            f'max-width:60%;text-align:right">{tasks_curr_short}</span>'
+            f'max-width:55%;text-align:right">{tasks_curr_short}</span>'
             f'</div>'
         )
 
         if has_prec:
+            errori_prec = int(precedente.get("errori_count", 0) or 0)
+            err_prec_color = "var(--red,#f87171)" if errori_prec > 0 else "var(--text-dim)"
             sess_prec_line = (
                 f'<div title="{tasks_prec_tip}" style="font-size:9px;color:var(--text-dim);'
                 f'display:flex;justify-content:space-between;gap:4px">'
-                f'<span><b style="color:#7cf">precedente</b> · {durata_prec_m}m · T={truppe_prec}</span>'
+                f'<span><b style="color:#7cf">precedente</b> · {durata_prec_m}m · '
+                f'racc:{truppe_prec} · <span style="color:{err_prec_color}">err:{errori_prec}</span></span>'
                 f'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
-                f'max-width:60%;text-align:right">{tasks_prec_short}</span>'
+                f'max-width:55%;text-align:right">{tasks_prec_short}</span>'
                 f'</div>'
             )
         else:
@@ -699,11 +736,17 @@ def partial_produzione_istanze(request: Request):
              border-radius:5px;padding:6px 8px;font-size:10px">
           <div style="display:flex;justify-content:space-between;align-items:center;
                margin-bottom:3px;font-weight:600;font-size:11px">
-            <span>{nome}</span>
+            <span style="display:flex;align-items:center;gap:5px">
+              <span style="display:inline-block;width:7px;height:7px;border-radius:50%;
+                background:{stato_col}"></span>
+              {nome}
+              <span style="color:var(--text-dim);font-weight:normal;font-size:9px">·{stato}</span>
+            </span>
             <span style="color:var(--text-dim);font-weight:normal;font-size:9px">
               P:{provv_lbl}
             </span>
           </div>
+          {header_status}
           <table style="width:100%;border-collapse:collapse;font-size:10px">
             <thead><tr style="color:var(--text-dim);font-size:9px">
               <th style="text-align:left">risorsa</th>

@@ -240,33 +240,31 @@ def get_produzione_istanze() -> list[dict]:
     """
     Auto-WU14 step3: ritorna dati produzione per ogni istanza.
 
+    Auto-WU18 (27/04): arricchito con stato live, task corrente, errori,
+    quota rifornimento (per card unificata).
+
     Per ogni istanza presente in instances.json, legge state/<nome>.json
-    e estrae produzione_corrente + ultima sessione chiusa dal storico.
+    e estrae produzione_corrente + ultima sessione chiusa dal storico,
+    arricchito con dati live da engine_status.json.
 
     Schema output:
     [{
       "nome": str,
       "abilitata": bool,
-      "corrente": {
-         "ts_inizio": iso,
-         "risorse_iniziali": {pomodoro, legno, acciaio, petrolio},
-         "diamanti_iniziali": int,
-         "rifornimento_inviato": {risorsa: qty},
-         "rifornimento_tassa": {risorsa: qty},
-         "rifornimento_provviste_residue": int,
-         "zaino_delta": {risorsa: delta},
-         "truppe_raccolta_inviate": int,
-      } | None,
-      "precedente": {
-         "ts_inizio", "ts_fine", "durata_sec",
-         "produzione_qty": {risorsa: qty},
-         "produzione_oraria": {risorsa: qty/h},
-      } | None,
+      "stato": "online" | "idle" | "error" | "unknown",
+      "task_corrente": str | None,
+      "errori_live": int,
+      "quota_max": int,            # rifornimento.quota_max
+      "spedizioni_oggi": int,      # rifornimento.spedizioni_oggi
+      "quota_esaurita": bool,      # spedizioni_oggi >= quota_max
+      "corrente": {...} | None,
+      "precedente": {...} | None,
       "n_storico_24h": int,
     }, ...]
     """
     try:
         insts = get_instances()
+        engine = get_engine_status()
         result: list[dict] = []
         for ist in insts:
             nome = ist.get("nome", "")
@@ -275,14 +273,32 @@ def get_produzione_istanze() -> list[dict]:
             state = _load_state(nome)
             corrente = state.get("produzione_corrente")
             storico  = state.get("produzione_storico", []) or []
-            # ultima sessione chiusa (più recente)
             precedente = storico[-1] if storico else None
+
+            # Live state from engine_status
+            ist_status = engine.istanze.get(nome) if engine else None
+            stato = (ist_status.stato if ist_status else None) or "unknown"
+            task_corrente = ist_status.task_corrente if ist_status else None
+            errori_live = ist_status.errori if ist_status else 0
+
+            # Quota rifornimento
+            rif = state.get("rifornimento", {})
+            quota_max       = int(rif.get("quota_max", 0) or 0)
+            spedizioni_oggi = int(rif.get("spedizioni_oggi", 0) or 0)
+            quota_esaurita  = quota_max > 0 and spedizioni_oggi >= quota_max
+
             result.append({
-                "nome":          nome,
-                "abilitata":     _abilitata(nome),
-                "corrente":      corrente,
-                "precedente":    precedente,
-                "n_storico_24h": len(storico),
+                "nome":            nome,
+                "abilitata":       _abilitata(nome),
+                "stato":           stato,
+                "task_corrente":   task_corrente,
+                "errori_live":     errori_live,
+                "quota_max":       quota_max,
+                "spedizioni_oggi": spedizioni_oggi,
+                "quota_esaurita":  quota_esaurita,
+                "corrente":        corrente,
+                "precedente":      precedente,
+                "n_storico_24h":   len(storico),
             })
         return result
     except Exception:
