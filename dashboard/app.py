@@ -719,23 +719,31 @@ def partial_produzione_istanze(request: Request):
         tasks_curr_short, tasks_curr_tip = _tasks_brief(tasks_curr)
         tasks_prec_short, tasks_prec_tip = _tasks_brief(tasks_prec)
 
-        # auto-WU19: header completo (assorbe inst-grid). 2 righe:
-        # 1) avvio + task corrente|ultimo + errori
-        # 2) ts ultimo task + msg ultimo task (se presente)
+        # auto-WU19: header completo (assorbe inst-grid).
+        # auto-WU26 (27/04): nascondi task quando stato non live (idle/unknown/disabled);
+        # aggiungi durata in header; promote truppe a "truppe:N" più evidente.
         err_color = "var(--red,#f87171)" if errori_live > 0 else "var(--text-dim)"
-        # task color: rosso se ultimo esito err, accent altrimenti
-        task_col = "var(--red,#f87171)" if ut_esito == "err" else "var(--accent)"
+        is_live  = stato in ("online", "running")
+        # task: solo se live, altrimenti "—"
+        if is_live:
+            task_col      = "var(--red,#f87171)" if ut_esito == "err" else "var(--accent)"
+            task_show_lbl = task_lbl
+        else:
+            task_col      = "var(--text-dim)"
+            task_show_lbl = "—"
+        # durata: avvio → now (solo se sessione corrente attiva)
+        durata_show = f' · <b style="color:var(--text)">{durata_curr_m}m</b>' if durata_curr_m > 0 else ""
         header_status = (
             f'<div style="display:flex;justify-content:space-between;'
             f'gap:6px;font-size:11px;color:var(--text-dim);margin-bottom:2px">'
-            f'<span>avvio <b style="color:var(--text)">{avvio_lbl}</b></span>'
+            f'<span>avvio <b style="color:var(--text)">{avvio_lbl}</b>{durata_show}</span>'
             f'<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
-            f'text-align:center">task: <b style="color:{task_col}">{task_lbl}</b></span>'
+            f'text-align:center">task: <b style="color:{task_col}">{task_show_lbl}</b></span>'
             f'<span style="color:{err_color}">err:{errori_live}</span>'
             f'</div>'
         )
-        # Riga ts + msg (solo se presenti)
-        if ut_ts or ut_msg:
+        # Riga ts + msg: solo se live (nascondi quando non live)
+        if is_live and (ut_ts or ut_msg):
             ts_show  = ut_ts or "—"
             msg_show = ut_msg or "—"
             header_lastmsg = (
@@ -749,13 +757,16 @@ def partial_produzione_istanze(request: Request):
         else:
             header_lastmsg = ""
 
-        # Riga corrente: durata, truppe (raccoglitori), quota rifornimento + flag esaurita
+        # Riga corrente: truppe inviate (raccoglitori), quota rifornimento + flag esaurita
+        # Durata già in header — qui solo statistiche raccolta + quota.
         quota_flag = " 🔴" if quota_esau else ""
+        truppe_col = "#7cf" if truppe > 0 else "var(--text-dim)"
         sess_corr_line = (
             f'<div title="{tasks_curr_tip}" style="font-size:11px;color:var(--text-dim);'
             f'margin-top:4px;display:flex;justify-content:space-between;gap:4px">'
-            f'<span><b style="color:var(--accent)">corrente</b> · {durata_curr_m}m · '
-            f'racc:{truppe} · q:{quota_lbl}{quota_flag}</span>'
+            f'<span><b style="color:var(--accent)">corrente</b> · '
+            f'<b style="color:{truppe_col}">truppe:{truppe}</b> · '
+            f'q:{quota_lbl}{quota_flag}</span>'
             f'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
             f'max-width:55%;text-align:right">{tasks_curr_short}</span>'
             f'</div>'
@@ -764,11 +775,13 @@ def partial_produzione_istanze(request: Request):
         if has_prec:
             errori_prec = int(precedente.get("errori_count", 0) or 0)
             err_prec_color = "var(--red,#f87171)" if errori_prec > 0 else "var(--text-dim)"
+            truppe_prec_col = "#7cf" if truppe_prec > 0 else "var(--text-dim)"
             sess_prec_line = (
                 f'<div title="{tasks_prec_tip}" style="font-size:11px;color:var(--text-dim);'
                 f'display:flex;justify-content:space-between;gap:4px">'
                 f'<span><b style="color:#7cf">precedente</b> · {durata_prec_m}m · '
-                f'racc:{truppe_prec} · <span style="color:{err_prec_color}">err:{errori_prec}</span></span>'
+                f'<b style="color:{truppe_prec_col}">truppe:{truppe_prec}</b> · '
+                f'<span style="color:{err_prec_color}">err:{errori_prec}</span></span>'
                 f'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
                 f'max-width:55%;text-align:right">{tasks_prec_short}</span>'
                 f'</div>'
