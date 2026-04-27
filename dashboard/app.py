@@ -799,40 +799,65 @@ def partial_produzione_istanze(request: Request):
         else:
             header_lastmsg = ""
 
-        # Riga corrente: truppe inviate (raccoglitori), quota rifornimento + flag esaurita
-        # Durata già in header — qui solo statistiche raccolta + quota.
+        # auto-WU30 (27/04): corrente+precedente come 2 colonne verticali
+        # con coppie label/value allineate. Più chiaro di line orizzontale
+        # con info miste (raccolta+rifornimento+task).
         quota_flag = " 🔴" if quota_esau else ""
         truppe_col = "#7cf" if truppe > 0 else "var(--text-dim)"
-        sess_corr_line = (
-            f'<div title="{tasks_curr_tip}" style="font-size:11px;color:var(--text-dim);'
-            f'margin-top:4px;display:flex;justify-content:space-between;gap:4px">'
-            f'<span><b style="color:var(--accent)">corrente</b> · '
-            f'<b style="color:{truppe_col}">truppe:{truppe}</b> · '
-            f'q:{quota_lbl}{quota_flag}</span>'
-            f'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
-            f'max-width:55%;text-align:right">{tasks_curr_short}</span>'
-            f'</div>'
+
+        def _kv(label: str, value: str, val_color: str = "var(--text)") -> str:
+            return (
+                f'<div style="display:flex;justify-content:space-between;gap:4px">'
+                f'<span style="color:var(--text-dim)">{label}</span>'
+                f'<span style="color:{val_color};overflow:hidden;'
+                f'text-overflow:ellipsis;white-space:nowrap;max-width:65%" '
+                f'title="{value}">{value}</span></div>'
+            )
+
+        corr_kvs = [
+            _kv("truppe", str(truppe), truppe_col),
+            _kv("quota", f"{quota_lbl}{quota_flag}",
+                "var(--red,#f87171)" if quota_esau else "var(--text)"),
+            _kv("tasks", tasks_curr_short),
+        ]
+        corr_block = (
+            f'<div style="font-size:11px;color:var(--text-dim)">'
+            f'<div style="color:var(--accent);font-weight:600;text-align:center;'
+            f'margin-bottom:2px;border-bottom:0.5px solid rgba(255,255,255,0.06);'
+            f'padding-bottom:1px">corrente</div>'
+            f'{"".join(corr_kvs)}</div>'
         )
 
         if has_prec:
             errori_prec = int(precedente.get("errori_count", 0) or 0)
-            err_prec_color = "var(--red,#f87171)" if errori_prec > 0 else "var(--text-dim)"
+            err_prec_color = "var(--red,#f87171)" if errori_prec > 0 else "var(--text)"
             truppe_prec_col = "#7cf" if truppe_prec > 0 else "var(--text-dim)"
-            sess_prec_line = (
-                f'<div title="{tasks_prec_tip}" style="font-size:11px;color:var(--text-dim);'
-                f'display:flex;justify-content:space-between;gap:4px">'
-                f'<span><b style="color:#7cf">precedente</b> · {durata_prec_m}m · '
-                f'<b style="color:{truppe_prec_col}">truppe:{truppe_prec}</b> · '
-                f'<span style="color:{err_prec_color}">err:{errori_prec}</span></span>'
-                f'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
-                f'max-width:55%;text-align:right">{tasks_prec_short}</span>'
-                f'</div>'
+            prec_kvs = [
+                _kv("durata", f"{durata_prec_m}m"),
+                _kv("truppe", str(truppe_prec), truppe_prec_col),
+                _kv("errori", str(errori_prec), err_prec_color),
+                _kv("tasks", tasks_prec_short),
+            ]
+            prec_block = (
+                f'<div style="font-size:11px;color:var(--text-dim)">'
+                f'<div style="color:#7cf;font-weight:600;text-align:center;'
+                f'margin-bottom:2px;border-bottom:0.5px solid rgba(255,255,255,0.06);'
+                f'padding-bottom:1px">precedente</div>'
+                f'{"".join(prec_kvs)}</div>'
             )
         else:
-            sess_prec_line = (
-                '<div style="font-size:11px;color:var(--text-dim);text-align:center">'
-                '<b>precedente</b> · in attesa</div>'
+            prec_block = (
+                f'<div style="font-size:11px;color:var(--text-dim);text-align:center;'
+                f'align-self:center">'
+                f'<b style="color:#7cf">precedente</b><br>'
+                f'<span style="font-style:italic">in attesa</span></div>'
             )
+
+        # 2-col grid che racchiude entrambi i blocchi
+        sess_block = (
+            f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;'
+            f'margin-top:5px">{corr_block}{prec_block}</div>'
+        )
 
         cards_html.append(f'''
         <div class="prod-card" style="background:var(--bg-card);border:1px solid var(--border);
@@ -863,8 +888,7 @@ def partial_produzione_istanze(request: Request):
             </tr></thead>
             <tbody>{rows}</tbody>
           </table>
-          {sess_corr_line}
-          {sess_prec_line}
+          {sess_block}
         </div>
         ''')
 
