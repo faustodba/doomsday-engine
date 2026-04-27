@@ -317,6 +317,16 @@ def partial_task_flags_v2(request: Request):
     ]
 
     # auto-WU22 (27/04): rewrite as 2-col checkbox rows (style rifornimento .rr-cb)
+    # auto-WU23 (27/04): abbreviazione nomi >10 char + compound span 2 cols.
+    ABBREV = {
+        "messaggi":          "msg",
+        "alleanza":          "alleanza",
+        "rifornimento":      "rifor",
+        "donazione":         "donaz",
+        "arena_mercato":     "arenaM",
+        "district_showdown": "DS",
+        "radar_census":      "radCens",
+    }
     rows     = []
     rendered = set()
 
@@ -328,6 +338,8 @@ def partial_task_flags_v2(request: Request):
         on      = flags.get(name, True)
         on_cls  = "on" if on else "off"
         checked = "checked" if on else ""
+        # Abbreviato se nome > 10 char
+        display = ABBREV.get(name, name) if len(name) > 10 else name
 
         if name in COMPOUND:
             c    = COMPOUND[name]
@@ -339,17 +351,17 @@ def partial_task_flags_v2(request: Request):
                     f'onclick="event.preventDefault();setModeRemote(\'{name}\',\'{s}\')">{s}</span>'
                 )
             subs_html = '<span class="task-subs">' + "".join(subs) + '</span>'
-            rows.append(f'''<label class="task-row {on_cls}">
+            rows.append(f'''<label class="task-row compound {on_cls}" title="{name}">
               <input type="checkbox" class="task-cb" {checked}
                      onchange="toggleTaskFlag('{name}', this.checked)">
-              <span class="task-name">{name}</span>
+              <span class="task-name">{display}</span>
               {subs_html}
             </label>''')
         else:
-            rows.append(f'''<label class="task-row {on_cls}">
+            rows.append(f'''<label class="task-row {on_cls}" title="{name}">
               <input type="checkbox" class="task-cb" {checked}
                      onchange="toggleTaskFlag('{name}', this.checked)">
-              <span class="task-name">{name}</span>
+              <span class="task-name">{display}</span>
             </label>''')
 
     return HTMLResponse(''.join(rows))
