@@ -804,7 +804,7 @@ def partial_produzione_istanze(request: Request):
         )
 
     return HTMLResponse(
-        '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));'
+        '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));'
         'gap:6px">' + "".join(cards_html) + '</div>'
     )
 
