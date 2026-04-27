@@ -814,10 +814,13 @@ def partial_produzione_istanze(request: Request):
                 f'title="{value}">{value}</span></div>'
             )
 
+        # auto-WU31: spediz = daily count (era q:N/M con max ciclo confuso).
+        # quota_max è max per CICLO non daily — fraction è semantically broken.
+        # Ora mostriamo solo il count daily; il blocco terminale resta su
+        # "Provv: esaurita" (provviste_esaurite=true dal gioco).
         corr_kvs = [
             _kv("truppe", str(truppe), truppe_col),
-            _kv("quota", f"{quota_lbl}{quota_flag}",
-                "var(--red,#f87171)" if quota_esau else "var(--text)"),
+            _kv("spediz", str(sped_oggi)),
         ]
         corr_block = (
             f'<div style="font-size:11px;color:var(--text-dim)">'
