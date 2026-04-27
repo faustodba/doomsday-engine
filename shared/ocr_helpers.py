@@ -311,6 +311,60 @@ def ocr_risorse(img: "Screenshot | np.ndarray") -> RisorseDeposito:
     )
 
 
+def ocr_risorse_robust(device, max_attempts: int = 3,
+                       sleep_s: float = 0.5, log_fn=None) -> "RisorseDeposito":
+    """
+    auto-WU25 (27/04): wrapper di ocr_risorse con retry per zone fallite.
+
+    Ogni tentativo prende uno screenshot fresco. I valori validi (!=-1) sono
+    mantenuti tra i tentativi: solo le zone fallite vengono ri-tentate.
+    Se dopo max_attempts qualche zona resta -1, ritorna comunque (caller
+    deciderà fallback con valori precedenti).
+
+    Tipici: 1 tentativo se tutto OK al primo round; 2-3 tentativi se 1-2
+    zone sono fallite per overlay transient.
+    """
+    import time as _t
+    log = log_fn or (lambda _m: None)
+    rd_acc = RisorseDeposito(-1, -1, -1, -1, -1)
+    fields = ("pomodoro", "legno", "acciaio", "petrolio", "diamanti")
+
+    for attempt in range(max_attempts):
+        try:
+            shot = device.screenshot() if device is not None else None
+        except Exception:
+            shot = None
+        if shot is None:
+            log(f"[OCR-RETRY] tent {attempt+1}: screenshot None")
+            _t.sleep(sleep_s)
+            continue
+
+        rd_new = ocr_risorse(shot)
+        # Merge: per ogni campo, usa nuovo valore se non -1, altrimenti tieni acc
+        merged = {}
+        for f in fields:
+            v_new = getattr(rd_new, f)
+            v_old = getattr(rd_acc, f)
+            merged[f] = v_new if v_new != -1 else v_old
+        rd_acc = RisorseDeposito(**merged)
+
+        # All OK? exit early
+        ko_fields = [f for f in fields if getattr(rd_acc, f) == -1]
+        if not ko_fields:
+            if attempt > 0:
+                log(f"[OCR-RETRY] tutto OK al tent {attempt+1}")
+            return rd_acc
+
+        if attempt < max_attempts - 1:
+            log(f"[OCR-RETRY] tent {attempt+1}: KO {ko_fields} — retry")
+            _t.sleep(sleep_s)
+
+    ko_fields = [f for f in fields if getattr(rd_acc, f) == -1]
+    if ko_fields:
+        log(f"[OCR-RETRY] dopo {max_attempts} tent: KO finali {ko_fields}")
+    return rd_acc
+
+
 # ==============================================================================
 # Contatore slot raccoglitori — portato da ocr.py V5 leggi_contatore_da_zona
 #

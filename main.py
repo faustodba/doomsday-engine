@@ -727,50 +727,70 @@ def _thread_istanza(ist, tasks_cls, dry_run):
         # auto-WU14: snapshot risorse castello + chiusura sessione precedente
         # + apertura nuova sessione produzione. Le risorse top-bar sono lette
         # qui (HOME stabile, banner chiuso) per garantire massima accuratezza.
+        # auto-WU25 (27/04): retry OCR per zone fallite + skip-on-fail.
+        # Pre-fix: ocr_risorse single-shot → se 1 zona fallisce ritorna -1
+        # per quella sola risorsa (es. legno=-1 osservato FAU_00 27/04).
+        # Post-fix: ocr_risorse_robust (3 tentativi con merge zone valide)
+        # + fallback a valore precedente se tutte le retry falliscono.
         try:
-            from shared.ocr_helpers import ocr_risorse
+            from shared.ocr_helpers import ocr_risorse_robust
             from core.state import _ts_now
-            shot_init = ctx.device.screenshot()
-            if shot_init is not None:
-                rd = ocr_risorse(shot_init)
-                ts_now = _ts_now()
-                risorse_now = {
-                    "pomodoro": rd.pomodoro,
-                    "legno":    rd.legno,
-                    "acciaio":  rd.acciaio,
-                    "petrolio": rd.petrolio,
-                }
+            ts_now = _ts_now()
+            rd = ocr_risorse_robust(
+                ctx.device, max_attempts=3, sleep_s=0.5,
+                log_fn=lambda m: _log(nome, m),
+            )
+            # Skip-on-fail: per ogni risorsa con valore -1, usa l'ultimo
+            # valore valido dalla precedente sessione (risorse_iniziali del
+            # produzione_corrente non ancora chiuso).
+            prev_corr = ctx.state.produzione_corrente
+            prev_init = (prev_corr.risorse_iniziali if prev_corr else None) or {}
+            risorse_now = {}
+            for r in ("pomodoro", "legno", "acciaio", "petrolio"):
+                v = getattr(rd, r)
+                if v == -1:
+                    fallback = prev_init.get(r, -1)
+                    if fallback != -1:
+                        risorse_now[r] = fallback
+                        _log(nome,
+                             f"[PROD-FALLBACK] {r} OCR fail → uso prec valore "
+                             f"{fallback/1e6:.1f}M")
+                    else:
+                        risorse_now[r] = -1
+                        _log(nome, f"[PROD-FALLBACK] {r} OCR fail e nessun prec valore")
+                else:
+                    risorse_now[r] = v
+
+            _log(nome,
+                 f"[PROD] risorse castello: pom={risorse_now['pomodoro']/1e6:.1f}M "
+                 f"leg={risorse_now['legno']/1e6:.1f}M "
+                 f"acc={risorse_now['acciaio']/1e6:.1f}M "
+                 f"pet={risorse_now['petrolio']/1e6:.1f}M dia={rd.diamanti}")
+
+            # Chiudi sessione precedente (se esiste) calcolando produzione
+            chiusa = ctx.state.chiudi_sessione_e_calcola(risorse_now, ts_now)
+            if chiusa is not None:
+                po = chiusa.produzione_oraria or {}
                 _log(nome,
-                     f"[PROD] risorse castello: pom={rd.pomodoro/1e6:.1f}M "
-                     f"leg={rd.legno/1e6:.1f}M acc={rd.acciaio/1e6:.1f}M "
-                     f"pet={rd.petrolio/1e6:.1f}M dia={rd.diamanti}")
+                     f"[PROD] sessione chiusa durata={chiusa.durata_sec or 0:.0f}s "
+                     f"prod/h: pom={po.get('pomodoro',0):.0f} "
+                     f"leg={po.get('legno',0):.0f} "
+                     f"acc={po.get('acciaio',0):.0f} "
+                     f"pet={po.get('petrolio',0):.0f}")
 
-                # Chiudi sessione precedente (se esiste) calcolando produzione
-                chiusa = ctx.state.chiudi_sessione_e_calcola(risorse_now, ts_now)
-                if chiusa is not None:
-                    po = chiusa.produzione_oraria or {}
-                    _log(nome,
-                         f"[PROD] sessione chiusa durata={chiusa.durata_sec or 0:.0f}s "
-                         f"prod/h: pom={po.get('pomodoro',0):.0f} "
-                         f"leg={po.get('legno',0):.0f} "
-                         f"acc={po.get('acciaio',0):.0f} "
-                         f"pet={po.get('petrolio',0):.0f}")
+            # Apri nuova sessione
+            ctx.state.apri_sessione(risorse_now, rd.diamanti, ts_now)
+            _log(nome, f"[PROD] sessione aperta @ {ts_now}")
 
-                # Apri nuova sessione
-                ctx.state.apri_sessione(risorse_now, rd.diamanti, ts_now)
-                _log(nome, f"[PROD] sessione aperta @ {ts_now}")
-
-                # auto-WU20 (27/04 fix persistenza): salva state SUBITO,
-                # prima del _build_ctx (line 774) che ricarica da disco e
-                # wipe `produzione_corrente`/`produzione_storico` impostati.
-                # Pre-fix: sessione_aperta loggata ma mai persistita →
-                # storico sempre vuoto, dashboard "in attesa" permanente.
-                try:
-                    ctx.state.save(state_dir=os.path.join(ROOT, "state"))
-                except Exception as exc:
-                    _log(nome, f"[WARN] save state post-apri_sessione: {exc}")
-            else:
-                _log(nome, "[PROD] screenshot None — sessione produzione non aperta")
+            # auto-WU20 (27/04 fix persistenza): salva state SUBITO,
+            # prima del _build_ctx (line 774) che ricarica da disco e
+            # wipe `produzione_corrente`/`produzione_storico` impostati.
+            # Pre-fix: sessione_aperta loggata ma mai persistita →
+            # storico sempre vuoto, dashboard "in attesa" permanente.
+            try:
+                ctx.state.save(state_dir=os.path.join(ROOT, "state"))
+            except Exception as exc:
+                _log(nome, f"[WARN] save state post-apri_sessione: {exc}")
         except Exception as exc:
             _log(nome, f"[WARN] produzione snapshot: {exc}")
 
