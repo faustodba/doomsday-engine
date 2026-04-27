@@ -2099,10 +2099,24 @@ class RaccoltaTask(Task):
             f"Raccolta: completata — {inviate_totali} squadre totali "
             f"(tentativi={tentativi_ciclo}, slot_pieni={slot_pieni})"
         )
+        # Output telemetria — Issue #53 Step 3
+        out_data = {
+            "inviate":          inviate_totali,
+            "slot_pieni":       slot_pieni,
+            "slot_attive":      int(attive_correnti),
+            "slot_totali":      int(obiettivo),
+            "tentativi_ciclo":  int(tentativi_ciclo),
+        }
+        try:
+            tipologie_bloccate = list(getattr(ctx.state, "raccolta_tipologie_bloccate", []) or [])
+            if tipologie_bloccate:
+                out_data["tipologie_bloccate"] = tipologie_bloccate
+        except Exception:
+            pass
         return TaskResult(
             success=True,
             message=f"{inviate_totali} squadre inviate",
-            data={"inviate": inviate_totali, "slot_pieni": slot_pieni},
+            data=out_data,
         )
 
 

@@ -130,7 +130,11 @@ class DonazioneTask(BaseTask):
             ctx.navigator.vai_in_home()
 
             ctx.log_msg(f"[DONAZIONE] completato — donate={donate_count}")
-            return TaskResult(success=True, message=f"donate={donate_count}")
+            return TaskResult(
+                success=True,
+                message=f"donate={donate_count}",
+                data={"donate_count": int(donate_count)},
+            )
 
         except Exception as exc:  # pylint: disable=broad-except
             ctx.log_msg(f"[DONAZIONE] errore imprevisto: {exc}")

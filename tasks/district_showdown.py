@@ -440,7 +440,15 @@ class DistrictShowdownTask(Task):
             ctx.device.back()
             time.sleep(cfg.delay_dopo_tap_minor)
         ctx.navigator.vai_in_home()
-        return TaskResult(success=True, message=esito)
+        # Output telemetria — Issue #53 Step 3
+        return TaskResult(
+            success=True,
+            message=esito,
+            data={
+                "fase1_esito":     esito,
+                "fasi_reward":     esito == "dadi_esauriti",
+            },
+        )
 
     # ------------------------------------------------------------------
     # Step 1 — Apri evento

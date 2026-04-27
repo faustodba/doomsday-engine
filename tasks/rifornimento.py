@@ -1166,13 +1166,15 @@ class RifornimentoTask(Task):
 
         # --- Selezione modalità di esecuzione ---
         # Mappa ha precedenza su Membri (più veloce, è il default)
+        mode_used = "mappa" if mappa_abilitata else "membri"
         if mappa_abilitata:
             ctx.log_msg("Rifornimento: modalità=MAPPA")
             # Guard: max_sped=0 → skip immediato
             if max_sped == 0:
                 ctx.log_msg("Rifornimento: max_spedizioni_ciclo=0 — skip")
                 return TaskResult(success=True, message="max_spedizioni=0",
-                                  data={"spedizioni": 0, "eta_residua": 0.0})
+                                  data={"spedizioni": 0, "eta_residua": 0.0,
+                                        "mode": mode_used, "skip_reason": "max_sped_0"})
             spedizioni, eta_residua = self._esegui_mappa(
                 ctx, deposito, deposito_da_ocr, slot_liberi,
                 risorse_config, soglie, nome_rifugio,
@@ -1184,7 +1186,8 @@ class RifornimentoTask(Task):
             if max_sped == 0:
                 ctx.log_msg("Rifornimento: max_spedizioni_ciclo=0 — skip")
                 return TaskResult(success=True, message="max_spedizioni=0",
-                                  data={"spedizioni": 0, "eta_residua": 0.0})
+                                  data={"spedizioni": 0, "eta_residua": 0.0,
+                                        "mode": mode_used, "skip_reason": "max_sped_0"})
             spedizioni, eta_residua = _esegui_via_membri(
                 ctx, risorse_config, soglie, nome_rifugio, max_sped, margine
             )
@@ -1223,10 +1226,26 @@ class RifornimentoTask(Task):
         except Exception as exc:
             ctx.log_msg(f"[WARN] storico_farm: {exc}")
 
+        # Output telemetria — Issue #53 Step 3
+        out_data = {
+            "spedizioni":      spedizioni,
+            "eta_residua":     eta_residua,
+            "mode":            mode_used,
+            "max_sped_ciclo":  max_sped,
+        }
+        try:
+            if ctx.state is not None and getattr(ctx.state, "rifornimento", None):
+                rif = ctx.state.rifornimento
+                out_data["provviste_residue"] = int(rif.provviste_residue)
+                out_data["tassa_pct_avg"]     = round(float(rif.tassa_pct_avg), 4)
+                out_data["spedizioni_oggi"]   = int(rif.spedizioni_oggi)
+        except Exception:
+            pass
+
         return TaskResult(
             success=True,
             message=f"{spedizioni} spedizioni",
-            data={"spedizioni": spedizioni, "eta_residua": eta_residua},
+            data=out_data,
         )
 
     def _esegui_mappa(self, ctx, deposito, deposito_da_ocr, slot_liberi,

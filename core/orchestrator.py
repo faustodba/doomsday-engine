@@ -38,12 +38,28 @@
 
 from __future__ import annotations
 
+import os
 import time
 from datetime import datetime, timezone, timedelta
 from dataclasses import dataclass, field
 from typing import Optional
 
 from core.task import Task, TaskContext, TaskResult
+from core.navigator import ADBUnhealthyError
+from core.telemetry import (
+    TaskTelemetry, record as _telemetry_record,
+    OUTCOME_OK, OUTCOME_SKIP, OUTCOME_FAIL, OUTCOME_ABORT,
+    ANOM_ADB_UNHEALTHY,
+)
+
+
+# Issue #57 — directory dove persistere lo state. Ogni task completato (success
+# o fail) triggera una save() atomica per evitare perdita scadenze/contatori
+# in caso di crash o cascata ADB nel resto del tick.
+def _state_dir() -> str:
+    """Risolve la dir state coerente con main.py — env DOOMSDAY_ROOT o cwd."""
+    root = os.environ.get("DOOMSDAY_ROOT", os.getcwd())
+    return os.path.join(root, "state")
 
 
 def _tname(task: Task) -> str:
@@ -219,6 +235,15 @@ class Orchestrator:
                 )
                 try:
                     in_home = nav.vai_in_home()
+                except ADBUnhealthyError as exc:
+                    # Issue #56 — emulator freezato: skip task rimanenti +
+                    # segnale al main per reset emergenziale istanza.
+                    self._ctx.log_msg(
+                        f"Orchestrator: [{task_name}] ADB UNHEALTHY nel gate HOME "
+                        f"— abort tick + reset emergenziale: {exc}"
+                    )
+                    setattr(self._ctx, "adb_unhealthy", True)
+                    return results
                 except Exception as exc:
                     in_home = False
                     self._ctx.log_msg(
@@ -245,8 +270,41 @@ class Orchestrator:
 
             self._ctx.log_msg(f"Orchestrator: avvio task '{task_name}'")
 
+            # Issue #53 — Telemetria: schema standardizzato eventi task.
+            # Failsafe: telemetria silenziosa, non deve mai bloccare il task.
+            cycle_num = 0
+            try:
+                cycle_num = int(getattr(self._ctx, "extras", {}).get("cycle", 0))
+            except Exception:
+                cycle_num = 0
+            tel_event = TaskTelemetry.start(
+                task=task_name,
+                instance=self._ctx.instance_name,
+                cycle=cycle_num,
+            )
+
             try:
                 result = entry.task.run(self._ctx)
+            except ADBUnhealthyError as exc:
+                # Issue #56 — eccezione propagata dal task durante una
+                # vai_in_home() interna: abort tick + reset emergenziale.
+                self._ctx.log_msg(
+                    f"Orchestrator: task '{task_name}' ADB UNHEALTHY "
+                    f"— abort tick + reset emergenziale: {exc}"
+                )
+                setattr(self._ctx, "adb_unhealthy", True)
+                # Emetti telemetry prima del return — outcome=abort, anomalia ADB
+                try:
+                    tel_event.add_anomaly(ANOM_ADB_UNHEALTHY)
+                    tel_event.finish(
+                        success=False,
+                        outcome=OUTCOME_ABORT,
+                        msg=f"ADB cascade: {exc}",
+                    )
+                    _telemetry_record(tel_event)
+                except Exception:
+                    pass
+                return results
             except Exception as exc:
                 self._ctx.log_msg(f"Orchestrator: task '{task_name}' -- eccezione: {exc}")
                 result = TaskResult(
@@ -259,10 +317,42 @@ class Orchestrator:
             entry.last_result = result
             results.append(result)
 
+            # Telemetry — emit evento finale (path normale + eccezioni generiche)
+            try:
+                if result.skipped:
+                    _outcome = OUTCOME_SKIP
+                elif result.success:
+                    _outcome = OUTCOME_OK
+                else:
+                    _outcome = OUTCOME_FAIL
+                tel_event.finish(
+                    success=bool(result.success),
+                    outcome=_outcome,
+                    msg=result.message,
+                    output=dict(result.data) if isinstance(result.data, dict) else {},
+                )
+                _telemetry_record(tel_event)
+            except Exception:
+                pass
+
             self._ctx.log_msg(
                 f"Orchestrator: task '{task_name}' completato "
                 f"-- success={result.success} msg='{result.message}'"
             )
+
+            # Issue #57 — persistenza immediata dello state dopo OGNI task
+            # (success o fail). Evita perdita di scadenze/contatori quando
+            # il tick crasha o blocca prima del save di fine tick (main.py).
+            # Caso reale FAU_04 (Issue #56): boost attivato 10:31, cascata
+            # ADB 10:40, save fine-tick mai raggiunto → restart bot legge
+            # scadenza vecchia → boost re-attivato, spreco item.
+            try:
+                if hasattr(self._ctx, "state") and self._ctx.state is not None:
+                    self._ctx.state.save(state_dir=_state_dir())
+            except Exception as exc:
+                self._ctx.log_msg(
+                    f"Orchestrator: save state post-'{task_name}' fallito: {exc}"
+                )
 
         return results
 

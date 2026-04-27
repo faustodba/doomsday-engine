@@ -202,7 +202,7 @@ class BoostTask(Task):
         # Per POPUP_NON_APERTO / SPEED_NON_TROVATO / ERRORE non alteriamo lo state:
         # il task riproverà al prossimo tick secondo la scadenza esistente.
 
-        return self._mappa_outcome(outcome, log)
+        return self._mappa_outcome(outcome, log, tipo_attivato=tipo_attivato)
 
     # ── Flusso principale ─────────────────────────────────────────────────────
 
@@ -459,11 +459,15 @@ class BoostTask(Task):
     # ── Mapping outcome → TaskResult ──────────────────────────────────────────
 
     @staticmethod
-    def _mappa_outcome(outcome: str, log) -> TaskResult:
+    def _mappa_outcome(outcome: str, log, tipo_attivato: str | None = None) -> TaskResult:
+        # Output telemetria — Issue #53 Step 3 (outcome + durata + tipo)
         mapping = {
-            _Outcome.GIA_ATTIVO:        TaskResult.ok("Speed boost già attivo"),
-            _Outcome.ATTIVATO_8H:       TaskResult.ok("Speed boost 8h attivato",  durata="8h"),
-            _Outcome.ATTIVATO_1D:       TaskResult.ok("Speed boost 1d attivato",  durata="1d"),
+            _Outcome.GIA_ATTIVO:        TaskResult.ok("Speed boost già attivo",
+                                                       outcome="gia_attivo", durata=tipo_attivato),
+            _Outcome.ATTIVATO_8H:       TaskResult.ok("Speed boost 8h attivato",
+                                                       outcome="attivato", durata="8h"),
+            _Outcome.ATTIVATO_1D:       TaskResult.ok("Speed boost 1d attivato",
+                                                       outcome="attivato", durata="1d"),
             _Outcome.NESSUN_BOOST:      TaskResult.skip("Nessun boost gratuito disponibile"),
             _Outcome.POPUP_NON_APERTO:  TaskResult.skip("Manage Shelter non aperto"),
             _Outcome.SPEED_NON_TROVATO: TaskResult.skip("Riga Gathering Speed non trovata"),

@@ -155,12 +155,15 @@ class ArenaTask(Task):
         run = _ArenaRun()
         self._esegui(ctx, run)
         success = run.esaurite or run.sfide_eseguite >= MAX_SFIDE
+        msg = (f"{run.sfide_eseguite} sfide" if not run.errore
+               else f"{run.sfide_eseguite} sfide ({run.errore})")
         return TaskResult(
             success=success,
+            message=msg,
             data={
-                "sfide_eseguite": run.sfide_eseguite,
-                "esaurite":       run.esaurite,
-                "errore":         run.errore,
+                "sfide_eseguite": int(run.sfide_eseguite),
+                "esaurite":       bool(run.esaurite),
+                "errore":         run.errore or "",
             },
         )
 
