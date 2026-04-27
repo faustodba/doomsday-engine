@@ -818,7 +818,6 @@ def partial_produzione_istanze(request: Request):
             _kv("truppe", str(truppe), truppe_col),
             _kv("quota", f"{quota_lbl}{quota_flag}",
                 "var(--red,#f87171)" if quota_esau else "var(--text)"),
-            _kv("tasks", tasks_curr_short),
         ]
         corr_block = (
             f'<div style="font-size:11px;color:var(--text-dim)">'
@@ -836,7 +835,6 @@ def partial_produzione_istanze(request: Request):
                 _kv("durata", f"{durata_prec_m}m"),
                 _kv("truppe", str(truppe_prec), truppe_prec_col),
                 _kv("errori", str(errori_prec), err_prec_color),
-                _kv("tasks", tasks_prec_short),
             ]
             prec_block = (
                 f'<div style="font-size:11px;color:var(--text-dim)">'
