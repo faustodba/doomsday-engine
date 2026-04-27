@@ -309,24 +309,25 @@ def partial_task_flags_v2(request: Request):
         },
     }
 
-    # raccolta esclusa: è sempre attiva, non controllabile da UI
+    # raccolta esclusa: è sempre attiva, non controllabile da UI.
+    # auto-WU24 (27/04): rifornimento+zaino accoppiati nella stessa riga
+    # del grid 2-col (compound side-by-side, no più span 2 cols).
     ORDER = [
-        "rifornimento", "vip", "boost", "arena", "store",
-        "alleanza", "donazione", "messaggi", "radar", "zaino",
+        "rifornimento", "zaino",
+        "vip", "boost",
+        "arena", "store",
+        "alleanza", "donazione",
+        "messaggi", "radar",
         "arena_mercato", "district_showdown",
     ]
 
     # auto-WU22 (27/04): rewrite as 2-col checkbox rows (style rifornimento .rr-cb)
-    # auto-WU23 (27/04): abbreviazione nomi >10 char + compound span 2 cols.
+    # auto-WU24 (27/04): max nome 15 char (abbrev solo district_showdown);
+    # rifornimento+zaino side-by-side (no compound span 2 cols).
     ABBREV = {
-        "messaggi":          "msg",
-        "alleanza":          "alleanza",
-        "rifornimento":      "rifor",
-        "donazione":         "donaz",
-        "arena_mercato":     "arenaM",
-        "district_showdown": "DS",
-        "radar_census":      "radCens",
+        "district_showdown": "districtSD",  # 17 → 10
     }
+    MAX_LEN = 15
     rows     = []
     rendered = set()
 
@@ -338,8 +339,8 @@ def partial_task_flags_v2(request: Request):
         on      = flags.get(name, True)
         on_cls  = "on" if on else "off"
         checked = "checked" if on else ""
-        # Abbreviato se nome > 10 char
-        display = ABBREV.get(name, name) if len(name) > 10 else name
+        # Abbreviazione solo se nome > MAX_LEN char
+        display = ABBREV.get(name, name) if len(name) > MAX_LEN else name
 
         if name in COMPOUND:
             c    = COMPOUND[name]
@@ -351,7 +352,7 @@ def partial_task_flags_v2(request: Request):
                     f'onclick="event.preventDefault();setModeRemote(\'{name}\',\'{s}\')">{s}</span>'
                 )
             subs_html = '<span class="task-subs">' + "".join(subs) + '</span>'
-            rows.append(f'''<label class="task-row compound {on_cls}" title="{name}">
+            rows.append(f'''<label class="task-row {on_cls}" title="{name}">
               <input type="checkbox" class="task-cb" {checked}
                      onchange="toggleTaskFlag('{name}', this.checked)">
               <span class="task-name">{display}</span>

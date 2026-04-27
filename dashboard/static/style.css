@@ -288,8 +288,6 @@ html, body {
 .task-row .task-sub:hover { color: var(--text-mid); }
 .task-row .task-sub + .task-sub { border-left: 0.5px solid var(--border); }
 .task-row.off .task-subs { display: none; }
-/* Compound (rifornimento+mappa|membri / zaino+bag|svuota) span 2 cols */
-.task-row.compound { grid-column: 1 / -1; }
 
 /* ── Config 4 colonne (sistema più larga per task flags) ──── */
 .cfg4 { display: grid; grid-template-columns: 1.4fr 1fr 1fr 1fr; gap: var(--gap); }
