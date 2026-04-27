@@ -586,6 +586,222 @@ def compute_and_save_live() -> Optional[dict]:
     return None
 
 
+def backfill_from_logs(
+    logs_dir: Path,
+    since_iso: Optional[str] = None,
+    until_iso: Optional[str] = None,
+) -> dict:
+    """
+    Step 7 — backfill retroattivo eventi telemetry dai logs/FAU_*.jsonl.
+
+    Estrae coppie "Orchestrator: avvio task 'X'" + "...completato/fallito"
+    e genera TaskTelemetry storici, scritti in events_<date>.jsonl.
+
+    Idempotente: dedup su (ts_start, task, instance) — re-eseguibile senza
+    duplicati. Output: dict con statistiche {generated, deduped, files_scanned}.
+
+    Limiti inerenti (i log non contengono):
+      - output strutturato (Step 3 attivo solo da bot restart in poi) → output={}
+      - cycle preciso → cycle=0
+      - retry_count → 0
+      - anomalies inferite da pattern: ADB UNHEALTHY, eccezione
+
+    Args:
+        logs_dir: directory con FAU_*.jsonl e FauMorfeus.jsonl
+        since_iso: limite inferiore (escluso prima); None = nessun limite
+        until_iso: limite superiore (escluso dopo); None = nessun limite
+
+    Returns:
+        Statistiche operazione.
+    """
+    import re as _re
+    re_start = _re.compile(r"Orchestrator: avvio task '([^']+)'")
+    re_done  = _re.compile(
+        r"Orchestrator: task '([^']+)' (?:completato|fallito) -- "
+        r"success=(True|False)(?: msg='([^']*)')?"
+    )
+    re_adb_abort = _re.compile(
+        r"Orchestrator: task '([^']+)' ADB UNHEALTHY"
+    )
+    re_exc = _re.compile(
+        r"Orchestrator: task '([^']+)' -- eccezione: (.+)"
+    )
+
+    stats = {
+        "files_scanned":  0,
+        "events_parsed":  0,
+        "events_written": 0,
+        "deduped":        0,
+        "errors":         0,
+    }
+
+    # Step A: pre-carica fingerprint eventi esistenti per dedup
+    existing_fp: set = set()
+    events_dir = _events_dir()
+    events_dir.mkdir(parents=True, exist_ok=True)
+    for fp in events_dir.glob("events_*.jsonl"):
+        try:
+            with open(fp, "rb") as f:
+                for raw in f:
+                    line = raw.decode("utf-8", errors="replace").strip()
+                    if not line:
+                        continue
+                    try:
+                        d = json.loads(line)
+                        existing_fp.add((d.get("ts_start", ""), d.get("task", ""),
+                                         d.get("instance", "")))
+                    except Exception:
+                        continue
+        except Exception:
+            stats["errors"] += 1
+
+    # Step B: scansiona logs
+    if not logs_dir.exists():
+        return stats
+
+    # Pending starts per (instance, task) — ts_start in attesa di end
+    # Usiamo solo ULTIMO start: V6 sequenziale, no overlap
+    pending: dict = {}
+
+    def _maybe_in_range(ts: str) -> bool:
+        if since_iso and ts < since_iso:
+            return False
+        if until_iso and ts > until_iso:
+            return False
+        return True
+
+    def _emit(ev: TaskTelemetry):
+        fp = (ev.ts_start, ev.task, ev.instance)
+        if fp in existing_fp:
+            stats["deduped"] += 1
+            return
+        if not _maybe_in_range(ev.ts_start):
+            return
+        # Append direttamente al file events_<date>.jsonl
+        try:
+            date_str = ev.ts_start[:10]  # YYYY-MM-DD
+            path = events_dir / f"events_{date_str}.jsonl"
+            with _WRITE_LOCK:
+                with open(path, "a", encoding="utf-8", buffering=1) as f:
+                    f.write(ev.to_json_line() + "\n")
+            existing_fp.add(fp)
+            stats["events_written"] += 1
+        except Exception:
+            stats["errors"] += 1
+
+    for fp in sorted(logs_dir.glob("*.jsonl")):
+        if fp.name.endswith(".bak.jsonl"):
+            continue
+        stats["files_scanned"] += 1
+        try:
+            with open(fp, "rb") as f:
+                for raw in f:
+                    try:
+                        d = json.loads(raw.decode("utf-8", errors="replace"))
+                    except Exception:
+                        continue
+                    ts = d.get("ts", "")
+                    ist = d.get("instance", "")
+                    msg = d.get("msg", "")
+                    if not (ts and ist and msg):
+                        continue
+
+                    # Match start
+                    m = re_start.match(msg)
+                    if m:
+                        task = m.group(1)
+                        pending[(ist, task)] = ts
+                        continue
+
+                    # Match completion (normal)
+                    m = re_done.match(msg)
+                    if m:
+                        task    = m.group(1)
+                        success = m.group(2) == "True"
+                        body    = m.group(3) or ""
+                        ts_start = pending.pop((ist, task), None)
+                        if not ts_start:
+                            continue  # orphan end → skip
+                        stats["events_parsed"] += 1
+                        # Outcome heuristic
+                        if success:
+                            # 'skipped' non differenziato nei log — consideriamo ok
+                            # eccezione: msg contains 'skip' o 'disabilitato'
+                            outc = OUTCOME_SKIP if (
+                                "skip" in body.lower() or "disabilitato" in body.lower()
+                                or "nessuna" in body.lower()
+                            ) else OUTCOME_OK
+                        else:
+                            outc = OUTCOME_FAIL
+                        ev = TaskTelemetry.start(task=task, instance=ist, cycle=0)
+                        ev.ts_start = ts_start
+                        ev.ts_end   = ts
+                        try:
+                            ev.duration_s = round(
+                                _iso_to_epoch(ts) - _iso_to_epoch(ts_start), 3
+                            )
+                        except Exception:
+                            ev.duration_s = 0.0
+                        ev.success = success
+                        ev.outcome = outc
+                        ev.msg     = body[:200]
+                        if "eccezione" in body.lower():
+                            ev.anomalies.append("retry")
+                        _emit(ev)
+                        continue
+
+                    # Match ADB abort (no end-event, special path in orchestrator)
+                    m = re_adb_abort.match(msg)
+                    if m:
+                        task = m.group(1)
+                        ts_start = pending.pop((ist, task), None)
+                        if not ts_start:
+                            continue
+                        stats["events_parsed"] += 1
+                        ev = TaskTelemetry.start(task=task, instance=ist, cycle=0)
+                        ev.ts_start = ts_start
+                        ev.ts_end   = ts
+                        try:
+                            ev.duration_s = round(
+                                _iso_to_epoch(ts) - _iso_to_epoch(ts_start), 3
+                            )
+                        except Exception:
+                            ev.duration_s = 0.0
+                        ev.success = False
+                        ev.outcome = OUTCOME_ABORT
+                        ev.msg     = "ADB UNHEALTHY (backfill)"
+                        ev.anomalies.append(ANOM_ADB_UNHEALTHY)
+                        _emit(ev)
+                        continue
+
+                    # Match generic exception
+                    m = re_exc.match(msg)
+                    if m:
+                        task = m.group(1)
+                        exc_msg = m.group(2)
+                        ts_start = pending.pop((ist, task), None)
+                        if not ts_start:
+                            continue
+                        stats["events_parsed"] += 1
+                        ev = TaskTelemetry.start(task=task, instance=ist, cycle=0)
+                        ev.ts_start = ts_start
+                        ev.ts_end   = ts
+                        try:
+                            ev.duration_s = round(
+                                _iso_to_epoch(ts) - _iso_to_epoch(ts_start), 3
+                            )
+                        except Exception:
+                            ev.duration_s = 0.0
+                        ev.success = False
+                        ev.outcome = OUTCOME_FAIL
+                        ev.msg     = f"eccezione: {exc_msg}"[:200]
+                        _emit(ev)
+        except Exception:
+            stats["errors"] += 1
+
+    return stats
+
+
 def live_writer_loop(stop_event: "threading.Event",
                      refresh_s: int = _LIVE_REFRESH_DEFAULT_S) -> None:
     """
