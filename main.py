@@ -54,6 +54,7 @@ def _import_tasks() -> dict:
     tasks = {}
     _catalogue = [
         ("tasks.raccolta",       "RaccoltaTask"),
+        ("tasks.raccolta",       "RaccoltaChiusuraTask"),  # Issue #62 — chiusura tick
         ("tasks.rifornimento",   "RifornimentoTask"),
         ("tasks.donazione",      "DonazioneTask"),
         ("tasks.zaino",          "ZainoTask"),
@@ -680,7 +681,7 @@ def _thread_istanza(ist, tasks_cls, dry_run):
         _log(nome, f"Tipologia={_tipologia} — registro solo RaccoltaTask")
 
     for class_name, priority, interval_h, schedule in _carica_task_setup():
-        if _solo_raccolta and class_name != "RaccoltaTask":
+        if _solo_raccolta and class_name not in ("RaccoltaTask", "RaccoltaChiusuraTask"):
             continue
         Cls = tasks_cls.get(class_name)
         if Cls is None:
@@ -758,6 +759,16 @@ def _thread_istanza(ist, tasks_cls, dry_run):
                 # Apri nuova sessione
                 ctx.state.apri_sessione(risorse_now, rd.diamanti, ts_now)
                 _log(nome, f"[PROD] sessione aperta @ {ts_now}")
+
+                # auto-WU20 (27/04 fix persistenza): salva state SUBITO,
+                # prima del _build_ctx (line 774) che ricarica da disco e
+                # wipe `produzione_corrente`/`produzione_storico` impostati.
+                # Pre-fix: sessione_aperta loggata ma mai persistita →
+                # storico sempre vuoto, dashboard "in attesa" permanente.
+                try:
+                    ctx.state.save(state_dir=os.path.join(ROOT, "state"))
+                except Exception as exc:
+                    _log(nome, f"[WARN] save state post-apri_sessione: {exc}")
             else:
                 _log(nome, "[PROD] screenshot None — sessione produzione non aperta")
         except Exception as exc:
@@ -817,7 +828,15 @@ def _thread_istanza(ist, tasks_cls, dry_run):
     except Exception as exc:
         _log(nome, f"[WARN] save state: {exc}")
 
-    _log(nome, f"Tick completato ({len(results)} eseguiti)")
+    # Issue #56 — flag adb_unhealthy: orchestrator ha abortito il tick per
+    # cascata ADB persistente (reconnect cosmetico). Logga l'evento per
+    # tracciamento; la chiusura istanza avviene comunque sotto.
+    adb_unhealthy = bool(getattr(ctx, "adb_unhealthy", False))
+    if adb_unhealthy:
+        _log(nome, f"[ERRORE] reset emergenziale ADB unhealthy — tick abortito ({len(results)} task eseguiti)")
+        _aggiorna_stato_istanza(nome, {"stato": "waiting", "ultimo_errore": "adb_unhealthy"})
+    else:
+        _log(nome, f"Tick completato ({len(results)} eseguiti)")
 
     # ── 4. Chiusura istanza MuMu ────────────────────────────────────
     if not dry_run:
