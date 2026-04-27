@@ -167,7 +167,43 @@ def _hhmm_from_iso(ts: str) -> str:
 # ==============================================================================
 
 def get_task_kpi_24h() -> List[TaskKpi]:
-    return _cached("task_kpi_24h", _compute_task_kpi_24h)
+    return _cached("task_kpi_24h", _compute_task_kpi_24h_dual)
+
+
+def _compute_task_kpi_24h_dual() -> List[TaskKpi]:
+    """
+    WU42 — fonte primaria: data/telemetry/live.json (precomputato dal
+    LiveTelemetry thread, schema TaskTelemetry). Fallback al log scan
+    legacy (WU37) se telemetry non è ancora attiva o live.json vuoto.
+    """
+    try:
+        from core.telemetry import load_live
+        live = load_live()
+    except Exception:
+        live = None
+
+    if live and live.get("per_task"):
+        return _kpi_from_live(live)
+    # Fallback log scan
+    return _compute_task_kpi_24h()
+
+
+def _kpi_from_live(live: dict) -> List[TaskKpi]:
+    out: List[TaskKpi] = []
+    for task_name, t in live.get("per_task", {}).items():
+        last_ts = t.get("last_ts", "") or ""
+        # converti "2026-04-27T13:25:14.123+00:00" → "13:25"
+        last_short = last_ts[11:16] if len(last_ts) >= 16 else ""
+        out.append(TaskKpi(
+            nome      = task_name,
+            esec_24h  = int(t.get("exec", 0)),
+            ok_pct    = round(float(t.get("ok_pct", 0))),
+            avg_dur_s = float(t.get("duration_avg_s", 0.0)),
+            last_ts   = last_short,
+            last_err  = t.get("last_err", "—") or "—",
+        ))
+    out.sort(key=lambda t: t.esec_24h, reverse=True)
+    return out
 
 
 def _compute_task_kpi_24h() -> List[TaskKpi]:
@@ -259,7 +295,92 @@ _HEALTH_PATTERNS = [
 
 
 def get_health_24h() -> List[HealthIssue]:
-    return _cached("health_24h", _compute_health_24h)
+    return _cached("health_24h", _compute_health_24h_dual)
+
+
+def _compute_health_24h_dual() -> List[HealthIssue]:
+    """
+    WU42 — sorgenti multiple:
+      - data/telemetry/live.json: anomalies_global + totals (ok/fail/abort)
+      - bot.log: pattern launcher (HOME timeout, banner unmatched, foreground)
+    Fallback completo al log scan legacy se telemetry non disponibile.
+    """
+    try:
+        from core.telemetry import load_live
+        live = load_live()
+    except Exception:
+        live = None
+
+    out: List[HealthIssue] = []
+
+    # 1. Anomalie da telemetry (se disponibile)
+    if live and live.get("anomalies_global"):
+        anom = live["anomalies_global"]
+        # Mappa tag canonici → label leggibile
+        tag_labels = {
+            "adb_unhealthy":     "ADB cascade abort",
+            "adb_cascade":       "ADB cascade",
+            "home_stab_timeout": "Stab HOME timeout",
+            "ocr_fail":          "OCR fail",
+            "template_not_found": "Template non trovato",
+            "banner_unmatched":  "Banner unmatched (telemetry)",
+            "foreground_recovery": "Boot foreground recov (telemetry)",
+            "retry":             "Retry task",
+        }
+        for tag, count in sorted(anom.items(), key=lambda x: -x[1]):
+            label = tag_labels.get(tag, tag)
+            out.append(HealthIssue(
+                kind="warn", label=label,
+                value=f"{count} occorrenze",
+                note=f"telemetry · tag={tag}",
+            ))
+        # OK pill: spedizioni totali
+        totals = live.get("totals", {})
+        ok_count = totals.get("ok", 0) + totals.get("skip", 0)
+        fail_count = totals.get("fail", 0) + totals.get("abort", 0)
+        if ok_count + fail_count > 0:
+            pct = round(100 * ok_count / (ok_count + fail_count))
+            out.append(HealthIssue(
+                kind="ok" if pct >= 90 else "warn",
+                label="Tick success rate",
+                value=f"{ok_count}/{ok_count + fail_count} ({pct}%)",
+                note="ok+skip vs fail+abort",
+            ))
+
+    # 2. Pattern bot.log non catturati da telemetry
+    botlog_patterns = [
+        ("Stab HOME timeout (launcher)",     r"stabilizzazione timeout — procedo comunque"),
+        ("HOME instabile reset (launcher)",  r"HOME instabile \(Screen\.UNKNOWN\)"),
+        ("Banner unmatched (launcher)",      r"_unmatched_tap_x.*: [1-9]"),
+        ("Boot foreground recov (launcher)", r"NON in foreground|monkey preventivo"),
+    ]
+    counters: Dict[str, Dict[str, int]] = {p[0]: {} for p in botlog_patterns}
+    compiled = [(lbl, re.compile(pat)) for lbl, pat in botlog_patterns]
+
+    since = _iso_minus_h(24)
+    for ts, ist, msg in _iter_botlog(since):
+        for lbl, rgx in compiled:
+            if rgx.search(msg):
+                counters[lbl][ist] = counters[lbl].get(ist, 0) + 1
+                break
+
+    for lbl, _pat in botlog_patterns:
+        ist_counters = counters[lbl]
+        total = sum(ist_counters.values())
+        if total == 0:
+            continue
+        top = sorted(ist_counters.items(), key=lambda x: -x[1])[:3]
+        out.append(HealthIssue(
+            kind="warn", label=lbl,
+            value=f"{total} occorrenze",
+            note=", ".join(f"{ist} ×{c}" for ist, c in top),
+        ))
+
+    # 3. Fallback completo se nessuna sorgente ha dati
+    if not out:
+        return _compute_health_24h()
+
+    return out
 
 
 def _iter_botlog(since_iso: str):

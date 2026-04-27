@@ -496,12 +496,18 @@ def _build_rollup_from_events(events: list) -> dict:
         outc = {"ok": 0, "skip": 0, "fail": 0, "abort": 0, "no_op": 0}
         durs = []
         anom: dict = {}
+        last_ts = ""
+        last_err = ""
         for ev in evs:
             outc[ev.outcome] = outc.get(ev.outcome, 0) + 1
             if ev.duration_s > 0:
                 durs.append(ev.duration_s)
             for tag in (ev.anomalies or []):
                 anom[tag] = anom.get(tag, 0) + 1
+            if ev.ts_end and ev.ts_end > last_ts:
+                last_ts = ev.ts_end
+            if ev.outcome in ("fail", "abort") and ev.msg:
+                last_err = ev.msg[:80]
         exec_n = len(evs)
         ok_n = outc["ok"] + outc["skip"]
         rollup["per_task"][task_name] = {
@@ -518,6 +524,8 @@ def _build_rollup_from_events(events: list) -> dict:
             "duration_max_s":   round(max(durs), 3) if durs else 0.0,
             "anomalies":        anom,
             "output_aggregates": _aggregate_outputs(evs),
+            "last_ts":          last_ts,
+            "last_err":         last_err or "—",
         }
 
     for ist_name, evs in by_inst.items():
