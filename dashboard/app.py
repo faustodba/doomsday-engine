@@ -580,12 +580,19 @@ def partial_produzione_istanze(request: Request):
 
         # auto-WU18: stato live + task corrente + errori + quota
         stato         = entry.get("stato", "unknown")
-        task_corrente = entry.get("task_corrente") or "—"
+        task_corrente = entry.get("task_corrente") or None
         errori_live   = int(entry.get("errori_live", 0) or 0)
         quota_max     = int(entry.get("quota_max", 0) or 0)
         sped_oggi     = int(entry.get("spedizioni_oggi", 0) or 0)
         quota_esau    = bool(entry.get("quota_esaurita", False))
         quota_lbl     = f"{sped_oggi}/{quota_max}" if quota_max > 0 else "—"
+        # auto-WU19: ultimo task (assorbe inst-grid card)
+        ut_nome  = entry.get("ultimo_task_nome") or None
+        ut_ts    = entry.get("ultimo_task_ts") or None
+        ut_msg   = entry.get("ultimo_task_msg") or ""
+        ut_esito = entry.get("ultimo_task_esito") or None
+        # task da mostrare: priorità a task_corrente, fallback a ultimo task
+        task_lbl = task_corrente if task_corrente else (ut_nome or "—")
         # Stato pill colors
         STATO_COLOR = {
             "online":     "#4ade80",  # green
@@ -595,6 +602,15 @@ def partial_produzione_istanze(request: Request):
             "unknown":    "#64748b",
         }
         stato_col = STATO_COLOR.get(stato, "#64748b")
+        # Badge stato a destra (stile inst-grid IDLE/RUNNING)
+        STATO_BADGE_BG = {
+            "online":  "rgba(74,222,128,0.18)",
+            "running": "rgba(74,222,128,0.18)",
+            "idle":    "rgba(148,163,184,0.15)",
+            "error":   "rgba(248,113,113,0.20)",
+            "unknown": "rgba(100,116,139,0.18)",
+        }
+        badge_bg = STATO_BADGE_BG.get(stato, "rgba(100,116,139,0.18)")
 
         # Sessione corrente
         ris_ini    = corrente.get("risorse_iniziali", {}) or {}
@@ -688,18 +704,35 @@ def partial_produzione_istanze(request: Request):
         tasks_curr_short, tasks_curr_tip = _tasks_brief(tasks_curr)
         tasks_prec_short, tasks_prec_tip = _tasks_brief(tasks_prec)
 
-        # auto-WU18: header secondaria con avvio + task corrente + errori live
-        # (prima del tabella risorse)
+        # auto-WU19: header completo (assorbe inst-grid). 2 righe:
+        # 1) avvio + task corrente|ultimo + errori
+        # 2) ts ultimo task + msg ultimo task (se presente)
         err_color = "var(--red,#f87171)" if errori_live > 0 else "var(--text-dim)"
+        # task color: rosso se ultimo esito err, accent altrimenti
+        task_col = "var(--red,#f87171)" if ut_esito == "err" else "var(--accent)"
         header_status = (
             f'<div style="display:flex;justify-content:space-between;'
-            f'gap:6px;font-size:9px;color:var(--text-dim);margin-bottom:3px">'
+            f'gap:6px;font-size:9px;color:var(--text-dim);margin-bottom:2px">'
             f'<span>avvio <b style="color:var(--text)">{avvio_lbl}</b></span>'
             f'<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
-            f'text-align:center">task: <b style="color:var(--accent)">{task_corrente}</b></span>'
+            f'text-align:center">task: <b style="color:{task_col}">{task_lbl}</b></span>'
             f'<span style="color:{err_color}">err:{errori_live}</span>'
             f'</div>'
         )
+        # Riga ts + msg (solo se presenti)
+        if ut_ts or ut_msg:
+            ts_show  = ut_ts or "—"
+            msg_show = ut_msg or "—"
+            header_lastmsg = (
+                f'<div style="display:flex;gap:6px;font-size:9px;color:var(--text-dim);'
+                f'margin-bottom:3px">'
+                f'<span>ts <b style="color:var(--text)">{ts_show}</b></span>'
+                f'<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" '
+                f'title="{msg_show}">msg: <i>{msg_show}</i></span>'
+                f'</div>'
+            )
+        else:
+            header_lastmsg = ""
 
         # Riga corrente: durata, truppe (raccoglitori), quota rifornimento + flag esaurita
         quota_flag = " 🔴" if quota_esau else ""
@@ -740,13 +773,16 @@ def partial_produzione_istanze(request: Request):
               <span style="display:inline-block;width:7px;height:7px;border-radius:50%;
                 background:{stato_col}"></span>
               {nome}
-              <span style="color:var(--text-dim);font-weight:normal;font-size:9px">·{stato}</span>
+              <span style="background:{badge_bg};color:{stato_col};font-size:8px;
+                font-weight:600;padding:1px 5px;border-radius:3px;text-transform:uppercase;
+                letter-spacing:0.5px">{stato}</span>
             </span>
             <span style="color:var(--text-dim);font-weight:normal;font-size:9px">
               P:{provv_lbl}
             </span>
           </div>
           {header_status}
+          {header_lastmsg}
           <table style="width:100%;border-collapse:collapse;font-size:10px">
             <thead><tr style="color:var(--text-dim);font-size:9px">
               <th style="text-align:left">risorsa</th>

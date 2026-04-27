@@ -280,6 +280,12 @@ def get_produzione_istanze() -> list[dict]:
             stato = (ist_status.stato if ist_status else None) or "unknown"
             task_corrente = ist_status.task_corrente if ist_status else None
             errori_live = ist_status.errori if ist_status else 0
+            # auto-WU19: ultimo task (per assorbire la card top inst-grid)
+            ut = ist_status.ultimo_task if ist_status else None
+            ultimo_task_nome  = (ut.nome if ut else None) or None
+            ultimo_task_ts    = (ut.ts if ut else None) or None
+            ultimo_task_msg   = ((ut.msg or "") if ut else "")[:50]
+            ultimo_task_esito = (ut.esito if ut else None) or None
 
             # Quota rifornimento
             rif = state.get("rifornimento", {})
@@ -288,17 +294,21 @@ def get_produzione_istanze() -> list[dict]:
             quota_esaurita  = quota_max > 0 and spedizioni_oggi >= quota_max
 
             result.append({
-                "nome":            nome,
-                "abilitata":       _abilitata(nome),
-                "stato":           stato,
-                "task_corrente":   task_corrente,
-                "errori_live":     errori_live,
-                "quota_max":       quota_max,
-                "spedizioni_oggi": spedizioni_oggi,
-                "quota_esaurita":  quota_esaurita,
-                "corrente":        corrente,
-                "precedente":      precedente,
-                "n_storico_24h":   len(storico),
+                "nome":              nome,
+                "abilitata":         _abilitata(nome),
+                "stato":             stato,
+                "task_corrente":     task_corrente,
+                "errori_live":       errori_live,
+                "ultimo_task_nome":  ultimo_task_nome,
+                "ultimo_task_ts":    ultimo_task_ts,
+                "ultimo_task_msg":   ultimo_task_msg,
+                "ultimo_task_esito": ultimo_task_esito,
+                "quota_max":         quota_max,
+                "spedizioni_oggi":   spedizioni_oggi,
+                "quota_esaurita":    quota_esaurita,
+                "corrente":          corrente,
+                "precedente":        precedente,
+                "n_storico_24h":     len(storico),
             })
         return result
     except Exception:
