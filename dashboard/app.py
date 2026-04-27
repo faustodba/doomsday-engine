@@ -833,48 +833,20 @@ def partial_produzione_istanze(request: Request):
             residuo_lbl = "—"
             residuo_col = "var(--text-dim)"
 
+        # auto-WU33: rimosso "truppe" da corrente + intero blocco precedente
+        # (al momento — riabilitabile in futuro quando produzione_storico stabile).
         corr_kvs = [
-            _kv("truppe", str(truppe), truppe_col),
             _kv("spediz", str(sped_oggi)),
             _kv("inviato", inviato_lbl, "#7cf" if inviato_totale > 0 else "var(--text)"),
             _kv("residuo", residuo_lbl, residuo_col),
         ]
-        corr_block = (
-            f'<div style="font-size:11px;color:var(--text-dim)">'
+        sess_block = (
+            f'<div style="font-size:11px;color:var(--text-dim);'
+            f'margin-top:5px;max-width:50%">'
             f'<div style="color:var(--accent);font-weight:600;text-align:center;'
             f'margin-bottom:2px;border-bottom:0.5px solid rgba(255,255,255,0.06);'
-            f'padding-bottom:1px">corrente</div>'
+            f'padding-bottom:1px">rifornimento giornaliero</div>'
             f'{"".join(corr_kvs)}</div>'
-        )
-
-        if has_prec:
-            errori_prec = int(precedente.get("errori_count", 0) or 0)
-            err_prec_color = "var(--red,#f87171)" if errori_prec > 0 else "var(--text)"
-            truppe_prec_col = "#7cf" if truppe_prec > 0 else "var(--text-dim)"
-            prec_kvs = [
-                _kv("durata", f"{durata_prec_m}m"),
-                _kv("truppe", str(truppe_prec), truppe_prec_col),
-                _kv("errori", str(errori_prec), err_prec_color),
-            ]
-            prec_block = (
-                f'<div style="font-size:11px;color:var(--text-dim)">'
-                f'<div style="color:#7cf;font-weight:600;text-align:center;'
-                f'margin-bottom:2px;border-bottom:0.5px solid rgba(255,255,255,0.06);'
-                f'padding-bottom:1px">precedente</div>'
-                f'{"".join(prec_kvs)}</div>'
-            )
-        else:
-            prec_block = (
-                f'<div style="font-size:11px;color:var(--text-dim);text-align:center;'
-                f'align-self:center">'
-                f'<b style="color:#7cf">precedente</b><br>'
-                f'<span style="font-style:italic">in attesa</span></div>'
-            )
-
-        # 2-col grid che racchiude entrambi i blocchi
-        sess_block = (
-            f'<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;'
-            f'margin-top:5px">{corr_block}{prec_block}</div>'
         )
 
         cards_html.append(f'''
