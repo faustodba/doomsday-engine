@@ -97,7 +97,7 @@ All'inizio di ogni sessione, in questo ordine:
 
 ---
 
-## Issues aperti (stato al 22/04/2026)
+## Issues aperti (stato al 27/04/2026)
 
 > **Nota**: la numerazione seguente è una tabella di tracking interno di CLAUDE.md
 > e NON è perfettamente allineata alla numerazione della sezione "Issues aperti" di ROADMAP.md.
@@ -157,6 +157,30 @@ All'inizio di ogni sessione, in questo ordine:
 | 48 | DistrictShowdown — loop infinito quando gioco esce + skip animation | ALTA | ✅ RISOLTA 24/04 (early-exit 3 cicli streak + check skip 840,371) |
 | 49 | Ottimizzazioni startup istanza (DELAY_POLL, stable_polls, delay_carica) | BASSA | 🆕 APERTA 24/04 — guadagno stimato ~90s/ciclo, rimandata post-stabilizzazione DS |
 | 50 | DistrictShowdown — finestre temporali evento (Ven 00:00 → Lun 00:00 UTC, Fund Raid Dom 20:00 → Lun 00:00) | — | ✅ IMPLEMENTATA 24/04 (`_is_in_event_window` + `_is_in_fund_raid_window` in DistrictShowdownTask) |
+| 51 | DistrictShowdown — gate readiness popup fase 3/4/5 (tap a vuoto su MuMu lento → blocco WARFARE) | ALTA | 🆕 APERTA 24/04 — proposta: `_wait_template_ready` analogo a pin_dado su sentinel di ogni popup (pin_alliance_influence / pin_achievement_rewards / pin_alliance_list / pin_vs_fund_raid) |
+| 52 | Notte 26/04 — produzione_corrente null + stab HOME 88% timeout + ARENA→ADB cascade + FAU_07 deficit | MIX | 🟡 parziale — 52c risolto da #56 WU24; 52a/b/d aperti |
+| 53 | Telemetria task & dashboard analytics — events JSONL + rollup + KPI | — | 🆕 APERTA 26/04 — MVP ~12h (memoria `project_telemetria_arch.md`) |
+| 54 | Banner catalog & dismissal pipeline boot stabilization — 573 UNKNOWN polls | — | 🟡 parziale — framework + 3 banner attivi (exit_game_dialog, auto_collect_afk_banner, banner_eventi_laterale) |
+| 55 | Store re-match fallback multi-candidate — swipe non-idempotente bordi mappa | ALTA | ✅ RISOLTA 26/04 (WU23 — multi-candidate sorted desc, cascade retry) |
+| 56 | Cascata ADB persistente FAU_04 12 min sterile — reconnect cosmetico | ALTA | ✅ RISOLTA 26/04 (WU24 — `ADBUnhealthyError` + abort tick + chiudi istanza) |
+| 57 | State save per task — fine-grained persistence (BoostState scadenza persa post-cascata FAU_04) | ALTA | ✅ RISOLTA 26/04 (WU25 — `orc.tick()` save dopo ogni task, `_state_dir()` env-based) |
+| 58 | Rifornimento log netto/lordo/tassa — `inviato_oggi` lordo invece di netto | MEDIA | ✅ RISOLTA 26/04 (qta_clamped_real ritornato da `_compila_e_invia`, `registra_spedizione(qta_inviata=qta_effettiva)` netto) |
+| 59 | Boost debug `_salva_debug_shot` 6 giorni attivo, 105MB accumulati | BASSA | ✅ RISOLTA 26/04 (chiamate commentate, screenshot eliminati prod+dev) |
+| 60 | Foreground check falso positivo post-restart — penalità 43s/istanza × 12 (~9min/restart) | ALTA | ✅ RISOLTA 26/04 (`_gioco_in_foreground` usa `mCurrentFocus` invece di `pkg in dumpsys activity top`) |
+| 61 | Discovery snapshot mancante post-dismiss banner / mid-tick UNKNOWN | MEDIA | ✅ RISOLTA 26/04 → SUPERSEDED da #63 (snapshot rimossi, sostituiti da tap X auto in memoria) |
+| 62 | Riordino priorità task + chiusura raccolta (boost→riforn→raccolta→...→raccolta_chiusura) | MEDIA | ✅ RISOLTA 26/04 (RaccoltaChiusuraTask sottoclasse, priority 200; task_setup.json riordinato; filtro raccolta_only esteso) |
+| 63 | Tap X auto-fallback per banner unmatched + no più screenshot su disco | MEDIA | ✅ RISOLTA 26/04 (`dismiss_banners_loop` tap (910,80) post-HOME-check; counter `_unmatched_tap_x` in dict ritorno; cartelle banner_unmatched/+vai_in_home_unknown/ rimosse) |
+| 64 | Raccolta legge slot mentre rifornimento ancora in volo → slot OCR ridotti | MEDIA | ✅ RISOLTA 26/04 step 1 (`RifornimentoState.eta_rientro_ultima` ISO; raccolta wait sempre fino a rientro, cap safety 600s) |
+| 65 | Wait > 60s rifornimento → anticipare task post-raccolta nel tempo morto | BASSA | 🆕 APERTA 26/04 step 2 — quando wait>60s, eseguire prima i task post-raccolta poi tornare a raccolta dopo verifica tempo trascorso |
+| 66 | Banner unmatched: X cerchio dorato + freccia BACK ↩ via match dinamico (2 template) | MEDIA | ✅ RISOLTA 26/04 (`pin_btn_x_close.png` 45×50 cerchio dorato per popup eventi; `pin_btn_back_arrow.png` 45×55 freccia BACK per schermate nidificate Alliance/Hero/Bag; flow A1 X→A2 BACK→B HOME/MAP→C BREAK). Test: Pompeii X=1.000, Alliance BACK=1.000 |
+| 68 | Stabilizzazione HOME: dismiss banners loop NON chiamato attivamente (149s avvio FAU_05 invece di ~30s) | ALTA | ✅ RISOLTA 26/04 (launcher.attendi_home invoca `_try_dismiss()` pre-stab + on-instability + pre-vai_in_home_finale; rimosso `_snap_post_home` write su disco) |
+| 69 | Fase 4 attesa caricamento: polling HOME/MAP ogni 2s troppo aggressivo + classify instabile durante load | MEDIA | ✅ RISOLTA 26/04 (nuovo flow: post sleep 10s, check `is_loading_splash` → se attivo aggancio fino a scomparsa Live Chat ogni 3s, se assente exit subito; Live Chat invariante più affidabile di classify HOME/MAP fluttuante) |
+| 71 | Store scan grid: continua tutti i 25 step anche con match >= 0.80 (~30-40s sprecati) | MEDIA | ✅ RISOLTA 26/04 (`soglia_store_early_exit=0.80`: scan interrotto al primo match alto, procede diretto al tap; multi-candidate fallback preservato per casi sotto early_exit) |
+| 72 | Fase 4 #69 false negative su gioco in background — exit early ma 47s polling sterile | DA OSSERVARE | 🔍 26/04 osservato 1 volta su FAU_10 (19:36:39 "no Live Chat" exit ma gioco in background → 47s polling fino a monkey recovery 19:37:27 + Live Chat rilevato 19:37:31). HOME raggiunto 157s vs 110s atteso. Da monitorare se ricorre, eventuale fix con `_gioco_in_foreground` check pre-splash |
+| 34 | Risorse netto/lordo/tassa schema (state + dashboard) | MEDIA | ✅ RISOLTA 27/04 (WU34 `RifornimentoState.inviato_lordo_oggi/tassa_oggi/tassa_pct_avg` + dashboard 6 row card + WU35 RISORSE FARM panel cleanup NETTO + WU36 CSS spacing) |
+| 39 | OCR "Daily Receiving Limit" FauMorfeus + dashboard | MEDIA | ✅ RISOLTA 27/04 (WU39 commit `ef81639` — `OCR_DAILY_RECV_LIMIT` 547,146,666,173 + `shared/morfeus_state.py` storage globale + dashboard riga capienza con color coding) |
+| 53 | Telemetria task & dashboard analytics — events JSONL + rollup + KPI | — | ✅ CHIUSA 27/04 (WU38-44 — pipeline 8/8 step, 9 commit `5153733`→`399eba0`, 19/19 test verdi). Vedi sezione "Sessione 27/04/2026" in ROADMAP.md |
+| 54 | Banner catalog & dismissal pipeline boot stabilization | — | 🟡 parziale (estesa con `pin_btn_x_close` + `pin_btn_back_arrow` in WU26/66) |
 
 > Aggiornare questa tabella ad ogni sessione insieme alla ROADMAP.
 

@@ -58,6 +58,46 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 27/04/2026 — Telemetria pipeline + Morfeus OCR + Risorse netto
+
+Maxi-sessione che ha chiuso **Issue #53** (telemetria) e **Issue #44/45** (semantica
+risorse netto/lordo + capienza destinatario). 12 commit pushati `efec7e6` → `399eba0`.
+
+#### 53. Telemetria task & dashboard analytics — pipeline 8/8 step (CHIUSA ✅ 27/04/2026)
+
+MVP completo `project_telemetria_arch.md`:
+
+| WU | Step | Componente | Commit |
+|----|------|------------|--------|
+| WU38 | 1 | `core/telemetry.py` — `TaskTelemetry` dataclass + storage 3-tier (events/rollup/live) + writer thread-safe + helpers (`_short_uuid`, `_iso_now`, `_iso_to_epoch`) + `record()` + `cleanup_old_events()` | `5153733` |
+| WU38 | 2 | Hook in `core/orchestrator.py:tick()` — auto-record TaskTelemetry per ogni `task.run()` (success/skip/fail/abort + ADBUnhealthyError tagged adb_unhealthy + cycle da `ctx.extras["cycle"]` + failsafe try/except blanket) | `5153733` |
+| WU38 | 3 | Migration TaskResult.data per 6 task: `rifornimento` (mode/provviste/tassa_pct_avg/spedizioni_oggi), `raccolta` (slot_attive/totali/tentativi/tipologie_bloccate), `boost` (outcome/durata), `donazione` (donate_count), `district_showdown` (fase1_esito/fasi_reward), `arena` (sfide_eseguite/esaurite/errore). Già OK: `vip`, `zaino`, `alleanza` (kwargs su `.ok()` finiscono in data). | `5153733` |
+| WU40 | 4 | Rollup engine giornaliero: `compute_rollup(date)` → `data/telemetry/rollup/rollup_<date>.json` con `totals/per_task/per_instance/anomalies_global`. Aggregator generico `_aggregate_outputs` (bool→counter, num→sum+max, str→categorico). Percentili p50/p95 in pure-Python. CLI `tools/build_rollup.py`. Retention 365gg. | `1572e25` |
+| WU41 | 5 | Live writer thread: `compute_live_24h()` sliding window (legge events oggi+ieri, filtra ts ≥ now-24h) + `live_writer_loop(stop_event, refresh_s=60)` daemon. Hook in `main.py` accanto a StatusWriter. Refactor `_build_rollup_from_events()` condiviso DRY. | `c8081a3` |
+| WU42 | 6 | Reader API dual-source `dashboard/services/telemetry_reader.py`: `live.json` primaria con fallback automatico al log scan WU37 se telemetry non attiva. `last_ts` (max ts_end) + `last_err` (msg ultimo fail/abort) aggiunti al rollup. Health panel: anomalies da telemetry + tag_labels mapping + tick success rate + bot.log launcher patterns. | `cc09aa9` |
+| WU43 | 7 | Backfill retroattivo `tools/backfill_telemetry.py` da `logs/FAU_*.jsonl`. Parsa coppie "Orchestrator: avvio task X" + "...completato/fallito" → TaskTelemetry sintetici. Idempotente (dedup su ts_start+task+instance). Inferisce anomalies per ADB UNHEALTHY + eccezioni. **76 eventi storici già caricati a ciclo 1.** | `815d824` |
+| WU44 | 8 | Anomaly pattern detector: `detect_anomaly_patterns(events)` rileva 4 sequenze multi-evento: `adb_cascade` (3+ abort entro 5min), `rifornimento_skip_chain` (3+ skip consecutivi), `task_timeout_recurring` (2+ duration > 3× mediana), `home_stab_loop` (3+ home_stab_timeout entro 30min). Severity low/med/high. **Pattern reale rilevato: `raccolta_chiusura` 2 outlier max 174.9s vs mediana 2.8s.** | `399eba0` |
+
+**Test coverage:** 19/19 passati (`tests/unit/test_telemetry_rollup.py` + `tests/unit/test_orchestrator_telemetry.py`).
+**Storage:** `data/telemetry/{events/,rollup/,live.json}` retention 30gg/365gg/sempre.
+**Pipeline failsafe:** ogni livello cattura eccezioni (telemetria silenziosa, mai blocca task).
+
+#### 39. OCR "Daily Receiving Limit" FauMorfeus + dashboard (CHIUSA ✅ 27/04/2026)
+
+- **Problema:** dashboard non aveva visibilità sulla capienza giornaliera residua del destinatario (FauMorfeus può saturare → spedizioni inutili).
+- **Soluzione:**
+  - `shared/rifornimento_base.py` — nuova zone OCR `OCR_DAILY_RECV_LIMIT = (547,146,666,173)` + helper `leggi_daily_recv_limit()`. Coordinate calibrate visivamente su screenshot reale catturato dal monitor `tools/capture_invio_mask.py`.
+  - `shared/morfeus_state.py` (nuovo) — storage globale `data/morfeus_state.json` (atomic write) con schema `{daily_recv_limit, ts, letto_da, tassa_pct}`. Last-write-wins.
+  - `tasks/rifornimento.py:_compila_e_invia()` — chiamata OCR + save dopo `leggi_provviste`.
+  - Dashboard: riga "capienza morfeus" nel pannello RISORSE FARM con color coding (0=red+⚠ saturo, <5M=yellow, ≥5M=accent). Tooltip ts + nome istanza.
+- **Commit:** `ef81639`.
+
+#### 38. Risorse netto/lordo/tassa schema + dashboard cleanup (CHIUSA ✅ 27/04/2026 — WU34/35/36)
+
+- **WU34** (commit `efec7e6`): `core/state.py` `RifornimentoState` esteso con `inviato_lordo_oggi`, `tassa_oggi`, `tassa_pct_avg` (running average 90/10). `registra_spedizione()` accetta `qta_lorda` e `tassa_amount`. `_controlla_reset()` reset LORDO+TASSA daily, tassa_pct_avg si conserva. `tasks/rifornimento.py` aggiorna entrambi i call sites (mappa + membri). Dashboard card: 6 key-value rows.
+- **WU35** (commit `4b630c8`): pannello RISORSE FARM aggregator pulito a NETTO. `RifornimentoIstanza` esteso con `provviste_residue_netta` + `tassa_pct_avg`. Totale e dettaglio istanze mostrano netto, lordo OCR esposto solo in tooltip.
+- **WU36** (commit `7283c4b`): CSS spacing — `.res-row` gap 6→10px, `.res-name` width 52→64px (visual readability).
+
 ### 78. DistrictShowdown — gate temporale override flag (RISOLTA ✅ 27/04/2026)
 
 **Contesto**: il gate `should_run()` controllava `task_abilitato("district_showdown")` PRIMA di `_is_in_event_window()`. Conseguenza: se l'utente disabilitava il flag durante l'evento, il task saltava — rischio dimenticanza.
@@ -2003,6 +2043,79 @@ pin_acc_500..2500000 (7 file), pin_pet_200..300000 (6 file)  ← NUOVO (zaino BA
 Mappa completa del codice sorgente con ruolo di ciascun modulo. Serve come
 guida per orientarsi nel repo e capire dove intervenire per ogni tipo di modifica.
 
+### Root del progetto (`C:\doomsday-engine` dev / `C:\doomsday-engine-prod` prod)
+
+#### File principali
+
+| File | Tipo | Descrizione |
+|------|:--:|-------------|
+| `main.py` | core | Entry point bot — loop ciclico sequenziale 12 istanze. |
+| `CLAUDE.md` | docs | Index del progetto, redirect a `.claude/CLAUDE.md` per istruzioni operative. |
+| `ROADMAP.md` | docs | Fonte di verità issues + architettura + struttura. **Questo file.** |
+| `engine_status.json` | runtime | Snapshot live stato bot (scritto da status_writer ogni N secondi). |
+| `last_checkpoint.json` | runtime | Checkpoint `--resume` (istanza+ciclo). |
+| `runtime.json` | runtime | Lock file processo bot attivo (PID). |
+| `bot.log` | log | Log testuale globale (corrente). |
+| `bot.log.bak` | log | Log backup (pre-rotazione, conservato 1 livello). |
+| `bot_live.log` | log | Log dashboard avvio uvicorn. |
+
+#### Launcher Windows (.bat)
+
+| File | Descrizione |
+|------|-------------|
+| `run.bat` | Launcher dev base (legacy). |
+| `run_prod.bat` | **Launcher principale produzione** — `cd C:\doomsday-engine-prod + DOOMSDAY_ROOT + main.py --tick-sleep 60 --no-dashboard --use-runtime --resume`. |
+| `run_dashboard_prod.bat` | Launcher dashboard FastAPI/uvicorn prod (porta 8765). |
+| `task.bat` | Helper esecuzione task singolo. |
+| `reset.bat` | Reset state (utility manuale). |
+| `fix_inplace_rifornimento.bat` | Fix one-shot legacy (storico). |
+| `release_pytest_fix5_16042026.bat` | Release storico (storico). |
+
+#### Cartelle codice/dati
+
+| Cartella | Descrizione |
+|----------|-------------|
+| `core/` | Infrastruttura motore (orchestrator, task, telemetry, launcher, navigator, device, state, scheduler, logger, adaptive_timing). |
+| `tasks/` | Implementazione 15 task (rifornimento, raccolta, donazione, district_showdown, arena, vip, zaino, alleanza, messaggi, boost, store, radar, ecc.). |
+| `shared/` | Utility condivise (template_matcher, ocr_helpers, ui_helpers, rifornimento_base, morfeus_state, banner_catalog). |
+| `dashboard/` | FastAPI web dashboard (app.py, models, routers/, services/, static/, templates/). |
+| `tools/` | CLI utility — backfill_telemetry.py, build_rollup.py, capture_invio_mask.py. |
+| `monitor/` | MCP server stdio per Claude Code (analyzer.py + mcp_server.py). |
+| `radar_tool/` | Sottomodulo classificazione nodi mappa via ML (currently disabled). |
+| `radar_archive/` | Archivio dataset radar (storico). |
+| `config/` | Configurazione (config_loader, config, global_config.json, runtime_overrides.json, instances.json, task_setup.json). |
+| `data/` | Dati persistenti (blacklist_fuori, storico_farm, morfeus_state, telemetry/). |
+| `state/` | Stato per-istanza (FAU_XX.json + FAU_XX_timing.json). |
+| `logs/` | Log JSONL per-istanza (FAU_XX.jsonl + .bak). |
+| `templates/` | Template PNG per matching UI (130+ file in `pin/`). |
+| `tests/` | Suite pytest (`unit/`, `tasks/`, `fixtures/`). |
+| `temp_screen/` | Screenshot temporanei (output `tools/capture_invio_mask.py`). |
+| `debug_task/` | Output debug task (storico, non versionato). |
+| `.claude/` | Istruzioni operative Claude Code (CLAUDE.md, mcp_servers.json, settings.json). |
+
+#### File legacy / orfani (candidati eliminazione — Issue #21)
+
+| File | Stato |
+|------|-------|
+| `calibra_slot_ocr.py` | utility OCR slot calibration (storico) |
+| `cd` | file vuoto (orfano) |
+| `gitignore` | senza `.` davanti (errato — dovrebbe essere `.gitignore`) |
+| `istruzioni di lancio.txt` | nota testo libero (storico) |
+| `main.py.bak` | backup (storico) |
+| `ocr_helpers_2e8ab2f.py` | hash commit antico (storico) |
+| `pytest_output.txt` | output test (storico) |
+| `python` | file vuoto (orfano) |
+| `report.html`, `report.py` | report storico HTML/python |
+| `reset_schedule.py` | utility one-shot (storico) |
+| `rifornimento_mappa.py` | V5 legacy (mai usato in V6 — da eliminare) |
+| `run_task.py` | runner task isolato V5-style |
+| `smoke_test.py` | test pre-pytest |
+| `tmp_clipboard.txt` | clipboard temp |
+| `totale` | file vuoto |
+| `test_*.py` (root) | test obsoleti (rimpiazzati da `tests/unit/test_*.py`) |
+
+> Nota: la rimozione richiede sessione dedicata (Issue #21) per evitare break.
+
 ### Entry point
 
 | File | Descrizione |
@@ -2028,14 +2141,15 @@ guida per orientarsi nel repo e capire dove intervenire per ogni tipo di modific
 
 | File | Descrizione |
 |------|-------------|
-| `orchestrator.py` | Registra task, ordina per priority, gestisce il tick: per ogni task → `should_run()` check → `e_dovuto()` schedule check → gate HOME pre-task → `run()` → aggiornamento schedule. |
+| `orchestrator.py` | Registra task, ordina per priority, gestisce il tick: per ogni task → `should_run()` check → `e_dovuto()` schedule check → gate HOME pre-task → `run()` → aggiornamento schedule. **WU38**: hook automatico TaskTelemetry per ogni run (start/finish/record), include cycle da ctx.extras + ADB cascade tagging. |
 | `task.py` | Classi base V6: `Task` (ABC con `name()/should_run()/run()` astratti), `TaskContext` (device, navigator, matcher, config, state, log_msg), `TaskResult` (success, message, data). |
+| `telemetry.py` | **WU38-44 (Issue #53)** — pipeline telemetria. `TaskTelemetry` dataclass + writer `record()` + reader `iter_events()/iter_events_range()` + rollup engine (`compute_rollup`, `save_rollup`, `cleanup_old_rollups`) + live writer (`compute_live_24h`, `live_writer_loop`) + backfill (`backfill_from_logs`) + anomaly detector (`detect_anomaly_patterns`). Storage `data/telemetry/{events,rollup,live.json}`. Self-test integrato. |
 | `launcher.py` | Avvio/chiusura istanze MuMu via `MuMuManager.exe` CLI. `avvia_player()` (MuMuNxMain.exe Win11), `avvia_istanza()` (launch + adb connect + `_avvia_gioco()` con am start + monkey + foreground check, Issue #46), `attendi_home()` (polling schermata + monkey recovery, Issue #46), `reset_istanza()`, `chiudi_istanza()`. |
 | `device.py` | Astrazione ADB per singola istanza. `AdbDevice(host, port, name)`: screenshot (Screenshot con `.frame` ndarray), tap, back, swipe. `Screenshot.match_template()` usato da matcher. `@dataclass MatchResult(found, score, cx, cy)`. |
 | `navigator.py` | Navigazione inter-schermata game. `schermata_corrente()` (Screen.HOME/MAP/UNKNOWN via template match), `vai_in_home()`, `vai_in_mappa()`, `tap_barra(ctx, voce)` (barra inferiore: campaign/alliance/hero/bag/beast). |
-| `state.py` | Stato persistente per-istanza. `InstanceState(path)` save/load atomico tmp+fsync+os.replace. Sottocampi: rifornimento, daily_tasks, metrics, schedule, boost, vip, arena. |
+| `state.py` | Stato persistente per-istanza. `InstanceState(path)` save/load atomico tmp+fsync+os.replace. Sottocampi: rifornimento, daily_tasks, metrics, schedule, boost, vip, arena. **WU34**: `RifornimentoState` esteso con `inviato_lordo_oggi`, `tassa_oggi`, `tassa_pct_avg` (running average), `eta_rientro_ultima` (sync raccolta-rifornimento Issue #64). |
 | `scheduler.py` | Gestione interval/daily/always per-task con restart-safe restore da disco. |
-| `logger.py` | Logger strutturato `ctx.log_msg(msg)`. Output duale: bot.log (testuale) + logs/FAU_XX.jsonl (JSONL machine-readable). |
+| `logger.py` | Logger strutturato `ctx.log_msg(msg)`. Output duale: bot.log (testuale) + logs/FAU_XX.jsonl (JSONL machine-readable). Rotazione automatica a 5MB → `.jsonl.1`. |
 | `adaptive_timing.py` | Timing per-istanza appreso dall'esperienza (es. `boot_android_s`). `get(key, fallback)` + `record(key, value)`. Salvato in `state/FAU_XX_timing.json`. |
 
 ### `tasks/` — implementazione task
@@ -2065,7 +2179,9 @@ guida per orientarsi nel repo e capire dove intervenire per ogni tipo di modific
 | `template_matcher.py` | Wrapper cv2.matchTemplate + caching template + soglie default per-template. `find_one/find_all/exists/score`. Classe `FakeMatcher` per test. |
 | `ocr_helpers.py` | Wrapper pytesseract. `ocr_risorse()` (OCR 4 valori risorse HOME), `ocr_slot()` (contatore squadre X/Y), `ocr_text()`, sanitize numeri ("5M"/"1.2B"). |
 | `ui_helpers.py` | Helpers UI: pulse tap, swipe scroll, wait_for_template, back_x_volte, ecc. |
-| `rifornimento_base.py` | Logica comune rifornimento (centratura mappa, resource_supply, compila_e_invia). |
+| `rifornimento_base.py` | Logica comune rifornimento (centratura mappa, resource_supply, compila_e_invia). **WU39**: nuova `OCR_DAILY_RECV_LIMIT (547,146,666,173)` + `leggi_daily_recv_limit()` (cap intake destinatario). |
+| `morfeus_state.py` | **WU39 (NEW)** — storage globale destinatario rifornimento. Schema `{daily_recv_limit, ts, letto_da, tassa_pct}` in `data/morfeus_state.json` (atomic write). Last-write-wins: tutte le istanze inviano alla stessa Morfeus, vedono lo stesso valore. API `save()`, `load()`. Failsafe (eccezioni silenziose). |
+| `banner_catalog.py` | Catalog banner riconosciuti dal navigator + dismiss action mirate (auto_collect_afk_banner, exit_game_dialog, banner_eventi_laterale, ecc.). Issue #54. |
 
 ### `dashboard/` — FastAPI web dashboard
 
@@ -2079,10 +2195,19 @@ guida per orientarsi nel repo e capire dove intervenire per ogni tipo di modific
 | `routers/api_stats.py` | Stats aggregate: spedizioni oggi, produzione/ora, totali risorse, provviste. |
 | `routers/api_status.py` | engine_status.json live: stato istanze, tick corrente, uptime. |
 | `services/config_manager.py` | Layer di accesso config+overrides. `get_global_config()`, `get_overrides()`, `get_merged_config()` (UI vede valori reali bot, Issue #18), `save_overrides()`. Usa `DOOMSDAY_ROOT` env var per coerenza dev/prod (Issue #38). |
-| `services/stats_reader.py` | Read-only stats da state/engine_status. `get_engine_status()`, `get_all_stats()`, `get_storico()`, `get_risorse_farm()` (aggregato farm). Filtro OCR anomalie >100M per spedizione (Issue #16/#27). |
+| `services/stats_reader.py` | Read-only stats da state/engine_status. `get_engine_status()`, `get_all_stats()`, `get_storico()`, `get_risorse_farm()` (aggregato farm). Filtro OCR anomalie >100M per spedizione (Issue #16/#27). **WU34/35**: `MorfeusState`, `RifornimentoIstanza` esteso con `provviste_residue_netta` + `tassa_pct_avg`. **WU39**: `_load_morfeus_state()` legge `data/morfeus_state.json`. |
 | `services/log_reader.py` | Tail efficiente log file con offset tracking. |
+| `services/telemetry_reader.py` | **WU37+42 (Issue #53)** — reader API dual-source per dashboard. `get_task_kpi_24h()`, `get_health_24h()`, `get_ciclo_status()`, `get_trend_7gg()`. Source primaria: `data/telemetry/live.json` (precomputato). Fallback automatico al log scan WU37 (rolling 24h su `logs/FAU_*.jsonl` + `bot.log`). Cache TTL 30s. Pattern detector (WU44) integrato in health. |
 | `templates/*.html` | Jinja2 template: `index.html` (dashboard principale), `config_global.html` (form parametri globali), `config_overrides.html` (form rifornimento/zaino). |
 | `static/style.css`, `static/app.js` | CSS palette ambra + HTMX bootstrap. |
+
+### `tools/` — utility CLI
+
+| File | Descrizione |
+|------|-------------|
+| `build_rollup.py` | **WU40** — genera `data/telemetry/rollup/rollup_<date>.json` da events. Args: `--date {today,yesterday,YYYY-MM-DD}` `--range N` (ultimi N giorni) `--cleanup N` (retention sweep). |
+| `backfill_telemetry.py` | **WU43** — backfill retroattivo TaskTelemetry da `logs/FAU_*.jsonl`. Idempotente (dedup su ts_start+task+instance). Args: `--days N` `--since ISO` `--until ISO` `--rebuild-rollup`. Inferisce anomalies per ADB UNHEALTHY + eccezioni generiche. |
+| `capture_invio_mask.py` | Monitor screencap maschera invio rifornimento. Polling-based: tail logs JSONL, su `Rifornimento: RESOURCE SUPPLY trovato` (max-age 15s) attende 1.7s e cattura via ADB exec-out screencap. Output `temp_screen/maschera_<istanza>_<ts>.png`. Usato per calibrazione coordinate OCR (es. WU39 Daily Receiving Limit). |
 
 ### `monitor/` — MCP server per Claude Code
 
@@ -2101,6 +2226,10 @@ Progetto separato per classificazione nodi mappa via ML. Usato da `radar_census.
 |----------|-------------|
 | `data/blacklist_fuori_globale.json` | Lista nodi raccolta fuori-territorio (globale tra istanze). |
 | `data/storico_farm.json` | Storico giornaliero produzione per istanza (90gg retention). |
+| `data/morfeus_state.json` | **WU39** — stato globale destinatario rifornimento (Daily Receiving Limit FauMorfeus). Atomic write, last-write-wins. |
+| `data/telemetry/events/events_<date>.jsonl` | **WU38** — eventi TaskTelemetry append-only (1 riga per esecuzione task). Retention 30gg. |
+| `data/telemetry/rollup/rollup_<date>.json` | **WU40** — rollup giornaliero (totals/per_task/per_instance/anomalies/patterns_detected). Retention 365gg. |
+| `data/telemetry/live.json` | **WU41** — sliding window 24h. Aggiornato dal LiveTelemetry thread ogni 60s. Source primaria della dashboard. |
 | `state/FAU_XX.json` | Stato persistente per-istanza (rifornimento, daily_tasks, schedule, metrics). Atomic save. |
 | `state/FAU_XX_timing.json` | Timing appresi per-istanza (boot_android_s, etc.). |
 | `logs/FAU_XX.jsonl` | Log strutturato per-istanza (1 JSON per riga). Ruotato `.bak` a ogni avvio. |
