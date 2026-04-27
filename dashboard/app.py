@@ -1317,6 +1317,9 @@ def partial_telemetria_health(request: Request):
         if h.kind == "ok":
             badge = '<span style="color:var(--green);font-weight:600">✓</span>'
             val_col = "var(--green)"
+        elif h.kind == "err":
+            badge = '<span style="color:var(--red);font-weight:700">✗</span>'
+            val_col = "var(--red)"
         else:
             badge = '<span style="color:#fbbf24;font-weight:600">⚠</span>'
             val_col = "var(--accent)"

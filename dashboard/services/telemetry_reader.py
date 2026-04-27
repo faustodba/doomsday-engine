@@ -300,8 +300,8 @@ def get_health_24h() -> List[HealthIssue]:
 
 def _compute_health_24h_dual() -> List[HealthIssue]:
     """
-    WU42 — sorgenti multiple:
-      - data/telemetry/live.json: anomalies_global + totals (ok/fail/abort)
+    WU42+44 — sorgenti multiple:
+      - data/telemetry/live.json: anomalies_global, totals, patterns_detected (Step 8)
       - bot.log: pattern launcher (HOME timeout, banner unmatched, foreground)
     Fallback completo al log scan legacy se telemetry non disponibile.
     """
@@ -312,6 +312,46 @@ def _compute_health_24h_dual() -> List[HealthIssue]:
         live = None
 
     out: List[HealthIssue] = []
+
+    # 0. Pattern detector (Step 8) — pattern multi-evento ad alta priorità
+    if live and live.get("patterns_detected"):
+        patterns = live["patterns_detected"]
+
+        # ADB cascade
+        for cas in patterns.get("adb_cascade", [])[:3]:
+            sev = "err" if cas.get("severity") == "high" else "warn"
+            out.append(HealthIssue(
+                kind=sev, label=f"⛓ ADB cascade {cas['instance']}",
+                value=f"{cas['count']} eventi",
+                note=f"finestra {cas['ts_start'][11:16]}–{cas['ts_end'][11:16]}",
+            ))
+
+        # Rifornimento skip chain
+        for chain in patterns.get("rifornimento_skip_chain", [])[:3]:
+            out.append(HealthIssue(
+                kind="warn",
+                label=f"⛓ rifornimento skip chain {chain['instance']}",
+                value=f"{chain['count']} skip consecutivi",
+                note=f"finestra {chain['ts_start'][11:16]}–{chain['ts_end'][11:16]}",
+            ))
+
+        # Task timeout recurring
+        for rec in patterns.get("task_timeout_recurring", [])[:3]:
+            out.append(HealthIssue(
+                kind="warn",
+                label=f"⏱ {rec['task']} timeout ricorrente",
+                value=f"{rec['count']} outlier",
+                note=f"max {rec['max_observed_s']:.0f}s vs mediana {rec.get('median_s', 0):.0f}s",
+            ))
+
+        # Home stab loop
+        for loop in patterns.get("home_stab_loop", [])[:3]:
+            out.append(HealthIssue(
+                kind="warn",
+                label=f"🔁 home stab loop {loop['instance']}",
+                value=f"{loop['count']} timeout",
+                note=f"finestra {loop['ts_start'][11:16]}–{loop['ts_end'][11:16]}",
+            ))
 
     # 1. Anomalie da telemetry (se disponibile)
     if live and live.get("anomalies_global"):

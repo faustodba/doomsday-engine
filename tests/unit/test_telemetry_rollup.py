@@ -268,3 +268,132 @@ def test_live_writer_loop_runs_and_stops(telemetry_root):
     stop.set()
     th.join(timeout=2)
     assert not th.is_alive()
+
+
+# ==============================================================================
+# 10. Anomaly pattern detector (Step 8)
+# ==============================================================================
+
+def _ev_with_ts(task, instance, outcome, ts_start_iso,
+                anomalies=None, output=None, dur=1.0):
+    e = TaskTelemetry.start(task=task, instance=instance, cycle=1)
+    e.ts_start = ts_start_iso
+    e.ts_end = ts_start_iso  # forzato uguale per semplicità
+    e.duration_s = float(dur)
+    e.success = outcome in (OUTCOME_OK, OUTCOME_SKIP)
+    e.outcome = outcome
+    e.anomalies = list(anomalies or [])
+    e.output = dict(output or {})
+    return e
+
+
+def test_detect_adb_cascade_high_severity():
+    from core.telemetry import detect_anomaly_patterns
+    from datetime import datetime, timezone, timedelta
+    base = datetime(2026, 4, 27, 10, 0, 0, tzinfo=timezone.utc)
+    events = [
+        _ev_with_ts("raccolta", "FAU_00", OUTCOME_ABORT,
+                    (base + timedelta(seconds=i*30)).isoformat(),
+                    anomalies=[ANOM_ADB_UNHEALTHY])
+        for i in range(5)
+    ]
+    patterns = detect_anomaly_patterns(events)
+    assert len(patterns["adb_cascade"]) == 1
+    cascade = patterns["adb_cascade"][0]
+    assert cascade["instance"] == "FAU_00"
+    assert cascade["count"]    == 5
+    assert cascade["severity"] == "high"
+
+
+def test_detect_adb_cascade_no_match_below_threshold():
+    from core.telemetry import detect_anomaly_patterns
+    from datetime import datetime, timezone, timedelta
+    base = datetime(2026, 4, 27, 10, 0, 0, tzinfo=timezone.utc)
+    # solo 2 eventi → < soglia 3
+    events = [
+        _ev_with_ts("raccolta", "FAU_00", OUTCOME_ABORT,
+                    (base + timedelta(seconds=i*30)).isoformat(),
+                    anomalies=[ANOM_ADB_UNHEALTHY])
+        for i in range(2)
+    ]
+    patterns = detect_anomaly_patterns(events)
+    assert patterns["adb_cascade"] == []
+
+
+def test_detect_rifornimento_skip_chain():
+    from core.telemetry import detect_anomaly_patterns
+    from datetime import datetime, timezone, timedelta
+    base = datetime(2026, 4, 27, 10, 0, 0, tzinfo=timezone.utc)
+    events = [
+        _ev_with_ts("rifornimento", "FAU_00", OUTCOME_SKIP,
+                    (base + timedelta(seconds=i*100)).isoformat())
+        for i in range(4)
+    ]
+    patterns = detect_anomaly_patterns(events)
+    assert len(patterns["rifornimento_skip_chain"]) == 1
+    chain = patterns["rifornimento_skip_chain"][0]
+    assert chain["count"] == 4
+    assert chain["instance"] == "FAU_00"
+
+
+def test_detect_rifornimento_skip_chain_breaks_on_success():
+    from core.telemetry import detect_anomaly_patterns
+    from datetime import datetime, timezone, timedelta
+    base = datetime(2026, 4, 27, 10, 0, 0, tzinfo=timezone.utc)
+    # 2 skip, 1 ok, 2 skip → no chain (max 2 consecutivi)
+    outcomes = [OUTCOME_SKIP, OUTCOME_SKIP, OUTCOME_OK, OUTCOME_SKIP, OUTCOME_SKIP]
+    events = [
+        _ev_with_ts("rifornimento", "FAU_00", o,
+                    (base + timedelta(seconds=i*100)).isoformat())
+        for i, o in enumerate(outcomes)
+    ]
+    patterns = detect_anomaly_patterns(events)
+    assert patterns["rifornimento_skip_chain"] == []
+
+
+def test_detect_task_timeout_recurring():
+    from core.telemetry import detect_anomaly_patterns
+    from datetime import datetime, timezone, timedelta
+    base = datetime(2026, 4, 27, 10, 0, 0, tzinfo=timezone.utc)
+    # 5 eventi normali (50s ciascuno) + 3 outliers (300s)
+    events = []
+    for i in range(5):
+        events.append(_ev_with_ts(
+            "raccolta", f"FAU_0{i}", OUTCOME_OK,
+            (base + timedelta(seconds=i*60)).isoformat(), dur=50.0))
+    for i in range(3):
+        events.append(_ev_with_ts(
+            "raccolta", f"FAU_1{i}", OUTCOME_OK,
+            (base + timedelta(minutes=i*10)).isoformat(), dur=300.0))
+    patterns = detect_anomaly_patterns(events)
+    assert len(patterns["task_timeout_recurring"]) == 1
+    rec = patterns["task_timeout_recurring"][0]
+    assert rec["task"] == "raccolta"
+    assert rec["count"] == 3
+    assert rec["max_observed_s"] == 300.0
+
+
+def test_detect_no_pattern_on_empty_events():
+    from core.telemetry import detect_anomaly_patterns
+    p = detect_anomaly_patterns([])
+    assert p["adb_cascade"]             == []
+    assert p["rifornimento_skip_chain"] == []
+    assert p["task_timeout_recurring"]  == []
+    assert p["home_stab_loop"]          == []
+
+
+def test_patterns_detected_in_rollup(telemetry_root):
+    """patterns_detected è populato in compute_rollup output."""
+    from core.telemetry import detect_anomaly_patterns
+    from datetime import datetime, timezone, timedelta
+    base = datetime.now(timezone.utc)
+    # ADB cascade per FAU_00
+    for i in range(3):
+        ev = _ev_with_ts("raccolta", "FAU_00", OUTCOME_ABORT,
+                          (base + timedelta(seconds=i*60)).isoformat(),
+                          anomalies=[ANOM_ADB_UNHEALTHY])
+        record(ev)
+
+    r = compute_rollup()
+    assert "patterns_detected" in r
+    assert len(r["patterns_detected"]["adb_cascade"]) == 1

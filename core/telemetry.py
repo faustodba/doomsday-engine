@@ -467,6 +467,177 @@ def compute_live_24h(now: Optional[datetime] = None) -> dict:
     return rollup
 
 
+def detect_anomaly_patterns(events: list) -> dict:
+    """
+    Step 8 — pattern matcher multi-evento. Identifica sequenze problematiche
+    che un singolo evento non rivela.
+
+    Pattern rilevati:
+      - adb_cascade               : 3+ abort/adb_unhealthy entro 5min (stessa istanza)
+      - rifornimento_skip_chain   : 3+ skip rifornimento consecutivi (stessa istanza)
+      - task_timeout_recurring    : 2+ task con duration > 2× p95 (stesso task)
+      - home_stab_loop            : 3+ home_stab_timeout entro 30min (stessa istanza)
+
+    Ritorna dict {pattern_name: [{instance|task, count, ts_start, ts_end,
+                                   event_ids: [...], severity: low|med|high}]}
+    """
+    out: dict = {
+        "adb_cascade":             [],
+        "rifornimento_skip_chain": [],
+        "task_timeout_recurring":  [],
+        "home_stab_loop":          [],
+    }
+    if not events:
+        return out
+
+    # Group per istanza, ordinati per ts_start
+    by_inst: dict = {}
+    by_task: dict = {}
+    for ev in sorted(events, key=lambda e: e.ts_start):
+        by_inst.setdefault(ev.instance, []).append(ev)
+        by_task.setdefault(ev.task, []).append(ev)
+
+    # ── Pattern 1: ADB cascade ────────────────────────────────────────────────
+    for inst, evs in by_inst.items():
+        problematici = [
+            e for e in evs
+            if ANOM_ADB_UNHEALTHY in e.anomalies or e.outcome == OUTCOME_ABORT
+        ]
+        # Sliding window 5 min
+        i = 0
+        while i < len(problematici):
+            window_start = problematici[i]
+            try:
+                t_start = _iso_to_epoch(window_start.ts_start)
+            except Exception:
+                i += 1
+                continue
+            j = i
+            while j < len(problematici):
+                try:
+                    t_j = _iso_to_epoch(problematici[j].ts_start)
+                except Exception:
+                    break
+                if t_j - t_start > 300:
+                    break
+                j += 1
+            count = j - i
+            if count >= 3:
+                window = problematici[i:j]
+                out["adb_cascade"].append({
+                    "instance":   inst,
+                    "count":      count,
+                    "ts_start":   window[0].ts_start,
+                    "ts_end":     window[-1].ts_end,
+                    "event_ids":  [e.event_id for e in window],
+                    "severity":   "high" if count >= 5 else "med",
+                })
+                i = j  # skip overlap, no doppi conteggi
+            else:
+                i += 1
+
+    # ── Pattern 2: rifornimento_skip_chain ────────────────────────────────────
+    for inst, evs in by_inst.items():
+        rif_evs = [e for e in evs if e.task == "rifornimento"]
+        skip_run = 0
+        chain_start: Optional[TaskTelemetry] = None
+        chain_events: list = []
+        for ev in rif_evs:
+            is_skip = (
+                ev.outcome == OUTCOME_SKIP
+                or (isinstance(ev.output, dict)
+                    and ev.output.get("spedizioni", -1) == 0)
+            )
+            if is_skip:
+                if skip_run == 0:
+                    chain_start = ev
+                    chain_events = [ev]
+                else:
+                    chain_events.append(ev)
+                skip_run += 1
+            else:
+                if skip_run >= 3 and chain_start:
+                    out["rifornimento_skip_chain"].append({
+                        "instance":   inst,
+                        "count":      skip_run,
+                        "ts_start":   chain_start.ts_start,
+                        "ts_end":     chain_events[-1].ts_end,
+                        "event_ids":  [e.event_id for e in chain_events],
+                        "severity":   "med" if skip_run < 5 else "high",
+                    })
+                skip_run = 0
+                chain_start = None
+                chain_events = []
+        # Catena ancora aperta a fine eventi
+        if skip_run >= 3 and chain_start:
+            out["rifornimento_skip_chain"].append({
+                "instance":   inst,
+                "count":      skip_run,
+                "ts_start":   chain_start.ts_start,
+                "ts_end":     chain_events[-1].ts_end,
+                "event_ids":  [e.event_id for e in chain_events],
+                "severity":   "med" if skip_run < 5 else "high",
+            })
+
+    # ── Pattern 3: task_timeout_recurring ─────────────────────────────────────
+    # Threshold basato su mediana × 3 (più robusto di p95 quando outliers
+    # contaminano la distribuzione: p95 di [50,50,50,50,50,300,300,300]=300).
+    for task_name, evs in by_task.items():
+        durs = [e.duration_s for e in evs if e.duration_s > 0]
+        if len(durs) < 5:
+            continue
+        median = _percentile(durs, 50)
+        threshold = max(30.0, median * 3.0)  # min 30s, sotto è rumore
+        outliers = [e for e in evs if e.duration_s > threshold]
+        if len(outliers) >= 2:
+            out["task_timeout_recurring"].append({
+                "task":           task_name,
+                "count":          len(outliers),
+                "threshold_s":    round(threshold, 1),
+                "median_s":       round(median, 1),
+                "max_observed_s": round(max(e.duration_s for e in outliers), 1),
+                "event_ids":      [e.event_id for e in outliers[:5]],
+                "severity":       "high" if len(outliers) >= 5 else "med",
+            })
+
+    # ── Pattern 4: home_stab_loop ─────────────────────────────────────────────
+    # Anomaly tag canonico (ora non emesso ma riserva il pattern)
+    for inst, evs in by_inst.items():
+        loops = [e for e in evs if ANOM_HOME_TIMEOUT in e.anomalies]
+        i = 0
+        while i < len(loops):
+            try:
+                t_start = _iso_to_epoch(loops[i].ts_start)
+            except Exception:
+                i += 1
+                continue
+            j = i
+            while j < len(loops):
+                try:
+                    t_j = _iso_to_epoch(loops[j].ts_start)
+                except Exception:
+                    break
+                if t_j - t_start > 1800:  # 30 min window
+                    break
+                j += 1
+            count = j - i
+            if count >= 3:
+                window = loops[i:j]
+                out["home_stab_loop"].append({
+                    "instance":   inst,
+                    "count":      count,
+                    "ts_start":   window[0].ts_start,
+                    "ts_end":     window[-1].ts_end,
+                    "event_ids":  [e.event_id for e in window],
+                    "severity":   "med",
+                })
+                i = j
+            else:
+                i += 1
+
+    return out
+
+
 def _build_rollup_from_events(events: list) -> dict:
     """
     Logica core di aggregazione condivisa tra compute_rollup() e
@@ -546,6 +717,9 @@ def _build_rollup_from_events(events: list) -> dict:
             "tasks_breakdown": breakdown,
             "anomalies_total": anom_total,
         }
+
+    # Step 8 — Pattern detector multi-evento
+    rollup["patterns_detected"] = detect_anomaly_patterns(events)
 
     return rollup
 
