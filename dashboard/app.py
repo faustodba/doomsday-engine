@@ -712,7 +712,7 @@ def partial_produzione_istanze(request: Request):
         task_col = "var(--red,#f87171)" if ut_esito == "err" else "var(--accent)"
         header_status = (
             f'<div style="display:flex;justify-content:space-between;'
-            f'gap:6px;font-size:9px;color:var(--text-dim);margin-bottom:2px">'
+            f'gap:6px;font-size:11px;color:var(--text-dim);margin-bottom:2px">'
             f'<span>avvio <b style="color:var(--text)">{avvio_lbl}</b></span>'
             f'<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
             f'text-align:center">task: <b style="color:{task_col}">{task_lbl}</b></span>'
@@ -724,7 +724,7 @@ def partial_produzione_istanze(request: Request):
             ts_show  = ut_ts or "—"
             msg_show = ut_msg or "—"
             header_lastmsg = (
-                f'<div style="display:flex;gap:6px;font-size:9px;color:var(--text-dim);'
+                f'<div style="display:flex;gap:6px;font-size:11px;color:var(--text-dim);'
                 f'margin-bottom:3px">'
                 f'<span>ts <b style="color:var(--text)">{ts_show}</b></span>'
                 f'<span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" '
@@ -737,8 +737,8 @@ def partial_produzione_istanze(request: Request):
         # Riga corrente: durata, truppe (raccoglitori), quota rifornimento + flag esaurita
         quota_flag = " 🔴" if quota_esau else ""
         sess_corr_line = (
-            f'<div title="{tasks_curr_tip}" style="font-size:9px;color:var(--text-dim);'
-            f'margin-top:3px;display:flex;justify-content:space-between;gap:4px">'
+            f'<div title="{tasks_curr_tip}" style="font-size:11px;color:var(--text-dim);'
+            f'margin-top:4px;display:flex;justify-content:space-between;gap:4px">'
             f'<span><b style="color:var(--accent)">corrente</b> · {durata_curr_m}m · '
             f'racc:{truppe} · q:{quota_lbl}{quota_flag}</span>'
             f'<span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;'
@@ -750,7 +750,7 @@ def partial_produzione_istanze(request: Request):
             errori_prec = int(precedente.get("errori_count", 0) or 0)
             err_prec_color = "var(--red,#f87171)" if errori_prec > 0 else "var(--text-dim)"
             sess_prec_line = (
-                f'<div title="{tasks_prec_tip}" style="font-size:9px;color:var(--text-dim);'
+                f'<div title="{tasks_prec_tip}" style="font-size:11px;color:var(--text-dim);'
                 f'display:flex;justify-content:space-between;gap:4px">'
                 f'<span><b style="color:#7cf">precedente</b> · {durata_prec_m}m · '
                 f'racc:{truppe_prec} · <span style="color:{err_prec_color}">err:{errori_prec}</span></span>'
@@ -760,31 +760,31 @@ def partial_produzione_istanze(request: Request):
             )
         else:
             sess_prec_line = (
-                '<div style="font-size:9px;color:var(--text-dim);text-align:center">'
+                '<div style="font-size:11px;color:var(--text-dim);text-align:center">'
                 '<b>precedente</b> · in attesa</div>'
             )
 
         cards_html.append(f'''
         <div class="prod-card" style="background:var(--bg-card);border:1px solid var(--border);
-             border-radius:5px;padding:6px 8px;font-size:10px">
+             border-radius:5px;padding:8px 10px;font-size:12px">
           <div style="display:flex;justify-content:space-between;align-items:center;
-               margin-bottom:3px;font-weight:600;font-size:11px">
-            <span style="display:flex;align-items:center;gap:5px">
-              <span style="display:inline-block;width:7px;height:7px;border-radius:50%;
+               margin-bottom:4px;font-weight:600;font-size:14px">
+            <span style="display:flex;align-items:center;gap:6px">
+              <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
                 background:{stato_col}"></span>
               {nome}
-              <span style="background:{badge_bg};color:{stato_col};font-size:8px;
-                font-weight:600;padding:1px 5px;border-radius:3px;text-transform:uppercase;
+              <span style="background:{badge_bg};color:{stato_col};font-size:10px;
+                font-weight:600;padding:1px 6px;border-radius:3px;text-transform:uppercase;
                 letter-spacing:0.5px">{stato}</span>
             </span>
-            <span style="color:var(--text-dim);font-weight:normal;font-size:9px">
+            <span style="color:var(--text-dim);font-weight:normal;font-size:11px">
               P:{provv_lbl}
             </span>
           </div>
           {header_status}
           {header_lastmsg}
-          <table style="width:100%;border-collapse:collapse;font-size:10px">
-            <thead><tr style="color:var(--text-dim);font-size:9px">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead><tr style="color:var(--text-dim);font-size:11px">
               <th style="text-align:left">risorsa</th>
               <th style="text-align:right">corrente</th>
               <th style="text-align:right">precedente</th>
