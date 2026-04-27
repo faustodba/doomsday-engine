@@ -814,35 +814,54 @@ def partial_produzione_istanze(request: Request):
                 f'title="{value}">{value}</span></div>'
             )
 
-        # auto-WU31+32: corrente block con stats giornaliere rifornimento.
-        # spediz = daily count (era q:N/M con max ciclo confuso, semantically broken).
-        # inviato = totale risorse inviate oggi (sum di inviato_oggi).
-        # residuo = provviste residue (= "quota disponibile per altre spedizioni").
+        # auto-WU31+32+34: corrente block con stats giornaliere rifornimento.
+        # spediz = daily count.
+        # inviato netto = qty arrivata a FauMorfeus (sum inviato_oggi).
+        # inviato lordo = qty uscita dal castello (sum inviato_lordo_oggi).
+        # tassa = inviato_lordo - inviato_netto (sum tassa_oggi).
+        # provv. lorde = OCR gioco (saldo capacità output).
+        # provv. nette = stima = lorde × (1 - tassa_pct_avg).
         inviato_totale = int(entry.get("inviato_totale", 0) or 0)
+        inviato_lordo  = int(entry.get("inviato_lordo_totale", 0) or 0)
+        tassa_tot      = int(entry.get("tassa_totale", 0) or 0)
+        tassa_pct_avg  = float(entry.get("tassa_pct_avg", 0.23) or 0.23)
         provviste_res  = int(entry.get("provviste_residue", -1) or -1)
+        provv_res_net  = int(entry.get("provviste_residue_netta", -1) or -1)
         provviste_esau_state = bool(entry.get("provviste_esaurite", False))
         # Format
-        inviato_lbl = _fmt_q(inviato_totale) if inviato_totale > 0 else "0"
+        netto_lbl  = _fmt_q(inviato_totale) if inviato_totale > 0 else "0"
+        lordo_lbl  = _fmt_q(inviato_lordo)  if inviato_lordo  > 0 else "0"
+        tassa_lbl  = _fmt_q(tassa_tot)      if tassa_tot      > 0 else "0"
         if provviste_esau_state or provviste_res == 0:
-            residuo_lbl = "esaurita"
-            residuo_col = "var(--red,#f87171)"
+            provv_lordo_lbl = "esaurita"
+            provv_lordo_col = "var(--red,#f87171)"
+            provv_netto_lbl = "—"
+            provv_netto_col = "var(--text-dim)"
         elif provviste_res > 0:
-            residuo_lbl = _fmt_q(provviste_res)
-            residuo_col = "var(--text)"
+            provv_lordo_lbl = _fmt_q(provviste_res)
+            provv_lordo_col = "var(--text)"
+            provv_netto_lbl = _fmt_q(provv_res_net) if provv_res_net > 0 else "—"
+            provv_netto_col = "var(--text-dim)"
         else:
-            residuo_lbl = "—"
-            residuo_col = "var(--text-dim)"
+            provv_lordo_lbl = "—"
+            provv_lordo_col = "var(--text-dim)"
+            provv_netto_lbl = "—"
+            provv_netto_col = "var(--text-dim)"
 
-        # auto-WU33: rimosso "truppe" da corrente + intero blocco precedente
-        # (al momento — riabilitabile in futuro quando produzione_storico stabile).
+        # auto-WU34 (27/04): blocco rifornimento giornaliero esteso con
+        # netto/lordo/tassa + provv. lorde/nette per chiarezza semantica.
         corr_kvs = [
-            _kv("spediz", str(sped_oggi)),
-            _kv("inviato", inviato_lbl, "#7cf" if inviato_totale > 0 else "var(--text)"),
-            _kv("residuo", residuo_lbl, residuo_col),
+            _kv("spediz",       str(sped_oggi)),
+            _kv("inv. netto",   netto_lbl,  "#7cf" if inviato_totale > 0 else "var(--text)"),
+            _kv("inv. lordo",   lordo_lbl,  "var(--text)"),
+            _kv("tassa",        tassa_lbl,  "var(--red,#f87171)" if tassa_tot > 0 else "var(--text-dim)"),
+            _kv("provv. lorde", provv_lordo_lbl, provv_lordo_col),
+            _kv("provv. nette", provv_netto_lbl, provv_netto_col),
         ]
         sess_block = (
             f'<div style="font-size:11px;color:var(--text-dim);'
-            f'margin-top:5px;max-width:50%">'
+            f'margin-top:5px;max-width:60%" '
+            f'title="tassa media: {tassa_pct_avg*100:.1f}%">'
             f'<div style="color:var(--accent);font-weight:600;text-align:center;'
             f'margin-bottom:2px;border-bottom:0.5px solid rgba(255,255,255,0.06);'
             f'padding-bottom:1px">rifornimento giornaliero</div>'

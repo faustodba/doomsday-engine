@@ -298,6 +298,17 @@ def get_produzione_istanze() -> list[dict]:
             inviato_totale  = sum(int(v or 0) for v in inviato_oggi.values())
             provviste_res   = int(rif.get("provviste_residue", -1) or -1)
             provviste_esau  = bool(rif.get("provviste_esaurite", False))
+            # auto-WU34 (27/04): aggregati LORDO + TASSA daily
+            inviato_lordo_oggi = rif.get("inviato_lordo_oggi", {}) or {}
+            tassa_oggi         = rif.get("tassa_oggi", {}) or {}
+            inviato_lordo_tot  = sum(int(v or 0) for v in inviato_lordo_oggi.values())
+            tassa_tot          = sum(int(v or 0) for v in tassa_oggi.values())
+            tassa_pct_avg      = float(rif.get("tassa_pct_avg", 0.23))
+            # Stima provviste residue NETTA = lordo × (1 - tassa_pct_avg)
+            if provviste_res > 0:
+                provviste_res_netta = int(provviste_res * (1.0 - tassa_pct_avg))
+            else:
+                provviste_res_netta = provviste_res
 
             result.append({
                 "nome":              nome,
@@ -315,6 +326,11 @@ def get_produzione_istanze() -> list[dict]:
                 "inviato_totale":    inviato_totale,
                 "provviste_residue": provviste_res,
                 "provviste_esaurite": provviste_esau,
+                # auto-WU34
+                "inviato_lordo_totale": inviato_lordo_tot,
+                "tassa_totale":         tassa_tot,
+                "tassa_pct_avg":        tassa_pct_avg,
+                "provviste_residue_netta": provviste_res_netta,
                 "corrente":          corrente,
                 "precedente":        precedente,
                 "n_storico_24h":     len(storico),

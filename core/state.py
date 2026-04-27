@@ -107,14 +107,28 @@ class RifornimentoState:
     data_riferimento: str = field(default_factory=_today_utc)
     ultima_spedizione: str | None = None   # timestamp ISO ultima spedizione
 
+    # Issue #64 — timestamp ISO atteso di rientro dell'ULTIMA spedizione inviata.
+    # Letto da RaccoltaTask all'inizio per evitare di leggere slot quando le
+    # spedizioni rifornimento sono ancora in volo (occupano slot squadra).
+    # = ts_invio + eta_andata_ritorno (margine già incluso da _attesa_ultima).
+    eta_rientro_ultima: str | None = None  # ISO UTC
+
     # Guard persistente: True quando il gioco segnala provviste=0
     # Blocca il task per tutta la giornata UTC su tutti i riavvii dell'istanza
     provviste_esaurite: bool = False
 
     # Statistiche giornaliere
     provviste_residue: int = -1
-    inviato_oggi: dict = field(default_factory=dict)   # {risorsa: int}
+    inviato_oggi: dict = field(default_factory=dict)   # {risorsa: int} NETTO
     dettaglio_oggi: list = field(default_factory=list) # [{ts, risorsa, qta, provviste}]
+
+    # auto-WU34 (27/04): aggiunte statistiche LORDO + TASSA per tracking
+    # completo. Default empty dict (retrocompatibile con state pre-WU34).
+    inviato_lordo_oggi: dict = field(default_factory=dict)  # {risorsa: int} LORDO
+    tassa_oggi:         dict = field(default_factory=dict)  # {risorsa: int} tassa
+    # Tassa percentuale media corrente (running avg, usata per stima
+    # provviste_residue netta = lordo × (1 - tassa_pct_avg)).
+    tassa_pct_avg: float = 0.23  # default 23% comune nel gioco
 
     def _controlla_reset(self) -> None:
         """Se siamo in un nuovo giorno UTC, azzera il contatore e le statistiche."""
@@ -126,6 +140,10 @@ class RifornimentoState:
             self.provviste_residue  = -1
             self.inviato_oggi       = {}
             self.dettaglio_oggi     = []
+            # WU34: reset anche LORDO/TASSA daily
+            self.inviato_lordo_oggi = {}
+            self.tassa_oggi         = {}
+            # tassa_pct_avg si conserva (è una stima cumulativa, no reset)
 
     @property
     def quota_esaurita(self) -> bool:
@@ -161,14 +179,21 @@ class RifornimentoState:
     def registra_spedizione(self,
                             risorsa: str = "",
                             qta_inviata: int = 0,
-                            provviste_residue: int = -1) -> None:
+                            provviste_residue: int = -1,
+                            qta_lorda: int = 0,
+                            tassa_amount: int = 0) -> None:
         """
         Incrementa il contatore, aggiorna timestamp e registra statistiche.
 
         Args:
             risorsa:          nome risorsa inviata (es. "pomodoro")
-            qta_inviata:      quantità reale inviata (snapshot_pre - snapshot_post)
+            qta_inviata:      quantità NETTA arrivata al destinatario
+                              (qta_lorda × (1-tassa))
             provviste_residue: provviste rimanenti lette dopo il VAI (-1 = non lette)
+            qta_lorda:        quantità LORDA uscita dal castello (input form OCR)
+                              auto-WU34 (27/04). Default 0 = legacy compat.
+            tassa_amount:     quantità tassa = qta_lorda - qta_inviata
+                              auto-WU34 (27/04). Default 0 = legacy compat.
         """
         self._controlla_reset()
         self.spedizioni_oggi += 1
@@ -179,12 +204,29 @@ class RifornimentoState:
 
         if risorsa and qta_inviata > 0:
             self.inviato_oggi[risorsa] = self.inviato_oggi.get(risorsa, 0) + qta_inviata
-            self.dettaglio_oggi.append({
+            entry = {
                 "ts":               self.ultima_spedizione,
                 "risorsa":          risorsa,
-                "qta_inviata":      qta_inviata,
+                "qta_inviata":      qta_inviata,           # NETTO
                 "provviste_residue": provviste_residue,
-            })
+            }
+            # auto-WU34: estensione con LORDO + TASSA (se forniti)
+            if qta_lorda > 0:
+                entry["qta_lorda"]    = qta_lorda
+                entry["tassa_amount"] = tassa_amount
+                self.inviato_lordo_oggi[risorsa] = (
+                    self.inviato_lordo_oggi.get(risorsa, 0) + qta_lorda
+                )
+                if tassa_amount > 0:
+                    self.tassa_oggi[risorsa] = (
+                        self.tassa_oggi.get(risorsa, 0) + tassa_amount
+                    )
+                # Update running avg tassa_pct: media pesata tra avg corrente
+                # e nuova osservazione (peso 0.1 per smoothing)
+                if qta_lorda > 0:
+                    nuova_pct = tassa_amount / qta_lorda
+                    self.tassa_pct_avg = (self.tassa_pct_avg * 0.9 + nuova_pct * 0.1)
+            self.dettaglio_oggi.append(entry)
 
     def totale_inviato(self) -> int:
         """Totale risorse inviate oggi su tutte le risorse."""
@@ -211,6 +253,10 @@ class RifornimentoState:
             provviste_residue   = d.get("provviste_residue",   -1),
             inviato_oggi        = dict(d.get("inviato_oggi",   {})),
             dettaglio_oggi      = list(d.get("dettaglio_oggi", [])),
+            # auto-WU34: nuovi campi LORDO + TASSA (default empty per legacy)
+            inviato_lordo_oggi  = dict(d.get("inviato_lordo_oggi", {})),
+            tassa_oggi          = dict(d.get("tassa_oggi",         {})),
+            tassa_pct_avg       = float(d.get("tassa_pct_avg",     0.23)),
         )
 
     def to_dict(self) -> dict:
@@ -223,6 +269,10 @@ class RifornimentoState:
             "provviste_residue":  self.provviste_residue,
             "inviato_oggi":       self.inviato_oggi,
             "dettaglio_oggi":     self.dettaglio_oggi,
+            # auto-WU34: persisti LORDO + TASSA + media tassa
+            "inviato_lordo_oggi": self.inviato_lordo_oggi,
+            "tassa_oggi":         self.tassa_oggi,
+            "tassa_pct_avg":      self.tassa_pct_avg,
         }
 
 

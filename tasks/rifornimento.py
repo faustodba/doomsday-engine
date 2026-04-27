@@ -383,19 +383,21 @@ def _apri_resource_supply(ctx: TaskContext) -> bool:
 
 
 def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
-                      nome_rifugio: str) -> tuple[bool, int, bool, int, int]:
+                      nome_rifugio: str) -> tuple[bool, int, bool, int, int, int]:
     """
     Legge la maschera di invio, compila la risorsa e preme VAI.
 
-    Ritorna: (ok, eta_sec, quota_esaurita, qta_inviata, provviste_lette)
+    Ritorna: (ok, eta_sec, quota_esaurita, qta_effettiva, qta_lordo, provviste_lette)
       ok=True          → spedizione inviata
       quota_esaurita   → provviste=0, non rientrare nel ciclo oggi
-      qta_inviata      → quantità nominale compilata (0 se non inviata)
+      qta_effettiva    → quantità NETTA arrivata al destinatario (clamped × (1-tassa))
+      qta_lordo        → quantità LORDA uscita dal castello (OCR campo input,
+                          fallback al valore nominale `qta` se OCR fallisce)
       provviste_lette  → provviste rimanenti lette dalla maschera (-1 se OCR fallito)
     """
     screen = ctx.device.screenshot()
     if not screen:
-        return False, 0, False, 0, -1
+        return False, 0, False, 0, 0, -1
 
     # Verifica nome destinatario (come V5 _compila_e_invia in rifornimento_base.py)
     # Retry una volta se OCR restituisce stringa vuota (popup ancora in rendering)
@@ -413,7 +415,7 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
             )
             ctx.device.back()
             time.sleep(0.8)
-            return False, 0, False, 0, -1
+            return False, 0, False, 0, 0, -1
 
     vai_zona     = _cfg(ctx, "VAI_ZONA")
     soglia_vai   = _cfg(ctx, "VAI_SOGLIA_GIALLI")
@@ -433,7 +435,7 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
         ctx.log_msg("Rifornimento: provviste esaurite → stop")
         ctx.device.key("KEYCODE_BACK")
         time.sleep(0.8)
-        return False, 0, True, 0, 0
+        return False, 0, True, 0, 0, 0
 
     eta_sec = _leggi_eta(screen, ocr_tempo)
     ctx.log_msg(f"Rifornimento: ETA viaggio={eta_sec}s")
@@ -442,7 +444,7 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
     coord = coord_campo.get(risorsa)
     if not coord:
         ctx.log_msg(f"Rifornimento: campo {risorsa} non configurato")
-        return False, 0, False, 0, provviste
+        return False, 0, False, 0, 0, provviste
 
     ctx.log_msg(f"Rifornimento: compila {risorsa}={qta:,}")
 
@@ -474,9 +476,9 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
         if provviste2 == 0:
             ctx.device.key("KEYCODE_BACK")
             time.sleep(0.8)
-            return False, 0, True, 0, 0
+            return False, 0, True, 0, 0, 0
         ctx.device.key("KEYCODE_BACK")
-        return False, 0, False, 0, provviste
+        return False, 0, False, 0, 0, provviste
 
     # auto-WU12: leggi valore reale CLAMPED dal campo input + applica tassa.
     # User: "L'input 999_999_999 il sistema auto-aggiusta sul max, e il valore
@@ -526,7 +528,7 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
     except Exception as exc:
         ctx.log_msg(f"[PROD] hook rifornimento: {exc}")
 
-    return True, eta_sec, False, qta_effettiva, provviste
+    return True, eta_sec, False, qta_effettiva, qta_clamped_real, provviste
 
 
 # ------------------------------------------------------------------------------
@@ -935,15 +937,12 @@ def _esegui_via_membri(ctx: TaskContext, risorse_config: dict,
         ctx.device.tap(*btn_coord)
         time.sleep(2.0)
 
-        # ── Snapshot PRE-VAI ─────────────────────────────────────────────────
-        snapshot_pre = dict(deposito)
-
         # ── Compila e invia ──────────────────────────────────────────────────
         # FIX 23/04: ts_invio catturato DOPO _compila_e_invia. L'OCR deposito +
         # compila quantità + tap VAI richiedono ~15-20s; se ts_invio fosse preso
         # prima, la coda_volo sottostimerebbe il tempo residuo delle spedizioni
         # in corso, causando uscite "nessun slot dopo attesa" sbagliate.
-        ok, eta_sec, quota_esaurita, qta_inviata, provviste_lette = _compila_e_invia(
+        ok, eta_sec, quota_esaurita, qta_effettiva, qta_lordo, provviste_lette = _compila_e_invia(
             ctx, risorsa_scelta, qta, nome_rifugio
         )
         ts_invio = time.time()
@@ -956,37 +955,37 @@ def _esegui_via_membri(ctx: TaskContext, risorse_config: dict,
             ctx.log_msg("Rifornimento membri: invio fallito — stop")
             break
 
-        # ── Snapshot POST-VAI ─────────────────────────────────────────────────
+        # ── Snapshot POST-VAI (per aggiornare deposito tracking) ────────────
         time.sleep(1.5)
         ctx.navigator.vai_in_home()   # torna home per OCR deposito
         time.sleep(1.0)
 
         snapshot_post = _leggi_deposito_ocr(ctx, risorse_l)
-        qta_reale = 0
-        if snapshot_pre.get(risorsa_scelta, -1) >= 0 and \
-           snapshot_post.get(risorsa_scelta, -1) >= 0:
-            qta_reale = max(0, int(
-                snapshot_pre[risorsa_scelta] - snapshot_post[risorsa_scelta]
-            ))
-        else:
-            qta_reale = qta_inviata
 
         # ── Registra ─────────────────────────────────────────────────────────
+        # FIX 26/04: tracking nello state usa qta_effettiva (NETTO arrivato
+        # al destinatario), non il delta deposito (LORDO con tassa).
         spedizioni += 1
         eta_ar = float(eta_sec * 2)
         coda_volo.append((ts_invio, eta_ar))
 
         if ctx.state is not None:
+            # auto-WU34 (27/04): registra anche LORDO + TASSA daily
+            tassa_amt = max(0, qta_lordo - qta_effettiva)
             ctx.state.rifornimento.registra_spedizione(
                 risorsa=risorsa_scelta,
-                qta_inviata=qta_reale,
+                qta_inviata=qta_effettiva,
                 provviste_residue=provviste_lette,
+                qta_lorda=qta_lordo,
+                tassa_amount=tassa_amt,
             )
 
+        tassa_pct = ((qta_lordo - qta_effettiva) / qta_lordo * 100) if qta_lordo > 0 else 0.0
         provv_str = f" | provviste={provviste_lette:,}" if provviste_lette >= 0 else ""
         ctx.log_msg(
             f"Rifornimento membri: spedizione {spedizioni} "
-            f"— {risorsa_scelta} {qta_reale:,} reali"
+            f"— {risorsa_scelta} netto={qta_effettiva:,} "
+            f"(lordo {qta_lordo:,}, tassa {tassa_pct:.1f}%)"
             f" | ETA A/R={eta_ar:.0f}s{provv_str}"
         )
 
@@ -1203,6 +1202,21 @@ class RifornimentoTask(Task):
 
         ctx.log_msg(f"Rifornimento: completato — {spedizioni} spedizioni")
 
+        # Issue #64 — salva ETA rientro ultima spedizione nel state.
+        # RaccoltaTask leggerà questo valore prima di leggere slot per evitare
+        # di vedere slot occupati da rifornimento ancora in volo.
+        try:
+            if ctx.state is not None and eta_residua > 0:
+                from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+                ts_rientro = _dt.now(_tz.utc) + _td(seconds=float(eta_residua))
+                ctx.state.rifornimento.eta_rientro_ultima = ts_rientro.isoformat()
+                ctx.log_msg(
+                    f"Rifornimento: eta_rientro_ultima = {ts_rientro.isoformat()} "
+                    f"(+{eta_residua:.0f}s)"
+                )
+        except Exception as exc:
+            ctx.log_msg(f"[WARN] save eta_rientro_ultima: {exc}")
+
         # Aggiorna storico farm giornaliero
         try:
             _aggiorna_storico_farm(ctx, ctx.instance_name)
@@ -1311,8 +1325,7 @@ class RifornimentoTask(Task):
                 # di OCR + compila + tap VAI). Prima era PRIMA, causando coda_volo
                 # ottimistica → "nessun slot dopo attesa" sbagliato (FAU_01 tick
                 # 2/5 sped con slot=0 dopo attesa 55s, ma sped 1 ancora in volo).
-                snapshot_pre = dict(deposito) if deposito else {}
-                ok, eta_sec, quota_esaurita, qta_inviata, provviste_lette = _compila_e_invia(
+                ok, eta_sec, quota_esaurita, qta_effettiva, qta_lordo, provviste_lette = _compila_e_invia(
                     ctx, risorsa_scelta, qta, nome_rifugio
                 )
                 ts_invio = time.time()
@@ -1327,33 +1340,34 @@ class RifornimentoTask(Task):
                     ctx.log_msg("Rifornimento: invio fallito — stop")
                     break
 
-                # ── 7. Snapshot POST-VAI ────────────────────────────────────
+                # ── 7. Snapshot POST-VAI (per aggiornare deposito tracking) ─
                 time.sleep(1.5)
                 snapshot_post = _leggi_deposito_ocr(ctx, risorse_l)
-                if snapshot_pre.get(risorsa_scelta, -1) >= 0 and \
-                   snapshot_post.get(risorsa_scelta, -1) >= 0:
-                    qta_reale = max(0, int(
-                        snapshot_pre[risorsa_scelta] - snapshot_post[risorsa_scelta]
-                    ))
-                else:
-                    qta_reale = qta_inviata
 
                 # ── 8. Registra ─────────────────────────────────────────────
+                # FIX 26/04: tracking nello state usa qta_effettiva (NETTO arrivato
+                # al destinatario), non il delta deposito (LORDO con tassa).
                 spedizioni += 1
                 eta_ar = float(eta_sec * 2)
                 coda_volo.append((ts_invio, eta_ar))
 
                 if ctx.state is not None:
+                    # auto-WU34 (27/04): registra anche LORDO + TASSA daily
+                    tassa_amt = max(0, qta_lordo - qta_effettiva)
                     ctx.state.rifornimento.registra_spedizione(
                         risorsa=risorsa_scelta,
-                        qta_inviata=qta_reale,
+                        qta_inviata=qta_effettiva,
                         provviste_residue=provviste_lette,
+                        qta_lorda=qta_lordo,
+                        tassa_amount=tassa_amt,
                     )
 
+                tassa_pct = ((qta_lordo - qta_effettiva) / qta_lordo * 100) if qta_lordo > 0 else 0.0
                 provv_str = f" | provviste={provviste_lette:,}" if provviste_lette >= 0 else ""
                 ctx.log_msg(
                     f"Rifornimento: spedizione {spedizioni} "
-                    f"— {risorsa_scelta} {qta_reale:,} reali"
+                    f"— {risorsa_scelta} netto={qta_effettiva:,} "
+                    f"(lordo {qta_lordo:,}, tassa {tassa_pct:.1f}%)"
                     f" | ETA A/R={eta_ar:.0f}s{provv_str}"
                 )
 
