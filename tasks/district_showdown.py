@@ -156,17 +156,17 @@ class DistrictShowdownTask(Task):
         return "district_showdown"
 
     def should_run(self, ctx: TaskContext) -> bool:
-        # Gate device/matcher + flag abilitazione globale (V6 API _InstanceCfg)
+        # Gate device/matcher
         if ctx.device is None or ctx.matcher is None:
             return False
-        if hasattr(ctx.config, "task_abilitato"):
-            if not ctx.config.task_abilitato("district_showdown"):
-                return False
-        # Gate finestra temporale evento (UTC) — l'evento DS dura da ven 00:00
-        # a lun 01:00 UTC. Fuori dalla finestra → skip (no ricerca inutile).
-        if not self._is_in_event_window():
-            return False
-        return True
+        # auto-WU17 (27/04): gate temporale override del flag manuale.
+        # Il task DS è completamente time-driven: si auto-attiva durante
+        # l'evento (Ven 00:00 → Lun 00:00 UTC) e auto-disattiva fuori,
+        # indipendentemente da task_abilitato("district_showdown"). Evita
+        # il rischio "flag dimenticato disabilitato" durante l'evento.
+        # Il sub-step 5 (Fund Raid) ha gate proprio `_is_in_fund_raid_window`
+        # (Dom 20:00 → Lun 00:00 UTC).
+        return self._is_in_event_window()
 
     def e_dovuto(self, ctx: TaskContext) -> bool:  # noqa: ARG002
         return True  # always scheduling — guard in should_run

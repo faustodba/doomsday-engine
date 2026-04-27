@@ -58,6 +58,489 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### 78. DistrictShowdown — gate temporale override flag (RISOLTA ✅ 27/04/2026)
+
+**Contesto**: il gate `should_run()` controllava `task_abilitato("district_showdown")` PRIMA di `_is_in_event_window()`. Conseguenza: se l'utente disabilitava il flag durante l'evento, il task saltava — rischio dimenticanza.
+
+**Fix WU-#78** ([tasks/district_showdown.py:158](tasks/district_showdown.py#L158)):
+- `should_run()` ora ritorna esclusivamente `_is_in_event_window()`. Il flag `task_abilitato` è effettivamente ignorato per DS — il task auto-attiva durante l'evento (Ven 00:00 → Lun 00:00 UTC) e auto-disattiva fuori.
+- Step 5 (Fund Raid) sub-gate `_is_in_fund_raid_window()` invariato: Dom 20:00 UTC → Lun 00:00 UTC (fine evento).
+
+**Razionale**: il task DS è completamente time-driven, non ha senso permettere disable manuale.
+
+---
+
+### 77. Raccolta — rotazione lenta FAU_02/05/07/10 (APERTA — bassa)
+
+**Sintomo**: 4 istanze su 12 trovano slot raccolta non tutti vuoti al ciclo successivo (avg libere 2.2-2.7 su 4 totali). Le altre 8 trovano slot tutti vuoti (libere=tot).
+
+**Diagnosi**: ETA marce raccolta > durata ciclo (≈1h30). Probabilmente:
+- Nodi a maggiore distanza dal castello (livello 7 vs 6, o diramazioni mappa lontane)
+- Coda blacklist piena → re-tentativi su nodi con ETA peggiore
+
+**Da fare**: profilare ETA medio per istanza e mappare distanza/livello nodi. Eventuale shift `RACCOLTA_LIVELLO` 7→6 sulle istanze problematiche per nodi più vicini.
+
+---
+
+### 76. FAU_07/09/10 — tick netto +150-200s vs baseline (APERTA — media)
+
+**Sintomo** (da ciclo notte 27/04): tick durata netta (escluso rifornimento) media:
+- Baseline FAU_02..06: ~470s
+- FAU_07: 617s, FAU_09: 647s, FAU_10: 698s
+- FauMorfeus (raccolta_only): 355s = floor
+
+Le 3 outlier hanno overhead ~150-200s extra non spiegato dal solo rifornimento.
+
+**Da indagare**: profilare quale task occupa tempo extra:
+- Raccolta più lenta (più swipe, blacklist più piena)?
+- Stab HOME instabile (#52a)?
+- Banner extra non catalogati?
+
+**Memoria**: linkata a #52d (FAU_07 deficit notte 26/04 — pre-esistente).
+
+---
+
+### 75. radar_census 0/11 fail confermato (APERTA — alta cleanup)
+
+**Sintomo**: il task `radar_census` ha success rate 0% su 11 esecuzioni (3 cicli notte 27/04). Tutte le esecuzioni falliscono (probabilmente `radar_tool/templates/` mancante in dev+prod, già nota Issue #18-bis).
+
+**Fix immediato**: disabilitare in `runtime_overrides.json` (`globali.task.radar_census = false`). Era erroneamente abilitato durante setup "tutti i task tranne arena".
+
+**Fix definitivo**: popolare templates radar mancanti o rimuovere il task dal catalog se non più necessario.
+
+---
+
+### 74-66 (RISOLTE 26/04-27/04 — bundle WU24)
+
+Commit attivi `ba1480c`, `0428596`, `97e9824`, `ac0277a`, `cfbc024`, `ff18261`, `9746330`:
+
+| # | Fix | Commit |
+|---|-----|--------|
+| 66 | Banner_eventi_laterale disabled — DS icon visibile post-startup (3/7 → 0/0 skip rate) | `9746330` |
+| 73 | Launcher fg-check pre-BACK + monkey preventivo (cooldown 15s) | `ba1480c` |
+| 74 | Boost row-alignment 8h/1d ↔ USE — registrazione corretta della durata effettivamente attivata | `ba1480c` |
+| — | Store soglia_store_attivo 0.75 → 0.65 + carrello DELAY UI 2.0s + stability check open>close | `ba1480c` + `97e9824` |
+| — | Donate anti-ban random 15-30 tap per block | `ba1480c` |
+| — | Raccolta skip-reset livello pannello via OCR (auto-WU13 ROI fix y-30 + regex Level) | `0428596` + `ac0277a` |
+| — | Fund raid burst 30 tap/block (~28× speedup) + stop OCR last_num | `cfbc024` + `ff18261` |
+
+---
+
+### 65. Wait > 60s rifornimento — anticipare task successivi (APERTA — feature)
+
+**Contesto**: Issue #64 step 1 (implementato) fa wait passivo fino al rientro dell'ultima spedizione rifornimento prima di leggere slot raccolta. Quando wait > 60s, lo sleep è uno spreco — il bot non fa nulla mentre potrebbe avanzare i task post-raccolta.
+
+**Step 2 (proposta)**: quando wait > 60s, **anticipare i task post-raccolta** (donazione, zaino, vip, alleanza, messaggi, arena, ds, store, radar) prima di tornare a raccolta. Dopo aver eseguito i task anticipati, **verificare il tempo trascorso** vs `eta_rientro_ultima`:
+
+```
+wait_s = eta_rientro_ultima - now
+if wait_s > 60:
+    log "anticipo task post-raccolta — recupero tempo morto"
+    # Esegui i task con priority > raccolta in ordine, MA salta raccolta_chiusura
+    for task in tasks_dovuti_post_raccolta_escluso_chiusura:
+        run_task(task)
+    # Ora verifica se rientro è avvenuto
+    elapsed = now - inizio_anticipo
+    if elapsed >= wait_s:
+        # rientro avvenuto durante anticipo — leggi slot e procedi raccolta
+        run_raccolta()
+    else:
+        # ancora wait residuo
+        sleep(wait_s - elapsed)
+        run_raccolta()
+```
+
+**Implicazioni**:
+- L'orchestrator dovrebbe permettere riordino dinamico dell'esecuzione (saltare raccolta, fare gli altri, tornare a raccolta)
+- Oppure: RaccoltaTask gestisce l'anticipo internamente chiamando direttamente altri task instances (più invasivo)
+- Approccio chirurgico: nuovo flag in TaskContext (es. `defer_raccolta=True`) → orchestrator riordina
+
+**Vantaggio**: recupero potenziale 30-180s/tick su istanze con rifornimento ETA lungo (rifugio distante).
+
+**Issue da affrontare**:
+- Sequenza task post-raccolta: rispettare priority ordering originale
+- `RaccoltaChiusuraTask` (priority 200, Issue #62) deve restare ULTIMA
+- Eventuale stato `wait_in_corso` per evitare doppia esecuzione
+
+**Memoria**: linkata a Issue #64 step 1.
+
+---
+
+### 64. Raccolta legge slot mentre rifornimento ancora in volo (RISOLTA ✅ 26/04/2026)
+
+**Sintomo**: dopo task rifornimento (5 spedizioni, ~10 min), task raccolta legge slot squadra. MA le spedizioni rifornimento utilizzano slot squadra fino al rientro al castello (ETA andata+ritorno tipica 100-200s/spedizione). Quindi la lettura OCR slot risulta:
+
+```
+Stato reale: 0/4 occupati
+Stato bot:   2-3/4 occupati (ultime 2-3 spedizioni rifornimento ancora in volo)
+→ libere: 1-2 invece di 4 → squadre non inviate
+```
+
+**Fix WU-#64 (step 1)**:
+
+1. **`RifornimentoState.eta_rientro_ultima: str | None`** ([core/state.py:114](core/state.py#L114)) — ISO timestamp atteso rientro ultima spedizione. Salvato a fine `RifornimentoTask.run()` come `now + eta_residua_sec`.
+
+2. **`RaccoltaTask.run()`** all'inizio ([tasks/raccolta.py:1722](tasks/raccolta.py#L1722)):
+   ```python
+   eta_iso = ctx.state.rifornimento.eta_rientro_ultima
+   wait_s = (datetime.fromisoformat(eta_iso) - now).total_seconds()
+   if wait_s > 0:
+       actual_wait = min(wait_s + 2, 600.0)  # cap 10min safety
+       sleep(actual_wait)
+   ```
+
+**Wait sempre fino al rientro**: nessuna soglia. Cap di sicurezza 600s (10min) protegge da `eta_rientro_ultima` corrotto. Step 2 (Issue #65) propone ottimizzazione per wait > 60s anticipando task post-raccolta.
+
+**File modificati**:
+- `core/state.py` — campo `eta_rientro_ultima`
+- `tasks/rifornimento.py` — save in state post-loop
+- `tasks/raccolta.py` — wait condizionale all'inizio run
+
+**Sync prod**: ✅. Attivo al prossimo restart manuale.
+
+---
+
+### 62. Riordino priorità task + chiusura raccolta slot pieni (RISOLTA ✅ 26/04/2026)
+
+**Richiesta operativa**: ottimizzare ordine task per massimizzare throughput:
+1. **BoostTask** (priority 5) — primo, garantisce gathering speed attivo
+2. **RifornimentoTask** (priority 10) — invio risorse al rifugio prima che si accumulino
+3. **RaccoltaTask** (priority 15) — invio squadre raccoglitrici
+4. resto dei task (donazione, zaino, vip, alleanza, messaggi, arena, ds, store, radar, ...)
+5. **RaccoltaChiusuraTask** (priority 200) — re-run raccolta come ULTIMO task del tick
+
+**Razionale chiusura raccolta**: durante l'esecuzione degli altri task possono essersi liberati slot squadra (marce concluse, attacchi finiti). Riprovare a chiusura tick massimizza il numero di nodi attivi/giorno.
+
+**Nuovo `task_setup.json` ordering**:
+
+| priority | class | schedule |
+|----------|-------|----------|
+| 5 | BoostTask | periodic |
+| 10 | RifornimentoTask | always |
+| 15 | RaccoltaTask | always |
+| 20 | DonazioneTask | always |
+| 25 | ZainoTask | periodic 168h |
+| 30 | VipTask | daily |
+| 35 | AlleanzaTask | periodic 4h |
+| 40 | MessaggiTask | periodic 4h |
+| 50 | ArenaTask | daily |
+| 60 | ArenaMercatoTask | daily |
+| 70 | DistrictShowdownTask | always |
+| 80 | StoreTask | periodic 8h |
+| 90 | RadarTask | periodic 12h |
+| 100 | RadarCensusTask | periodic 12h |
+| **200** | **RaccoltaChiusuraTask** | **always** |
+
+**Implementazione**:
+
+1. **`RaccoltaChiusuraTask`** in `tasks/raccolta.py` — sottoclasse di `RaccoltaTask`, override solo `name() → "raccolta_chiusura"`. Eredita `run()` completo. Se slot pieni, esce in <2s con "nessuna squadra libera".
+
+2. **`main.py:_import_tasks()`** — registra anche `RaccoltaChiusuraTask` nel catalogo task.
+
+3. **`main.py` filtro `raccolta_only`** — esteso a `("RaccoltaTask", "RaccoltaChiusuraTask")` per istanze raccolta-only.
+
+4. **`task_setup.json`** — riordino completo + nuova entry priority 200.
+
+**Smoke test**: ordering verificato, RaccoltaChiusuraTask sottoclasse di RaccoltaTask, name distinto ("raccolta_chiusura").
+
+**Sync prod**: ✅. Attivo al prossimo restart manuale.
+
+---
+
+### 60. Foreground check falso positivo post-restart bot — penalità 43s/istanza (RISOLTA ✅ 26/04/2026)
+
+**Sintomo osservato 26/04/2026 13:53-13:55 FAU_08** (post-restart bot WU24):
+
+```
+13:53:26 am start gioco (tentativo 1/3) — am start OK
+13:53:29 monkey launcher (porta UI al top)
+13:53:40 gioco verificato in foreground       ← FALSO POSITIVO
+13:54:41-13:55:25 polling 43s schermata=Screen.UNKNOWN  ← bloccato su HOME Android
+13:55:25 monkey recovery (UNKNOWN 8 cicli)    ← safety-net interviene
+13:55:45 [SPLASH] Live Chat rilevato (score=1.000) — gioco finalmente in caricamento
+```
+
+Discovery screenshot a streak5 mostra **HOME del MuMu Player Android** (launcher con icone MuMu Store, App Cloner, Gadget, Doomsday) — gioco NON aperto nonostante "verificato in foreground".
+
+**Root cause**: `_gioco_in_foreground()` ([core/launcher.py:133-145](core/launcher.py#L133)) usava `pkg in dumpsys_output` da `dumpsys activity top`. Match testuale generico. Il commento del codice ammetteva esplicitamente:
+
+> "check NON STRETTO — può dare falso positivo se pkg appare come task background. Safety-net reale è il monkey recovery in attendi_home"
+
+Dopo kill+restart bot, MuMu rebootato fresh ha il pacchetto gioco visibile nell'output `dumpsys activity top` come **recent task / background**, non come app in primo piano.
+
+**Fix applicato**: `_gioco_in_foreground()` ora usa `dumpsys window | mCurrentFocus`:
+
+```python
+out = _adb_cmd(porta, "shell", "dumpsys", "window", adb_exe=adb_exe)
+for line in out.splitlines():
+    if "mCurrentFocus" in line and pkg in line:
+        return True
+return False
+```
+
+`mCurrentFocus` è la window correntemente focusata (UNA SOLA per volta, quella visibile + interattiva). Esempio output post-fix verificato live FAU_08:
+```
+mCurrentFocus=Window{ec1c0f8 u0 com.igg.android.doomsdaylastsurvivors/com.gpc.sdk.unity.GPCSDKMainActivity}
+```
+
+**Stima impatto**:
+- Pre-fix: ~43s extra/istanza × 12 istanze al 1° ciclo post-restart = **~9 min penalità per ogni restart bot**
+- Post-fix: 0s (am start verifica corretta → 2°/3° tentativo se serve, no attesa monkey recovery)
+
+**File modificato**: `core/launcher.py:_gioco_in_foreground()` (8 righe)
+
+**Sync prod**: ✅. Smoke test live FAU_08 OK. Attivo al prossimo restart manuale.
+
+---
+
+### 57. State save per task — fine-grained persistence (RISOLTA ✅ 26/04/2026 — WU25)
+
+**Sintomo osservato 26/04/2026 FAU_04**:
+- 10:31:01 tick FAU_04 inizia
+- 10:31:26 BoostTask attiva boost → `registra_attivo()` → scadenza memoria=18:31:26 (8h)
+- 10:40:52 cascata ADB persistente (Issue #56) → tick non termina mai
+- `ctx.state.save()` a fine tick ([main.py:816](main.py#L816)) **mai raggiunto**
+- 12:52 restart bot → rilegge state stale `scadenza=09:44:44` (vecchia)
+- 10:59 boost ri-attivato → spreco di un item boost
+
+**Root cause architetturale**: `state.save()` chiamato **una sola volta** a fine tick. Tutti i task che modificano state (boost, rifornimento, vip, store, arena) sono a rischio se il tick crasha o blocca.
+
+**Fix WU25**: `core/orchestrator.py` chiama `ctx.state.save(state_dir=_state_dir())` **dopo OGNI task completato** (success o fail). Save è atomico (tmp+fsync+os.replace) → no race con dashboard reader.
+
+```python
+# in orc.tick() dopo entry.last_run = time.time(); results.append(result)
+try:
+    if hasattr(self._ctx, "state") and self._ctx.state is not None:
+        self._ctx.state.save(state_dir=_state_dir())
+except Exception as exc:
+    self._ctx.log_msg(f"Orchestrator: save state post-'{task_name}' fallito: {exc}")
+```
+
+`_state_dir()` resolve via env `DOOMSDAY_ROOT` (settata in run_prod.bat) o cwd come fallback. State dir convenzione `{root}/state/`.
+
+**Impatto**: ~5-10 save extra/tick (file system load <1ms each su SSD). Beneficio: nessuna perdita stato in caso di crash/blocco.
+
+**Stato file FAU_04 pre-fix**:
+| Istanza | Scadenza state (stale) | Scadenza memoria (persa) |
+|---------|------------------------|--------------------------|
+| FAU_04 | 2026-04-26T09:44:44 | 2026-04-26T18:31:26 |
+
+**File modificati**:
+- `core/orchestrator.py` — import `os`, helper `_state_dir()`, save block post-task
+
+**Sync prod**: ✅ — sarà attivo al prossimo restart manuale (regola: chiusura istanza naturale).
+
+---
+
+### 56. Cascata ADB persistente — recovery emergenziale (RISOLTA ✅ 26/04/2026 — WU24)
+
+**Sintomo osservato 26/04/2026 FAU_04** (cascata ~12 min sterile):
+
+```
+10:40:29 raccolta squadra confermata 4/4
+10:40:33 vai_in_home tentativo 1/8 — screen=MAP
+10:40:52 [NAV] screenshot None — UNKNOWN
+10:41:44 [NAV] screenshot None 3x — tento reconnect ADB
+10:41:55 [NAV] reconnect ADB OK — retry vai_in_home
+10:42:07 [NAV] screenshot None — UNKNOWN  ← reconnect cosmetico
+...
+10:52:20+ ABORT → reconnect → ABORT loop persistente
+```
+
+**Pattern diagnostico**: `reconnect ADB OK` seguito da `screenshot None` ripetuto **non transitorio** — l'emulator stesso è freezato, non il socket ADB. Il bot loopa all'infinito perché:
+1. `vai_in_home()` ABORT ritorna False → task riprova
+2. Nessun timeout di tick
+3. Nessuna logica di skip globale dopo N ABORT consecutivi
+
+**Stima durata uscita naturale (pre-fix)**: 5-10 minuti minimo dopo cascata, raramente recupera.
+
+**Fix WU24 — 3 layer**:
+
+**Layer 1 — Navigator** ([core/navigator.py](core/navigator.py)):
+- Nuova classe `ADBUnhealthyError(RuntimeError)`
+- Counter `_reconnect_failures` persistente sull'istanza Navigator
+- Trigger Tier 1: dopo `reconnect ADB OK` se nuovo screenshot ancora None per 2 cicli consecutivi → raise `ADBUnhealthyError`
+- Reset counter su HOME success
+
+**Layer 2 — Orchestrator** ([core/orchestrator.py](core/orchestrator.py)):
+- Cattura `ADBUnhealthyError` sia nel gate HOME sia in `task.run()`
+- Setta `ctx.adb_unhealthy = True`, abort tick, ritorna results parziali
+
+**Layer 3 — Main** ([main.py](main.py)):
+- Post-tick check `getattr(ctx, "adb_unhealthy", False)` → log `[ERRORE] reset emergenziale ADB unhealthy` + flag stato `ultimo_errore=adb_unhealthy`
+- Chiusura istanza standard (`_launcher.chiudi_istanza`) + ciclo successivo restart pulito via `reset_istanza`
+
+**Effetto atteso**:
+- Pre-fix: cascata 6-12 min sterile (osservato FAU_04)
+- Post-fix: ~40s (2 ABORT post-reconnect) → raise → abort tick + chiudi → ciclo dopo restart pulito
+
+**File modificati**:
+- `core/navigator.py` — `ADBUnhealthyError` + counter `_reconnect_failures` + raise condizionato
+- `core/orchestrator.py` — try/except `ADBUnhealthyError` in 2 punti
+- `main.py` — flag `adb_unhealthy` post-tick handling
+
+**Sync prod**: ✅. Bot **riavviato** alle 12:52 con WU24 attivo.
+
+---
+
+
+
+**Sintomo osservato 26/04/2026 09:34 FAU_00**:
+```
+[STORE] passo 06 → score=0.658 *** match ***
+[STORE] passo 07 → score=0.764 *** match ***
+[STORE] passo 08 → score=0.768 *** match ***  ← MAX
+[STORE] passo 21 → score=0.735 *** match ***
+[STORE] passo 22 → score=0.739 *** match ***
+[STORE] Best step=8 score=0.768 — delta swipe (-300,-300)
+[STORE] Re-match al best: score=0.439 (97,311)  FALLITO
+[STORE] Outcome='store_non_trovato' → fail
+```
+
+Best step correttamente identificato (max score 0.768), ma dopo delta swipe il re-match cade a 0.439 (sotto soglia 0.65) → store_non_trovato → run perso.
+
+**Root cause**: `swipe(±p)` NON è idempotente sui bordi della mappa di gioco. Cumulative del passo 24 (fine spirale) = (+600, +600) = angolo estremo. Lo swipe `-300, -300` viene parzialmente assorbito dal bordo (mappa non si scrolla oltre limiti) → bot resta in posizione mappa diversa da quella del passo 8 → re-match cade su altro edificio.
+
+Pattern condiviso con FAU_08 notte scorsa (best step=22 cumulative `(0, +600)` bordo). Tasso store_non_trovato osservato ~10%.
+
+**Fix proposto multi-candidate**:
+
+1. Durante scan, salvare TUTTI i match `>= soglia_store` (non solo best):
+```python
+candidates = []  # [(step_n, score, cum_x, cum_y), ...]
+for n, (dx, dy) in enumerate(cfg.griglia):
+    if result.score >= cfg.soglia_store:
+        candidates.append((n, result.score, cum_x, cum_y))
+candidates.sort(key=lambda c: -c[1])
+```
+
+2. Try in ordine score decrescente:
+```python
+for cand_step, cand_score, tgt_x, tgt_y in candidates:
+    delta_x = tgt_x - end_x
+    delta_y = tgt_y - end_y
+    apply_swipes(delta_x, delta_y)
+    end_x, end_y = tgt_x, tgt_y  # update
+    result = matcher.find_one(...)
+    if result.found and result.score >= cfg.soglia_store:
+        break
+    log(f"Re-match fallito step={cand_step} — provo successivo")
+else:
+    return _Esito.STORE_NON_TROVATO
+```
+
+**Stima impatto**:
+- Tasso store_non_trovato: 10% → ~2%
+- +1 store run/giorno per istanza ≈ +18 acquisti/istanza/giorno
+- Costo: +15s solo nei casi fallback
+
+**File**: `tasks/store.py:209-308` `_esegui_store()` riscrittura del match-tracking single→multi.
+
+**Memoria**: `.claude/projects/c--doomsday-engine/memory/project_store_multi_candidate.md`
+
+---
+
+### 54. Banner catalog & dismissal pipeline — boot stabilization (APERTA — feature)
+
+**Problema misurato**: 573 polls UNKNOWN cumulativi nella vita del bot (~48 min CPU/ADB sprecati). Avg 10.1 polls/cycle, max 28. Variabilità FAU_00 (15.2) vs FAU_06 (4.6) → 3× differenza per popup non catalogati.
+
+Sistema attuale: solo `pin_banner_aperto/chiuso` gestito da `comprimi_banner_home`. Tutto il resto coperto da `loop BACK` cieco in `attendi_home`. Alcuni popup (News feed, Daily login) NON chiudono con BACK — serve tap X specifico.
+
+**Proposta MVP (~5h)**:
+
+1. `shared/banner_catalog.py` con `BannerSpec` dataclass (template, ROI, threshold, dismiss_action: back/tap_x/tap_center/tap_coords, priority)
+2. Catalogo iniziale: daily_login_calendar, welcome_back, news_feed, event_modal, update_optional, banner_eventi_laterale (esistente)
+3. `dismiss_banners_loop(ctx, max_iter=8)` in `shared/ui_helpers.py` — itera screenshot+match+dismiss finché trova banner
+4. Integrazione `attendi_home`: dopo splash naturale 10s, PRIMA del polling cieco. Ridurre `timeout_carica_s` 180→60s
+5. **Discovery prerequisito**: salvare screenshot quando `unknown_streak == 5` in `debug_task/boot_unknown/` per 1 ciclo → catalogazione manuale + template extraction
+6. Telemetria: `{banner_name: count}` aggregato per istanza
+
+**Stima impatto**:
+- UNKNOWN polls: 10.1 → 5.0 (-50%)
+- Boot stabilization: 170s → 110s (-35%)
+- Cycle median: 12.3 → 10.5 min
+- Throughput: 8 → 10 cycle/giorno (+25%)
+
+**Memoria dettagliata**: `.claude/projects/c--doomsday-engine/memory/project_banner_catalog.md`
+
+---
+
+### 53. Telemetria task & dashboard analytics — architettura (APERTA — feature)
+
+**Problema**: persistence sparsa, KPI non aggregabili, dashboard solo status. Per analisi notturna richiesto parsing regex manuale del bot.log.
+
+**Proposta MVP** (~12h):
+
+1. **Schema** `core/telemetry.py` con dataclass `TaskTelemetry` (ts_start/end, task, instance, duration_s, success, outcome, output:dict, anomalies, retry_count)
+2. **Storage 3-tier** in `data/telemetry/`:
+   - `events/events_YYYY-MM-DD.jsonl` append-only (retention 30gg)
+   - `rollup/rollup_YYYY-MM-DD.json` daily aggregate (retention 365gg)
+   - `live.json` rolling 24h (refresh 60s)
+3. **Wrapper** `Task.run_with_telemetry(ctx)` in `core/task.py` chiamato dall'orchestrator. Try/except blanket per non rompere hot path
+4. **Migration**: `TaskResult.output_data: dict` aggiunto, ogni task popola con dati specifici (vip→cass_ok/free_ok, raccolta→squadre/tipi, rifornimento→spedizioni/qty, ...)
+5. **Reader API** `dashboard/services/telemetry_reader.py`: kpi_live, history(days=7), events_recent, anomalies, benchmark_compare
+6. **UI** sezione "📊 Telemetria" con tabella KPI 24h, anomalie raggruppate, sparkline trend 7gg, drill-down istanza
+7. **Backfill** script one-shot estrae da bot.log storico → events JSONL retro
+8. **Anomaly detector** (bonus): pattern matcher su events log → genera evento anomaly + alert UI
+
+**Storage estimate**: ~120 KB/giorno events + 4 KB rollup = ~10 MB/anno totale (retention attiva).
+
+**Compat**: `storico_farm.json` mantenuto 30gg per backward-compat, poi migrare consumer a rollup.
+
+**Vantaggi**: visibility totale, KPI standardizzati, anomaly detection automatica, append-only events (no contention con state hot path).
+
+**Memoria dettagliata**: `.claude/projects/c--doomsday-engine/memory/project_telemetria_arch.md`
+
+---
+
+### 52. Issues notturne 26/04/2026 — analisi performance
+
+Da analisi notte 25-26/04 (~9h, 44 cycle, 11 istanze + FauMorfeus):
+
+#### 52a. WU14 produzione_corrente non popolata in state files (MEDIA)
+- **Sintomo**: `state/FAU_*.json` per tutte le 11 istanze ha `produzione_corrente=null` e `produzione_storico=[]`
+- I `[PROD]` log nel bot.log esistono e mostrano risorse castello correttamente, ma lo state non si aggiorna
+- **Impatto**: dashboard non può popolare la card "produzione oraria" — feature WU14 implementata ma non funzionale end-to-end
+- **Da indagare**:
+  - `apri_sessione` viene chiamato in main.py (post comprimi_banner)?
+  - Hooks in `tasks/rifornimento.py`, `tasks/raccolta.py`, `tasks/zaino.py` invocati con `ctx.state.produzione_corrente.aggiungi_*`?
+  - `chiudi_sessione_e_calcola` triggered a fine cycle (orchestrator end)?
+- **Stima**: 30 min audit + fix mancante
+
+#### 52b. Stabilizzazione HOME timeout ricorrente — 88% boot (MEDIA)
+- **Sintomo**: 38/43 boot misurati (88%) finiscono in `stabilizzazione timeout — procedo comunque` dopo 40s
+- Solo 6/43 raggiungono `HOME stabile 3/3` (target nominale)
+- 35 occorrenze `HOME stabile 1/3`, 29 reset `HOME instabile (UNKNOWN)`
+- **Causa**: banner eventi animato + transizioni UI fanno fluttuare lo score `pin_home_template` sotto soglia 0.7 ad ogni transizione
+- **Impatto**: ~30s/boot perso in attesa timeout × 38 boot = ~19 min/notte
+- **Fix candidato**: tollerare 1 reset entro 30s (algoritmo "2/3 con 1 reset"), oppure spostare `comprimi_banner_home` PRIMA di `attendi_home` invece che dopo
+- **File**: `core/launcher.py:attendi_home`
+
+#### 52c. ARENA recovery `_doppio_tap_centro + back×4` rompe ADB (ALTA)
+- **Sintomo**: 8/10 istanze in cui ARENA fallisce entrano in cascade `screenshot None` per il resto del cycle
+- 50 occorrenze `ARENA-PIN screenshot fallito` notturne, 16 `errore sfida` totali
+- `WU3 ADB reconnect` riporta "OK" ma screencap successivo resta None
+- **Pattern temporale**: cycle 7 (~01:30-04:00 UTC) = finestra ADB cascade nightly
+- **Impatto**: 27% raccolta skipped post-arena, ~6 task skipped/cycle quando triggerato
+- **Fix candidato**: sostituire in `tasks/arena.py:315-324` la sequenza `_doppio_tap_centro + back×4` con `navigator.vai_in_home()` puro (screenshot-based, adattivo)
+- **Già documentato**: `.claude/AUTONOMOUS_CHANGES.md` issue notte (non risolto)
+
+#### 52d. FAU_07 deficit netto risorse + acciaio overflow castelli (BASSA)
+- **Sintomo FAU_07**: tutti tassi netti M/h negativi (pom -0.55, leg -0.04, pet -0.18)
+- **Sistema acciaio**: castelli +7.92 M/h cumulati (FAU_05 +4.37 / FAU_09 +3.41 dominanti), rifugio FauMorfeus -7.64 M/h
+- `RIFORNIMENTO_ACCIAIO_ABILITATO=False` → mai spedito → accumulo ~190M/giorno proiettato
+- **Da decidere**:
+  - FAU_07: audit config (training in corso? livello rifugio? attività in deficit)
+  - Acciaio: abilitare `RIFORNIMENTO_ACCIAIO_ABILITATO=True` con `RIFORNIMENTO_SOGLIA_ACCIAIO_M=5.0`?
+
+#### Constraint operativi misurati (riferimento)
+- Cycle singolo per istanza: **median 12.3 min** (range 5-20 min)
+- Round completo (12 istanze sequenziali): **~150 min**
+- Sleep tra round: ~30 min → cycle totale **~3h**
+- Throughput proiettato: **~8 cycle/giorno** per istanza
+- Boot phase: 41s avvio + 170s stabilization = **~3.9 min/istanza**
+- Output notte (per estrapolazione): 83 squadre raccolta, 31 spedizioni rifornimento (~80M risorse), 11 boost attivati, 22 letture messaggi+alleanza, 11 VIP claim, 109 acquisti store, 570 tap donate, 6/11 ARENA degraded
+
 ### 1. Rifornimento — da mettere a punto (CHIUSA ✅ 20/04/2026)
 - **Stato:** validato in produzione su 8 istanze il 20/04/2026.
 - **Fix finale (20/04/2026):** `_centra_mappa` → tap castello `time.sleep(2.0)` (era `0.3`),
@@ -188,6 +671,45 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 - **Catena end-to-end ora funzionante:**
   UI dashboard → `runtime_overrides.json` → `merge_config` → `_from_raw` (normalize) →
   `ctx.config.ALLOCAZIONE_*` (frazioni) → `ratio_cfg` (mapping) → `_calcola_sequenza_allocation`
+
+### 51. DistrictShowdown — gate readiness popup fase 3/4/5 (APERTA — alta priorità)
+- **Contesto**: il flusso attuale tap icona → `sleep(delay_foray=5s)` → tap
+  coord fissa all'interno del popup NON garantisce che il popup sia caricato.
+  Su MuMu lento (come osservato su FAU_03 ciclo 24/04) il tap "interno"
+  cade su schermata non ancora aggiornata → apre elemento sbagliato (es.
+  icona WARFARE/Rally della HOME invece di claim chiave Influence) →
+  il bot finisce bloccato in schermata che BACK non chiude →
+  tutti i task successivi falliscono gate HOME → tick istanza perso.
+- **Osservazione FAU_03 24/04 21:22**:
+  - `tap (918,30)` icona Influence Rewards OK
+  - `sleep 5s` → popup NON ancora aperto (gioco lento)
+  - `tap (781,148)` cade sulla HOME del gioco → apre schermata WARFARE
+  - `back x2` non chiude WARFARE (non è popup modal)
+  - `vai_in_home()` score HOME 0.43-0.56 (parziale sotto WARFARE, sotto soglia 0.7)
+  - Tick: 10 task dovuti, **tutti saltati** per "gate HOME FALLITO"
+- **Fix proposto (analogo a `_wait_template_ready(pin_dado)` in `_apri_evento`)**:
+  Per ciascun popup prima di tappare coord interne, gate su **sentinel template**:
+  - **Fase 3 Influence**: aggiungere `pin_alliance_influence.png` (titolo popup).
+    Prima di `tap (781,148)` chiave → `_wait_template_ready(pin_alliance_influence, max_wait=10s, stable_polls=2)`.
+    Se None → skip (popup non aperto, no tap a vuoto).
+  - **Fase 4 Achievement**: aggiungere `pin_achievement_rewards.png` (titolo popup).
+    Prima di `tap (882,129)` Claim All → gate readiness.
+  - **Fase 5 Fund Raid**: aggiungere `pin_alliance_list.png` (titolo Alliance List) +
+    `pin_vs_fund_raid.png` (schermata VS). Due gate:
+    - prima di `tap (802,161)` Select → gate `pin_alliance_list`
+    - prima di `tap (443,450)` Raid + loop OCR → gate `pin_vs_fund_raid`
+- **Template PNG richiesti** (da catturare via screenshot ADB):
+  - `pin_alliance_influence.png`
+  - `pin_achievement_rewards.png`
+  - `pin_alliance_list.png`
+  - `pin_vs_fund_raid.png`
+- **Stessa logica già funzionante per mappa DS**: `pin_dado` sentinel in
+  `_apri_evento` via `_wait_template_ready` risolve il problema analogo di
+  "maschera non ancora stabilizzata dopo tap icona". Estendere il pattern
+  ai popup interni = robustezza end-to-end.
+- **Impatto**: risolve i tick persi su istanze "lente" (MuMu/VM rallentati)
+  dove il delay 5s non basta. Atteso: 0 task SALTATO per gate HOME FALLITO
+  post-fase 3/4/5 anche su hardware lento.
 
 ### 50. DistrictShowdown — finestre temporali evento (CHIUSA ✅ 24/04/2026)
 - **Contesto**: l'evento District Showdown è attivo solo durante il weekend
