@@ -129,10 +129,10 @@ def _detect_game_maintenance(device, matcher, log_fn, nome) -> bool:
         screen = device.screenshot()
         if screen is None:
             return False
-        score_refresh = matcher.score(screen, "pin_game_maintenance_refresh")
+        score_refresh = matcher.score(screen, "pin/pin_game_maintenance_refresh.png")
         if score_refresh < _GAME_MAINT_SOGLIA:
             return False
-        score_discord = matcher.score(screen, "pin_game_maintenance_discord")
+        score_discord = matcher.score(screen, "pin/pin_game_maintenance_discord.png")
         if score_discord < _GAME_MAINT_SOGLIA:
             return False
 
@@ -712,6 +712,24 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
             _is_splash = None
 
         while time.time() - t_start < _cfg.timeout_carica_s:
+            # WU54 — check popup MAINTENANCE gioco PRIORITARIO (prima di splash
+            # check + banner dismiss + BACK polling). Se il server è in
+            # manutenzione, Live Chat NON è visibile (coperto dal popup) e
+            # is_loading_splash ritorna False, quindi il check WU54 nello
+            # step1 sotto non scatta mai. Per questo qui in cima.
+            if hasattr(ctx, 'matcher') and ctx.matcher is not None:
+                try:
+                    if _detect_game_maintenance(device, ctx.matcher, log_fn, nome):
+                        setattr(ctx, "game_maintenance", True)
+                        _log(
+                            f"[{nome}] [GAME-MAINT] bot in pausa via maintenance flag "
+                            f"— il main loop ferma tutte le istanze",
+                            log_fn,
+                        )
+                        return False
+                except Exception:
+                    pass
+
             # auto-WU22 step1: check loading splash. Se siamo in caricamento
             # (template "Live Chat" rilevato), NON fare BACK — il gioco sta
             # caricando, qualsiasi BACK è inutile o controproducente
@@ -726,6 +744,20 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
                     mini.device = device
                     mini.matcher = ctx.matcher
                     if _is_splash(mini, log_fn=lambda m: _log(f"[{nome}] {m}", log_fn)):
+                        # WU54 — durante splash wait, check popup MAINTENANCE
+                        # gioco. Se rilevato → attiva maintenance bot + return False.
+                        try:
+                            if _detect_game_maintenance(device, ctx.matcher, log_fn, nome):
+                                setattr(ctx, "game_maintenance", True)
+                                _log(
+                                    f"[{nome}] [GAME-MAINT] bot in pausa via maintenance flag "
+                                    f"— il main loop ferma tutte le istanze",
+                                    log_fn,
+                                )
+                                return False
+                        except Exception:
+                            pass
+
                         # Splash → wait passivo, nessuna azione device
                         time.sleep(POLL_BACK_INTERVAL_S)
                         try:
