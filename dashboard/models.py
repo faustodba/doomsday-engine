@@ -182,6 +182,8 @@ class GlobaliOverride(BaseModel):
     rifornimento:         RifornimentoOverride        = Field(default_factory=RifornimentoOverride)
     zaino:                ZainoOverride               = Field(default_factory=ZainoOverride)
     raccolta:             RaccoltaOverride            = Field(default_factory=RaccoltaOverride)
+    # WU55 — Data collection OCR slot HOME vs MAPPA
+    raccolta_ocr_debug:   bool                       = False
 
 
 # ==============================================================================

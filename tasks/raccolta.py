@@ -209,6 +209,11 @@ _DEFAULTS: dict = {
     # Override per-istanza in runtime_overrides.json:
     #   "istanze": { "FAU_05": { "raccolta_fuori_territorio": true } }
     "RACCOLTA_FUORI_TERRITORIO_ABILITATA": False,
+    # WU55 — Data collection per analisi OCR slot in MAPPA vs HOME.
+    # Quando True: dopo lettura slot HOME (ground truth) + dopo vai_in_mappa,
+    # salva crop+screenshot in data/ocr_dataset/ per analisi offline.
+    # NON cambia il comportamento del bot (passive shadow OCR in MAPPA).
+    "RACCOLTA_OCR_DEBUG": False,
     # Blacklist
     "BLACKLIST_COMMITTED_TTL":  120,
     "BLACKLIST_RESERVED_TTL":   45,
@@ -224,6 +229,63 @@ _TUTTI_I_TIPI = ["campo", "segheria", "petrolio", "acciaio"]
 
 def _cfg(ctx: TaskContext, key: str):
     return ctx.config.get(key, _DEFAULTS[key])
+
+
+def _ocr_debug_collect_map(ctx: TaskContext) -> None:
+    """
+    WU55 — Data collection: shadow OCR su MAPPA dopo vai_in_mappa.
+
+    Esegue OCR slot in MAPPA usando stesso preprocessing di HOME (per
+    confrontare il fail). Salva sample MAPPA con stesso pair_id del
+    sample HOME corrispondente. Failsafe: log warning, non blocca task.
+
+    Pre-requisito: ctx._ocr_pair settato dal save_home_sample (in OCR HOME).
+    """
+    if not bool(_cfg(ctx, "RACCOLTA_OCR_DEBUG")):
+        return
+    pair = getattr(ctx, "_ocr_pair", None)
+    if not pair:
+        return
+    pid, attive_home, totale_home = pair
+    try:
+        from shared.ocr_helpers import leggi_contatore_slot
+        from shared.ocr_dataset import save_map_sample
+        # Attesa stabilizzazione MAPPA
+        time.sleep(1.5)
+        screen_map = ctx.device.screenshot() if ctx.device else None
+        if screen_map is None:
+            ctx.log_msg("[OCR-DEBUG] map screenshot None — skip")
+            return
+        attive_map, totale_map = leggi_contatore_slot(
+            screen_map, totale_noto=totale_home,
+        )
+        ocr_raw = f"{attive_map}/{totale_map}"
+        match = (attive_map == attive_home) and (totale_map == totale_home)
+        save_map_sample(
+            istanza=ctx.instance_name,
+            pair_id=pid,
+            screen=screen_map,
+            ocr_raw=ocr_raw,
+            attive=attive_map,
+            totale=totale_map,
+            extra={
+                "trigger":         "_ocr_debug_collect_map",
+                "schermata":       "MAP",
+                "home_attive":     int(attive_home),
+                "home_totale":     int(totale_home),
+                "match_home":      bool(match),
+            },
+        )
+        marker = "✓" if match else "✗"
+        ctx.log_msg(
+            f"[OCR-DEBUG] map sample pair={pid} home={attive_home}/{totale_home} "
+            f"map={attive_map}/{totale_map} {marker}"
+        )
+        # One-shot: dopo aver salvato la coppia, resetto pair per evitare
+        # multipli sample MAP per lo stesso HOME (multi-tentativi loop).
+        ctx._ocr_pair = None  # type: ignore
+    except Exception as exc:
+        ctx.log_msg(f"[OCR-DEBUG] collect map fail: {exc}")
 
 
 # ==============================================================================
@@ -1968,6 +2030,26 @@ class RaccoltaTask(Task):
                             f"Raccolta: slot OCR — attive={attive_inizio}/{obiettivo} "
                             f"libere={libere}"
                         )
+                        # WU55 — data collection HOME (ground truth)
+                        if bool(_cfg(ctx, "RACCOLTA_OCR_DEBUG")):
+                            try:
+                                from shared.ocr_dataset import (
+                                    new_pair_id, save_home_sample,
+                                )
+                                pid = new_pair_id()
+                                save_home_sample(
+                                    istanza=ctx.instance_name,
+                                    pair_id=pid,
+                                    screen=screen_home,
+                                    ocr_raw=f"{attive_ocr}/{totale_ocr}",
+                                    attive=attive_ocr,
+                                    totale=totale_ocr,
+                                    extra={"trigger": "_leggi_slot_da_home", "schermata": "HOME"},
+                                )
+                                ctx._ocr_pair = (pid, attive_ocr, totale_ocr)  # type: ignore
+                                ctx.log_msg(f"[OCR-DEBUG] home sample salvato pair={pid}")
+                            except Exception as exc:
+                                ctx.log_msg(f"[OCR-DEBUG] save home fail: {exc}")
                         if libere == 0:
                             ctx.log_msg("Raccolta: nessuna squadra libera — skip")
                             return TaskResult(success=True, message="nessuna squadra libera",
@@ -2060,6 +2142,9 @@ class RaccoltaTask(Task):
                     else:
                         ctx.device.key("KEYCODE_MAP")
                         time.sleep(2.0)
+
+                    # WU55 — data collection MAP (shadow OCR)
+                    _ocr_debug_collect_map(ctx)
                 else:
                     # Primo tentativo: navigazione iniziale in mappa
                     ctx.log_msg("Raccolta: navigazione → mappa")
@@ -2071,6 +2156,9 @@ class RaccoltaTask(Task):
                     else:
                         ctx.device.key("KEYCODE_MAP")
                         time.sleep(2.0)
+
+                # WU55 — data collection MAP (shadow OCR, no decisione)
+                _ocr_debug_collect_map(ctx)
 
                 # Esegui il loop invio marce
                 inviate = _loop_invio_marce(ctx, obiettivo, attive_correnti,

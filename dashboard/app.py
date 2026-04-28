@@ -1580,6 +1580,46 @@ def api_maintenance_stop():
     return {"active": False}
 
 
+@app.post("/api/raccolta-ocr-debug/{mode}", include_in_schema=False)
+def api_raccolta_ocr_debug(mode: str):
+    """
+    WU55 — Toggle data collection OCR slot HOME vs MAPPA.
+    Modifica `runtime_overrides.json.globali.raccolta_ocr_debug`.
+
+    mode: 'on' | 'off'
+    """
+    if mode not in ("on", "off"):
+        raise HTTPException(400, "mode deve essere 'on' o 'off'")
+    from dashboard.services.config_manager import get_overrides, save_overrides
+    ov = get_overrides()
+    if "globali" not in ov:
+        ov["globali"] = {}
+    ov["globali"]["raccolta_ocr_debug"] = (mode == "on")
+    save_overrides(ov)
+    return {"ok": True, "raccolta_ocr_debug": mode == "on"}
+
+
+@app.get("/api/raccolta-ocr-debug/status", include_in_schema=False)
+def api_raccolta_ocr_debug_status():
+    """Stato corrente flag + count pair raccolti."""
+    from dashboard.services.config_manager import get_overrides
+    try:
+        from shared.ocr_dataset import list_pairs
+        pairs = list_pairs()
+        n_complete = sum(1 for p in pairs if p["complete"])
+    except Exception:
+        pairs = []
+        n_complete = 0
+    ov = get_overrides()
+    active = bool(ov.get("globali", {}).get("raccolta_ocr_debug", False))
+    return {
+        "active":           active,
+        "pair_count":       len(pairs),
+        "pair_complete":    n_complete,
+        "pair_incomplete":  len(pairs) - n_complete,
+    }
+
+
 @app.get("/ui/partial/maintenance-banner", include_in_schema=False)
 def partial_maintenance_banner(request: Request):
     """

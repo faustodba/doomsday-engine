@@ -394,6 +394,9 @@ class GlobalConfig:
     task_radar:             bool = True
     task_radar_census:      bool = False
 
+    # WU55 — Data collection OCR slot (debug analisi HOME vs MAPPA)
+    raccolta_ocr_debug:     bool = False
+
     # Rifornimento — parametri comuni
     dooms_account:                    str   = ""
     rifornimento_max_spedizioni_ciclo: int  = 5
@@ -489,6 +492,12 @@ class GlobalConfig:
             task_store             = bool(t.get("store",             True)),
             task_radar             = bool(t.get("radar",             True)),
             task_radar_census      = bool(t.get("radar_census",      False)),
+
+            # WU55 — debug OCR slot (legge da raw o globali.raccolta_ocr_debug)
+            raccolta_ocr_debug     = bool(
+                raw.get("raccolta_ocr_debug",
+                        raw.get("globali", {}).get("raccolta_ocr_debug", False))
+            ),
 
             # Rifornimento — comune
             dooms_account                    = str(rc.get("dooms_account",        "")),
@@ -711,6 +720,9 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
             "raccolta_fuori_territorio",
             ist.get("raccolta_fuori_territorio", False),
         ))
+        # WU55 — Data collection OCR slot per analisi HOME vs MAPPA.
+        # Flag globale (non per istanza) — attivato per 1 ciclo di analisi.
+        RACCOLTA_OCR_DEBUG = bool(getattr(gcfg, "raccolta_ocr_debug", False))
 
         # ── Task flag (retrocompat. uppercase) ───────────────────────────────
         ALLEANZA_ABILITATO        = gcfg.task_alleanza
