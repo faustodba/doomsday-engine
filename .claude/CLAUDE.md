@@ -97,7 +97,7 @@ All'inizio di ogni sessione, in questo ordine:
 
 ---
 
-## Issues aperti (stato al 27/04/2026)
+## Issues aperti (stato al 28/04/2026)
 
 > **Nota**: la numerazione seguente è una tabella di tracking interno di CLAUDE.md
 > e NON è perfettamente allineata alla numerazione della sezione "Issues aperti" di ROADMAP.md.
@@ -186,6 +186,15 @@ All'inizio di ogni sessione, in questo ordine:
 | 49 | Cicli persistenti su file dedicato + numerazione globale crescente | MEDIA | ✅ RISOLTA 27/04 (WU46 `41711bd` storage `data/telemetry/cicli.json` + hooks main.py + pannello dashboard `📚 storico cicli`. WU48 `6498d11` numerazione globale + run_id + auto-close stale `aborted=True`) |
 | — | run_dashboard_prod.bat rotto (chiamava `dashboard_server.py` inesistente) | MEDIA | ✅ RISOLTA 27/04 (`eddefc6` corretto `uvicorn dashboard.app:app` + 7 modalità doc) |
 | — | run_prod.bat senza commenti / modalità multiple | BASSA | ✅ RISOLTA 27/04 (`1a960c1` 9 modalità preconfigurate documentate, modalità #6 RIDOTTA RAM 4 istanze per memory pressure dev tools) |
+| 73 | Pannello tempi medi task con filtro outlier IQR | — | ✅ IMPLEMENTATA 28/04 (WU49 `7984478` — IQR Tukey k=1.5, esclude district_showdown, ordinamento desc per avg) |
+| 74 | Raccolta fuori territorio per istanza (toggle dashboard) | — | ✅ IMPLEMENTATA 28/04 (WU50 `4012b70` flag `IstanzaOverride.raccolta_fuori_territorio`, WU52 `72f7b0e` sync su `instances.json`, `_nodo_in_territorio` ritorna True ⇒ no add a `BlacklistFuori`) |
+| 75 | Modalità manutenzione bot — file flag + dashboard toggle | — | ✅ IMPLEMENTATA 28/04 (WU51 `2f1b9ea` `core/maintenance.py` + `data/maintenance.flag` + endpoint `/api/maintenance/{start,stop,status}` + auto-resume) |
+| 76 | Istanze disabilitate read-only nella tabella | BASSA | ✅ RISOLTA 28/04 (WU52 `72f7b0e` `disabled_attr` su input/select riga quando `abilitata=False`, evita modifiche accidentali a istanze offline) |
+| 77 | Detect popup MAINTENANCE gioco (auto-pause + OCR ETA) | ALTA | ✅ IMPLEMENTATA 28/04 (WU53 `c9f543f` skip istanza, WU54 `fcdad78`+`55d62c7` template `pin_game_maintenance_refresh/discord`, OCR countdown `(598,348,699,373)`, hook 3 punti `attendi_home`, `enable_maintenance_with_auto_resume(eta+30s)`). Verifica end-to-end pendente — popup sparito durante test |
+| 78 | Data collection OCR slot HOME vs MAPPA — training AI agent | — | 🟡 IN CORSO 28/04 (WU55 `2c470ab` + WU55-bis `d451b8f` shadow OCR MAP in `_reset_to_mappa`. Modulo `shared/ocr_dataset.py`, hook 4 punti raccolta.py, toggle `/api/raccolta-ocr-debug/*`. Soglia spawn agente: 30+ pair complete; al restart 28/04 11:08 = 16 pair, 2 complete; ETA 1 ciclo) |
+| 79 | Pannello produzione/ora storico 12h con sparkline | — | ✅ IMPLEMENTATA 28/04 (WU56 `39fdfcf`+`0490b18`+`a767201` layout 2-righe sparkline ASCII 14px + avg/min/max space-between, `get_produzione_storico_24h(hours=12)`, filter min>0) |
+| 80 | RaccoltaFastTask — variante fast via tipologia istanza | — | ✅ IMPLEMENTATA 28/04 (WU57 `55d2e61` nuovo `tasks/raccolta_fast.py` 440 righe, delay -33%/-47% su tap_icona/CERCA, recovery 1-shot, switch via `tipologia=raccolta_fast` con runtime swap RaccoltaTask→RaccoltaFastTask in main.py preservando priority 15/interval/schedule e tutti gli altri task attivi) |
+| — | UI rename tipologie istanza + colonna FT | BASSA | ✅ RISOLTA 28/04 (`27fd5d2` labels `completo`/`completo · fast`/`solo raccolta`, riordino opzioni, header colonna `⛯`→`FT`) |
 
 > Aggiornare questa tabella ad ogni sessione insieme alla ROADMAP.
 

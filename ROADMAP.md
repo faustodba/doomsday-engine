@@ -58,6 +58,190 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 28/04/2026 — Maintenance bot/gioco + Data collection OCR + Raccolta Fast
+
+Sessione lunga focalizzata su 4 filoni: (1) toggle modalità manutenzione bot,
+(2) detect popup MAINTENANCE lato gioco con auto-pause, (3) data collection
+OCR slot HOME vs MAPPA per training futuro AI agent, (4) variante fast del
+task raccolta. 12 commit `7984478` → `27fd5d2`.
+
+#### 49. Pannello tempi medi task con filtro outlier IQR (CHIUSA ✅ 28/04 — WU49)
+
+Nuovo pannello dashboard `⏱ tempi medi task`. Aggrega `events.jsonl` per
+nome task, calcola media durata in secondi con filtro outlier via metodo
+**IQR (Tukey fences, k=1.5)**. Esclude `district_showdown` (durata variabile
+per design — battaglie fund-raid). Mostra: nome task, samples (post-filter),
+avg, min, max, std. Layout tabella compatta 5-col in sidebar destra.
+Ordinamento desc per avg → spot rapido task lenti.
+
+Commit: `7984478`.
+
+#### 50. Raccolta fuori territorio per istanza (CHIUSA ✅ 28/04 — WU50)
+
+Issue: in alcune fasi del gioco il castle/rifugio è in zone dove ogni nodo
+risulta fuori territorio → blacklist globale satura → raccolta non parte.
+Soluzione: flag `raccolta_fuori_territorio: bool` su `IstanzaOverride` +
+`instances.json` (WU52 sync). Quando attivo: `_nodo_in_territorio()` ritorna
+True per tutti i nodi, NESSUN add a `BlacklistFuori` globale. Toggle dashboard
+nella tabella istanze (colonna `FT` — WU UI rename).
+
+Commit: `4012b70` (logica) + `72f7b0e` (sync instances.json).
+
+#### 51. Modalità manutenzione bot (CHIUSA ✅ 28/04 — WU51)
+
+File flag `data/maintenance.flag` JSON con `{enabled, motivo, set_da,
+auto_resume_ts}`. Modulo `core/maintenance.py`: `enable_maintenance()`,
+`enable_maintenance_with_auto_resume(eta_seconds)`, `wait_if_maintenance()`
+(blocking poll 5s, log heartbeat ogni 60s). Hook nel main loop pre-tick.
+Dashboard: pannello `🔧 Manutenzione` con 3 endpoint
+`/api/maintenance/{start,stop,status}` + partial banner `/ui/partial/maintenance-banner`.
+
+Commit: `2f1b9ea`.
+
+#### 52. Istanze disabilitate read-only nella tabella (CHIUSA ✅ 28/04 — WU52)
+
+Quando `abilitata=False`, tutti gli input/select della riga ricevono attributo
+`disabled` (truppe/sq/prof/lv/FT/fascia oraria). Solo il toggle abilitazione
+resta cliccabile. Evita modifiche accidentali a istanze offline. Esteso WU50:
+flag `raccolta_fuori_territorio` ora persistito anche su `instances.json` (non
+solo override) per coerenza con max_squadre/livello/layout.
+
+Commit: `72f7b0e`.
+
+#### 53/54. Popup MAINTENANCE gioco — detect + auto-pause (CHIUSA ✅ 28/04)
+
+Issue: quando i server del gioco vanno in manutenzione, TUTTE le istanze
+mostrano popup "Maintenance · server time HH:MM:SS · REFRESH/Discord". Il bot
+prima ciclava skip istanze inutilmente. Ora:
+
+- **Detect**: 2 template `pin_game_maintenance_refresh.png` (174×35 zona
+  554-728 × 400-435) + `pin_game_maintenance_discord.png` (174×35 zona
+  293-467 × 400-435), match score >= 0.85 entrambi → conferma popup.
+- **OCR countdown**: zona `(598,348,699,373)` per leggere `HH:MM:SS` →
+  `eta_seconds` → `enable_maintenance_with_auto_resume(eta+30s)` (margine
+  sicurezza 30s sul boot server).
+- **Hook in 3 punti** di `core/launcher.py:attendi_home()`: Fase 4 Live Chat
+  polling, Fase 5 sub-loop splash wait, e in cima al while Fase 5 (PRIORITARIO).
+- **OCR fail fallback**: se countdown illeggibile → retry ogni 600s (10min).
+- **Auto-resume**: bot riprende automaticamente quando `now > auto_resume_ts`.
+
+Verifica funzionale via test python diretto (popup live sparito durante test
+end-to-end perché server tornato online — codice validato in unit). Issue
+parziale risolta — pattern detection robusto, da osservare in prossima
+manutenzione reale.
+
+Commit: `c9f543f` (WU53 detect+skip), `fcdad78` (WU54 auto-pause+OCR ETA),
+`55d62c7` (WU54 fix path template + hook 3 posizioni).
+
+#### 55. Data collection OCR slot HOME vs MAPPA (IN CORSO 🟡 28/04 — WU55+bis)
+
+**Obiettivo**: training futuro AI agent per stabilizzare lettura slot in MAPPA
+(zona OCR identica a HOME `(890,117,946,141)` ma fail più frequenti per
+banner/animazioni mappa).
+
+**Pipeline data collection**:
+- Modulo `shared/ocr_dataset.py`: `new_pair_id()`, `save_home_sample()`,
+  `save_map_sample()`. Storage `data/ocr_dataset/<istanza>_<pair_id>/`
+  (screen + crop + crop_otsu + meta.json).
+- Hook in `tasks/raccolta.py` 3 punti:
+  1. Pre-mappa (riga 2058) — OCR HOME pre-batch + ctx._ocr_pair → save HOME
+  2. Post-`vai_in_mappa()` (riga 2180) — shadow OCR MAP → save MAP
+  3. Post-marcia HOME (riga 1147) — OCR slot post-marcia → save HOME
+- **WU55-bis** (`d451b8f`): hook aggiunto in `_reset_to_mappa` (riga 1212+) per
+  catturare MAP appaiata al HOME post-marcia. Risultato: per ogni marcia OK
+  ora si genera 1 pair completa HOME+MAP (1 pre-batch + N post-marcia, dove
+  N = slot riempiti).
+
+**Toggle dashboard**: `/api/raccolta-ocr-debug/{on|off|status}` + flag
+`runtime_overrides.globali.raccolta_ocr_debug` propagato via `merge_config()`
+(fix root-level globali → `_InstanceCfg.RACCOLTA_OCR_DEBUG`).
+
+**Stato dataset al restart 28/04 11:08**: 16 pair (2 complete, 14 home-only).
+Soglia per analisi agente AI: 30+ pair complete. ETA: 1-2 cicli con WU55-bis
+attivo (~60 pair complete per ciclo stimati).
+
+**TODO**: spawn agente AI con dataset >= 30 complete per pattern analysis.
+
+Commit: `2c470ab` (WU55), `d451b8f` (WU55-bis).
+
+#### 56. Pannello produzione/ora storico 12h con sparkline (CHIUSA ✅ 28/04 — WU56)
+
+Pannello `⚡ produzione/ora · farm aggregata` arricchito con storico delle
+ultime 12h (ridotto da 24h iniziale per leggibilità in sidebar 260px).
+Layout 2-righe per risorsa: icona+sparkline ASCII (▁▂▃▄▅▆▇█, 14px font) +
+sotto avg/min/max in space-between. Aggregazione su bins orari di
+`storico_farm.json`. Filtra valori > 0 per il min (evita 0 spurious).
+
+Backend: `dashboard/services/stats_reader.py:get_produzione_storico_24h(hours=12)`
+ritorna `{bins, media, min, max, samples, window_h}` per pomodoro/legno/
+petrolio/acciaio/totale.
+
+Iter UI: layout 5-col tabella → centrato con min/max → 2-righe finale (richiesto
+user "scritta non centrata, introduci max/min" + "non si vedono i dati min e max,
+riduci a 12h").
+
+Commit: `39fdfcf` (initial 24h), `0490b18` (footer centrato + min/h),
+`a767201` (layout 2-righe + finestra 12h).
+
+#### 57. RaccoltaFastTask — variante fast via tipologia istanza (NUOVA 🆕 28/04 — WU57)
+
+Nuovo task `RaccoltaFastTask` (file `tasks/raccolta_fast.py`, 440 righe).
+Filosofia: **niente verifiche parziali per ogni marcia, solo verifica finale
+post-batch**. Riusa helper di `tasks/raccolta.py` (_cerca_nodo,
+_leggi_coord_nodo, _nodo_in_territorio, Blacklist, BlacklistFuori).
+
+**Flow**:
+1. OCR slot HOME pre-batch → libere=N (1-5)
+2. `vai_in_mappa()`
+3. Loop N marce: `_tenta_marcia` (CERCA + tap_nodo + popup gather + territorio
+   check + invio fast senza retry intermedi). Recovery 1-shot su fail
+   (BACK + vai_in_home + vai_in_mappa).
+4. Post-batch: `vai_in_home` + OCR slot → confronto vs `attive_pre`.
+
+**Delay ridotti vs raccolta standard**:
+| Step                  | Standard | Fast | Delta |
+|-----------------------|----------|------|-------|
+| TAP icona tipo        | 1.8s     | 1.2s | -33%  |
+| CERCA / lente         | 1.5s     | 0.8s | -47%  |
+| SQUADRA selezione     | 1.8s     | 1.2s | -33%  |
+| MARCIA conferma       | 1.5s     | 1.2s | -20%  |
+| Post-marcia stabilizz.| —        | 2.5s | +nuovo|
+
+**Switch via tipologia istanza** (no doppia esecuzione):
+- `dashboard/models.py`: enum `TipologiaIstanza.raccolta_fast`
+- `main.py`: runtime swap RaccoltaTask → RaccoltaFastTask quando
+  `tipologia=="raccolta_fast"`. Mantiene priority 15/interval/schedule e
+  TUTTI gli altri task attivi (a differenza di `raccolta_only` che limita
+  ai due raccolta task).
+- Dashboard select: option `completo · fast` (UI rename WU separato).
+
+**A/B testing pronto**: flaggare 1-2 istanze fast vs 9-10 standard, confronto
+durata tick raccolta. Rollback immediato cambiando tipologia in dashboard.
+
+Commit: `55d2e61`.
+
+#### UI rename — tipologie istanza + colonna FT (28/04)
+
+Refactor labels select tipologia per chiarezza semantica (richiesto user
+"non è una nomenclatura corretta è fuorviante"):
+
+| Value (invariato)     | Label vecchia    | Label nuova       |
+|-----------------------|------------------|-------------------|
+| `full`                | full             | **completo**      |
+| `raccolta_fast`       | raccolta fast    | **completo · fast** |
+| `raccolta_only`       | raccolta         | **solo raccolta** |
+
+Riordinate opzioni: `completo` + `completo · fast` consecutive (varianti),
+poi `solo raccolta` (profilo separato). Visivamente "fast" è una sotto-modalità
+del completo, non un upgrade del raccolta_only.
+
+Header colonna fuori territorio: glifo `⛯` → testo `FT` (più leggibile,
+coerente con stile colonne lv./sq./prof.). Title hover preservato.
+
+Commit: `27fd5d2`.
+
+---
+
 ### Sessione 27/04/2026 — serata — Cicli persistenti + race state + dashboard fix
 
 Sessione serale focused su gap dashboard telemetria + race condition state.
