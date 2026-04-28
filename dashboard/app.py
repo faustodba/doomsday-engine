@@ -1592,12 +1592,27 @@ def partial_maintenance_banner(request: Request):
     if active:
         motivo = info.get("motivo", "")
         ts     = info.get("ts_attivato", "")[:19].replace("T", " ")
+        # WU54 — auto-resume ts (gioco in manutenzione)
+        ar_ts  = info.get("auto_resume_ts", "")
+        ar_lbl = ""
+        if ar_ts:
+            try:
+                from datetime import datetime, timezone
+                ar_dt = datetime.fromisoformat(ar_ts)
+                delta = (ar_dt - datetime.now(timezone.utc)).total_seconds()
+                if delta > 0:
+                    m, s = int(delta // 60), int(delta % 60)
+                    ar_lbl = f' <span style="color:#fbbf24">· auto-resume ~{m}m{s:02d}s</span>'
+                else:
+                    ar_lbl = ' <span style="color:var(--green)">· auto-resume scaduto</span>'
+            except Exception:
+                pass
         body = f'''
         <div style="background:rgba(248,113,113,0.15);border:1px solid var(--red);
                     color:var(--red);padding:6px 12px;border-radius:4px;
                     display:flex;align-items:center;gap:10px;font-size:12px">
           <span style="font-weight:600">🔧 MANUTENZIONE ATTIVA</span>
-          <span style="color:var(--text-dim)">attivata {ts}{(" — " + motivo) if motivo else ""}</span>
+          <span style="color:var(--text-dim)">attivata {ts}{(" — " + motivo) if motivo else ""}{ar_lbl}</span>
           <button onclick="maintenanceToggle(false)" class="btn btn-primary"
                   style="margin-left:auto;padding:3px 10px;font-size:11px">▶ riprendi bot</button>
         </div>

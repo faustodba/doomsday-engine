@@ -76,37 +76,93 @@ def _log(msg: str, log_fn: Optional[Callable] = None) -> None:
         print(line)
 
 
-# WU53 — Detect popup MAINTENANCE lato gioco (manutenzione server-side)
+# WU53/54 — Detect popup MAINTENANCE lato gioco (manutenzione server-side)
 # Pattern: 2 template (REFRESH + Discord button) entrambi >= soglia.
-# Conferma doppia per evitare falsi positivi (un solo button non basta).
-_GAME_MAINT_SOGLIA = 0.85
+# Quando rilevato → attiva maintenance bot-side con auto_resume calcolato
+# dall'OCR del countdown (zona 598,348,699,373 — formato HH:MM:SS).
+# Tutte le istanze sono bloccate dal popup → bot in pausa, no skip ciclico.
+_GAME_MAINT_SOGLIA      = 0.85
+_GAME_MAINT_OCR_BOX     = (598, 348, 699, 373)   # HH:MM:SS countdown
+_GAME_MAINT_OCR_FAIL_S  = 600                    # 10 min fallback
+
+
+def _ocr_maintenance_eta(screen, log_fn, nome) -> int:
+    """
+    OCR del countdown 'Estimated Maintenance Time Remaining' (zona fissa).
+    Formato atteso: HH:MM:SS (es. '00:10:35').
+
+    Returns:
+        Secondi totali (>0). _GAME_MAINT_OCR_FAIL_S se OCR fallisce.
+    """
+    try:
+        from shared.ocr_helpers import ocr_intero
+        import re as _re
+        testo = ocr_intero(screen, _GAME_MAINT_OCR_BOX, preprocessor="otsu") or ""
+        clean = _re.sub(r"[^0-9:]", "", testo)
+        parti = clean.split(":")
+        if len(parti) == 3 and all(p for p in parti):
+            sec = int(parti[0]) * 3600 + int(parti[1]) * 60 + int(parti[2])
+            if 0 < sec < 24 * 3600:  # sanity: max 24h
+                _log(f"[{nome}] [GAME-MAINT] countdown OCR={clean} → {sec}s", log_fn)
+                return sec
+        if len(parti) == 2 and all(p for p in parti):
+            sec = int(parti[0]) * 60 + int(parti[1])
+            if 0 < sec < 24 * 3600:
+                _log(f"[{nome}] [GAME-MAINT] countdown OCR={clean} → {sec}s", log_fn)
+                return sec
+    except Exception as exc:
+        _log(f"[{nome}] [GAME-MAINT] OCR countdown errore: {exc}", log_fn)
+    _log(f"[{nome}] [GAME-MAINT] OCR fallito → fallback {_GAME_MAINT_OCR_FAIL_S}s", log_fn)
+    return _GAME_MAINT_OCR_FAIL_S
 
 
 def _detect_game_maintenance(device, matcher, log_fn, nome) -> bool:
     """
-    Rileva il popup MAINTENANCE del gioco (testo italiano: "Manutenzione",
-    inglese: "MAINTENANCE — server in maintenance").
+    Rileva il popup MAINTENANCE del gioco. Quando trovato, attiva
+    automaticamente la modalità manutenzione bot-side con auto_resume
+    calcolato dall'OCR del countdown.
 
     Returns:
-        True se entrambi REFRESH + Discord button matched >= soglia.
+        True se popup rilevato + maintenance bot attivata.
     """
     try:
         screen = device.screenshot()
         if screen is None:
             return False
         score_refresh = matcher.score(screen, "pin_game_maintenance_refresh")
-        # Early-exit: se REFRESH non c'è, inutile verificare Discord
         if score_refresh < _GAME_MAINT_SOGLIA:
             return False
         score_discord = matcher.score(screen, "pin_game_maintenance_discord")
-        detected = score_discord >= _GAME_MAINT_SOGLIA
-        if detected:
+        if score_discord < _GAME_MAINT_SOGLIA:
+            return False
+
+        _log(
+            f"[{nome}] [GAME-MAINT] popup rilevato (REFRESH={score_refresh:.3f} "
+            f"Discord={score_discord:.3f}) — OCR countdown",
+            log_fn,
+        )
+        eta_s = _ocr_maintenance_eta(screen, log_fn, nome)
+
+        # Attiva maintenance bot-side con auto-resume dopo eta_s + 30s margine.
+        # Tutte le istanze sono bloccate dal popup, quindi bot in pausa
+        # e non ciclo skip-skip-skip che non serve a niente.
+        try:
+            from core.maintenance import enable_maintenance_with_auto_resume
+            margine = 30
+            enable_maintenance_with_auto_resume(
+                eta_seconds=eta_s + margine,
+                motivo=f"manutenzione gioco rilevata su {nome} (ETA {eta_s}s)",
+                set_da="auto_game_detect",
+            )
             _log(
-                f"[{nome}] [GAME-MAINT] match REFRESH={score_refresh:.3f} "
-                f"Discord={score_discord:.3f}",
+                f"[{nome}] [GAME-MAINT] bot in pausa fino a +{eta_s+margine}s "
+                f"(auto-resume)",
                 log_fn,
             )
-        return detected
+        except Exception as exc:
+            _log(f"[{nome}] [GAME-MAINT] errore enable_maintenance: {exc}", log_fn)
+
+        return True
     except Exception as exc:
         _log(f"[{nome}] [GAME-MAINT] errore detect: {exc}", log_fn)
         return False
@@ -543,14 +599,20 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
             while time.time() - t_poll < (t_max - t_min):
                 time.sleep(3.0)
 
-                # WU53 — check popup MAINTENANCE lato gioco. Se rilevato,
-                # esce SUBITO con flag dedicato (skip istanza, no monkey
-                # recovery, no retry). Pattern: 2 template (REFRESH+Discord)
-                # entrambi >= 0.85 → certezza popup attivo.
+                # WU53/54 — check popup MAINTENANCE lato gioco. Se rilevato:
+                #   - OCR countdown → calcola auto-resume timestamp
+                #   - Attiva modalità manutenzione bot (file flag con auto_resume_ts)
+                #   - Tutte le istanze sono bloccate dal popup → bot in pausa
+                #     (no skip istanza-by-istanza, è inutile)
+                #   - Resume automatico quando timer scade
                 try:
                     if _detect_game_maintenance(device, ctx.matcher, log_fn, nome):
                         setattr(ctx, "game_maintenance", True)
-                        _log(f"[{nome}] [GAME-MAINT] popup manutenzione gioco rilevato — skip istanza", log_fn)
+                        _log(
+                            f"[{nome}] [GAME-MAINT] bot in pausa via maintenance flag "
+                            f"— il main loop ferma tutte le istanze",
+                            log_fn,
+                        )
                         return False
                 except Exception:
                     pass
