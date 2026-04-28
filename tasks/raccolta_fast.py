@@ -107,6 +107,7 @@ class RaccoltaFastTask(Task):
         from tasks.raccolta import (
             _cerca_nodo, _leggi_coord_nodo, _tap_nodo_e_verifica_gather,
             _nodo_in_territorio, _reset_to_mappa,
+            _aggiorna_slot_in_mappa,        # WU55 28/04 — legge slot in mappa
             _leggi_attive_post_marcia, Blacklist, BlacklistFuori, _cfg,
         )
         from shared.ocr_helpers import leggi_contatore_slot
@@ -195,8 +196,14 @@ class RaccoltaFastTask(Task):
                         ctx, tipo, n_truppe, blacklist, blacklist_fuori, obiettivo)
 
             if ok_marcia:
-                # Verifica post-marcia: torna in HOME, OCR slot
-                attive_post = self._verifica_post_marcia(ctx, obiettivo)
+                # WU55 28/04 — verifica post-marcia direttamente in MAPPA
+                # (no più vai_in_home → OCR → vai_in_mappa). Risparmio ~10-15s
+                # per marcia. Guardrail Scenario E: se MAP=(0,N) ma attive_pre>=1
+                # → fallback HOME singolo (popup overlay ambiguità).
+                # Rollback: git checkout wu55-pre-refactor-mappa -- tasks/raccolta_fast.py
+                attive_post = _aggiorna_slot_in_mappa(
+                    ctx, obiettivo, attive_corrente + 1
+                )
                 if attive_post > attive_corrente:
                     ctx.log_msg(
                         f"RaccoltaFast: ✓ marcia confermata "
@@ -213,11 +220,13 @@ class RaccoltaFastTask(Task):
                     marce_fallite += 1
                     # Non avanzo idx_tipo, riprova stesso tipo prossima iter
 
-                # Re-naviga in mappa per la prossima marcia (siamo in HOME)
-                if n_marcia < libere - 1:  # non l'ultima
-                    if not ctx.navigator.vai_in_mappa():
-                        ctx.log_msg("RaccoltaFast: vai_in_mappa fallito mid-batch — abort")
-                        break
+                # WU55 28/04 — NIENTE vai_in_mappa: siamo gia' in mappa post
+                # _aggiorna_slot_in_mappa (no vai_in_home intermedio).
+                # Solo se _aggiorna_slot_in_mappa ha fatto fallback HOME (caso
+                # ambiguo/fail), saremmo in HOME → lì serve vai_in_mappa.
+                # Detection: attive_post == -1 o == obiettivo via fallback
+                # _reset_to_mappa che lascia in mappa. Helper sempre torna in
+                # mappa quindi NO vai_in_mappa qui necessario.
 
         # ── Finale: torna HOME ─────────────────────────────────────────────
         try:
@@ -390,6 +399,13 @@ class RaccoltaFastTask(Task):
 
     def _verifica_post_marcia(self, ctx: TaskContext, obiettivo: int) -> int:
         """
+        DEPRECATO 28/04/2026 — non più usato dal flow principale.
+        Sostituito da `_aggiorna_slot_in_mappa()` di tasks.raccolta che legge
+        slot direttamente in mappa (no vai_in_home → OCR → vai_in_mappa).
+
+        Mantenuto solo per eventuale uso esterno/test. Non rimuovere senza
+        verificare assenza di chiamanti.
+
         Torna in HOME → sleep stabilizzazione → OCR slot.
         Returns attive_post (-1 se OCR fail, valore conservativo).
         """
