@@ -127,33 +127,37 @@ def _load_engine_status() -> EngineStatus:
 # WU56 — Storico produzione/ora ultime 24h aggregato per finestra oraria
 # ==============================================================================
 
-def get_produzione_storico_24h() -> dict:
+def get_produzione_storico_24h(hours: int = 12) -> dict:
     """
-    Aggrega produzione_oraria delle ultime 24h da tutte le istanze.
+    Aggrega produzione_oraria delle ultime `hours` ore (default 12) da tutte
+    le istanze. Default 12h per limitare larghezza sparkline in sidebar.
 
-    Per ogni ora UTC degli ultimi 24h:
+    Per ogni ora UTC degli ultimi `hours`:
       - Trova sessioni con ts_fine in quella finestra
       - Somma produzione_oraria per risorsa (mantiene magnitudo della farm)
       - Se nessuna sessione in quella ora, valore = 0 (gap)
 
     Returns:
         {
-            "ore":       ["HH-7gg", "HH+1", ...],  # 24 label tipo "10:00"
+            "ore":       ["HH:00", ...],
             "serie":     {pomodoro: [v..], legno, acciaio, petrolio},
             "media_24h": {pomodoro, legno, acciaio, petrolio},
+            "min_24h":   {pomodoro, ...},
             "max_24h":   {pomodoro, ...},
-            "samples":   int,  # numero sessioni considerate
+            "samples":   int,
+            "window_h":  int,   # finestra effettiva (era 24h, ora default 12h)
         }
     """
     from datetime import datetime, timedelta, timezone
+    h_window = max(1, min(48, int(hours)))
     now = datetime.now(timezone.utc)
-    window_start = now - timedelta(hours=24)
+    window_start = now - timedelta(hours=h_window)
 
-    # Inizializza 24 bin orari (chiavi: ora UTC inizio finestra)
+    # Inizializza N bin orari (chiavi: ora UTC inizio finestra)
     bins: Dict[str, Dict[str, float]] = {}
     bin_count: Dict[str, int] = {}
-    for h in range(24):
-        bin_dt  = (now - timedelta(hours=23 - h)).replace(minute=0, second=0, microsecond=0)
+    for h in range(h_window):
+        bin_dt  = (now - timedelta(hours=h_window - 1 - h)).replace(minute=0, second=0, microsecond=0)
         key = bin_dt.strftime("%Y-%m-%dT%H")
         bins[key] = {r: 0.0 for r in _RISORSE_STANDARD}
         bin_count[key] = 0
@@ -221,6 +225,7 @@ def get_produzione_storico_24h() -> dict:
         "min_24h":   min_24h,
         "max_24h":   max_24h,
         "samples":   samples_total,
+        "window_h":  h_window,
     }
 
 

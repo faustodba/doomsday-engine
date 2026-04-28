@@ -1243,10 +1243,11 @@ def partial_res_oraria(request: Request):
             )
         corpo = f'<tr><td style="color:var(--text-dim)">farm</td>{riga_vals}</tr>'
 
-    # WU56 — Storico 24h aggregator
+    # WU56 — Storico aggregator (default 12h per stare in larghezza sidebar)
     from dashboard.services.stats_reader import get_produzione_storico_24h
-    storico = get_produzione_storico_24h()
-    samples = storico.get("samples", 0)
+    storico  = get_produzione_storico_24h(hours=12)
+    samples  = storico.get("samples", 0)
+    window_h = storico.get("window_h", 12)
 
     # Sparkline ASCII per ogni risorsa
     def _spark(vals):
@@ -1256,6 +1257,8 @@ def partial_res_oraria(request: Request):
         mx = max(vals) or 1
         return "".join(chars[min(7, int(v / mx * 7))] for v in vals)
 
+    # Layout 2-righe per risorsa (sparkline sopra full-width, valori sotto)
+    # Evita overflow su sidebar stretta (260px).
     storico_rows = ""
     if samples > 0:
         for risorsa, ico in RISORSE:
@@ -1265,17 +1268,22 @@ def partial_res_oraria(request: Request):
             mx    = storico["max_24h"].get(risorsa,   0)
             spark = _spark(serie)
             storico_rows += (
-                f'<tr>'
-                f'<td style="font-size:14px">{ico}</td>'
-                f'<td style="font-family:monospace;font-size:12px;color:var(--accent);'
-                f'letter-spacing:0px" title="ore 24h fa → ora">{spark}</td>'
-                f'<td style="text-align:right;color:var(--text-dim);font-size:10px" '
-                f'title="media h con dati">{_fmt_m(media)}</td>'
-                f'<td style="text-align:right;color:var(--text-dim);font-size:10px" '
-                f'title="minimo (escluso 0)">{_fmt_m(mn)}</td>'
-                f'<td style="text-align:right;color:var(--accent);font-size:10px" '
-                f'title="picco massimo">{_fmt_m(mx)}</td>'
-                f'</tr>'
+                f'<div style="margin-bottom:8px;border-bottom:0.5px solid var(--border);'
+                f'padding-bottom:5px">'
+                # Riga 1: icona + sparkline grande
+                f'<div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">'
+                f'<span style="font-size:14px;width:18px">{ico}</span>'
+                f'<span style="font-family:monospace;font-size:14px;color:var(--accent);'
+                f'letter-spacing:1px" title="ultime {window_h} ore">{spark}</span>'
+                f'</div>'
+                # Riga 2: valori avg/min/max compatti
+                f'<div style="display:flex;justify-content:space-between;'
+                f'font-size:10px;padding-left:24px">'
+                f'<span style="color:var(--text-dim)">avg <b style="color:var(--text)">{_fmt_m(media)}</b></span>'
+                f'<span style="color:var(--text-dim)">min <b style="color:var(--text)">{_fmt_m(mn)}</b></span>'
+                f'<span style="color:var(--text-dim)">max <b style="color:var(--accent)">{_fmt_m(mx)}</b></span>'
+                f'</div>'
+                f'</div>'
             )
 
     html = f'''
@@ -1293,22 +1301,19 @@ def partial_res_oraria(request: Request):
     <details style="margin-top:8px" {("open" if samples > 0 else "")}>
       <summary style="cursor:pointer;font-size:11px;color:var(--text-dim);
                        letter-spacing:1px;text-transform:uppercase">
-        📊 storico 24h ({samples} sessioni)
+        📊 storico {window_h}h ({samples} sessioni)
       </summary>
-      {(f'<table class="ora-tbl" style="margin-top:6px;font-size:10px"><thead><tr>'
-        f'<th></th><th>trend 24h</th>'
-        f'<th style="text-align:right;font-size:9px">avg/h</th>'
-        f'<th style="text-align:right;font-size:9px">min/h</th>'
-        f'<th style="text-align:right;font-size:9px">max/h</th>'
-        f'</tr></thead><tbody>{storico_rows}</tbody></table>'
+      <div style="margin-top:6px">
+      {(storico_rows
         if samples > 0 else
         '<div style="color:var(--text-dim);font-size:11px;padding:6px 0">'
         'nessun dato (serve ≥1 sessione completata con durata ≥5min)</div>')}
+      </div>
     </details>
 
     <div style="color:var(--text-dim);font-size:9px;margin-top:6px;text-align:center;
                 line-height:1.3">
-      farm: ultima sessione · storico: produzione_storico 24h
+      farm: ultima sessione · storico: ultime {window_h}h
     </div>
     '''
     return HTMLResponse(html)
