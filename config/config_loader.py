@@ -705,6 +705,11 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         ALLOCAZIONE_LEGNO    = gcfg.allocazione_legno
         ALLOCAZIONE_PETROLIO = gcfg.allocazione_petrolio
         ALLOCAZIONE_ACCIAIO  = gcfg.allocazione_acciaio
+        # WU50 — modalità fuori territorio (per istanza)
+        # Quando True: bypassa check territorio + non aggiunge nodi a
+        # blacklist_fuori. Caso d'uso: castle in zona dove tutti i nodi
+        # sono fuori territorio (movimento castle/rifugio).
+        RACCOLTA_FUORI_TERRITORIO_ABILITATA = bool(_ovr("raccolta_fuori_territorio", False))
 
         # ── Task flag (retrocompat. uppercase) ───────────────────────────────
         ALLEANZA_ABILITATO        = gcfg.task_alleanza

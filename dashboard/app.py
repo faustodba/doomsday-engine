@@ -633,6 +633,8 @@ def partial_ist_table(request: Request):
         fascia_raw  = ist_ov.get("fascia_oraria", ist.get("fascia_oraria", ""))
         max_squadre = ist.get("max_squadre", 4)
         livello     = ist.get("livello", 6)
+        # WU50 — flag fuori territorio per istanza
+        fuori_terr  = bool(ist_ov.get("raccolta_fuori_territorio", False))
         stato       = ist_status.stato if ist_status else ("idle" if not abilitata else "unknown")
 
         fascia_da = ""
@@ -664,6 +666,9 @@ def partial_ist_table(request: Request):
           </select></td>
           <td><input type="number" class="ist-lv" value="{livello}"
                      min="1" max="10" style="width:36px"></td>
+          <td><input type="checkbox" class="ist-fuori-terr" {"checked" if fuori_terr else ""}
+                     title="modalità fuori territorio: raccolta su nodi fuori senza blacklist (WU50)"
+                     style="accent-color:var(--accent);width:13px;height:13px;cursor:pointer"></td>
           <td><div class="fascia">
             <input type="time" class="ist-fascia-da" value="{fascia_da}">
             <span class="fsep">—</span>
@@ -672,7 +677,7 @@ def partial_ist_table(request: Request):
         </tr>''')
 
     return HTMLResponse(''.join(rows) or
-        '<tr><td colspan="7" style="color:var(--text-dim);font-size:9px;padding:8px">nessuna istanza</td></tr>')
+        '<tr><td colspan="8" style="color:var(--text-dim);font-size:9px;padding:8px">nessuna istanza</td></tr>')
 
 
 @app.get("/ui/partial/storico", include_in_schema=False)

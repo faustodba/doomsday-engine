@@ -200,6 +200,15 @@ _DEFAULTS: dict = {
     "RACCOLTA_TRUPPE":          0,
     "RACCOLTA_LIVELLO":         6,
     "RACCOLTA_LIVELLO_MIN":     6,
+    # WU50 — modalità "fuori territorio": permette raccolta su nodi fuori
+    # territorio (rifugio piazzato in zona dove tutti i nodi sono fuori).
+    # Quando True:
+    #   - bypass del check `_nodo_in_territorio` (procede comunque)
+    #   - bypass del check `blacklist_fuori.contiene` (legge nodi blacklisted)
+    #   - NON aggiunge nodi alla blacklist_fuori (sempre ignorato)
+    # Override per-istanza in runtime_overrides.json:
+    #   "istanze": { "FAU_05": { "raccolta_fuori_territorio": true } }
+    "RACCOLTA_FUORI_TERRITORIO_ABILITATA": False,
     # Blacklist
     "BLACKLIST_COMMITTED_TTL":  120,
     "BLACKLIST_RESERVED_TTL":   45,
@@ -1384,7 +1393,9 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
             continue
 
         # ── Blacklist FUORI (disco): prova livello successivo ──────────
-        if blacklist_fuori.contiene(chiave_test):
+        # WU50: bypass se modalità fuori_territorio attiva → considera ammesso
+        _fuori_terr_ok = bool(_cfg(ctx, "RACCOLTA_FUORI_TERRITORIO_ABILITATA"))
+        if blacklist_fuori.contiene(chiave_test) and not _fuori_terr_ok:
             ctx.log_msg(
                 f"Raccolta [{tipo}] Lv.{lv}: nodo {chiave_test} "
                 f"in blacklist fuori — provo livello successivo"
@@ -1428,7 +1439,8 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
                 )
                 _reset_to_mappa(ctx, obiettivo)
                 return False, True, False
-            if blacklist_fuori.contiene(chiave2):
+            # WU50: bypass se modalità fuori_territorio attiva
+            if blacklist_fuori.contiene(chiave2) and not _fuori_terr_ok:
                 ctx.log_msg(
                     f"Raccolta [{tipo}]: secondo nodo {chiave2} "
                     f"in blacklist fuori — skip neutro"
@@ -1466,7 +1478,12 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
     screen_popup = gather_result.screen
 
     # ─── Step 4: verifica territorio (PRIMA del livello per early abort) ─
-    if screen_popup is not None and not _nodo_in_territorio(screen_popup, tipo, ctx):
+    # WU50: in modalità fuori_territorio bypass del check (procede comunque
+    # senza blacklist + senza rollback). Caso d'uso: castle in zona dove
+    # tutti i nodi sono fuori territorio.
+    _fuori_terr_ok = bool(_cfg(ctx, "RACCOLTA_FUORI_TERRITORIO_ABILITATA"))
+    if (screen_popup is not None and not _fuori_terr_ok
+            and not _nodo_in_territorio(screen_popup, tipo, ctx)):
         ctx.log_msg(
             f"Raccolta [{tipo}]: nodo {chiave} FUORI territorio — "
             f"blacklist fuori + rollback"
@@ -1477,6 +1494,17 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
         time.sleep(0.5)
         _reset_to_mappa(ctx, obiettivo)
         return False, False, True  # skip neutro
+    elif _fuori_terr_ok and screen_popup is not None:
+        # Log diagnostico (one-shot per nodo): sappiamo se IN o FUORI ma
+        # andiamo avanti comunque. Utile per analisi performance senza buff.
+        try:
+            in_terr = _nodo_in_territorio(screen_popup, tipo, ctx)
+            ctx.log_msg(
+                f"Raccolta [{tipo}]: modalità fuori_territorio attiva — "
+                f"nodo {chiave} {'IN' if in_terr else 'FUORI'} territorio (procedo)"
+            )
+        except Exception:
+            pass
 
     # ─── Step 5: verifica livello nodo ──────────────────────────────────
     if screen_popup is not None:

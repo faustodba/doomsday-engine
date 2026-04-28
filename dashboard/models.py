@@ -207,6 +207,8 @@ class IstanzaOverride(BaseModel):
     max_squadre:  Optional[int]           = None   # scritto su instances.json
     layout:       Optional[int]           = None   # scritto su instances.json
     livello:      Optional[int]           = None   # scritto su instances.json
+    # WU50 — raccolta fuori territorio (per istanza)
+    raccolta_fuori_territorio: bool       = False
 
 
 # ==============================================================================

@@ -236,7 +236,8 @@
         <table class="ist-tbl">
           <thead><tr>
             <th>on</th><th>nome</th><th>truppe</th><th>sq.</th>
-            <th>prof.</th><th>lv.</th><th>fascia oraria</th>
+            <th>prof.</th><th>lv.</th><th title="raccolta fuori territorio (WU50)">⛯</th>
+            <th>fascia oraria</th>
           </tr></thead>
           <tbody id="ist-tbody"
                  hx-get="/ui/partial/ist-table"
@@ -580,6 +581,7 @@ async function salvaIstanze() {
       fascia_oraria: (da||a) ? `${da||'00:00'}-${a||'23:59'}` : null,
       max_squadre:  parseInt(tr.querySelector('.ist-sq')?.value)||null,
       livello:      parseInt(tr.querySelector('.ist-lv')?.value)||null,
+      raccolta_fuori_territorio: tr.querySelector('.ist-fuori-terr')?.checked ?? false,
     };
   });
   const {ok,data} = await apiPut('/api/config/istanze', {istanze});
