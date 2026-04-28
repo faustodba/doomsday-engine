@@ -195,6 +195,7 @@ All'inizio di ogni sessione, in questo ordine:
 | 79 | Pannello produzione/ora storico 12h con sparkline | — | ✅ IMPLEMENTATA 28/04 (WU56 `39fdfcf`+`0490b18`+`a767201` layout 2-righe sparkline ASCII 14px + avg/min/max space-between, `get_produzione_storico_24h(hours=12)`, filter min>0) |
 | 80 | RaccoltaFastTask — variante fast via tipologia istanza | — | ✅ IMPLEMENTATA 28/04 (WU57 `55d2e61` nuovo `tasks/raccolta_fast.py` 440 righe, delay -33%/-47% su tap_icona/CERCA, recovery 1-shot, switch via `tipologia=raccolta_fast` con runtime swap RaccoltaTask→RaccoltaFastTask in main.py preservando priority 15/interval/schedule e tutti gli altri task attivi) |
 | — | UI rename tipologie istanza + colonna FT | BASSA | ✅ RISOLTA 28/04 (`27fd5d2` labels `completo`/`completo · fast`/`solo raccolta`, riordino opzioni, header colonna `⛯`→`FT`) |
+| 81 | Update Version popup gioco — detect + gestione | ALTA | 🆕 APERTA 28/04 — pulsante "Update Version" + icona triangolo arancione "Up" appare in HOME riga eventi superiore quando client gioco ha nuova versione. Zona ~520-590, 40-95. Proposta: template `pin_update_version.png` + hook `attendi_home`, decisione skip istanza/alert dashboard/auto-pause se >=80% istanze. Pattern affine a #77 MAINTENANCE ma livello client. APK update richiede interazione utente (sideload/store) — bot non può autonomamente |
 
 > Aggiornare questa tabella ad ogni sessione insieme alla ROADMAP.
 

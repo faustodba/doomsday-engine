@@ -58,6 +58,51 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Issue aperte — gestione aggiornamento software gioco
+
+#### 81. Update Version popup gioco — detect + gestione (NUOVA 🆕 28/04/2026)
+
+**Sintomo**: quando il client del gioco ha una nuova versione disponibile,
+appare un pulsante "**Update Version**" sulla HOME (icona triangolo arancione
+"Up" + testo) nella riga eventi superiore (accanto a Beast Search, Treasure
+Island Trip, ecc.). Posizione approssimativa screenshot 960×540: zona
+centro-alta, attorno a x=520-590, y=40-95.
+
+**Problema**: il bot oggi NON rileva questo pulsante e procede con la HOME
+normale. Conseguenze potenziali:
+- Se l'utente lo cliccasse manualmente partirebbe il download APK → emulator
+  riavvio → bot crash mid-tick.
+- Se il gioco forza l'update (server obbliga), tutte le funzioni tap che
+  presuppongono UI standard potrebbero fallire silenziosamente (es. tap
+  alleanza apre invece popup update) → cascata fallimenti tipo "lente NON
+  aperta".
+- Pattern affine a #77 (MAINTENANCE detect) ma livello CLIENT non server.
+
+**Proposta soluzione** (analoga a WU54 maintenance):
+1. Estrarre template `pin_update_version.png` da screenshot istanza con
+   pulsante visibile (zona ~70×50px).
+2. Hook detect in `core/launcher.py:attendi_home()` o gate pre-tick:
+   - Se score >= 0.85 → pulsante rilevato.
+   - Decisione: (a) skip istanza ciclo corrente con flag persistente
+     `data/update_pending.flag` per evitare retry, (b) alert dashboard
+     `update_required[<istanza>]` con timestamp, (c) opzione auto-update se
+     l'utente abilita flag (rischioso — emulator riavvio non gestito da bot).
+3. Gestione globale: se >= 80% istanze hanno pulsante → enable_maintenance
+   automatico (analogo a WU54) con motivo "client update required" finché
+   utente non aggiorna manualmente APK su MuMu.
+
+**Note**:
+- L'update va scaricato sull'APK del gioco — il bot NON può eseguirlo
+  autonomamente (richiede interazione store/Google Play o sideload).
+- Eventi rari ma critici: bloccano farm completa finché non risolti.
+- Screenshot di riferimento fornito dall'utente 28/04 ore 11:46 contenente:
+  pulsante "Update Version" in alto + banner "General Notice V20.5.0".
+
+**Priorità**: ALTA (regressione potenziale su tutte le istanze quando il
+gioco rilascia nuova versione, evento ~settimanale storico).
+
+---
+
 ### Sessione 28/04/2026 — Maintenance bot/gioco + Data collection OCR + Raccolta Fast
 
 Sessione lunga focalizzata su 4 filoni: (1) toggle modalità manutenzione bot,
