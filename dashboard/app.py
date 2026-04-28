@@ -1243,6 +1243,38 @@ def partial_res_oraria(request: Request):
             )
         corpo = f'<tr><td style="color:var(--text-dim)">farm</td>{riga_vals}</tr>'
 
+    # WU56 — Storico 24h aggregator
+    from dashboard.services.stats_reader import get_produzione_storico_24h
+    storico = get_produzione_storico_24h()
+    samples = storico.get("samples", 0)
+
+    # Sparkline ASCII per ogni risorsa
+    def _spark(vals):
+        if not vals:
+            return ""
+        chars = "▁▂▃▄▅▆▇█"
+        mx = max(vals) or 1
+        return "".join(chars[min(7, int(v / mx * 7))] for v in vals)
+
+    storico_rows = ""
+    if samples > 0:
+        for risorsa, ico in RISORSE:
+            serie = storico["serie"].get(risorsa, [])
+            media = storico["media_24h"].get(risorsa, 0)
+            mx    = storico["max_24h"].get(risorsa,   0)
+            spark = _spark(serie)
+            storico_rows += (
+                f'<tr>'
+                f'<td style="font-size:14px">{ico}</td>'
+                f'<td style="font-family:monospace;font-size:12px;color:var(--accent);'
+                f'letter-spacing:0px" title="ore 24h fa → ora">{spark}</td>'
+                f'<td style="text-align:right;color:var(--text-dim);font-size:11px" '
+                f'title="media h con dati">{_fmt_m(media)}/h</td>'
+                f'<td style="text-align:right;color:var(--text-dim);font-size:11px" '
+                f'title="picco max">{_fmt_m(mx)}/h</td>'
+                f'</tr>'
+            )
+
     html = f'''
     <div class="res-sub">produzione/ora — farm aggregata</div>
     <table class="ora-tbl">
@@ -1254,8 +1286,24 @@ def partial_res_oraria(request: Request):
       </thead>
       <tbody>{corpo}</tbody>
     </table>
+
+    <details style="margin-top:8px" {("open" if samples > 0 else "")}>
+      <summary style="cursor:pointer;font-size:11px;color:var(--text-dim);
+                       letter-spacing:1px;text-transform:uppercase">
+        📊 storico 24h ({samples} sessioni)
+      </summary>
+      {(f'<table class="ora-tbl" style="margin-top:6px"><thead><tr>'
+        f'<th></th><th>trend 24h</th>'
+        f'<th style="text-align:right">media/h</th>'
+        f'<th style="text-align:right">picco</th>'
+        f'</tr></thead><tbody>{storico_rows}</tbody></table>'
+        if samples > 0 else
+        '<div style="color:var(--text-dim);font-size:11px;padding:6px 0">'
+        'nessun dato (serve ≥1 sessione completata con durata ≥5min)</div>')}
+    </details>
+
     <div style="color:var(--text-dim);font-size:9px;margin-top:6px;text-align:right">
-      aggiornato ad ogni ciclo raccolta
+      farm: ultima sessione · storico: bin orari da produzione_storico
     </div>
     '''
     return HTMLResponse(html)

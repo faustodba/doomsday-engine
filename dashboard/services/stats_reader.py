@@ -123,6 +123,99 @@ def _load_engine_status() -> EngineStatus:
     return es
 
 
+# ==============================================================================
+# WU56 — Storico produzione/ora ultime 24h aggregato per finestra oraria
+# ==============================================================================
+
+def get_produzione_storico_24h() -> dict:
+    """
+    Aggrega produzione_oraria delle ultime 24h da tutte le istanze.
+
+    Per ogni ora UTC degli ultimi 24h:
+      - Trova sessioni con ts_fine in quella finestra
+      - Somma produzione_oraria per risorsa (mantiene magnitudo della farm)
+      - Se nessuna sessione in quella ora, valore = 0 (gap)
+
+    Returns:
+        {
+            "ore":       ["HH-7gg", "HH+1", ...],  # 24 label tipo "10:00"
+            "serie":     {pomodoro: [v..], legno, acciaio, petrolio},
+            "media_24h": {pomodoro, legno, acciaio, petrolio},
+            "max_24h":   {pomodoro, ...},
+            "samples":   int,  # numero sessioni considerate
+        }
+    """
+    from datetime import datetime, timedelta, timezone
+    now = datetime.now(timezone.utc)
+    window_start = now - timedelta(hours=24)
+
+    # Inizializza 24 bin orari (chiavi: ora UTC inizio finestra)
+    bins: Dict[str, Dict[str, float]] = {}
+    bin_count: Dict[str, int] = {}
+    for h in range(24):
+        bin_dt  = (now - timedelta(hours=23 - h)).replace(minute=0, second=0, microsecond=0)
+        key = bin_dt.strftime("%Y-%m-%dT%H")
+        bins[key] = {r: 0.0 for r in _RISORSE_STANDARD}
+        bin_count[key] = 0
+
+    samples_total = 0
+    insts = get_instances() if callable(get_instances) else []
+    for ist in insts:
+        nome = ist.get("nome", "")
+        if not nome:
+            continue
+        state = _load_state(nome)
+        if not state:
+            continue
+        for sess in state.get("produzione_storico", []) or []:
+            ts_fine = sess.get("ts_fine")
+            if not ts_fine:
+                continue
+            try:
+                t = datetime.fromisoformat(ts_fine)
+            except Exception:
+                continue
+            if t < window_start or t > now:
+                continue
+            po = sess.get("produzione_oraria") or {}
+            if not po:
+                continue
+            bin_key = t.replace(minute=0, second=0, microsecond=0).strftime("%Y-%m-%dT%H")
+            if bin_key not in bins:
+                continue
+            for r in _RISORSE_STANDARD:
+                v = po.get(r, 0)
+                if v and v > 0:
+                    bins[bin_key][r] += float(v)
+            bin_count[bin_key] += 1
+            samples_total += 1
+
+    # Ordina chiavi cronologicamente
+    keys_sorted = sorted(bins.keys())
+    ore_labels = [k[11:13] + ":00" for k in keys_sorted]
+
+    serie: Dict[str, list] = {r: [] for r in _RISORSE_STANDARD}
+    for k in keys_sorted:
+        for r in _RISORSE_STANDARD:
+            serie[r].append(round(bins[k][r], 0))
+
+    # Statistiche aggregato
+    media_24h = {}
+    max_24h = {}
+    for r in _RISORSE_STANDARD:
+        vals = [v for v in serie[r] if v > 0]
+        media_24h[r] = round(sum(vals) / len(vals), 0) if vals else 0.0
+        max_24h[r]   = round(max(vals), 0) if vals else 0.0
+
+    return {
+        "ore":       ore_labels,
+        "serie":     serie,
+        "media_24h": media_24h,
+        "max_24h":   max_24h,
+        "samples":   samples_total,
+    }
+
+
 def _load_storico_farm_today(istanza: str) -> Optional[dict]:
     """
     Legge entry odierna per istanza da data/storico_farm.json.
