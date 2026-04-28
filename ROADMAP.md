@@ -205,7 +205,33 @@ banner/animazioni mappa).
 Soglia per analisi agente AI: 30+ pair complete. ETA: 1-2 cicli con WU55-bis
 attivo (~60 pair complete per ciclo stimati).
 
-**TODO**: spawn agente AI con dataset >= 30 complete per pattern analysis.
+**Obiettivo finale WU55** (chiarito 28/04 sessione AI agent):
+Validare che OCR MAP sia affidabile come HOME → permettere **refactor del flusso
+raccolta** rimuovendo `_reset_to_mappa` (vai_in_home → OCR HOME → vai_in_mappa)
+dopo ogni marcia OK. Oggi questo passaggio esiste perché la regola CLAUDE.md
+"lettura iniziale slot OCR deve essere fatta in HOME" era stata stabilita
+quando MAP causava falsi positivi (es. caso `7/5` letto al posto di `4/5`,
+auto-corretto dal sanity check `attive>totale` → skip conservativo).
+
+**Risparmio stimato**: ~10-15s × 4-5 marce = **40-75s per tick raccolta**, ×12
+istanze = **8-15 min per ciclo**.
+
+**1° run agente AI** (dataset 13 complete, eseguito 28/04 12:00):
+- 12/13 pair `match_home=true` (OCR MAP coincide con HOME)
+- 1/13 edge case: HOME `0/5` (no counter, by-design) ↔ MAP `-1/-1` (transizione
+  schermata, pre-check pixel ≥ soglia ma OCR cifre fallisce)
+- L'agente ha mal-classificato i casi `0/N` come "garbage" perché non aveva il
+  contesto di `leggi_contatore_slot()` (pre-check pixel < soglia → return
+  `(0, totale_noto)` per design)
+- Conclusione preliminare: **OCR MAP sembra già stabile** sui sample esistenti
+
+**TODO**:
+1. Aspettare dataset >= 50 pair complete (~1 ciclo aggiuntivo)
+2. 2° run agente AI **con codice `shared/ocr_helpers.py:leggi_contatore_slot`
+   come contesto** per classificazione corretta dei casi `0/N`
+3. Se `match_home=true` >= 95% sui sample con contatore visibile → procedere
+   con refactor flusso raccolta (rimozione `_reset_to_mappa` post-marcia OK,
+   sostituito da OCR diretto in mappa)
 
 Commit: `2c470ab` (WU55), `d451b8f` (WU55-bis).
 
