@@ -1047,6 +1047,16 @@ def main():
 
             nome = ist["nome"]
 
+            # WU51 — modalità manutenzione: pausa tra istanze se file flag
+            # data/maintenance.flag presente. Mai interrompe tick in corso.
+            # Polling 5s, riprende automatico quando flag rimosso.
+            try:
+                from core.maintenance import wait_if_maintenance
+                if wait_if_maintenance(stop_event, lambda m: _log("MAIN", m)):
+                    break  # stop_event ricevuto durante manutenzione
+            except Exception as exc:
+                _log("MAIN", f"[WARN] check maintenance fallito: {exc}")
+
             # Skip istanze precedenti al punto di resume (solo ciclo 1)
             if _resume_attivo and not _resume_trovato:
                 if nome != resume_da:

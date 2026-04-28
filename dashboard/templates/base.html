@@ -33,10 +33,47 @@
 
   <div class="rbar"><div class="rbar-inner"></div></div>
 
+  <!-- WU51 — banner manutenzione (sempre visibile, polling 5s) -->
+  <div id="maint-banner"
+       style="padding:6px 20px;max-width:1600px;margin:0 auto"
+       hx-get="/ui/partial/maintenance-banner"
+       hx-trigger="load, every 5s"
+       hx-swap="innerHTML">
+  </div>
+
   <!-- MAIN -->
   <main class="main">
     {% block content %}{% endblock %}
   </main>
+
+  <script>
+    // WU51 — toggle modalità manutenzione
+    async function maintenanceToggle(activate) {
+      try {
+        if (activate) {
+          const motivo = prompt('Motivo manutenzione (opzionale):', 'aggiornamento');
+          if (motivo === null) return;  // cancelled
+          const r = await fetch('/api/maintenance/start', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({motivo: motivo || ''}),
+          });
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+        } else {
+          if (!confirm('Disattivare modalità manutenzione e riprendere il bot?')) return;
+          const r = await fetch('/api/maintenance/stop', {method: 'POST'});
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+        }
+        // Refresh immediato banner
+        if (typeof htmx !== 'undefined') {
+          htmx.ajax('GET', '/ui/partial/maintenance-banner',
+                    {target: '#maint-banner', swap: 'innerHTML'});
+        }
+      } catch (err) {
+        alert('Errore: ' + err.message);
+      }
+    }
+  </script>
 
 </div>
 </body>

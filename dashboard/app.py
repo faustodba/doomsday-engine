@@ -1527,3 +1527,85 @@ def partial_telemetria_tempi_medi(request: Request):
         '</tr></thead>'
         f'<tbody>{"".join(body)}</tbody></table>'
     )
+
+
+# ==============================================================================
+# WU51 — Modalità manutenzione (file flag + endpoint dashboard)
+# ==============================================================================
+
+from fastapi import HTTPException
+from pydantic import BaseModel as _BaseModel
+
+
+class _MaintenanceReq(_BaseModel):
+    motivo: str = ""
+
+
+@app.get("/api/maintenance/status", include_in_schema=False)
+def api_maintenance_status():
+    """Stato corrente modalità manutenzione."""
+    from core.maintenance import is_maintenance_active, get_maintenance_info
+    info = get_maintenance_info()
+    return {
+        "active":   is_maintenance_active(),
+        "info":     info,
+    }
+
+
+@app.post("/api/maintenance/start", include_in_schema=False)
+def api_maintenance_start(req: _MaintenanceReq):
+    """
+    Attiva modalità manutenzione (crea data/maintenance.flag).
+    Il bot pausa tra le istanze al prossimo controllo (~entro 5s).
+    Mai interrompe un tick istanza in corso.
+    """
+    from core.maintenance import enable_maintenance, get_maintenance_info
+    if not enable_maintenance(motivo=req.motivo, set_da="dashboard"):
+        raise HTTPException(500, "scrittura flag fallita")
+    return {"active": True, "info": get_maintenance_info()}
+
+
+@app.post("/api/maintenance/stop", include_in_schema=False)
+def api_maintenance_stop():
+    """Disattiva modalità manutenzione (rimuove file flag). Bot riprende."""
+    from core.maintenance import disable_maintenance
+    ok = disable_maintenance()
+    if not ok:
+        raise HTTPException(500, "rimozione flag fallita")
+    return {"active": False}
+
+
+@app.get("/ui/partial/maintenance-banner", include_in_schema=False)
+def partial_maintenance_banner(request: Request):
+    """
+    Banner stato manutenzione + pulsanti start/stop. Renderizzato in topbar.
+    """
+    from core.maintenance import is_maintenance_active, get_maintenance_info
+    active = is_maintenance_active()
+    info   = get_maintenance_info() or {}
+
+    if active:
+        motivo = info.get("motivo", "")
+        ts     = info.get("ts_attivato", "")[:19].replace("T", " ")
+        body = f'''
+        <div style="background:rgba(248,113,113,0.15);border:1px solid var(--red);
+                    color:var(--red);padding:6px 12px;border-radius:4px;
+                    display:flex;align-items:center;gap:10px;font-size:12px">
+          <span style="font-weight:600">🔧 MANUTENZIONE ATTIVA</span>
+          <span style="color:var(--text-dim)">attivata {ts}{(" — " + motivo) if motivo else ""}</span>
+          <button onclick="maintenanceToggle(false)" class="btn btn-primary"
+                  style="margin-left:auto;padding:3px 10px;font-size:11px">▶ riprendi bot</button>
+        </div>
+        '''
+    else:
+        body = f'''
+        <div style="display:flex;align-items:center;gap:8px;font-size:11px">
+          <span style="color:var(--text-dim)">bot attivo</span>
+          <button onclick="maintenanceToggle(true)" class="btn"
+                  style="padding:3px 10px;font-size:11px;background:transparent;
+                         color:var(--text-dim);border:1px solid var(--border);cursor:pointer">
+            🔧 manutenzione
+          </button>
+        </div>
+        '''
+    return HTMLResponse(body)
