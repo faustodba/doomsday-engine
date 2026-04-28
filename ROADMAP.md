@@ -58,6 +58,43 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Issue aperte — radar_census + Update Version
+
+#### 82. Radar census — bootstrap templates + smoke test (CHIUSA ✅ 28/04)
+
+**Issue #18-bis** chiusa: `radar_tool/templates/` mancante in V6.
+
+Step eseguiti:
+1. Copia 47 template PNG da V5 (`C:\Bot-farm\radar_tool\templates\`) a V6
+   dev+prod. Lista tipi unici: 19, auto, av1-av18, avatar*, bot, camion, card,
+   fiamma, frecce, para, ped, pedone, skull, soldati.
+2. `.gitignore` esteso con `!radar_tool/templates/*.png` per tracciare i 47
+   template (analogo a `templates/pin/*.png`).
+3. Smoke test offline (`radar_tool/_smoke_test.py`) verificato:
+   - load_templates: 47/47 ✓
+   - classifier RF: caricato, trained=True ✓
+   - detect su `map_full.png` archive V5: **12 icone rilevate** (auto×3,
+     av17×2, pedone_2×2, camion, para×2, pedone_1, skull) con conf_tmpl 0.65-1.00 ✓
+
+**RF accuracy bassa** (~0.25-0.35 su tutti i sample, predice sempre
+"paracadute"): dataset training V5 limitato (~28 etichette) → modello
+underfitted. Fallback `_categoria_da_template()` heuristic via parsing nome
+template funziona (es. `pin_skull → skull`, conf_tmpl >= 0.80 → ready=True),
+quindi la catalogazione produce output utile in produzione.
+
+**Re-training RF**: rimandato — non bloccante. Richiede sessione GUI con
+`radar_tool/labeler.py` + `train.py` per costruire dataset con label V6
+estese (numero, bottiglia + esistenti).
+
+**Sblocco**: il task `RadarCensusTask` ora può essere riabilitato. Output
+in `radar_archive/census/YYYYMMDD_HHMMSS_FAU_XX/{map_full.png,
+map_annotated.png, census.json, crops/}`. Catalogazione tramite template
+heuristic + RF fallback. Pronto per "altre funzionalità" che useranno
+coordinate + categoria icone (es. caccia mostri, raccolta auto,
+eliminazione skull).
+
+---
+
 ### Issue aperte — gestione aggiornamento software gioco
 
 #### 81. Update Version popup gioco — detect + gestione (NUOVA 🆕 28/04/2026)

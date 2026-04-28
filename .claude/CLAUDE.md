@@ -122,7 +122,7 @@ All'inizio di ogni sessione, in questo ordine:
 | 17 | Storico `engine_status.storico` filtrato — solo `raccolta`+`arena` | MEDIA | 🆕 NUOVA 21/04 |
 | 17-bis | `InstanceState.save()` non atomica | MEDIA | ✅ RISOLTA (`a8ea422` tmp+fsync+os.replace) |
 | 18 | Dashboard `/ui` mostra raw `global_config`, bot usa merged con overrides | MEDIA | ✅ RISOLTA 22/04 (get_merged_config — dashboard ora mostra valori reali bot) |
-| 18-bis | `radar_tool/templates/` mancante (dev+prod) | BASSA | ⏳ workaround: radar_census saltato |
+| 18-bis | `radar_tool/templates/` mancante (dev+prod) | BASSA | ✅ RISOLTA 28/04 (47 template copiati da V5 `C:/Bot-farm/radar_tool/templates/` a V6 dev+prod, smoke test `radar_tool/_smoke_test.py` OK: 12 icone rilevate su sample. RF classifier conf bassa <0.60 → fallback heuristic via nome template funzionante. Re-training RF rimandato — non bloccante per produzione) |
 | 19 | Race buffer stdout ultima istanza a fine ciclo (cosmetico) | BASSA | ⏳ usare `python -u` o `sys.stdout.flush()` |
 | 20 | Dashboard V6 rewrite (FastAPI+Jinja2+HTMX) | — | ✅ CHIUSA 20/04 — commit `9773de3` + `runtime.json` orfano eliminato |
 | 21 | `gitignore` duplicato errato e `rifornimento_mappa.py` V5 legacy — da valutare eliminazione | BASSA | ⏳ prossima sessione |

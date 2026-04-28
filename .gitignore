@@ -31,6 +31,7 @@ debug_nav/
 debug_task/
 *.png
 !templates/pin/*.png
+!radar_tool/templates/*.png
 
 # ── Deploy bat locali ─────────────────────────────────────────────────────────
 deploy/
