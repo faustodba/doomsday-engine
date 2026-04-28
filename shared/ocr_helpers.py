@@ -665,6 +665,36 @@ def leggi_contatore_slot(
         if attive == -1 or totale == -1:
             return (-1, -1)
 
+        # WU55 28/04 — cross-validation per stabilità (pattern 4↔7 confusion)
+        # Se attive>totale, semanticamente impossibile: retry con preprocessing
+        # alternativo (thresh_130 invece di maschera_bianca) + cifre separate.
+        # Se 2/3 metodi concordano su un valore <=totale → uso quello.
+        # Altrimenti (-1,-1) e il caller fa fallback HOME (più stabile).
+        if attive > totale:
+            attive_thresh, totale_thresh = _ocr_slot_thresh130(crop_testo)
+            crop_sx = pil_img.crop(_ZONA_CIFRA_SX)
+            crop_dx = pil_img.crop(_ZONA_CIFRA_DX)
+            attive_cifra = _ocr_cifra_singola_slot(crop_sx, psm=10)
+            totale_cifra = _ocr_cifra_singola_slot(crop_dx, psm=8)
+
+            # Vote per attive: solo valori plausibili (0..totale_noto)
+            cap = totale_noto if totale_noto > 0 else max(totale, 5)
+            candidates = [v for v in (attive, attive_thresh, attive_cifra)
+                          if 0 <= v <= cap]
+            if candidates:
+                # Majority vote, tie-break su valore minimo (conservativo)
+                from collections import Counter
+                count = Counter(candidates).most_common(1)[0][0]
+                attive = count
+                # Conferma totale se coerente
+                if 0 < totale_thresh <= cap:
+                    totale = totale_thresh
+                elif 0 < totale_cifra <= cap:
+                    totale = totale_cifra
+            else:
+                # Nessun valore plausibile da nessun preprocessing → reject
+                return (-1, -1)
+
         return (attive, totale)
 
     except Exception:
