@@ -194,6 +194,7 @@ class TipologiaIstanza(str, Enum):
     full          = "full"
     raccolta      = "raccolta"
     raccolta_only = "raccolta_only"   # alias profilo bot (FauMorfeus)
+    raccolta_fast = "raccolta_fast"   # WU57 — RaccoltaFastTask al posto di RaccoltaTask
 
 
 class IstanzaOverride(BaseModel):

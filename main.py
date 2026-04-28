@@ -55,6 +55,7 @@ def _import_tasks() -> dict:
     _catalogue = [
         ("tasks.raccolta",       "RaccoltaTask"),
         ("tasks.raccolta",       "RaccoltaChiusuraTask"),  # Issue #62 — chiusura tick
+        ("tasks.raccolta_fast",  "RaccoltaFastTask"),      # WU57 — variante fast (sostituisce RaccoltaTask via tipologia=raccolta_fast)
         ("tasks.rifornimento",   "RifornimentoTask"),
         ("tasks.donazione",      "DonazioneTask"),
         ("tasks.zaino",          "ZainoTask"),
@@ -677,12 +678,18 @@ def _thread_istanza(ist, tasks_cls, dry_run):
         or "full"
     )
     _solo_raccolta = str(_tipologia) == "raccolta_only"
+    _raccolta_fast = str(_tipologia) == "raccolta_fast"
     if _solo_raccolta:
         _log(nome, f"Tipologia={_tipologia} — registro solo RaccoltaTask")
+    if _raccolta_fast:
+        _log(nome, f"Tipologia={_tipologia} — RaccoltaFastTask sostituisce RaccoltaTask (altri task attivi)")
 
     for class_name, priority, interval_h, schedule in _carica_task_setup():
         if _solo_raccolta and class_name not in ("RaccoltaTask", "RaccoltaChiusuraTask"):
             continue
+        # WU57 — runtime swap RaccoltaTask -> RaccoltaFastTask (priority/interval/schedule preservati)
+        if _raccolta_fast and class_name == "RaccoltaTask":
+            class_name = "RaccoltaFastTask"
         Cls = tasks_cls.get(class_name)
         if Cls is None:
             continue
