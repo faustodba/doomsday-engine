@@ -409,6 +409,13 @@ html, body {
 .ist-name-col { font-family: var(--sans); font-size: 17px; font-weight: 600; letter-spacing: 2px; }
 .ist-name-col.off { opacity: .4; }
 
+/* WU52 — riga istanza disabilitata: campi greyed/non interattivi */
+.ist-tbl tr.ist-row.disabled td { opacity: .35; }
+.ist-tbl tr.ist-row.disabled td:first-child,
+.ist-tbl tr.ist-row.disabled td:nth-child(2) { opacity: 1; }
+.ist-tbl input:disabled,
+.ist-tbl select:disabled { cursor: not-allowed; background: rgba(42,51,72,.3); }
+
 /* ── Storico ─────────────────────────────────────────────── */
 .filter-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
 .filter-lbl { font-size: 14px; color: var(--text-dim); letter-spacing: 1px; }

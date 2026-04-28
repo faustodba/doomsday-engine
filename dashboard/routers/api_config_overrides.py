@@ -230,7 +230,8 @@ def save_istanze(payload: PayloadIstanze):
     ov.istanze = payload.istanze
     _save_ov(ov)
 
-    # Estrai campi da scrivere su instances.json (max_squadre, layout, livello)
+    # Estrai campi da scrivere su instances.json (max_squadre, layout, livello,
+    # raccolta_fuori_territorio — WU50 default statico per istanza)
     instances_updates: dict[str, dict] = {}
     for nome, ist_ov in payload.istanze.items():
         upd = {}
@@ -240,8 +241,10 @@ def save_istanze(payload: PayloadIstanze):
             upd["layout"] = ist_ov.layout
         if ist_ov.livello is not None:
             upd["livello"] = ist_ov.livello
-        if upd:
-            instances_updates[nome] = upd
+        # WU50 — flag fuori territorio sempre persistito in instances.json
+        # (è un default statico per-istanza, configurabile da dashboard)
+        upd["raccolta_fuori_territorio"] = bool(ist_ov.raccolta_fuori_territorio)
+        instances_updates[nome] = upd
 
     errors: list[str] = []
     if instances_updates:

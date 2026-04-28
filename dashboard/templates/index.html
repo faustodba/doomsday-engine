@@ -454,6 +454,22 @@ function toggleRR(rowId, cb) {
   cb.checked ? row.classList.remove('flagoff') : row.classList.add('flagoff');
 }
 
+// WU52 — istanza disabilitata: lock altri campi della riga
+function onIstToggle(cb) {
+  const tr = cb.closest('tr[data-nome]');
+  if (!tr) return;
+  const enabled = cb.checked;
+  // disabilita/abilita TUTTI gli input della riga eccetto il toggle ON stesso
+  tr.querySelectorAll('input, select').forEach(el => {
+    if (el === cb) return;
+    el.disabled = !enabled;
+  });
+  tr.classList.toggle('disabled', !enabled);
+  // Visual: name greyed
+  const nameCol = tr.querySelector('.ist-name-col');
+  if (nameCol) nameCol.classList.toggle('off', !enabled);
+}
+
 function setMode(mode) {
   ['mappa','membri'].forEach(m => {
     g('mode-'+m)?.classList.toggle('active', m===mode);

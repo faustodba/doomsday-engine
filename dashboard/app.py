@@ -633,9 +633,14 @@ def partial_ist_table(request: Request):
         fascia_raw  = ist_ov.get("fascia_oraria", ist.get("fascia_oraria", ""))
         max_squadre = ist.get("max_squadre", 4)
         livello     = ist.get("livello", 6)
-        # WU50 — flag fuori territorio per istanza
-        fuori_terr  = bool(ist_ov.get("raccolta_fuori_territorio", False))
+        # WU50 — flag fuori territorio: override > instances.json (default)
+        fuori_terr  = bool(ist_ov.get(
+            "raccolta_fuori_territorio",
+            ist.get("raccolta_fuori_territorio", False),
+        ))
         stato       = ist_status.stato if ist_status else ("idle" if not abilitata else "unknown")
+        # WU52 — quando istanza disabilitata, gli altri campi sono read-only
+        disabled_attr = "disabled" if not abilitata else ""
 
         fascia_da = ""
         fascia_a  = ""
@@ -648,31 +653,31 @@ def partial_ist_table(request: Request):
         nome_css = "" if abilitata else " off"
         checked  = "checked" if abilitata else ""
 
-        rows.append(f'''<tr data-nome="{nome}">
+        rows.append(f'''<tr data-nome="{nome}" class="ist-row {'disabled' if not abilitata else ''}">
           <td><input type="checkbox" class="ist-cb" {checked}
                      style="accent-color:var(--accent);width:13px;height:13px;cursor:pointer"
-                     onchange="document.querySelector('[data-nome=\\"{nome}\\"] .ist-name-col').classList.toggle('off',!this.checked)"></td>
+                     onchange="onIstToggle(this)"></td>
           <td>
             <span class="ist-name-col{nome_css}">{nome}</span>
             <span class="badge {stato}" style="margin-left:4px">{stato}</span>
           </td>
-          <td><input type="number" class="ist-truppe" value="{truppe}"
+          <td><input type="number" class="ist-truppe" value="{truppe}" {disabled_attr}
                      min="0" step="1000" style="width:62px"></td>
-          <td><input type="number" class="ist-sq" value="{max_squadre}"
+          <td><input type="number" class="ist-sq" value="{max_squadre}" {disabled_attr}
                      min="1" max="10" style="width:36px"></td>
-          <td><select class="ist-prof">
+          <td><select class="ist-prof" {disabled_attr}>
             <option value="full"          {"selected" if tipologia=="full"          else ""}>full</option>
             <option value="raccolta_only" {"selected" if tipologia=="raccolta_only" else ""}>raccolta</option>
           </select></td>
-          <td><input type="number" class="ist-lv" value="{livello}"
+          <td><input type="number" class="ist-lv" value="{livello}" {disabled_attr}
                      min="1" max="10" style="width:36px"></td>
-          <td><input type="checkbox" class="ist-fuori-terr" {"checked" if fuori_terr else ""}
+          <td><input type="checkbox" class="ist-fuori-terr" {"checked" if fuori_terr else ""} {disabled_attr}
                      title="modalità fuori territorio: raccolta su nodi fuori senza blacklist (WU50)"
                      style="accent-color:var(--accent);width:13px;height:13px;cursor:pointer"></td>
           <td><div class="fascia">
-            <input type="time" class="ist-fascia-da" value="{fascia_da}">
+            <input type="time" class="ist-fascia-da" value="{fascia_da}" {disabled_attr}>
             <span class="fsep">—</span>
-            <input type="time" class="ist-fascia-a" value="{fascia_a}">
+            <input type="time" class="ist-fascia-a" value="{fascia_a}" {disabled_attr}>
           </div></td>
         </tr>''')
 
