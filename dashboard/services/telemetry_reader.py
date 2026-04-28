@@ -83,6 +83,31 @@ class CicloStatus:
 
 
 @dataclass
+class TaskDurationStats:
+    """
+    WU49 — Statistiche durata task con filtro outlier IQR (Tukey fences).
+
+    Consistenza basata su CV (coefficient of variation = std/mean):
+      - high: cv < 0.3   (deviazione standard < 30% della media)
+      - med:  cv 0.3-0.7
+      - low:  cv > 0.7   (alta varianza → tempi inconsistenti)
+      - n/a:  count < 5  (campione troppo piccolo per statistica)
+    """
+    task:           str
+    count:          int          # esecuzioni considerate (post-filtro)
+    count_total:    int          # esecuzioni totali (pre-filtro)
+    excluded:       int          # outlier rimossi
+    min_s:          float
+    median_s:       float
+    mean_s:         float
+    p95_s:          float
+    max_s:          float
+    std_s:          float
+    cv:             float        # coefficient of variation = std/mean
+    consistenza:    str          # "high" | "med" | "low" | "n/a"
+
+
+@dataclass
 class CicloStorico:
     """Singolo ciclo completato con durata e istanze processate."""
     numero:        int          # globale crescente (WU48)
@@ -673,6 +698,114 @@ def _sparkline(values: List[float]) -> str:
         return _SPARK[3] * len(values)
     span = mx - mn
     return "".join(_SPARK[min(7, int((v - mn) / span * 7))] for v in values)
+
+
+# ==============================================================================
+# WU49 — Report tempi medi task (consistenti, escluso district_showdown)
+# ==============================================================================
+
+# Task da escludere dal report (eventi sporadici, troppo variabili, o speciali)
+_TASK_EXCLUSI_DURATIONS = {
+    "districtshowdown",
+    "district_showdown",
+    "radar_census",  # spesso fallisce per templates mancanti
+}
+
+# Sample size minimo per considerare una statistica significativa
+_MIN_SAMPLE_DURATIONS = 5
+
+
+def get_task_durations_report(days: int = 7) -> List[TaskDurationStats]:
+    """
+    WU49 — Report tempi medi task con filtro outlier IQR.
+
+    Legge eventi telemetria ultimi `days` giorni, raggruppa per task,
+    filtra outlier statistici (Tukey fences IQR×1.5), calcola statistiche.
+
+    Esclude `districtshowdown` (durate inconsistenti per natura evento).
+    Solo task con count_total >= 5 per ridurre rumore (sample size).
+
+    Returns:
+        Lista TaskDurationStats ordinata per count desc.
+    """
+    return _cached(f"task_durations_{days}", lambda: _compute_task_durations(days))
+
+
+def _compute_task_durations(days: int) -> List[TaskDurationStats]:
+    try:
+        from core.telemetry import iter_events_range, _percentile
+    except Exception:
+        return []
+
+    # Aggrega durations per task
+    by_task: Dict[str, List[float]] = {}
+    for ev in iter_events_range(days):
+        task = (ev.task or "").lower()
+        if task in _TASK_EXCLUSI_DURATIONS:
+            continue
+        if ev.outcome not in ("ok", "skip"):
+            continue
+        d = float(ev.duration_s or 0.0)
+        if d <= 0.5:  # filtra task quasi-istantanei (skip/disabled)
+            continue
+        if d > 1800:  # filtra hung (>30 min)
+            continue
+        by_task.setdefault(ev.task, []).append(d)
+
+    out: List[TaskDurationStats] = []
+    for task, durs in by_task.items():
+        count_total = len(durs)
+        if count_total < _MIN_SAMPLE_DURATIONS:
+            continue
+
+        # Filtro outlier IQR (Tukey fences ×1.5)
+        sd = sorted(durs)
+        n  = len(sd)
+        q1 = sd[n // 4]
+        q3 = sd[3 * n // 4]
+        iqr = q3 - q1
+        lo = q1 - 1.5 * iqr
+        hi = q3 + 1.5 * iqr
+        clean = [v for v in durs if lo <= v <= hi]
+        excluded = count_total - len(clean)
+
+        if not clean:
+            clean = durs  # fallback se filtro IQR ha tolto tutto
+
+        # Statistiche
+        n2 = len(clean)
+        mean = sum(clean) / n2
+        var = sum((v - mean) ** 2 for v in clean) / n2 if n2 > 0 else 0.0
+        std = var ** 0.5
+        cv  = (std / mean) if mean > 0 else 0.0
+
+        # Consistenza basata su CV (coefficient of variation)
+        if n2 < _MIN_SAMPLE_DURATIONS:
+            consistenza = "n/a"
+        elif cv < 0.3:
+            consistenza = "high"
+        elif cv < 0.7:
+            consistenza = "med"
+        else:
+            consistenza = "low"
+
+        out.append(TaskDurationStats(
+            task         = task,
+            count        = n2,
+            count_total  = count_total,
+            excluded     = excluded,
+            min_s        = min(clean),
+            median_s     = _percentile(clean, 50),
+            mean_s       = mean,
+            p95_s        = _percentile(clean, 95),
+            max_s        = max(clean),
+            std_s        = std,
+            cv           = cv,
+            consistenza  = consistenza,
+        ))
+
+    out.sort(key=lambda t: -t.count)
+    return out
 
 
 def get_trend_7gg() -> List[TrendSeries]:

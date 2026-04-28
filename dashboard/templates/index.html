@@ -306,6 +306,17 @@
         </div>
 
         <div class="tel-card tel-full">
+          <div class="tel-head">⏱ tempi medi task — 7gg (filtro IQR, escluso district)</div>
+          <div id="tel-tempi-medi"
+               hx-get="/ui/partial/telemetria-tempi-medi"
+               hx-trigger="load, every 120s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">events 7gg · outlier rimossi via Tukey fences IQR×1.5 · cv = std/media</div>
+        </div>
+
+        <div class="tel-card tel-full">
           <div class="tel-head">📈 trend 7gg</div>
           <div id="tel-trend"
                hx-get="/ui/partial/telemetria-trend"

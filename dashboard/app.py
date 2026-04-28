@@ -1462,3 +1462,63 @@ def partial_telemetria_storico_cicli(request: Request):
         '</tr></thead>'
         f'<tbody>{"".join(body)}</tbody></table>'
     )
+
+
+@app.get("/ui/partial/telemetria-tempi-medi", include_in_schema=False)
+def partial_telemetria_tempi_medi(request: Request):
+    """
+    WU49 — Report tempi medi task con filtro outlier IQR (consistenti).
+    Esclude district_showdown + radar_census. Min sample 5 esecuzioni.
+    """
+    from dashboard.services.telemetry_reader import get_task_durations_report
+    rows = get_task_durations_report(days=7)
+    if not rows:
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:8px">'
+            'nessun dato — telemetria attiva ma serve almeno 5 esecuzioni per task</div>'
+        )
+
+    def _fmt(s: float) -> str:
+        if s < 60:
+            return f"{s:.1f}s"
+        return f"{s/60:.1f}m"
+
+    cons_badge = {
+        "high": ('<span style="color:var(--green);font-weight:600" title="cv<0.3 — tempi molto consistenti">●●●</span>', "var(--green)"),
+        "med":  ('<span style="color:#fbbf24;font-weight:600" title="cv 0.3-0.7 — variabilità media">●●○</span>', "#fbbf24"),
+        "low":  ('<span style="color:var(--red);font-weight:600" title="cv>0.7 — alta varianza, tempi inconsistenti">●○○</span>', "var(--red)"),
+        "n/a":  ('<span style="color:var(--text-dim)" title="campione troppo piccolo">○○○</span>', "var(--text-dim)"),
+    }
+
+    body = []
+    for r in rows:
+        badge, mean_col = cons_badge.get(r.consistenza, cons_badge["n/a"])
+        excl_lbl = (f'<span style="color:var(--text-dim);font-size:9px"> '
+                    f'(-{r.excluded})</span>') if r.excluded > 0 else ''
+        body.append(
+            f'<tr>'
+            f'<td style="color:var(--accent)">{r.task}</td>'
+            f'<td style="text-align:right">{r.count}{excl_lbl}</td>'
+            f'<td style="text-align:right;color:var(--text-dim)">{_fmt(r.min_s)}</td>'
+            f'<td style="text-align:right;color:var(--text-dim)">{_fmt(r.median_s)}</td>'
+            f'<td style="text-align:right;color:{mean_col};font-weight:600">{_fmt(r.mean_s)}</td>'
+            f'<td style="text-align:right;color:var(--text-dim)">{_fmt(r.p95_s)}</td>'
+            f'<td style="text-align:right;color:var(--text-dim)">{_fmt(r.max_s)}</td>'
+            f'<td style="text-align:right;color:var(--text-dim);font-size:11px">{r.cv:.2f}</td>'
+            f'<td style="text-align:center">{badge}</td>'
+            f'</tr>'
+        )
+    return HTMLResponse(
+        '<table class="tel-table"><thead><tr>'
+        '<th>task</th>'
+        '<th style="text-align:right">n</th>'
+        '<th style="text-align:right">min</th>'
+        '<th style="text-align:right">mediana</th>'
+        '<th style="text-align:right">media</th>'
+        '<th style="text-align:right">p95</th>'
+        '<th style="text-align:right">max</th>'
+        '<th style="text-align:right" title="coefficient of variation">cv</th>'
+        '<th style="text-align:center" title="consistenza">●</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table>'
+    )
