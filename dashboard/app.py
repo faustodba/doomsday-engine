@@ -1261,6 +1261,7 @@ def partial_res_oraria(request: Request):
         for risorsa, ico in RISORSE:
             serie = storico["serie"].get(risorsa, [])
             media = storico["media_24h"].get(risorsa, 0)
+            mn    = storico["min_24h"].get(risorsa,   0)
             mx    = storico["max_24h"].get(risorsa,   0)
             spark = _spark(serie)
             storico_rows += (
@@ -1268,10 +1269,12 @@ def partial_res_oraria(request: Request):
                 f'<td style="font-size:14px">{ico}</td>'
                 f'<td style="font-family:monospace;font-size:12px;color:var(--accent);'
                 f'letter-spacing:0px" title="ore 24h fa → ora">{spark}</td>'
-                f'<td style="text-align:right;color:var(--text-dim);font-size:11px" '
-                f'title="media h con dati">{_fmt_m(media)}/h</td>'
-                f'<td style="text-align:right;color:var(--text-dim);font-size:11px" '
-                f'title="picco max">{_fmt_m(mx)}/h</td>'
+                f'<td style="text-align:right;color:var(--text-dim);font-size:10px" '
+                f'title="media h con dati">{_fmt_m(media)}</td>'
+                f'<td style="text-align:right;color:var(--text-dim);font-size:10px" '
+                f'title="minimo (escluso 0)">{_fmt_m(mn)}</td>'
+                f'<td style="text-align:right;color:var(--accent);font-size:10px" '
+                f'title="picco massimo">{_fmt_m(mx)}</td>'
                 f'</tr>'
             )
 
@@ -1292,18 +1295,20 @@ def partial_res_oraria(request: Request):
                        letter-spacing:1px;text-transform:uppercase">
         📊 storico 24h ({samples} sessioni)
       </summary>
-      {(f'<table class="ora-tbl" style="margin-top:6px"><thead><tr>'
+      {(f'<table class="ora-tbl" style="margin-top:6px;font-size:10px"><thead><tr>'
         f'<th></th><th>trend 24h</th>'
-        f'<th style="text-align:right">media/h</th>'
-        f'<th style="text-align:right">picco</th>'
+        f'<th style="text-align:right;font-size:9px">avg/h</th>'
+        f'<th style="text-align:right;font-size:9px">min/h</th>'
+        f'<th style="text-align:right;font-size:9px">max/h</th>'
         f'</tr></thead><tbody>{storico_rows}</tbody></table>'
         if samples > 0 else
         '<div style="color:var(--text-dim);font-size:11px;padding:6px 0">'
         'nessun dato (serve ≥1 sessione completata con durata ≥5min)</div>')}
     </details>
 
-    <div style="color:var(--text-dim);font-size:9px;margin-top:6px;text-align:right">
-      farm: ultima sessione · storico: bin orari da produzione_storico
+    <div style="color:var(--text-dim);font-size:9px;margin-top:6px;text-align:center;
+                line-height:1.3">
+      farm: ultima sessione · storico: produzione_storico 24h
     </div>
     '''
     return HTMLResponse(html)

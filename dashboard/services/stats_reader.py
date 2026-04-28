@@ -200,17 +200,25 @@ def get_produzione_storico_24h() -> dict:
             serie[r].append(round(bins[k][r], 0))
 
     # Statistiche aggregato
-    media_24h = {}
-    max_24h = {}
+    media_24h: Dict[str, float] = {}
+    min_24h:   Dict[str, float] = {}
+    max_24h:   Dict[str, float] = {}
     for r in _RISORSE_STANDARD:
         vals = [v for v in serie[r] if v > 0]
-        media_24h[r] = round(sum(vals) / len(vals), 0) if vals else 0.0
-        max_24h[r]   = round(max(vals), 0) if vals else 0.0
+        if vals:
+            media_24h[r] = round(sum(vals) / len(vals), 0)
+            min_24h[r]   = round(min(vals), 0)
+            max_24h[r]   = round(max(vals), 0)
+        else:
+            media_24h[r] = 0.0
+            min_24h[r]   = 0.0
+            max_24h[r]   = 0.0
 
     return {
         "ore":       ore_labels,
         "serie":     serie,
         "media_24h": media_24h,
+        "min_24h":   min_24h,
         "max_24h":   max_24h,
         "samples":   samples_total,
     }
