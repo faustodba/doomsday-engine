@@ -1217,6 +1217,83 @@ def _reset_to_mappa(ctx: TaskContext, obiettivo: int) -> int:
     return attive
 
 
+def _aggiorna_slot_in_mappa(ctx: TaskContext, obiettivo: int,
+                              attive_pre: int) -> int:
+    """
+    WU55 28/04/2026 — Refactor: legge slot DIRETTAMENTE in mappa post-marcia
+    OK, senza vai_in_home → vai_in_mappa. Risparmio ~10-15s per marcia.
+
+    Affidabilità validata: 97.2% MAP coincide con HOME (35/36 sample post-marcia
+    nel dataset OCR WU55, tag rollback `wu55-pre-refactor-mappa`).
+
+    Guardrail Scenario E (popup overlay scuro): se OCR MAP ritorna `(0, N)` da
+    pre-check vuoto MA `attive_pre >= 1`, è ambiguo (potrebbe essere falso
+    positivo). Fallback singolo a HOME per disambiguare.
+
+    Sanity check: se `attive > obiettivo` (es. "5" letto come "7") → assume
+    obiettivo (slot pieni, conservativo, già documentato CLAUDE.md).
+
+    Args:
+        ctx:        TaskContext con navigator/device.
+        obiettivo:  totale slot noto (max squadre).
+        attive_pre: attive prima dell'invio marcia (>=0 atteso).
+
+    Returns:
+        attive (int 0..obiettivo) — slot occupati dopo la marcia.
+        -1 se ctx.navigator None oppure OCR completamente fallito.
+
+    Rollback: `git checkout wu55-pre-refactor-mappa -- tasks/raccolta.py`
+    """
+    if ctx.navigator is None:
+        return -1
+
+    try:
+        from shared.ocr_helpers import leggi_contatore_slot
+    except ImportError:
+        return -1
+
+    # Stabilizzazione mappa post-tap (chiusura maschera marcia → mappa pulita)
+    time.sleep(1.5)
+    screen_map = ctx.device.screenshot() if ctx.device else None
+    if screen_map is None:
+        ctx.log_msg("[SLOT-MAP] screenshot None — fallback _reset_to_mappa")
+        return _reset_to_mappa(ctx, obiettivo)
+
+    attive_map, totale_map = leggi_contatore_slot(
+        screen_map, totale_noto=obiettivo
+    )
+
+    # Sanity check: attive > totale = OCR sbagliato (es. "4" letto "7")
+    if 0 <= attive_map and attive_map > obiettivo:
+        ctx.log_msg(
+            f"[SLOT-MAP] OCR anomalo attive={attive_map}>obiettivo={obiettivo} "
+            f"— assume slot pieni (conservativo)"
+        )
+        return obiettivo
+
+    # Guardrail Scenario E: MAP (0, N) MA attive_pre >= 1 → ambiguo
+    # (popup overlay che oscura contatore, falso positivo "no counter")
+    if attive_map == 0 and attive_pre >= 1:
+        ctx.log_msg(
+            f"[SLOT-MAP] MAP=(0,{totale_map}) ma attive_pre={attive_pre} "
+            f"— Scenario E ambiguo → fallback HOME singolo"
+        )
+        return _reset_to_mappa(ctx, obiettivo)
+
+    # Lettura accettabile in mappa
+    if 0 <= attive_map <= obiettivo:
+        ctx.log_msg(
+            f"[SLOT-MAP] OCR MAP attive={attive_map}/{obiettivo} (pre={attive_pre})"
+        )
+        return attive_map
+
+    # OCR fallito (-1, -1) → fallback HOME conservativo
+    ctx.log_msg(
+        f"[SLOT-MAP] OCR fallito ({attive_map},{totale_map}) — fallback HOME"
+    )
+    return _reset_to_mappa(ctx, obiettivo)
+
+
 # ==============================================================================
 # Sequenza UI principale
 # ==============================================================================
@@ -1848,6 +1925,7 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
             # ── CASO ok=True ─────────────────────────────────────────
             if ok:
                 inviate         += 1
+                attive_pre_marcia = attive_correnti
                 attive_correnti += 1
                 fallimenti_cons  = 0
                 skip_neutri_per_tipo[tipo] = 0
@@ -1856,14 +1934,20 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
                 )
                 time.sleep(_cfg(ctx, "DELAY_POST_MARCIA"))
 
-                # FIX C: verifica slot reali da HOME
-                attive_reali = _reset_to_mappa(ctx, obiettivo)
+                # WU55 28/04: verifica slot direttamente in mappa (no più
+                # vai_in_home → OCR → vai_in_mappa). Risparmio ~10-15s/marcia.
+                # Guardrail Scenario E: se MAP=(0,N) ma attive_pre>=1 →
+                # fallback HOME singolo (popup overlay ambiguità).
+                # Rollback: git checkout wu55-pre-refactor-mappa -- tasks/raccolta.py
+                attive_reali = _aggiorna_slot_in_mappa(
+                    ctx, obiettivo, attive_pre_marcia + 1
+                )
                 if attive_reali >= 0:
                     if attive_reali != attive_correnti:
                         ctx.log_msg(
                             f"Raccolta: [RIALLINEA] attive "
                             f"{attive_correnti}→{attive_reali} "
-                            f"(OCR post-marcia da HOME)"
+                            f"(OCR post-marcia in MAPPA)"
                         )
                     attive_correnti = attive_reali
                 ctx.log_msg(
