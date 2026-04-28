@@ -76,6 +76,42 @@ def _log(msg: str, log_fn: Optional[Callable] = None) -> None:
         print(line)
 
 
+# WU53 — Detect popup MAINTENANCE lato gioco (manutenzione server-side)
+# Pattern: 2 template (REFRESH + Discord button) entrambi >= soglia.
+# Conferma doppia per evitare falsi positivi (un solo button non basta).
+_GAME_MAINT_SOGLIA = 0.85
+
+
+def _detect_game_maintenance(device, matcher, log_fn, nome) -> bool:
+    """
+    Rileva il popup MAINTENANCE del gioco (testo italiano: "Manutenzione",
+    inglese: "MAINTENANCE — server in maintenance").
+
+    Returns:
+        True se entrambi REFRESH + Discord button matched >= soglia.
+    """
+    try:
+        screen = device.screenshot()
+        if screen is None:
+            return False
+        score_refresh = matcher.score(screen, "pin_game_maintenance_refresh")
+        # Early-exit: se REFRESH non c'è, inutile verificare Discord
+        if score_refresh < _GAME_MAINT_SOGLIA:
+            return False
+        score_discord = matcher.score(screen, "pin_game_maintenance_discord")
+        detected = score_discord >= _GAME_MAINT_SOGLIA
+        if detected:
+            _log(
+                f"[{nome}] [GAME-MAINT] match REFRESH={score_refresh:.3f} "
+                f"Discord={score_discord:.3f}",
+                log_fn,
+            )
+        return detected
+    except Exception as exc:
+        _log(f"[{nome}] [GAME-MAINT] errore detect: {exc}", log_fn)
+        return False
+
+
 def _resolve_manager(configured_path: str) -> str:
     """
     Ritorna configured_path se il file esiste.
@@ -506,6 +542,19 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
             _log(f"[{nome}] Live Chat splash attivo — aggancio fino a scomparsa", log_fn)
             while time.time() - t_poll < (t_max - t_min):
                 time.sleep(3.0)
+
+                # WU53 — check popup MAINTENANCE lato gioco. Se rilevato,
+                # esce SUBITO con flag dedicato (skip istanza, no monkey
+                # recovery, no retry). Pattern: 2 template (REFRESH+Discord)
+                # entrambi >= 0.85 → certezza popup attivo.
+                try:
+                    if _detect_game_maintenance(device, ctx.matcher, log_fn, nome):
+                        setattr(ctx, "game_maintenance", True)
+                        _log(f"[{nome}] [GAME-MAINT] popup manutenzione gioco rilevato — skip istanza", log_fn)
+                        return False
+                except Exception:
+                    pass
+
                 try:
                     splash_ancora = _is_splash_f4(_mini_f4) if _is_splash_f4 else False
                 except Exception:
