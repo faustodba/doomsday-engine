@@ -666,9 +666,9 @@ def partial_ist_table(request: Request):
           <td><input type="number" class="ist-sq" value="{max_squadre}" {disabled_attr}
                      min="1" max="10" style="width:36px"></td>
           <td><select class="ist-prof" {disabled_attr}>
-            <option value="full"          {"selected" if tipologia=="full"          else ""}>full</option>
-            <option value="raccolta_only" {"selected" if tipologia=="raccolta_only" else ""}>raccolta</option>
-            <option value="raccolta_fast" {"selected" if tipologia=="raccolta_fast" else ""}>raccolta fast</option>
+            <option value="full"          {"selected" if tipologia=="full"          else ""}>completo</option>
+            <option value="raccolta_fast" {"selected" if tipologia=="raccolta_fast" else ""}>completo · fast</option>
+            <option value="raccolta_only" {"selected" if tipologia=="raccolta_only" else ""}>solo raccolta</option>
           </select></td>
           <td><input type="number" class="ist-lv" value="{livello}" {disabled_attr}
                      min="1" max="10" style="width:36px"></td>
