@@ -62,6 +62,10 @@ _ZONA_TESTO_SLOT  = (890, 117, 946, 141)  # testo X/Y intero — psm=7 priorità
 _ZONA_CIFRA_SX    = (906, 117, 916, 141)  # cifra attive — ricalibrata (era 890-919)
 _ZONA_CIFRA_DX    = (919, 117, 929, 141)  # cifra totale — ricalibrata (era 922-946)
 _SOGLIA_PX_BIANCHI = 15                   # pixel bianchi minimi per considerare slot attivi
+_SOGLIA_LUMIN_PX  = 100                   # soglia luminosità RGB per pre-check (era 140 hardcoded).
+                                          # WU55 28/04: abbassata 140→100 per coprire MAP sotto-illuminata
+                                          # (caso FAU_07 popup overlay: max RGB=88 borderline; ora cattura).
+                                          # Solo pre-check leggi_contatore_slot — no impatto su _maschera_bianca.
 
 
 # ==============================================================================
@@ -629,9 +633,9 @@ def leggi_contatore_slot(
         crop_testo = pil_img.crop((x1, y1, x2, y2))
         arr_check  = np.array(crop_testo).astype(int)
         px_bianchi = int(np.sum(
-            (arr_check[:, :, 0] > 140) &
-            (arr_check[:, :, 1] > 140) &
-            (arr_check[:, :, 2] > 140)
+            (arr_check[:, :, 0] > _SOGLIA_LUMIN_PX) &
+            (arr_check[:, :, 1] > _SOGLIA_LUMIN_PX) &
+            (arr_check[:, :, 2] > _SOGLIA_LUMIN_PX)
         ))
 
         if px_bianchi < _SOGLIA_PX_BIANCHI:
