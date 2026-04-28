@@ -1141,6 +1141,25 @@ def _leggi_attive_post_marcia(ctx: TaskContext, obiettivo: int,
             continue
         attive, totale = leggi_contatore_slot(screen, totale_noto=obiettivo)
         if attive >= 0:
+            # WU55 — data collection HOME sample post-marcia
+            if bool(_cfg(ctx, "RACCOLTA_OCR_DEBUG")):
+                try:
+                    from shared.ocr_dataset import new_pair_id, save_home_sample
+                    pid = new_pair_id()
+                    save_home_sample(
+                        istanza=ctx.instance_name,
+                        pair_id=pid,
+                        screen=screen,
+                        ocr_raw=f"{attive}/{totale}",
+                        attive=attive,
+                        totale=totale,
+                        extra={"trigger": "_leggi_attive_post_marcia",
+                               "schermata": "HOME", "retry": i},
+                    )
+                    ctx._ocr_pair = (pid, attive, totale)  # type: ignore
+                    ctx.log_msg(f"[OCR-DEBUG] home post-marcia pair={pid} {attive}/{totale}")
+                except Exception as exc:
+                    ctx.log_msg(f"[OCR-DEBUG] save post-marcia fail: {exc}")
             return attive
         ctx.log_msg(f"[POST-MARCIA] OCR contatore N/D (tentativo {i+1}/{retry})")
         time.sleep(sleep_s)
@@ -1192,6 +1211,9 @@ def _reset_to_mappa(ctx: TaskContext, obiettivo: int) -> int:
         pass
     ctx.navigator.vai_in_mappa()
     time.sleep(1.5)
+    # WU55 — shadow OCR MAP appaiata al HOME post-marcia (ctx._ocr_pair settato
+    # da _leggi_attive_post_marcia). Skip silente se pair=None (fallimento/scarto).
+    _ocr_debug_collect_map(ctx)
     return attive
 
 
