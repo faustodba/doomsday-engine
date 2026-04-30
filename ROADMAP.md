@@ -58,7 +58,62 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
-### Issue chiuse — Sessione 30/04 mattina (arena fix completi)
+### Issue chiuse — Sessione 30/04 mattina (arena fix completi + WU82-83)
+
+#### WU83. Arena rebuild truppe pre-1ª sfida del giorno ✅
+
+L'utente osservava che a inizio giornata le truppe arena potevano essere
+sub-ottimali (squadre rimaste della sera prima, magari livelli vecchi
+post-training notturno). Decisione: 1×/die UTC alla 1ª sfida del giorno,
+**rimuovi tutte le truppe + ricarica via READY auto-deploy** che il client
+sceglie con composizione migliore disponibile.
+
+**Mappatura coord live FAU_06 (4 celle) + FAU_00 (5 celle)**:
+- Rimozione `−`: (80, 80) / (80, 148) / (80, 216) / (80, 283) / (80, 351)
+- Apertura cella `+`: (42, 100) / (42, 170) / (42, 240) / (42, 310) / (42, 380)
+- READY auto-deploy: (723, 482)
+- 5ª cella su istanze 4-cella è LUCCHETTATA → ignorata silenziosamente
+
+**N celle dinamico** = `ctx.config.max_squadre` (5 per FAU_00/FauMorfeus, 4 altre).
+
+**Flow WU83**:
+```python
+if run.sfide_eseguite == 0 and not _deploy_done_today(nome):
+    n = max_squadre
+    for i in range(n):
+        tap(_TAP_REMOVE_TRUPPA[i])          # rimuovi
+    for i in range(n):
+        tap(_TAP_OPEN_CELLA[i])             # apri selettore
+        tap(_TAP_READY_DEPLOY)              # auto-deploy
+    _mark_deploy_done(nome)                 # 1×/die marker
+    re-check START CHALLENGE post-rebuild
+```
+
+**State**: `data/arena_deploy_state.json` con `{"FAU_00": "2026-04-30", ...}`,
+atomic write tmp+os.replace.
+
+**Validazione runtime**:
+- FAU_06 (4 celle): power 431k → empty 12k → deploy 685k (**+59% truppe nuove**)
+- FAU_00 (5 celle): power 17.0M → empty 7.8M → deploy 17.0M (composizione invariata, già max)
+
+**Costo**: ~25-30s solo 1×/die UTC per istanza. Su run successivi del giorno
+skip per check `_deploy_done_today`.
+
+#### WU82. Arena wait battaglia 60s → 15s ✅
+
+Con driver DirectX (Issue #88) + skip ON garantito (WU74), battaglie con
+animazione skippata durano <10s. Il `time.sleep(60s)` di WU75 era
+sovradimensionato.
+
+**Fix**: in `tasks/arena.py:86-88`:
+- `_DELAY_BATTAGLIA_S`: 8.0 → 5.0
+- `_MAX_BATTAGLIA_S`: 52.0 → 10.0
+
+Totale wait: 60s → **15s** per sfida.
+
+**Saving**: 45s/sfida × 5 sfide = **225s/ciclo arena** (~3.75 min).
+
+
 
 #### Issue #88. Cascade ADB durante arena — driver Vulkan MuMu ✅
 

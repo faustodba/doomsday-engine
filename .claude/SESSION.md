@@ -1,5 +1,48 @@
 # SESSION.md — Handoff Doomsday Engine V6
 
+## Sessione 30/04/2026 mattina+pomeriggio — Arena fix completi + rebuild truppe (WU74-83)
+
+### Stato finale sessione
+
+**Bot prod fermato** (test giornata terminato 30/04 ~12:55 locale). Driver
+DirectX validato 864/864 ADB ONLINE su 6 sfide test. Tutti fix arena
+deployed: WU74-83 + Issue #88+89 + WU85 Glory.
+
+### Aggiunte 30/04 mattina+pomeriggio
+
+| WU | Cosa | Validazione |
+|----|------|-------------|
+| WU82 | Arena wait battaglia 60s → 15s (skip ON + DirectX = battaglie <10s) | Saving 225s/ciclo arena |
+| WU83 | Rebuild truppe pre-1ª sfida del giorno (1×/die UTC) | FAU_06 4 celle +59% power, FAU_00 5 celle invariato (già max) |
+
+### Flow WU83 dettagliato
+
+Coord calibrate live (cross-istanza):
+- 5 rimozioni: x=80, y=80/148/216/283/351
+- 5 aperture cella: x=42, y=100/170/240/310/380
+- READY auto-deploy: (723, 482)
+
+N celle = `max_squadre` config. State `data/arena_deploy_state.json` UTC.
+
+Trigger: `if run.sfide_eseguite == 0 and not _deploy_done_today(nome)` →
+rebuild → mark today → re-check START CHALLENGE.
+
+### Pre-condizioni prossima sessione
+
+- Bot fermato, dashboard attiva
+- Tutti fix WU74-83 + Issue #88+89 + WU77 deployed prod e syncati
+- State arena reset, checkpoint da FAU_02 (last position)
+- Driver DirectX su tutte 11 istanze (manuale utente)
+
+### Next steps suggeriti
+
+1. Restart bot in produzione (resume da checkpoint)
+2. Validazione runtime arena complete su tutto ciclo
+3. Issue #83 match dinamico Challenge button (effort ~30 righe)
+4. Issue #81 Update Version popup gioco
+
+---
+
 ## Sessione 30/04/2026 mattina — Arena fix completi (cascade + template + tap dinamico)
 
 ### Stato finale sessione

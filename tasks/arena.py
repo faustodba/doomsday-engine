@@ -44,8 +44,12 @@ Logica principale
 
 from __future__ import annotations
 
+import json
+import os
 import time
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
@@ -75,6 +79,16 @@ _TAP_CENTRO           = (480, 270)  # centro schermo (fallback)
 _TAP_CENTRO_PAUSE     = 0.8         # pausa tra i due tap centro
 _TAP_SKIP_CHECKBOX    = (723, 488)  # checkbox Skip (salta animazione battaglia)
 
+# WU83 (30/04 12:20) — Rebuild truppe pre-1ª sfida del giorno.
+# Coord calibrate live FAU_06: 4 celle attive + 5ª lucchettata.
+# Lista 5 coord — usate fino a max_squadre dell'istanza (FAU_00/FauMorfeus=5,
+# altre=4). Operazione 1×/die UTC per istanza, state in
+# data/arena_deploy_state.json.
+_TAP_REMOVE_TRUPPA = [(80,  80), (80, 148), (80, 216), (80, 283), (80, 351)]
+_TAP_OPEN_CELLA    = [(42, 100), (42, 170), (42, 240), (42, 310), (42, 380)]
+_TAP_READY_DEPLOY  = (723, 482)
+_DELAY_REBUILD_S   = 0.8
+
 # Parametri pixel per popup Congratulations generico
 _CONGRATS_CHECK_XY  = (480, 300)
 _CONGRATS_BGR_LOW   = np.array([200, 150,  50], dtype=np.uint8)
@@ -83,9 +97,11 @@ _CONGRATS_BGR_HIGH  = np.array([255, 220, 130], dtype=np.uint8)
 MAX_SFIDE = 5
 
 # Timing battaglia
-_DELAY_BATTAGLIA_S = 8.0    # sleep iniziale fisso post-tap START
-_POLL_BATTAGLIA_S  = 3.0    # intervallo polling
-_MAX_BATTAGLIA_S   = 52.0   # timeout polling
+_DELAY_BATTAGLIA_S = 5.0    # sleep iniziale fisso post-tap START (8.0 → 5.0 WU82)
+_POLL_BATTAGLIA_S  = 3.0    # intervallo polling (legacy, non usato post-WU75)
+_MAX_BATTAGLIA_S   = 10.0   # WU82 (30/04 11:30): 52→10. Battaglie con
+                            # skip ON + driver DirectX durano <10s in pratica.
+                            # Totale wait WU75 ora 15s (era 60s).
 
 MAX_TENTATIVI         = 3
 MAX_ERRORI_CONSEC     = 2
@@ -396,6 +412,27 @@ class ArenaTask(Task):
             time.sleep(1.5)
             return "errore"
 
+        # WU83 (30/04 12:20) — Rebuild truppe pre-1ª sfida del giorno.
+        # Eseguito SOLO alla prima sfida del primo tentativo del giorno.
+        # State persistito in data/arena_deploy_state.json (granularità UTC).
+        # Operation: rimuovi N squadre + tap cella + READY (auto-deploy).
+        # READY auto-seleziona la migliore composizione disponibile (es. test
+        # FAU_06: power 431k → 685k post-rebuild, +59% truppe nuove).
+        if run.sfide_eseguite == 0 and not _deploy_done_today(ctx.instance_name):
+            try:
+                n_celle = int(ctx.config.get("max_squadre", 4))
+                self._rebuild_truppe(ctx, n_celle)
+                _mark_deploy_done(ctx.instance_name)
+                ctx.log_msg(f"[ARENA] [WU83] rebuild OK ({n_celle} celle) — marcato per oggi")
+            except Exception as exc:
+                ctx.log_msg(f"[ARENA] [WU83] rebuild errore: {exc}")
+            # Re-verifica START CHALLENGE post-rebuild
+            if not self._check_pin(ctx, "challenge", retry=2, retry_s=1.5):
+                ctx.log_msg("[ARENA] [WU83] START CHALLENGE non visibile post-rebuild — abort")
+                ctx.device.back()
+                time.sleep(1.5)
+                return "errore"
+
         # SKIP-CHECKBOX: verifica ad ogni sfida.
         # WU74 (30/04 mattina) — pre-fix: solo 1×/sessione. Bug osservato: la
         # pulizia cache giornaliera (WU64) reset checkbox al default e in
@@ -636,3 +673,90 @@ class ArenaTask(Task):
         ctx.device.tap(*_TAP_CENTRO)
         time.sleep(_TAP_CENTRO_PAUSE)
         ctx.device.tap(*_TAP_CENTRO)
+
+    # WU83 — Rebuild truppe pre-1ª sfida (ad ogni avvio nuovo giorno UTC)
+    def _rebuild_truppe(self, ctx: TaskContext, n_celle: int) -> None:
+        """
+        Rimuove tutte le truppe schierate + ricarica via READY auto-deploy.
+
+        Sequenza:
+          1. Tap N pulsanti "−" rimozione (colonna sx coord 80,y_remove[i])
+          2. Per ogni cella vuota:
+             - Tap centro cella (apre selettore truppe)
+             - Tap READY (723,482) → auto-deploy migliore composizione
+          3. Ritorna alla pre-battle screen con N truppe schierate
+
+        n_celle: 4 (default) o 5 (FAU_00, FauMorfeus). 5ª cella >= max disponibili
+                 sarà ignorata silenziosamente se lucchettata.
+
+        Test live FAU_06 30/04 (4 celle): power 431k → 685k post-rebuild (+59%).
+        """
+        ctx.log_msg(f"[ARENA] [WU83] rebuild truppe — {n_celle} celle")
+        n = max(1, min(5, int(n_celle)))
+
+        # Step 1: rimuovi N truppe correnti
+        for i in range(n):
+            x, y = _TAP_REMOVE_TRUPPA[i]
+            ctx.device.tap(x, y)
+            time.sleep(_DELAY_REBUILD_S)
+        time.sleep(2.0)  # stabilizzazione UI post-rimozione
+
+        # Step 2: riempi N celle con auto-deploy
+        for i in range(n):
+            x, y = _TAP_OPEN_CELLA[i]
+            ctx.log_msg(f"[ARENA] [WU83] cella {i+1}/{n} — tap ({x},{y}) + READY")
+            ctx.device.tap(x, y)
+            time.sleep(2.5)  # apertura selettore truppe
+            ctx.device.tap(*_TAP_READY_DEPLOY)
+            time.sleep(2.5)  # ready + chiusura pannello
+
+
+# ──────────────────────────────────────────────────────────────────────────────
+# WU83 — State helper: 1×/die UTC per istanza
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _deploy_state_path() -> Path:
+    """Path data/arena_deploy_state.json (rispetta DOOMSDAY_ROOT)."""
+    root = os.environ.get("DOOMSDAY_ROOT", os.getcwd())
+    return Path(root) / "data" / "arena_deploy_state.json"
+
+
+def _today_utc() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+
+def _deploy_done_today(nome: str) -> bool:
+    """True se rebuild già fatto oggi (UTC) per `nome`. Failsafe → False."""
+    if not nome:
+        return False
+    try:
+        path = _deploy_state_path()
+        if not path.exists():
+            return False
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return data.get(nome) == _today_utc()
+    except Exception:
+        return False
+
+
+def _mark_deploy_done(nome: str) -> None:
+    """Aggiorna data/arena_deploy_state.json[nome] = oggi UTC. Atomic write."""
+    if not nome:
+        return
+    try:
+        path = _deploy_state_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        data: dict = {}
+        if path.exists():
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(data, dict):
+                    data = {}
+            except Exception:
+                data = {}
+        data[nome] = _today_utc()
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
+        os.replace(tmp, path)
+    except Exception:
+        pass
