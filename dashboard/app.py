@@ -560,10 +560,11 @@ def partial_task_flags_v2(request: Request):
     ORDER = [
         "rifornimento", "zaino",
         "vip", "boost",
-        "arena", "store",
-        "alleanza", "donazione",
-        "messaggi", "radar",
-        "arena_mercato", "district_showdown",
+        "truppe", "arena",
+        "store", "alleanza",
+        "donazione", "messaggi",
+        "radar", "arena_mercato",
+        "district_showdown",
     ]
 
     # auto-WU22 (27/04): rewrite as 2-col checkbox rows (style rifornimento .rr-cb)
@@ -1163,6 +1164,75 @@ def partial_produzione_istanze(request: Request):
             f'{"".join(corr_kvs)}</div>'
         )
 
+        # WU66 — riga truppe (Layout A): total oggi + Δ7gg + sparkline 7 giorni
+        from dashboard.services.stats_reader import get_truppe_istanza
+        try:
+            tr = get_truppe_istanza(nome)
+        except Exception:
+            tr = {"oggi": None, "sette_gg_fa": None, "delta": None,
+                  "delta_pct": None, "serie_7d": [None]*7}
+
+        oggi_v   = tr.get("oggi")
+        delta_v  = tr.get("delta")
+        delta_p  = tr.get("delta_pct")
+        serie_v  = tr.get("serie_7d") or []
+
+        # Format oggi
+        if oggi_v is None:
+            oggi_lbl = "—"
+            oggi_col = "var(--text-dim)"
+        else:
+            oggi_lbl = f"{oggi_v:,}"
+            oggi_col = "var(--text)"
+
+        # Format delta + arrow + colore
+        if delta_v is None:
+            delta_lbl = "Δ7gg —"
+            delta_col = "var(--text-dim)"
+        elif delta_v > 0:
+            delta_lbl = f"Δ7gg +{delta_v:,} ▲{delta_p:.1f}%"
+            delta_col = "#4ade80"  # green
+        elif delta_v < 0:
+            delta_lbl = f"Δ7gg {delta_v:,} ▼{abs(delta_p):.1f}%"
+            delta_col = "#f87171"  # red
+        else:
+            delta_lbl = f"Δ7gg 0"
+            delta_col = "var(--text-dim)"
+
+        # Sparkline ASCII: 7 char (gg-6 .. oggi). None → '·' (dato mancante)
+        chars = "▁▂▃▄▅▆▇█"
+        valid_vals = [v for v in serie_v if v is not None]
+        if valid_vals:
+            mn, mx = min(valid_vals), max(valid_vals)
+            rng = (mx - mn) or 1
+            spark = "".join(
+                chars[min(7, int((v - mn) / rng * 7))] if v is not None else "·"
+                for v in serie_v
+            )
+            # tooltip con valori esatti
+            from datetime import date, timedelta
+            today_d = date.today()
+            spark_tip = " · ".join(
+                f"{(today_d - timedelta(days=6-i)).strftime('%d/%m')}: "
+                f"{(v if v is not None else '—')}"
+                for i, v in enumerate(serie_v)
+            )
+        else:
+            spark = "·" * 7
+            spark_tip = "nessun dato 7gg"
+
+        truppe_block = (
+            f'<div style="display:flex;justify-content:space-between;'
+            f'align-items:center;gap:6px;margin-top:5px;padding-top:4px;'
+            f'border-top:0.5px solid rgba(255,255,255,0.06);font-size:11px">'
+            f'<span style="color:var(--text-dim)">🪖 truppe: '
+            f'<b style="color:{oggi_col}">{oggi_lbl}</b></span>'
+            f'<span style="color:{delta_col};font-size:10px">{delta_lbl}</span>'
+            f'<span style="font-family:monospace;font-size:13px;color:var(--accent);'
+            f'letter-spacing:1px" title="{spark_tip}">{spark}</span>'
+            f'</div>'
+        )
+
         cards_html.append(f'''
         <div class="prod-card" style="background:var(--bg-card);border:1px solid var(--border);
              border-radius:5px;padding:8px 10px;font-size:12px;opacity:{card_opacity}">
@@ -1180,6 +1250,7 @@ def partial_produzione_istanze(request: Request):
           </div>
           {header_status}
           {header_lastmsg}
+          {truppe_block}
           <table style="width:100%;border-collapse:collapse;font-size:12px">
             <thead><tr style="color:var(--text-dim);font-size:11px">
               <th style="text-align:left">risorsa</th>
@@ -1202,6 +1273,149 @@ def partial_produzione_istanze(request: Request):
     return HTMLResponse(
         '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));'
         'gap:6px">' + "".join(cards_html) + '</div>'
+    )
+
+
+@app.get("/ui/partial/truppe-storico", include_in_schema=False)
+def partial_truppe_storico(request: Request):
+    """
+    WU66 (Layout B) — pannello storico truppe 8 giorni con tabella comparata.
+
+    Mostra per ogni istanza:
+      - Total Squads oggi (UTC)
+      - Total Squads 7 giorni fa
+      - Δ assoluto + Δ% + sparkline 8gg
+      - Riga TOTALE in fondo
+    Ordinamento: delta_pct desc (chi cresce di più sopra), None in fondo.
+    """
+    from dashboard.services.stats_reader import get_truppe_storico_aggregato
+    from datetime import date, timedelta
+
+    data = get_truppe_storico_aggregato(days=8)
+    per_istanza = data.get("per_istanza") or []
+    totale      = data.get("totale") or {}
+    days        = int(data.get("days", 8))
+
+    if not per_istanza:
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:12px">'
+            'nessun dato truppe — il primo snapshot è scritto al prossimo settings '
+            'di ogni istanza (1x/giorno UTC)</div>'
+        )
+
+    chars = "▁▂▃▄▅▆▇█"
+
+    def _spark(serie: list, mn: Optional[int], rng: int) -> str:
+        out = []
+        for v in serie:
+            if v is None:
+                out.append("·")
+            else:
+                pct = (v - mn) / rng if rng else 0
+                out.append(chars[min(7, max(0, int(pct * 7)))])
+        return "".join(out)
+
+    def _fmt(n) -> str:
+        return f"{n:,}" if n is not None else "—"
+
+    def _delta_cell(d, p) -> tuple[str, str]:
+        if d is None:
+            return ("—", "var(--text-dim)")
+        if d > 0:
+            return (f"+{d:,} ▲{p:.1f}%", "#4ade80")
+        if d < 0:
+            return (f"{d:,} ▼{abs(p):.1f}%", "#f87171")
+        return ("0", "var(--text-dim)")
+
+    today_d = date.today()
+    date_labels = [
+        (today_d - timedelta(days=days - 1 - i)).strftime("%d/%m")
+        for i in range(days)
+    ]
+
+    # Per normalizzare lo spark globalmente (stesso scale per tutte)
+    all_vals = [v for r in per_istanza for v in (r["serie"] or []) if v is not None]
+    g_mn = min(all_vals) if all_vals else 0
+    g_mx = max(all_vals) if all_vals else 1
+    g_rng = (g_mx - g_mn) or 1
+
+    rows = []
+    for r in per_istanza:
+        nome  = r["nome"]
+        oggi  = r["oggi"]
+        sette = r["sette_gg_fa"]
+        d, p  = r["delta"], r["delta_pct"]
+        serie = r["serie"] or [None] * days
+        delta_lbl, delta_col = _delta_cell(d, p)
+        # spark normalizzato sui valori dell'istanza (più informativo che globale)
+        ivals = [v for v in serie if v is not None]
+        if ivals:
+            i_mn, i_mx = min(ivals), max(ivals)
+            i_rng = (i_mx - i_mn) or 1
+            spark = _spark(serie, i_mn, i_rng)
+        else:
+            spark = "·" * days
+        spark_tip = " · ".join(
+            f"{date_labels[i]}: {(v if v is not None else '—')}"
+            for i, v in enumerate(serie)
+        )
+        rows.append(
+            f'<tr style="border-bottom:0.5px solid rgba(255,255,255,0.04)">'
+            f'<td style="padding:3px 8px;font-weight:600">{nome}</td>'
+            f'<td style="padding:3px 8px;text-align:right">{_fmt(oggi)}</td>'
+            f'<td style="padding:3px 8px;text-align:right;color:var(--text-dim)">{_fmt(sette)}</td>'
+            f'<td style="padding:3px 8px;text-align:right;color:{delta_col}">{delta_lbl}</td>'
+            f'<td style="padding:3px 8px;font-family:monospace;font-size:14px;'
+            f'color:var(--accent);letter-spacing:1px" title="{spark_tip}">{spark}</td>'
+            f'</tr>'
+        )
+
+    # Riga TOTALE
+    t_oggi  = totale.get("oggi")
+    t_sette = totale.get("sette_gg_fa")
+    t_d, t_p = totale.get("delta"), totale.get("delta_pct")
+    t_serie = totale.get("serie") or [None] * days
+    t_delta_lbl, t_delta_col = _delta_cell(t_d, t_p)
+    tvals = [v for v in t_serie if v is not None]
+    if tvals:
+        t_mn, t_mx = min(tvals), max(tvals)
+        t_rng = (t_mx - t_mn) or 1
+        t_spark = _spark(t_serie, t_mn, t_rng)
+    else:
+        t_spark = "·" * days
+    t_spark_tip = " · ".join(
+        f"{date_labels[i]}: {(v if v is not None else '—')}"
+        for i, v in enumerate(t_serie)
+    )
+
+    tot_row = (
+        f'<tr style="border-top:1.5px solid var(--border);'
+        f'background:rgba(255,255,255,0.02)">'
+        f'<td style="padding:5px 8px;font-weight:700;color:var(--accent)">TOTALE</td>'
+        f'<td style="padding:5px 8px;text-align:right;font-weight:700">{_fmt(t_oggi)}</td>'
+        f'<td style="padding:5px 8px;text-align:right;color:var(--text-dim)">{_fmt(t_sette)}</td>'
+        f'<td style="padding:5px 8px;text-align:right;font-weight:700;color:{t_delta_col}">{t_delta_lbl}</td>'
+        f'<td style="padding:5px 8px;font-family:monospace;font-size:14px;'
+        f'color:var(--accent);letter-spacing:1px" title="{t_spark_tip}">{t_spark}</td>'
+        f'</tr>'
+    )
+
+    header = (
+        f'<thead><tr style="color:var(--text-dim);font-size:11px;'
+        f'border-bottom:1px solid var(--border)">'
+        f'<th style="text-align:left;padding:4px 8px">istanza</th>'
+        f'<th style="text-align:right;padding:4px 8px">oggi</th>'
+        f'<th style="text-align:right;padding:4px 8px">7 gg fa</th>'
+        f'<th style="text-align:right;padding:4px 8px">Δ (Δ%)</th>'
+        f'<th style="text-align:left;padding:4px 8px" '
+        f'title="ultimi {days} giorni: {" · ".join(date_labels)}">'
+        f'trend ({days}gg)</th>'
+        f'</tr></thead>'
+    )
+
+    return HTMLResponse(
+        f'<table style="width:100%;border-collapse:collapse;font-size:12px">'
+        f'{header}<tbody>{"".join(rows)}{tot_row}</tbody></table>'
     )
 
 
@@ -1516,16 +1730,18 @@ def partial_telemetria_storico_cicli(request: Request):
             dur_lbl     = "in corso"
         run_tag = (f'<span style="color:var(--text-dim);font-size:9px;margin-left:4px" '
                    f'title="run_local={c.run_local}">·{c.run_local}</span>') if c.run_local else ''
+        data_lbl = c.start_date or "—"
         body.append(
             f'<tr><td style="width:18px">{esito_badge}</td>'
             f'<td style="color:var(--accent);font-weight:600">CICLO {c.numero}{run_tag}</td>'
+            f'<td style="color:var(--text-dim);font-size:11px;white-space:nowrap">{data_lbl}</td>'
             f'<td style="color:var(--text-dim);font-size:11px">{c.start_hhmm} → {c.end_hhmm}</td>'
             f'<td style="text-align:right;color:{esito_col};font-weight:600">{dur_lbl}</td>'
             f'<td style="text-align:right;color:var(--text-dim);font-size:11px">{c.n_istanze} ist</td></tr>'
         )
     return HTMLResponse(
         '<table class="tel-table"><thead><tr>'
-        '<th></th><th>ciclo</th><th>finestra</th>'
+        '<th></th><th>ciclo</th><th>data</th><th>finestra</th>'
         '<th style="text-align:right">durata</th>'
         '<th style="text-align:right">istanze</th>'
         '</tr></thead>'

@@ -130,28 +130,28 @@
     "fascia_oraria": ""
   },
   {
-    "nome": "FauMorfeus",
+    "nome": "FAU_10",
     "indice": 10,
     "porta": 16704,
-    "truppe": 0,
-    "max_squadre": 5,
-    "layout": 1,
-    "lingua": "en",
-    "livello": 7,
-    "profilo": "raccolta_only",
-    "abilitata": true,
-    "fascia_oraria": ""
-  },
-  {
-    "nome": "FAU_10",
-    "indice": 11,
-    "porta": 16736,
     "truppe": 0,
     "max_squadre": 4,
     "layout": 2,
     "lingua": "en",
     "livello": 6,
     "profilo": "full",
+    "abilitata": true,
+    "fascia_oraria": ""
+  },
+  {
+    "nome": "FauMorfeus",
+    "indice": 11,
+    "porta": 16736,
+    "truppe": 0,
+    "max_squadre": 5,
+    "layout": 1,
+    "lingua": "en",
+    "livello": 7,
+    "profilo": "raccolta_only",
     "abilitata": true,
     "fascia_oraria": ""
   }

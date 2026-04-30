@@ -22,6 +22,19 @@
 
     <div class="divider"></div>
 
+    <!-- ── WU66 STORICO TRUPPE 8gg ──────────────────────────── -->
+    <div class="section">
+      <div class="sec-label">📊 storico truppe (8 giorni)</div>
+      <div id="truppe-storico"
+           hx-get="/ui/partial/truppe-storico"
+           hx-trigger="load, every 60s"
+           hx-swap="innerHTML">
+        <div style="color:var(--text-dim);text-align:center;padding:12px">caricamento...</div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
     <!-- ── CONFIGURAZIONE 2x2 ────────────────────────────── -->
     <div class="section">
       <div class="sec-label">configurazione</div>

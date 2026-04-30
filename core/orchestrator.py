@@ -313,7 +313,17 @@ class Orchestrator:
                     data={},
                 )
 
-            entry.last_run    = time.time()
+            # WU79 (30/04 10:14) — Issue #84 fix: pre-fix `last_run` veniva
+            # aggiornato SEMPRE (anche su result.success=False o eccezioni),
+            # bloccando il retry del task fino al reset daily 24h dopo.
+            # Esempio FAU_00 30/04: arena fallita → last_run aggiornato →
+            # arena non ritenta fino al 01/05 02:35 UTC, perde 5 sfide.
+            # Post-fix: aggiorna last_run solo se task riuscito o skippato
+            # (skip = condizione gestita correttamente, non un fail).
+            # Su fail/eccezione → last_run resta invariato → al prossimo
+            # tick il task viene riprovato.
+            if result.success or result.skipped:
+                entry.last_run = time.time()
             entry.last_result = result
             results.append(result)
 

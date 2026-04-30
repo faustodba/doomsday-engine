@@ -58,7 +58,677 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
-### Issue aperte — radar_census + Update Version
+### Issue chiuse — Sessione 30/04 mattina (arena fix completi)
+
+#### Issue #88. Cascade ADB durante arena — driver Vulkan MuMu ✅
+
+**Bug osservato 30/04** durante test live arena FAU_10: ADB offline
+**immediato** al tap START CHALLENGE. WU75 (no polling) + WU76 (in-memory)
+NON eliminavano cascade — il problema scattava prima di qualsiasi screencap.
+
+**Test esclusione**:
+- Settings video LOW vs HIGH stesso esito (cascade)
+- WU76 in-memory benchmark più lento (1526ms vs 1185ms legacy) → I/O non era bottleneck
+
+**Root cause**: driver **Vulkan** di MuMu Player crasha il bridge ADB su
+animazione 3D battle. Bug noto MuMu/Hyper-V/Doomsday Last Survivors specifico.
+
+**Soluzione**: switch driver da **Vulkan → DirectX** (manuale utente in
+MuMu Settings → Display → Render mode).
+
+**Validazione runtime**:
+- FAU_10: 271/271 polling ADB ONLINE in 3 sfide consecutive
+- FAU_00: 432/432 ONLINE in 2 sfide
+- FAU_01: 161/161 ONLINE in 1 sfida
+- **Totale 864/864 ONLINE, 0 OFFLINE** (vs cascade endemica pre-fix)
+
+**Da applicare**: tutte le 11 istanze MuMu (manuale utente).
+
+#### Issue #89. Template arena Failure/Victory/Continue stale ✅
+
+Con cascade ADB risolto da Issue #88, finalmente visualizzabile il
+popup post-battle. Client gioco ha **ridisegnato la UI**: tutti e 3 i
+template esistenti (del 30 marzo) sono stale.
+
+**Estrazione live**:
+- **Failure** FAU_10: testo bianco grande su sfondo magenta in
+  (380,42,535,88), 155×46 px. Score 0.998
+- **Victory** FAU_00 (rank 81→53): testo bianco grande su sfondo dorato,
+  155×46 px stesse coord. Score 1.000 self-match
+- **Continue** "Tap to Continue" corsivo bianco posizione VARIABILE:
+  - Victory: centro (457, 469)
+  - Failure: centro (457, 516)
+  - Delta 47 pixel → coord fisse non valide (vedi WU80)
+
+**ROI nuove**: (370, 35, 545, 95) per Victory + Failure (per ROI ≥ template).
+ROI Continue (370, 495, 545, 540).
+
+**Soglia**: 0.80 → 0.90 (vedi WU81 per anti-falso positivo).
+
+#### WU80. Arena tap dinamico Continue (loc match) ✅
+
+Pre-fix: coord fisse `_TAP_CONTINUE_VICTORY` (457,462) e `_FAILURE` (457,509).
+Issue #89 ha rivelato che il pulsante "Tap to Continue" è in posizione
+diversa tra Victory (y=469) e Failure (y=516) — coord fisse non risolvono.
+
+**Fix**: in `tasks/arena.py` post-battaglia, match template `continue` su
+zone (370, 495, 545, 540) e `tap(cont_result.cx, cont_result.cy)` su loc
+del match. Fallback coord fisse solo se match fallisce.
+
+#### WU81. Arena soglia victory/failure 0.80 → 0.90 ✅
+
+Su FAU_00 sfida 2 (Failure reale), il template `victory` matchava score
+**0.847** (>0.80 soglia) — falso positivo strutturale (font/dimensioni
+simili). Logica del bot `if victory: ... elif failure:` avrebbe
+interpretato Failure come Victory.
+
+Soglia rinforzata a **0.90**. Discriminazione validata:
+- FAU_00 sfida 2 Failure: victory=0.847 (no), failure=0.995 (sì) ✓
+- FAU_01 sfida 1 Failure: victory=0.591 (no), failure=0.999 (sì) ✓
+
+#### WU78-rev. Settings_helper coord HIGH/MID/HIGH calibrate live ✅
+
+Issue #88 risolto rende inutili settings ULTRA-LOW (Graphics LOW + Frame
+LOW + Optimize LOW). Bot ora imposta HIGH/MID/HIGH (matching FAU_10 manuale).
+
+**Coord calibrate live FAU_00 30/04** (utente provided):
+- `_TAP_GRAPHICS_HIGH = (809, 123)` — slider HIGH
+- `_TAP_FRAME_MID = (717, 209)` — radio MID
+- `_TAP_OPTIMIZE_HIGH = (229, 330)` — pulsante HIGH
+
+Coord fisse cross-istanza (le settings sono nello stesso layout su tutte le istanze).
+
+---
+
+### Issue chiuse — Sessione 29/04 sera
+
+#### WU64. Pulizia cache giornaliera (1×/die per istanza) ✅
+
+Estensione di `core/settings_helper.imposta_settings_lightweight`. Dopo
+i toggle Graphics/Frame/Optimize, esegue 1×/die UTC per istanza:
+Avatar→Settings→**Help (570,235)→Clear cache (666,375)→Clear icon (480,200)
+→polling CLOSE template ogni 5s (max 120s)→CLOSE (480,445)**→back-extra→2 BACK.
+
+- **Stato persistito** in `data/cache_state.json` (granularità giornaliera UTC).
+  Skip-on-already-done idempotente. State path env-aware (`DOOMSDAY_ROOT`).
+- **Template estratto** `templates/pin/pin_clear_cache_close.png` (140×34, soglia
+  0.85). Validato score: HOME no-popup 0.022, popup pre-clear 0.028,
+  popup post-clear 1.000 (margine 0.97).
+- **Coord calibrate FAU_10** 29/04 19:11 con tap-test live ADB.
+- **Runtime FAU_10 c4 19:42**: CLOSE rilevato dopo 6s primo polling
+  (score 1.000). Settings totale 61.1s (35s base + 22s pulizia + 4s nav).
+  Idempotenza confermata FAU_00 c5: "cache già pulita oggi → skip".
+
+#### WU65. Lettura giornaliera Total Squads + storico crescita 365gg ✅
+
+Nuovo modulo `core/troops_reader.py`. Hook in `core/launcher.attendi_home`
+post-settings, **1×/die UTC** per istanza:
+
+```
+HOME → tap Avatar (48,37) → tap Squads (895,509) → OCR _ZONA_TOTAL_SQUADS
+(830,60,945,90) → append data/storico_truppe.json[nome] → 2 BACK
+```
+
+- **OCR cascade** otsu→binary, sanity range `1.000≤val≤999.000.000`.
+- **Storage**: `data/storico_truppe.json` schema
+  `{"FAU_00": [{"data": "YYYY-MM-DD", "total_squads": N, "ts": "ISO"}]}`,
+  retention 365gg, atomic write tmp+os.replace, idempotenza intra-day.
+- **Runtime FAU_10 c4**: `total_squads=112,848` registrato in 16.8s.
+- **FAU_00 c5**: `total_squads=2,665,764` (24× FAU_10 — istanza grande).
+
+#### WU66. Dashboard truppe — Layout A (card) + Layout B (storico 8gg) ✅
+
+**Layout A** — riga truppe in `partial_produzione_istanze` per ogni istanza:
+```
+🪖 truppe: 112,848   Δ7gg —   sparkline ······▁
+```
+
+- Δ7gg verde se positivo, rosso se negativo, grigio se mancano dati 7gg fa
+- Sparkline 7 char (oggi-6..oggi), tooltip valori esatti
+- Color coding adattivo
+
+**Layout B** — nuovo endpoint `/ui/partial/truppe-storico` + section in
+`templates/index.html`. Tabella con colonne: istanza | oggi | 7gg fa |
+Δ (Δ%) | trend 8gg sparkline. Riga TOTALE in fondo. Ordinamento per
+delta_pct desc (chi cresce più sopra). HTMX refresh 60s.
+
+**Funzioni nuove** in `dashboard/services/stats_reader.py`:
+- `_load_storico_truppe()` — load JSON
+- `get_truppe_istanza(nome)` — Layout A (oggi, 7gg fa, delta, delta_pct, serie_7d)
+- `get_truppe_storico_aggregato(days=8)` — Layout B (per_istanza ordinato + totale)
+
+#### Issue #85. Glory popup tier-up — fix ROI 270×60 ✅
+
+**ROOT CAUSE**: template `pin_arena_07_glory.png` è 225×35 px, ROI in
+`tasks/arena.py::_ARENA_PIN["glory"]` era `(380,410,570,458)` = 190×48 →
+**`cv2.matchTemplate` rifiuta perché template > image, match sempre impossibile**.
+
+**Fix**: ROI espansa a `(345,405,615,465)` = 270×60 (centro ~480 ±135, y 405-465).
+
+**Conseguenza pre-fix**: il popup Glory comparso a fine season (cambio rank
+Bronze→Silver→...) bloccava arena perché bot non riusciva a tappare Continue.
+
+#### WU67. Raccolta livello — reset+conta sostituito con delta diretto ✅
+
+Pre-fix: ogni raccolta che chiede livello diverso da quello corrente faceva
+**SEMPRE 7 tap meno (reset Lv.1) + N tap piu (conta da Lv.1 a target)** =
+7..13 tap, 1.5-3s.
+
+Post-fix: legge livello pannello via OCR (`_leggi_livello_panel` esistente),
+calcola delta = target - panel, fa solo `|delta|` tap nella direzione giusta:
+
+```python
+delta = livello - livello_panel
+if delta > 0: tap_piu × delta
+else:         tap_meno × abs(delta)
+```
+
+- **Saving**: 1.5-2s/raccolta × ~100 raccolte/die × 11 istanze ≈ ~25-35min/die
+- Mantiene il branch `livello_panel == -1` (OCR fail) come fallback reset+conta
+
+#### WU68. Sanity OCR slot post-marcia: `attive_map < attive_pre` → fallback HOME ✅
+
+In `tasks/raccolta.py::_aggiorna_slot_in_mappa` aggiunto sanity check
+deterministico DOPO la lettura OCR MAP:
+
+```python
+# attive_pre = pre_marcia + 1 (bot ha appena confermato +1 squadra)
+if 0 <= attive_map < attive_pre:
+    # Sospetto bug OCR (es. "5"→"4") OPPURE squadra rientrata (~15s, raro).
+    # Fallback HOME (più stabile) per disambiguare.
+    return _reset_to_mappa(ctx, obiettivo)
+```
+
+- **Cattura il caso `5/5 letti come 4/5`** (opposto del 4↔7 già coperto da
+  cross-validation `attive>totale`).
+- **Costo**: ~13-15s per fallback HOME, solo nel ~2-3% sospetto.
+
+#### WU69. Pattern detection slot pieni — 2× maschera_not_opened → break ✅
+
+Quando il client gioco rifiuta l'apertura della maschera invio (slot pieni
+reali), il bot vedeva `maschera NON aperta score=0.38` e procedeva ad altri
+tipi sprecando 60-90s in 3 tentativi.
+
+**Fix**: nuovo flag `ctx._raccolta_mask_not_opened` settato in `_esegui_marcia`
+quando maschera non si apre 2× (e pin_no_squads NON trovato). Counter
+`mask_not_opened_streak` in `_loop_invio_marce`:
+
+```python
+if ctx._raccolta_mask_not_opened:
+    mask_not_opened_streak += 1
+    if mask_not_opened_streak >= 2:
+        ctx._raccolta_slot_pieni = True
+        break  # esci dal for, then while
+```
+
+In `RaccoltaTask.run` controllo flag dopo `_loop_invio_marce` → break dal
+while esterno + log "slot pieni dedotti — chiusura istanza".
+
+- **Saving**: 60-90s per ciclo patologico (3 tentativi × 20-30s → 1 + uscita)
+- Reset streak su invio OK / tipo_bloccato / skip_neutro (causa diversa)
+
+#### WU70. OCR slot SX-only ensemble — risolve bug "5→7" ✅
+
+**Root cause confermata su FAU_00 c5** (max_squadre=5): tesseract con flow
+`_ocr_zona_intera_slot` (psm 6/7/13 sul pattern X/Y intero) confonde
+`5/5 → 7/5`. La cross-validation esistente `a8fb4ca` cattura `attive>totale`
+(skip conservativo) ma NON recupera il valore corretto.
+
+**Fix proposto dall'utente**: tagliare il "/" e l'intera cifra DX,
+leggere SOLO la SX in ROI isolata 10×24px, totale dalla config.
+
+Implementato come **branch primario** in `shared/ocr_helpers.leggi_contatore_slot`
+quando `totale_noto > 0`:
+
+```python
+crop_sx = pil_img.crop(_ZONA_CIFRA_SX)  # 10×24 isolato
+attive_psm10 = _ocr_cifra_singola_slot(crop_sx, psm=10)
+attive_psm8  = _ocr_cifra_singola_slot(crop_sx, psm=8)
+attive_psm7  = _ocr_cifra_singola_slot(crop_sx, psm=7)
+
+# Sanity pre-vote: scarta valori >totale_noto (impossibili)
+plausibili = [v for v in (attive_psm10, attive_psm8, attive_psm7)
+              if 0 <= v <= totale_noto]
+if plausibili:
+    attive = Counter(plausibili).most_common(1)[0][0]  # majority vote
+    return (attive, totale_noto)  # totale deterministic
+# else fallthrough flow legacy
+```
+
+- ROI piccola (cifra singola) → no disturbi da "/" o DX a confondere SX
+- 3 PSM in ensemble (10 single-char, 8 single-word, 7 single-line)
+- Sanity rigorosa scarta `7` quando max=5 (anche se 1/3 PSM legge giusto vince)
+- Costo: 3× tesseract calls ~200-300ms (trascurabile vs 1.5s sleep)
+- Fallback flow legacy se tutti i PSM ritornano valori non plausibili
+
+**Validazione runtime FAU_00 c6** (29/04 21:29):
+- Pre-fix c5: `OCR slot anomalo attive=7>totale=5 → skip conservativo` (0 inviate)
+- Post-fix c6: `slot OCR — attive=5/5 libere=0` corretto, **1 squadra inviata**
+  + `slot pieni — uscita` pulito.
+
+#### WU76. Screenshot pipeline in-memory (port V5 v5.24 → V6) ✅
+
+**Bug osservato 30/04 mattina** — analizzando perché il `tap START
+CHALLENGE` causava ADB offline immediato anche con WU75 attivo (no
+polling 17 screencap), scoperto che `core/device.py::_screenshot_raw`
+faceva I/O su disco per ogni screenshot:
+
+```python
+# Pre-fix V6 (3 operazioni I/O per screencap):
+adb shell screencap -p /sdcard/v6_screen.png    # 1) write su sdcard device
+adb pull remote local                            # 2) read+write su disco host
+cv2.imread(local)                                # 3) read da disco host
+os.remove(local)                                 # 4) delete da disco host
+```
+
+V5 ha già la pipeline in-memory dal commit v5.24
+("Aggiunta pipeline screenshot in-memoria (exec-out)") con saving
+documentato "150-300ms per chiamata". V6 non l'ha mai portato.
+
+**Fix WU76**: refactor `_screenshot_raw` in `core/device.py`:
+
+```python
+# Post-fix WU76 (0 operazioni I/O):
+result = subprocess.run(
+    [adb, "-s", port, "exec-out", "screencap", "-p"],
+    capture_output=True, timeout=15,
+)
+png_bytes = result.stdout
+arr = np.frombuffer(png_bytes, dtype=np.uint8)
+frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+```
+
+**Caratteristiche**:
+- Sanity check PNG header (`b"\x89PNG"`) prima di imdecode
+- Fallback legacy `screencap+pull` se exec-out fallisce (compat ADB vecchio)
+- Lock per-porta + lock globale invariati
+
+**Saving**:
+- I/O disco: 3-4 op/screen → 0 op
+- Latenza: ~300-500ms → ~50-200ms (-66%/-83% V5 commento)
+- Carico ADB durante burst (arena, raccolta): saturazione eliminata
+
+**Effetto atteso su cascade ADB**: dovrebbe sparire o ridursi >>50%.
+Combinato con WU74+WU75, arena dovrebbe diventare stabile.
+
+**Smoke test 30/04**: 5/5 screencap consecutivi via exec-out su FAU_10
+ritornano frame `(540, 960, 3)` valido. Latenza misurata 1.1-2.4s su
+istanza appena riavviata (CPU/RAM stressate post-boot) — sotto regime
+normale dovrebbe essere molto più veloce.
+
+**Validazione runtime**: pendente, attivo al prossimo restart bot.
+
+#### WU75. Arena — sleep passivo battaglia + 1 check final (era 17 polling) ✅
+
+**Bug osservato 30/04 mattina** dall'utente analizzando cascade ADB pattern:
+8/11 istanze il 30/04 con cascade ADB durante arena (FAU_00, 01, 03, 04, 06,
+07, 08, 10 — da 6 a 17 screenshot falliti). FAU_02, FAU_05, FAU_09 senza
+cascade. La cascade NON era correlata al timeout battaglia (FAU_05 5/5
+timeout, 0 cascade) ma scattava DOPO battaglia, durante transizione tra
+sfide su template `lista`/`purchase`/`challenge`.
+
+**Root cause**: il polling durante battaglia faceva 17 screencap (ogni 3.5s
+× 60s) + 8 screencap nella transizione post-Continue (glory + lista×3 +
+purchase×2 + challenge). 25 screencap in burst rate ~1/2s saturavano il
+socket ADB di MuMu già stressato dalle animazioni 3D battle.
+
+**Fix**: refactor `_attendi_fine_battaglia` da polling a `sleep(60s) +
+1 screencap`:
+
+```python
+# Pre-fix: while polling ogni 3.5s × 60s = 17 screencap
+while time.time() - t_start < 60:
+    screencap → match victory + failure
+    time.sleep(3.5)
+
+# Post-fix WU75: sleep passivo + 1 check
+time.sleep(60.0)
+screen = ctx.device.screenshot()
+victory = match victory
+failure = match failure
+```
+
+- **Saving**: ~94% screencap durante battaglia (17→1)
+- **Trade-off**: timeout 60s comunque rispettato; se skip OFF reale (WU74
+  false positive non risolto) battaglia >60s → check final fallisce → timeout
+- **Combinazione con WU74**: skip ON ad ogni sfida + sleep passivo + 1 check
+  = battaglie pulite senza cascade ADB
+- **Validazione**: pendente, attivo al prossimo restart bot
+
+#### WU74. Arena — check skip checkbox ad ogni sfida (era 1×/sessione) ✅
+
+**Bug osservato 30/04 mattina** dall'utente analizzando i timeout arena: 5/8
+istanze avevano timeout battaglia 60s sistematici (FAU_05 5/5 timeout, FAU_09
+3/5, FAU_01 3/5). Pattern non spiegato dai template victory/failure (lo score
+0.14-0.20 era corretto durante battaglia in corso).
+
+**Root cause**: in `tasks/arena.py:387` flag `run.skip_verificato` causava
+verifica skip checkbox SOLO alla 1ª sfida. Per sfide 2-5 nessun re-check.
+
+**Trigger scoperto**: la pulizia cache giornaliera WU64 (eseguita prima
+di arena su tutte le istanze il 30/04 UTC) **resetta al default visivo**
+il checkbox skip nel client. Poi:
+- FAU_02: bot rileva `OFF→tap` → skip attivato → 0 timeout su 5 sfide ✓
+- FAU_05: bot rileva `Skip già attivo` (FALSO POSITIVO) → no tap → skip
+  resta OFF reale → 5/5 timeout 60s
+
+Il template `pin_arena_check.png` matcha anche con skip OFF perché ROI
+`(700,470,760,510)` identica a `pin_arena_no_check.png` — discriminazione
+fragile su pixel marginali.
+
+**Fix**: rimosso flag, `_assicura_skip()` chiamato ad ogni sfida.
+
+```python
+# Pre-fix
+if not run.skip_verificato:
+    self._assicura_skip(ctx)
+    run.skip_verificato = True
+
+# Post-fix WU74
+self._assicura_skip(ctx)  # ad ogni sfida
+```
+
+- **Costo**: +1.5s/sfida × 5 = +7.5s/ciclo arena (trascurabile vs ~5min totali)
+- **Beneficio**: skip sempre realmente attivo, eliminazione timeout sistematico
+- **Validazione**: pendente, attivo al prossimo restart bot
+
+#### WU73. Dashboard storico truppe — ordinamento alfabetico ✅
+
+In `get_truppe_storico_aggregato`: sort key cambiato da `delta_pct desc` a
+`r["nome"]` → ordine FAU_00, FAU_01, ..., FAU_10, FauMorfeus. Più intuitivo
+per debug per-istanza (richiesta utente 30/04 notte).
+
+#### WU72. Dashboard storico cicli — UTC raw vs ora locale ✅
+
+**Bug osservato 30/04 notte** dall'utente: pannello "📚 storico cicli" mostrava
+ciclo #43 con `start=22:58` (UTC raw) mentre la card istanza FAU_00 mostrava
+avvio `01:02` (ora locale). Disallineamento di 2h confonde la lettura.
+
+**Bug aggiuntivo a cavallo mezzanotte UTC**: ciclo iniziato `2026-04-29T22:58 UTC`
+veniva visualizzato `data=29/04` mentre era già il `30/04` ora locale (`00:58`).
+
+**Root cause**: in [`dashboard/services/telemetry_reader.get_storico_cicli`](dashboard/services/telemetry_reader.py)
+slicing `ts_start[11:16]` e `ts_start[8:10]/[5:7]` estraeva direttamente i
+caratteri della stringa ISO UTC senza conversione in fuso locale.
+
+**Fix**: nuove helper `_ts_to_local_hhmm()` e `_ts_to_local_date()` con
+`datetime.fromisoformat(ts).astimezone().strftime(...)` che converte in ora
+locale del server. Coerente con card istanza (già in locale).
+
+**Validazione runtime** post-restart dashboard:
+- ciclo #43: pre `data=29/04 start=22:58` → post `data=30/04 start=00:58` ✓
+- ciclo #42: end correctly mostrato a cavallo mezzanotte (`23:34→00:57`)
+
+#### WU71. Stabilizzazione HOME — polling 3s → 1s ✅
+
+In `core/launcher.attendi_home::stabilizzazione`, ridotto `time.sleep(3.0)
+→ 1.0` nel polling stable_count consecutive HOME.
+
+- **Saving**: 5 stable × 2s = 10s/istanza × 11 istanze ≈ **110s/ciclo**
+- Trade-off: 3× screenshot+template-match al secondo durante stab (window
+  max 60s). Su PC lento il costo CPU è bilanciato dal saving wallclock.
+- **Stato**: deployed, attivo al prossimo restart spontaneo.
+
+---
+
+### Issue chiuse — Sessione 29/04 pomeriggio (continua 3)
+
+#### WU63. Audit debug PNG su disco + cleanup ✅
+
+**Audit completo** dei punti che scrivono PNG durante runtime bot prod:
+
+| File | Funzione | Trigger | Stato post-audit |
+|------|----------|---------|------------------|
+| `shared/ocr_dataset.py:106-118` | `salva_ocr_pair` (WU55) | flag `raccolta_ocr_debug` | ❌ **SPENTO 29/04** (era `true` in prod, ora `false`) |
+| `core/launcher.py:679-695` | `_save_discovery_snapshot` | UNKNOWN streak {5,10,15,20} | ✅ MANTENUTO (utile per banner discovery, cap 4/ciclo) |
+| `shared/ocr_helpers.py:414-415` | OCR slot fail debug | psm 6/7/13 tutti KO | ✅ ATTIVO (2 file fissi sovrascritti, trascurabile) |
+| `tasks/raccolta.py:546` `_salva_debug_verifica` | anomalia score `pin_verifica_*` | trigger anomalia | ✅ ATTIVO (mai scattato finora) |
+| `tasks/raccolta.py:920` `_salva_debug_lv_panel` | livello panel | cap interno MAX_DEBUG_FILES | ✅ ATTIVO (cap interno) |
+| `tasks/boost.py:78` `_salva_debug_shot` | — | chiamate commentate | ❌ DISABILITATO (Issue #59) |
+
+**Cleanup file PNG già accumulati in PROD** (29/04):
+- `data/ocr_dataset/` — 2040 file, **445 MB** → cancellati
+- `debug_task/screenshots/` — 1 file 2 MB → cancellato (test manuale 28/04)
+- `debug_task/vai_in_home_unknown/` — 3 file 2 MB → cancellati (cartella deprecata Issue #63)
+- `debug_task/boot_unknown/` — 11 file 9 MB → **MANTENUTO** (utile discovery)
+
+**Totale liberato**: ~448 MB su disco prod. Toggle `raccolta_ocr_debug` ora
+`false` in `runtime_overrides.json` prod (hot-reload prossimo tick — niente
+restart richiesto).
+
+#### WU62. Nuovo task TRUPPE — addestramento automatico 4 caserme ✅
+
+**Scenario**: 4 caserme fisse per tipologia (Fanteria / Cavalleria / Arcieri /
+Macchine). Il client gioco espone nella colonna sx HOME un'icona scudo+2 fucili
+con counter `X/4` dove X = caserme attualmente in addestramento.
+
+**Comportamento utile scoperto in test**: tap sull'icona pannello porta
+*automaticamente* alla prossima caserma libera (skip automatico di quelle
+già in addestramento). Niente scan mappa necessario per individuare le
+caserme. Decisione: **niente template matching dinamico per il MVP** —
+tutte le coord sono FISSE.
+
+**Coord calibrate su FAU_05** (960×540):
+
+| Step | Coord | Tipo |
+|------|-------|------|
+| Pannello caserme (col sx HOME) | `(30, 247)` | FISSA |
+| Cerchio "Train" del menu mappa post-(30,247) | `(564, 382)` | FISSA |
+| Pulsante TRAIN giallo (Squad Training screen) | `(794, 471)` | FISSA |
+| Checkbox "Fast Training" tap | `(687, 508)` | FISSA |
+| Box pixel checkbox per stato | `(676, 497)→(699, 518)` | FISSA |
+| Zona OCR counter X/4 | `(12, 264, 30, 282)` | FISSA |
+
+**OCR counter cascade** (`shared/ocr_helpers.ocr_cifre`):
+- Preprocessor primario `otsu` → funziona per X ∈ {1,2,3,4}
+- Fallback `binary` → necessario per X==0 (otsu lo perde per contrasto basso)
+- Validato su 5 stati 0/4..4/4 in test reale
+
+**Vincolo Fast Training**: checkbox SEMPRE OFF (premium-free). Stato letto
+via R-mean del box pixel: `R > 110 → ON`. Soglia derivata dal confronto
+sample: OFF ≈ RGB(88,65,45), ON ≈ RGB(134,97,65).
+
+**Test reale FAU_05** (29/04 14:55-15:10):
+4 cicli consecutivi 0/4 → 4/4, tutti OK. Checkbox sempre OFF in tutti i
+4 cicli. 4 tipi caserme gestite con stesse coord: Infantry (Ruffian),
+Rider (Iron Cavalry), Ranged (Ranger), Engine (Rover).
+
+**Flow MVP** (`tasks/truppe.py`):
+1. `vai_in_home()`
+2. Leggi counter X via OCR cascade
+3. Se X==4 → skip (TaskResult.skip)
+4. Per (4-X) volte:
+   a. tap `(30, 247)` → sleep 5s
+   b. tap `(564, 382)` → sleep 5s [apre Squad Training]
+   c. verifica box checkbox; se R-mean>110 → tap `(687, 508)` → sleep 5s
+   d. tap `(794, 471)` → sleep 5s [TRAIN avviato]
+5. Re-leggi counter (best effort, log)
+6. `tap_barra("city")` → ritorno HOME
+
+**Integrazione**:
+- `tasks/truppe.py` — NUOVO file
+- `config/task_setup.json` — aggiunta `TruppeTask` priority **18**, periodic **4h**
+  (subito dopo `RaccoltaTask=15`, prima di `DonazioneTask=20`. Logica: i primi 3
+  task sono sempre Boost→Rifornimento→Raccolta, gli altri seguono)
+- `main.py::_import_tasks` — aggiunto import
+- `dashboard/models.py::TaskFlags` — flag `truppe: bool = True`
+- `dashboard/routers/api_config_overrides.py` — `truppe` in `valid_tasks`
+- `dashboard/app.py::partial_task_flags_v2::ORDER` — `truppe` aggiunto alla
+  pill UI (Row 3 con `arena`); `district_showdown` orfano in ultima riga
+
+**Template estratti** (in `templates/pin/`, **non usati dal MVP**, riserva
+per robustezza futura template matching):
+- `pin_truppe_pannello.png` (55×36) — icona scudo+fucili
+- `pin_truppe_train_btn.png` (100×29) — pulsante TRAIN giallo
+- `pin_truppe_check_off.png` (23×21) — checkbox vuoto
+- `pin_truppe_check_on.png` (23×21) — checkbox con spunta dorata
+
+**Stato sync prod**: NUOVO file `tasks/truppe.py` + 4 PNG + modifiche
+config/main/dashboard. **Bot prod da riavviare** per attivare il nuovo task.
+
+### Issue chiuse — Sessione 29/04 pomeriggio (continua 2)
+
+#### WU61. Test FAU_03 reinstallato + integrazione settings_helper in launcher ✅
+
+**Test FAU_03** (29/04 13:16-13:19, porta ADB 16480):
+Script: `c:\tmp\test_fau03_settings_arena.py`. Sequenza:
+PRE-Glory dismiss → FASE 1 settings → FASE 2 Campaign / Arena of Doom /
+Glory check (opt) / 5 sfide.
+
+| Fase | Esito | Note |
+|------|-------|------|
+| PRE Glory dismiss | ⚠️ NON esercitato | popup non visibile all'avvio test |
+| FASE 1 Settings | ✅ 22.5s | Optimize template score 0.998 |
+| Glory post-Arena of Doom | ⚠️ NON esercitato | popup non comparso nel flow |
+| FASE 2 Arena 5 sfide | ✅ 159.6s — 31.9s/sfida | Identico a FAU_02 |
+
+**Issue #85 NON validato** in questa sessione (popup Glory assente in entrambi
+gli hook). PNG nuovo + ROI espansa rimangono in posizione. Validazione end-to-end
+rimandata al prossimo cambio tier in produzione.
+
+**FAU_03 stabile post-reinstallazione**: ADB stabile, no cascade, no freeze,
+arena 5/5 = pattern identico FAU_02. Conferma efficacia pulizia/reinstallazione
+istanze MuMu come fix per cascata ADB persistente.
+
+**Integrazione `imposta_settings_lightweight()` in `core/launcher.py`**:
+
+Hook in `attendi_home()` dopo `nav.vai_in_home()` finale (HOME confermata).
+Try/except con lazy import → errori non bloccano avvio istanza, solo log warn.
+`_SettingsCtx` minimale (device + matcher + navigator).
+
+**Effetto runtime**: ad ogni avvio istanza, dopo HOME stabile, applica
+sequenza Avatar→Settings→System→Graphics LOW→Frame LOW→Optimize check→3 BACK
+(~22s/istanza). Idempotente per Optimize (template check ROI 108-198×317-357).
+Costo aggregato: 12 istanze × 22s × 2 cicli/h = ~9 min/h aggiuntivi.
+
+**Stato sync prod**: `core/launcher.py`, `core/settings_helper.py`,
+`tasks/arena.py`, `templates/pin/pin_arena_07_glory.png`,
+`templates/pin/pin_settings_optimize_low_active.png`. Bot prod **da riavviare**
+manualmente per attivare l'integrazione (decisione utente — bot in pausa,
+modalità raccolta-only).
+
+### Issue chiuse — Sessione 29/04 pomeriggio
+
+#### WU60. Settings lightweight client gioco — `core/settings_helper.py` ✅
+
+**Motivazione**: Cascata ADB persistente su FAU_02/03/04 durante test arena
+diretto (FAU_00 stabile). Ipotesi: settings client gioco non lightweight
++ MuMu out-of-date → instabilità rendering. Verifica manuale FAU_01:
+con Graphics LOW + Frame Rate LOW + Optimize Mode LOW il flow regge.
+
+**Implementazione**: nuovo modulo `core/settings_helper.py` con
+`imposta_settings_lightweight(ctx, log_fn)`:
+- Sequenza 8 step: Avatar→Settings→System→Graphics LOW→Frame LOW→
+  check Optimize visuale→[tap se non attivo]→3 BACK.
+- Coordinate calibrate via `getevent /dev/input/event4` su FAU_01
+  (960×540 display).
+- Toggle stateful Optimize Mode: pre-screenshot + match template
+  `pin_settings_optimize_low_active.png` (ROI 108-198 × 317-357,
+  soglia 0.70). Skip tap se già attivo (idempotenza forzata via vista).
+- Delay maggiorati per PC lento (utente conferma checkbox match instabile):
+  `_DELAY_NAV=3.0s`, `_DELAY_TOGGLE=2.0s`, `_DELAY_PRE_CHECK=1.5s`,
+  `_DELAY_BACK=2.0s`. Tempo totale ~22s/istanza.
+
+**Stato**: modulo creato e validato su FAU_01 (score Optimize 1.000).
+Test FAU_02 (settings OK, arena KO) → settings da soli non risolvono cascata
+ADB; necessaria reinstallazione istanza. **Integrazione in `launcher.py`
+RIMANDATA** post-pulizia istanze.
+
+### Issue chiuse — Sessione 29/04 mattina
+
+#### WU58. Dashboard mostra dati daily stale dopo pausa lunga (29/04) ✅
+
+**Sintomo**: dopo pausa 22:56-05:46 in modalità manutenzione + task
+rifornimento OFF da ieri sera, dashboard mostrava `inviato_oggi` e
+`provv. lorde/nette` con valori di ieri come se fossero di oggi.
+
+**Causa**: `state/FAU_*.json::rifornimento` mantiene `data_riferimento` +
+totali daily aggiornati solo quando il task rifornimento gira (chiamando
+`_controlla_reset` che azzera al cambio giorno).
+
+**Fix** in `dashboard/services/stats_reader.py` — 3 funzioni:
+1. `get_state_per_istanza()`: se `data_riferimento != today_utc` azzera
+   in-memory spedizioni, inviato netto/lordo, tassa, dettaglio, provviste.
+2. `get_risorse_farm()`: stessa logica per pannello aggregato.
+3. `_load_morfeus_state()`: se `ts[:10] != today_utc` → `daily_recv_limit=-1`
+   (dashboard mostra "capienza morfeus —").
+
+State file NON toccato: il bot lo azzera al primo tick rifornimento di oggi.
+
+#### WU59. Pannello "📚 storico cicli" — colonna DATA ✅
+
+**Sintomo**: dopo pausa 28→29/04 i cicli di ieri/oggi indistinguibili
+(dashboard mostrava solo HH:MM → HH:MM).
+
+**Fix**:
+- `CicloStorico.start_date` (formato DD/MM UTC) in `telemetry_reader.py`.
+- Colonna "data" tra "ciclo" e "finestra" in `partial_telemetria_storico_cicli`.
+
+### Issue aperte — Arena Watch/Challenge + Orchestrator last_run
+
+#### 83. Arena `_TAP_ULTIMA_SFIDA` cieco — freeze su righe "Watch" (28/04 sera)
+
+**Sintomo:** dopo reset arena schedule (state azzerato 28/04 19:15), arena
+parte ma blocca dopo 0-1 sfide su istanze con sfide già combattute oggi.
+
+**Root cause:** `tasks/arena.py:58` ha `_TAP_ULTIMA_SFIDA = (745, 482)` —
+coordinata fissa V5. Tappa la "ultima riga" della lista 5 sfide
+indipendentemente dal pulsante presente. Ogni riga ha pulsante variabile:
+- "Challenge" (sfida nuova) → entra in popup Challenge Info → bot trova pin
+  `challenge` 0.993 → tap START CHALLENGE → battaglia OK
+- "Watch" / replay (sfida già combattuta oggi) → entra in **modalità
+  visualizzazione battaglia** → schermata transitoria senza pin riconoscibili
+  → screenshot ADB iniziano a fallire (gioco bloccato in stato non gestito)
+  → cascata abort ADB unhealthy.
+
+**Conferma sperimentale (28/04 sera, 3 istanze):**
+
+| Istanza | Stato sfide pre-reset | Esito post-reset |
+|---|---|---|
+| FAU_00 | 0/5 ieri (last_run 27/04 12:58) → 5 nuove "Challenge" | ✅ 5/5 success in 2 min |
+| FAU_10 | 1/5 stamattina → 1 "Watch" + 4 "Challenge" | ❌ 1V poi freeze sfida 2 |
+| FAU_01 | 1/5 stamattina → 1 "Watch" + 4 "Challenge" | ❌ freeze sfida 1 (la "Watch" era già in cima) |
+
+**Fix candidati:**
+1. **Match dinamico button "Challenge"** — `matcher.find_one()` su template
+   `pin_btn_challenge_lista.png` filtrato in ROI lista, scegliere coordinata
+   del primo match invece di pixel fisso.
+2. **Scroll/filter "Watch"** — swipe o filtro UI per nascondere sfide
+   completate prima del tap.
+3. **Try-and-back con sentinel** — tappare (745,482), screenshot post 1.5s,
+   se trova `pin_replay` invece di `pin_challenge` → BACK + tap riga superiore.
+
+**Effort:** ~30 righe Python (fix #1, più robusto). Richiede screenshot
+template `pin_btn_challenge_lista.png` da estrarre dalla UI corrente.
+
+**Bot in modalità minima (28/04 19:45)**: utente ha disabilitato dashboard
+tutti i task tranne raccolta. Solo `raccolta` (always) + `radar_census`
+attivi. Modalità sicura mentre si studia la sequenza arena. Riabilitare
+arena/store/altri dopo fix.
+
+#### 84. Bug orchestrator: `entry.last_run` aggiornato anche su fail/abort
+
+**Sintomo:** arena fallita stamattina 13/13 esecuzioni, MA `last_run` è
+stato aggiornato comunque in `state/FAU_XX.json`. Risultato: orchestrator
+considera arena "fatta oggi" → `e_dovuto_daily=False` → arena non riprova
+fino al reset 01:00 UTC del giorno dopo.
+
+**Codice problematico:** `core/orchestrator.py:316`:
+```python
+entry.last_run    = time.time()
+entry.last_result = result
+```
+Eseguito SEMPRE dopo `task.run()`, anche se `result.success=False` o
+exception capturata.
+
+**Fix proposto:**
+```python
+if result.success or result.skipped:
+    entry.last_run = time.time()
+entry.last_result = result
+```
+
+**Effort:** 2 righe + restart bot. Da fare insieme al fix #83.
 
 #### 82. Radar census — bootstrap templates + smoke test (CHIUSA ✅ 28/04)
 
@@ -2256,21 +2926,34 @@ state.arena.log_stato()              → str descrittiva per log
 state.rifornimento.provviste_esaurite→ bool (TODO: da aggiungere)
 ```
 
-### Scheduling task in main.py (_TASK_SETUP)
-| Classe | Priority | Interval | Schedule | Note |
-|--------|----------|----------|----------|------|
-| BoostTask | 5 | — | periodic | always-run con BoostState guard |
-| VipTask | 10 | 24h | daily | |
-| MessaggiTask | 20 | 4h | periodic | |
-| AlleanzaTask | 30 | 4h | periodic | |
-| StoreTask | 40 | 8h | periodic | |
-| ArenaTask | 50 | 24h | daily | |
-| ArenaMercatoTask | 60 | 24h | daily | |
-| ZainoTask | 70 | 168h | periodic | |
-| RadarTask | 80 | 12h | periodic | |
-| RadarCensusTask | 90 | 12h | periodic | disabilitato default |
-| RifornimentoTask | 100 | — | always | always-run con guard pre-condizioni (soglie risorse, slot) |
-| RaccoltaTask | 110 | — | always | always-run se slot liberi |
+### Scheduling task (`config/task_setup.json` ↔ `main.py::_TASK_SETUP`)
+
+> Fonte di verità: `config/task_setup.json`. Aggiornato 29/04/2026 (WU62 + audit).
+> I primi 3 task sono **sempre** Boost → Rifornimento → Raccolta (logica:
+> incrementa produzione, verifica slot, occupa slot). Gli altri seguono.
+
+| Pos | Classe | Priority | Interval | Schedule | Note |
+|-----|--------|----------|----------|----------|------|
+| 1 | BoostTask | 5 | — | periodic | always-run con BoostState guard (incrementa produzione) |
+| 2 | RifornimentoTask | 10 | — | always | guard pre-condizioni (soglie risorse, slot disponibili) |
+| 3 | RaccoltaTask | 15 | — | always | always-run se slot liberi (occupa slot squadre) |
+| 4 | **TruppeTask** | **18** | **4h** | **periodic** | **NUOVO 29/04 — addestra 4 caserme libere (skip se 4/4)** |
+| 5 | DonazioneTask | 20 | — | always | |
+| 6 | ZainoTask | 25 | 168h | periodic | |
+| 7 | VipTask | 30 | 24h | daily | |
+| 8 | AlleanzaTask | 35 | 4h | periodic | |
+| 9 | MessaggiTask | 40 | 4h | periodic | |
+| 10 | ArenaTask | 50 | 24h | daily | |
+| 11 | ArenaMercatoTask | 60 | 24h | daily | |
+| 12 | DistrictShowdownTask | 70 | — | always | guard finestre evento |
+| 13 | StoreTask | 80 | 8h | periodic | |
+| 14 | RadarTask | 90 | 12h | periodic | |
+| 15 | RadarCensusTask | 100 | 12h | periodic | disabilitato default |
+| 16 | RaccoltaChiusuraTask | 200 | — | always | chiusura tick (Issue #62) |
+
+**Runtime swap RaccoltaFastTask** (WU57): se `tipologia == "raccolta_fast"`,
+`main.py::_thread_istanza` sostituisce `RaccoltaTask` con `RaccoltaFastTask`
+in fase di registrazione, preservando priority/interval/schedule.
 
 ---
 

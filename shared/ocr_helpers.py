@@ -611,14 +611,20 @@ def leggi_contatore_slot(
     Zone calibrate da ocr.py V5 (890,117,946,141).
 
     Pipeline:
+      0. WU70 (29/04 sera) — SX-only ensemble [PRIMARIA quando totale_noto>0]:
+         - crop _ZONA_CIFRA_SX (10×24 isolato, no "/" no DX a confondere)
+         - 3 PSM diversi (10/8/7) con upscale 8x + Otsu
+         - filtra a priori valori >totale_noto (impossibili) → escluso "5→7"
+         - majority vote sui plausibili → (attive, totale_noto)
+         - tutto fallisce → fallthrough al flow legacy
       1. Pre-check pixel bianchi — se < 15px → fallback thresh_130 psm=6 scale=2
          Se fallback trova X/Y → ritorna. Altrimenti → (0, totale_noto).
-      2. OCR zona intera psm=6/7/13 → pattern X/Y  [priorità]
+      2. OCR zona intera psm=6/7/13 → pattern X/Y  [priorità legacy]
       3. Fallback cifre separate psm=10/8
 
     Args:
         img:         Screenshot della HOME o MAPPA
-        totale_noto: valore totale noto (da instances.json) usato come fallback
+        totale_noto: valore totale noto (da instances.json). Se >0 abilita WU70.
 
     Returns:
         (attive, totale) — es. (2, 4)
@@ -627,6 +633,25 @@ def leggi_contatore_slot(
     """
     try:
         pil_img = _to_pil(img)
+
+        # WU70 — SX-only ensemble: lettura primaria quando totale_noto>0
+        if totale_noto > 0:
+            crop_sx = pil_img.crop(_ZONA_CIFRA_SX)
+            attive_psm10 = _ocr_cifra_singola_slot(crop_sx, psm=10)
+            attive_psm8  = _ocr_cifra_singola_slot(crop_sx, psm=8)
+            attive_psm7  = _ocr_cifra_singola_slot(crop_sx, psm=7)
+            # Filtra a priori valori non plausibili (impossibili: <0 o >totale).
+            # Cattura il pattern "5→7" perché 7 viene escluso quando max=5.
+            plausibili = [
+                v for v in (attive_psm10, attive_psm8, attive_psm7)
+                if 0 <= v <= totale_noto
+            ]
+            if plausibili:
+                from collections import Counter
+                attive = Counter(plausibili).most_common(1)[0][0]
+                return (attive, totale_noto)
+            # Tutti e 3 i PSM hanno letto valori non plausibili o -1.
+            # Fallthrough al flow legacy come ultima spiaggia.
 
         # 1. Pre-check pixel bianchi nella zona testo
         x1, y1, x2, y2 = _ZONA_TESTO_SLOT

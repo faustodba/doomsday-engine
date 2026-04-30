@@ -757,23 +757,40 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
             f"Raccolta: pannello già su Lv.{livello_panel} == target — "
             f"skip reset"
         )
-    else:
-        if livello_panel == -1:
-            ctx.log_msg(
-                f"Raccolta: OCR livello pannello fallito — reset standard"
-            )
-        else:
-            ctx.log_msg(
-                f"Raccolta: pannello su Lv.{livello_panel} != target Lv.{livello} "
-                f"— reset standard"
-            )
+    elif livello_panel == -1:
+        # OCR fallito: NON sappiamo dove siamo → reset+conta classico (sicuro)
+        ctx.log_msg(
+            f"Raccolta: OCR livello pannello fallito — reset standard "
+            f"(7 meno + {livello - 1} piu)"
+        )
         for _ in range(7):
             ctx.device.tap(coord_lv["meno"])
-            time.sleep(0.2)               # FIX F: 0.15 → 0.2
+            time.sleep(0.2)
         time.sleep(0.3)
         for _ in range(livello - 1):
             ctx.device.tap(coord_lv["piu"])
-            time.sleep(0.25)              # FIX F: 0.2 → 0.25
+            time.sleep(0.25)
+    else:
+        # WU67 (29/04): OCR letto → aggiusta solo del delta (saving 5-12 tap).
+        # Pre-fix: SEMPRE 7 meno + N piu (7..13 tap, 1.5-3s).
+        # Post-fix: |delta| tap nella direzione giusta (1..6 tap, 0.2-1.5s).
+        delta = livello - livello_panel
+        if delta > 0:
+            ctx.log_msg(
+                f"Raccolta: pannello su Lv.{livello_panel} → +{delta} tap "
+                f"piu per target Lv.{livello}"
+            )
+            for _ in range(delta):
+                ctx.device.tap(coord_lv["piu"])
+                time.sleep(0.25)
+        else:  # delta < 0
+            ctx.log_msg(
+                f"Raccolta: pannello su Lv.{livello_panel} → {abs(delta)} tap "
+                f"meno per target Lv.{livello}"
+            )
+            for _ in range(abs(delta)):
+                ctx.device.tap(coord_lv["meno"])
+                time.sleep(0.2)
 
     ctx.device.tap(coord_lv["search"])
     time.sleep(delay_cerca)
@@ -1280,6 +1297,25 @@ def _aggiorna_slot_in_mappa(ctx: TaskContext, obiettivo: int,
         )
         return _reset_to_mappa(ctx, obiettivo)
 
+    # WU68 (29/04 sera) — Sanity check deterministico: bot ha appena
+    # confermato l'invio di +1 squadra, quindi `attive_pre` rappresenta il
+    # totale atteso post-marcia (= attive_pre_marcia + 1). Reale dovrebbe
+    # essere ≥ attive_pre. Eccezione: 1 squadra rientrata durante la marcia
+    # (~15-20s, raro). Se OCR MAP < attive_pre → sospetto bug OCR (es. "5"
+    # letto come "4", opposto del pattern 4↔7 già coperto da cross-validation
+    # in ocr_helpers, che scatta solo per attive>totale). Fallback HOME
+    # singolo per disambiguare:
+    #   - bug OCR ("5"→"4") → HOME ground-truth corregge a 5
+    #   - rientro reale → HOME conferma 4
+    # Bug osservato 29/04 sera: 5/5 letto come 4/5 → bot inviava 6° squadra
+    # fittizia. Costo fix: ~13-15s solo nei casi sospetti (~2-3%).
+    if 0 <= attive_map < attive_pre:
+        ctx.log_msg(
+            f"[SLOT-MAP] sanity: attive_map={attive_map} < attive_pre={attive_pre} "
+            f"— sospetto bug OCR (just sent +1, atteso ≥{attive_pre}) → fallback HOME"
+        )
+        return _reset_to_mappa(ctx, obiettivo)
+
     # Lettura accettabile in mappa
     if 0 <= attive_map <= obiettivo:
         ctx.log_msg(
@@ -1373,6 +1409,12 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int,
     soglia          = _cfg(ctx, "TEMPLATE_SOGLIA")
     eta_max         = _cfg(ctx, "ETA_MAX_S")
 
+    # WU69 — flag "maschera non aperta" per pattern detection slot pieni.
+    # Reset all'inizio di ogni invio. Settato a True solo se "maschera ancora
+    # non aperta" e pin_no_squads NON trovato. Il caller (_loop_invio_marce)
+    # conta gli streak e se >= 2 deduce slot pieni → break + flag.
+    ctx._raccolta_mask_not_opened = False  # type: ignore[attr-defined]
+
     ctx.log_msg("Raccolta: RACCOGLI → SQUADRA")
     ctx.device.tap(tap_raccogli)
     time.sleep(0.8)                   # FIX F: 0.5 → 0.8
@@ -1408,6 +1450,11 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int,
                         time.sleep(0.3)
                         ctx._raccolta_no_squads = True
                         return False, None
+                    # WU69 — segnale "maschera non si apre" (slot pieni candidato).
+                    # Solo se NON è "No Squads" e la maschera non si è aperta a
+                    # nessuno dei 2 tentativi → segnale al loop di tracciare lo
+                    # streak. 2 streak su tipi diversi → conclude slot pieni.
+                    ctx._raccolta_mask_not_opened = True  # type: ignore[attr-defined]
                     ctx.log_msg("Raccolta: maschera ancora non aperta — FALLITO")
                     return False, None
                 ctx.log_msg(f"Raccolta: maschera aperta al retry score={m2.score:.3f} → OK")
@@ -1848,6 +1895,11 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
     attive_correnti = attive_inizio
     inviate         = 0
     fallimenti_cons = 0
+    # WU69 — streak fallimenti "maschera non aperta" consecutivi (slot pieni
+    # detection deterministica via pattern UI: la maschera non si apre se gli
+    # slot squadra sono tutti occupati, indipendentemente da OCR slot iniziale).
+    mask_not_opened_streak = 0
+    SOGLIA_MASK_STREAK     = 2  # >= 2 fallimenti su tipi diversi → slot pieni
 
     # Safety: limite totale invii per evitare loop infiniti
     max_invii    = obiettivo * max(2, max_fallimenti) + 5
@@ -1928,6 +1980,7 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
                 attive_pre_marcia = attive_correnti
                 attive_correnti += 1
                 fallimenti_cons  = 0
+                mask_not_opened_streak = 0  # WU69 — reset streak su invio OK
                 skip_neutri_per_tipo[tipo] = 0
                 ctx.log_msg(
                     f"Raccolta: squadra confermata ({attive_correnti}/{obiettivo})"
@@ -1997,6 +2050,30 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
             # ── CASO fallimento puro ─────────────────────────────────
             # _reset_to_mappa già chiamato dentro _invia_squadra
             fallimenti_cons += 1
+
+            # WU69 — pattern detection slot pieni: se "maschera non aperta" è
+            # il sintomo specifico (flag settato in _esegui_marcia), incrementa
+            # streak. >= SOGLIA su tipi diversi consecutivi = slot pieni
+            # deterministico (la maschera non si apre se tutti gli slot squadra
+            # sono occupati, indipendentemente dal valore letto via OCR).
+            if getattr(ctx, "_raccolta_mask_not_opened", False):
+                mask_not_opened_streak += 1
+                ctx.log_msg(
+                    f"Raccolta: maschera_not_opened streak="
+                    f"{mask_not_opened_streak}/{SOGLIA_MASK_STREAK}"
+                )
+                if mask_not_opened_streak >= SOGLIA_MASK_STREAK:
+                    ctx.log_msg(
+                        f"Raccolta: {mask_not_opened_streak} fallimenti maschera "
+                        f"consecutivi su tipi diversi → slot pieni dedotti, "
+                        f"uscita immediata"
+                    )
+                    ctx._raccolta_slot_pieni = True  # type: ignore[attr-defined]
+                    break  # esce dal for; il while terminerà
+            else:
+                # Fallimento per altra causa (es. nodo perso, marcia errata) →
+                # reset streak (lo streak deve essere puro "mask_not_opened")
+                mask_not_opened_streak = 0
             continue
 
         # F3 — dopo il for: se flag No Squads True, esci anche dal while
@@ -2276,6 +2353,16 @@ class RaccoltaTask(Task):
                 if getattr(ctx, "_raccolta_no_squads", False):
                     ctx.log_msg("Raccolta: No Squads confermato — chiusura istanza")
                     ctx._raccolta_no_squads = False   # reset per prossima esecuzione
+                    break
+
+                # WU69 — slot pieni dedotti via pattern "maschera non aperta"
+                # ripetuto su tipi diversi: esci dal while esterno (no retry).
+                # Saving rispetto a comportamento pre-fix: ~60-90s per ciclo
+                # patologico (3 tentativi × 20-30s ognuno → 1 invio + uscita).
+                if getattr(ctx, "_raccolta_slot_pieni", False):
+                    ctx.log_msg("Raccolta: slot pieni dedotti — chiusura istanza")
+                    ctx._raccolta_slot_pieni = False  # reset per prossima esecuzione
+                    attive_correnti = obiettivo  # forza stato "pieno" per stato finale
                     break
 
                 # Post-loop: rileggi slot da HOME per decidere se continuare

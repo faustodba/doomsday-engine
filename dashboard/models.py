@@ -56,6 +56,7 @@ class TaskFlags(BaseModel):
     arena_mercato:      bool = True
     district_showdown:  bool = False     # default OFF — evento mensile
     boost:              bool = True
+    truppe:             bool = True
     store:              bool = True
 
 

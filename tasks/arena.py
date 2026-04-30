@@ -15,7 +15,12 @@ PIN usati
   pin/pin_arena_04_failure.png    ROI=(414, 94, 544, 146)  soglia=0.80
   pin/pin_arena_05_continue.png   ROI=(410,443, 547, 487)  soglia=0.80  [diagnostico]
   pin/pin_arena_06_purchase.png   ROI=(334,143, 586, 185)  soglia=0.80
-  pin/pin_arena_07_glory.png      ROI=(379,418, 564, 447)  soglia=0.80
+  pin/pin_arena_07_glory.png      ROI=(380,410, 570, 458)  soglia=0.80
+                                  → pulsante "Continue" giallo del popup
+                                    "Congratulations / Glory <Tier>" (es.
+                                    Glory Silver), che appare a inizio
+                                    season o al cambio di rank. NON il
+                                    banner header "Arena of Glory".
 
 Navigazione
 ─────────────────────────────────────────────────────────────────────────────
@@ -59,10 +64,13 @@ _TAP_ULTIMA_SFIDA    = (745, 482)   # pulsante Challenge ultima riga lista (V5 c
 _TAP_START_CHALLENGE = (730, 451)   # bottone START CHALLENGE (V5 config)
 _TAP_ESAURITE_CANCEL = (334, 380)   # Cancel nel popup "sfide esaurite"
 _TAP_CONGRATULATIONS = (480, 440)   # Continue nel popup Congratulations generico
-_TAP_GLORY_CONTINUE  = (471, 432)   # Continue nel popup Glory Silver
+_TAP_GLORY_CONTINUE  = (473, 432)   # Continue nel popup Glory <Tier> (popup tier-up:
+                                    # "Congratulations / Glory Silver" e simili)
 
-_TAP_CONTINUE_VICTORY = (457, 462)  # "Tap to continue" su schermata Victory
-_TAP_CONTINUE_FAILURE = (469, 509)  # "Tap to continue" su schermata Failure
+_TAP_CONTINUE_VICTORY = (457, 515)  # WU77 "Tap to Continue" Victory (era 462)
+_TAP_CONTINUE_FAILURE = (457, 515)  # WU77 "Tap to Continue" Failure (era 509)
+                                    # Nuovo design 30/04: stesso testo+coord
+                                    # per Victory e Failure (centro basso 515)
 _TAP_CENTRO           = (480, 270)  # centro schermo (fallback)
 _TAP_CENTRO_PAUSE     = 0.8         # pausa tra i due tap centro
 _TAP_SKIP_CHECKBOX    = (723, 488)  # checkbox Skip (salta animazione battaglia)
@@ -98,11 +106,27 @@ class _PinSpec:
 _ARENA_PIN: dict[str, _PinSpec] = {
     "lista":    _PinSpec("pin/pin_arena_01_lista.png",     (387,  0,  565,  43), 0.80),
     "challenge":_PinSpec("pin/pin_arena_02_challenge.png", (610, 434, 857, 486), 0.80),
-    "victory":  _PinSpec("pin/pin_arena_03_victory.png",   (407,  89, 557, 156), 0.80),
-    "failure":  _PinSpec("pin/pin_arena_04_failure.png",   (414,  94, 544, 146), 0.80),
-    "continue": _PinSpec("pin/pin_arena_05_continue.png",  (410, 443, 547, 487), 0.80),
+    # WU77+WU80 (30/04 10:42) — template + ROI aggiornati per nuovo design.
+    # Victory: testo "Victory" giallo/oro centro alto su sfondo dorato.
+    # Estratto live FAU_00 30/04 (rank 81→53). Self-match score 1.000.
+    # WU81 (30/04 10:45): soglia 0.80→0.90 — su Failure il victory matchava
+    # 0.847 (falso positivo strutturale font/dim simili). Soglia 0.90 evita
+    # confusione: Victory reale ~1.0, Failure reale ~0.84.
+    "victory":  _PinSpec("pin/pin_arena_03_victory.png",   (370,  35, 545,  95), 0.90),
+    # Failure: testo "Failure" bianco grande su sfondo magenta in (380,42,535,88).
+    # Validazione live FAU_10: score 0.998. Soglia 0.90 (WU81) per simmetria.
+    "failure":  _PinSpec("pin/pin_arena_04_failure.png",   (370,  35, 545,  95), 0.90),
+    # Vecchio "Tap to Continue" pulsante in (410,443,547,487); nuovo testo
+    # "Tap to Continue" corsivo bianco in basso a (380,503,535,530). Score 0.996.
+    "continue": _PinSpec("pin/pin_arena_05_continue.png",  (370, 495, 545, 540), 0.80),
     "purchase": _PinSpec("pin/pin_arena_06_purchase.png",  (334, 143, 586, 185), 0.80),
-    "glory":    _PinSpec("pin/pin_arena_07_glory.png",     (379, 418, 564, 447), 0.80),
+    # "glory" = pulsante "Continue" giallo del popup tier-up
+    # "Congratulations / Glory <Tier>". Template attuale 225×35 px,
+    # ROI deve essere ≥ template (constraint cv2.matchTemplate).
+    # Fix 29/04 sera: ROI 190×48 → 270×60 (centro 480, span ±135, y 405-465)
+    # per accogliere template 225×35 con margine. Bug: template > ROI →
+    # match sempre impossibile, popup Glory mai chiuso.
+    "glory":    _PinSpec("pin/pin_arena_07_glory.png",     (345, 405, 615, 465), 0.80),
     "skip_on":  _PinSpec("pin/pin_arena_check.png",        (700, 470, 760, 510), 0.75),
     "skip_off": _PinSpec("pin/pin_arena_no_check.png",     (700, 470, 760, 510), 0.75),
 }
@@ -117,7 +141,7 @@ class _ArenaRun:
     sfide_eseguite:   int  = 0
     esaurite:         bool = False
     errore:           str | None = None
-    skip_verificato:  bool = False
+    skip_verificato:  bool = False  # WU74 deprecato — check skip ora ad ogni sfida
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -372,10 +396,14 @@ class ArenaTask(Task):
             time.sleep(1.5)
             return "errore"
 
-        # SKIP-CHECKBOX: verifica una volta per sessione
-        if not run.skip_verificato:
-            self._assicura_skip(ctx)
-            run.skip_verificato = True
+        # SKIP-CHECKBOX: verifica ad ogni sfida.
+        # WU74 (30/04 mattina) — pre-fix: solo 1×/sessione. Bug osservato: la
+        # pulizia cache giornaliera (WU64) reset checkbox al default e in
+        # alcune istanze il template `skip_on` matcha falso positivo dopo
+        # cache pulita → bot crede skip ON ma è OFF → battaglie >60s →
+        # timeout 5/5 (es. FAU_05 30/04). Costo: ~1.5s/sfida × 5 = +7.5s/ciclo
+        # arena. Beneficio: skip sempre realmente attivo, eliminazione timeout.
+        self._assicura_skip(ctx)
 
         ctx.log_msg("[ARENA] [PRE-CHALLENGE] START CHALLENGE — tap")
         ctx.device.tap(*_TAP_START_CHALLENGE)
@@ -390,21 +418,36 @@ class ArenaTask(Task):
         else:
             ctx.log_msg("[ARENA] [POST-BATTAGLIA] timeout — né Victory né Failure")
 
-        # Diagnostico: pin_continue (solo logging)
+        # WU80 (30/04 10:25) — tap DINAMICO su loc match "continue" invece
+        # di coord fisse. Motivo: pulsante "Tap to Continue" può essere in
+        # posizione diversa tra Victory e Failure (UI ridisegnata 30/04).
+        # Match dinamico template `pin_arena_05_continue.png` → tap (cx, cy)
+        # dal MatchResult. Fallback coord fissa (457,515) se match fallisce.
         screen_diag = ctx.device.screenshot()
+        cont_result = None
         if screen_diag is not None:
-            ok_cont = self._match(ctx, screen_diag, "continue")
-            ctx.log_msg("[ARENA] [PRE-CONTINUE] pin_arena_05=%s", ok_cont)
+            spec_c = _ARENA_PIN["continue"]
+            cont_result = ctx.matcher.find_one(
+                screen_diag, spec_c.path,
+                threshold=spec_c.soglia, zone=spec_c.roi,
+            )
+            ctx.log_msg("[ARENA] [PRE-CONTINUE] continue score=%.3f", cont_result.score)
 
-        # Tap "Tap to continue" con coordinata dipendente dal risultato
-        if victory:
-            ctx.log_msg("[ARENA] [CONTINUE] Victory → tap %s", _TAP_CONTINUE_VICTORY)
-            ctx.device.tap(*_TAP_CONTINUE_VICTORY)
-        elif failure:
-            ctx.log_msg("[ARENA] [CONTINUE] Failure → tap %s", _TAP_CONTINUE_FAILURE)
-            ctx.device.tap(*_TAP_CONTINUE_FAILURE)
+        if victory or failure:
+            esito = "Victory" if victory else "Failure"
+            if cont_result is not None and cont_result.found:
+                cx, cy = cont_result.cx, cont_result.cy
+                ctx.log_msg("[ARENA] [CONTINUE] %s → tap dinamico (%d,%d) score=%.3f",
+                            esito, cx, cy, cont_result.score)
+                ctx.device.tap(cx, cy)
+            else:
+                # Fallback su coord fissa unificata (457,515)
+                fallback = _TAP_CONTINUE_VICTORY if victory else _TAP_CONTINUE_FAILURE
+                ctx.log_msg("[ARENA] [CONTINUE] %s → match fail, fallback coord %s",
+                            esito, fallback)
+                ctx.device.tap(*fallback)
         else:
-            ctx.log_msg("[ARENA] [CONTINUE] fallback → doppio tap centro")
+            ctx.log_msg("[ARENA] [CONTINUE] timeout → doppio tap centro")
             self._doppio_tap_centro(ctx)
         time.sleep(0.5)  # minimo animazione tap
 
@@ -430,7 +473,7 @@ class ArenaTask(Task):
         """
         Verifica che Skip sia attivo nella schermata START CHALLENGE.
         Se non spuntato esegue il tap su (723,488) per attivarlo.
-        Chiamato una sola volta per sessione (run.skip_verificato).
+        WU74 (30/04 mattina) — chiamato ad ogni sfida (era 1×/sessione).
         """
         screen = ctx.device.screenshot()
         if screen is None:
@@ -452,7 +495,17 @@ class ArenaTask(Task):
 
     def _gestisci_popup_glory(self, ctx: TaskContext) -> bool:
         """
-        Rileva e chiude popup "Congratulations / Glory Silver" (pin_arena_07_glory).
+        Rileva e chiude popup tier-up "Congratulations / Glory <Tier>"
+        (es. Glory Silver) via match del pulsante "Continue" giallo.
+
+        Template: pin/pin_arena_07_glory.png (il bottone Continue, NON il
+        banner header). Tap fisso su _TAP_GLORY_CONTINUE = (473, 432).
+
+        Hook: chiamato post-tap "Arena of Doom" (vedi `_naviga_a_arena`)
+        e re-controllato in `_esegui_sfida` (GUARD-GLORY pre-sfida e
+        POST-CONTINUE post-vittoria) — il popup può comparire mid-session
+        al cambio rank.
+
         Ritorna True se il popup era presente.
         """
         screen = ctx.device.screenshot()
@@ -501,29 +554,45 @@ class ArenaTask(Task):
 
     def _attendi_fine_battaglia(self, ctx: TaskContext) -> tuple[bool, bool]:
         """
-        Attesa fine battaglia: delay iniziale fisso + polling adattivo.
+        Attesa fine battaglia: sleep passivo totale + 1 check final.
+
+        WU75 (30/04 mattina) — refactor da polling adattivo a sleep+single-check.
+        Pre-fix: 17 screenshot/battaglia (polling ogni 3.5s × 60s) causavano
+        cascade ADB nelle transizioni post-battaglia (8/11 istanze 30/04 con
+        cascade da 6-17 screenshot fallito).
+
+        Strategia (con skip checkbox attivo da WU74 ad ogni sfida):
+          1. Sleep passivo totale (delay_iniziale + max_battaglia)
+          2. 1 screenshot finale → match victory + failure
+          3. Return esito o False/False se fallisce
+
+        Saving: ~94% screencap durante battaglia (17→1).
+        Trade-off: se skip è OFF reale (template false positive), battaglia
+        può durare >60s → single check fallisce → timeout normale (uguale al
+        comportamento pre-fix in caso di timeout).
 
         Returns:
             (victory, failure) — entrambi False = timeout/anomalia.
         """
-        ctx.log_msg("[ARENA] attesa battaglia — delay iniziale %.0fs", _DELAY_BATTAGLIA_S)
-        time.sleep(_DELAY_BATTAGLIA_S)
+        total_wait = _DELAY_BATTAGLIA_S + _MAX_BATTAGLIA_S
+        ctx.log_msg("[ARENA] attesa battaglia passiva %.0fs (WU75 no polling)",
+                    total_wait)
+        time.sleep(total_wait)
 
-        t_start = time.time()
-        while time.time() - t_start < _MAX_BATTAGLIA_S:
-            screen = ctx.device.screenshot()
-            if screen is not None:
-                victory = self._match(ctx, screen, "victory")
-                failure = self._match(ctx, screen, "failure")
-                elapsed = _DELAY_BATTAGLIA_S + (time.time() - t_start)
-                if victory or failure:
-                    ctx.log_msg("[ARENA] fine battaglia in %.1fs totali", elapsed)
-                    return victory, failure
-            time.sleep(_POLL_BATTAGLIA_S)
+        screen = ctx.device.screenshot()
+        if screen is None:
+            ctx.log_msg("[ARENA] screenshot post-battaglia fallito — assumo timeout")
+            return False, False
 
-        totale = _DELAY_BATTAGLIA_S + _MAX_BATTAGLIA_S
-        ctx.log_msg("[ARENA] timeout battaglia dopo %.0fs", totale)
-        return False, False
+        victory = self._match(ctx, screen, "victory")
+        failure = self._match(ctx, screen, "failure")
+
+        if victory or failure:
+            ctx.log_msg("[ARENA] fine battaglia rilevata dopo %.0fs", total_wait)
+        else:
+            ctx.log_msg("[ARENA] timeout battaglia dopo %.0fs — né Victory né Failure",
+                        total_wait)
+        return victory, failure
 
     # ── Primitivi template matching ───────────────────────────────────────────
 

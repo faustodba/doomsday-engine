@@ -66,6 +66,7 @@ def _import_tasks() -> dict:
         ("tasks.arena_mercato",  "ArenaMercatoTask"),
         ("tasks.district_showdown", "DistrictShowdownTask"),
         ("tasks.boost",          "BoostTask"),
+        ("tasks.truppe",         "TruppeTask"),
         ("tasks.store",          "StoreTask"),
         ("tasks.radar",          "RadarTask"),
         ("tasks.radar_census",   "RadarCensusTask"),
@@ -179,11 +180,13 @@ def _cleanup_globale_startup(log_fn=None) -> None:
     Molto più rapido del loop `MuMuManager shutdown` per-istanza
     (~3s vs ~60s per 12 istanze).
 
-    Safe solo all'avvio bot: nessun'istanza pulita da preservare (non
-    possiamo distinguere orfani da istanze in uso se il bot è appena partito).
+    Usato sia all'avvio bot sia pre-ciclo (29/04/2026) — il kill secco
+    è preferibile perché non dipende dal filtro `abilitata=True` delle
+    istanze, quindi spazza via anche emulator orfani di istanze
+    disabilitate (es. FauMorfeus) o di altri bot.
 
-    Per il cleanup PRE-CICLO serve invece il loop mirato (`_cleanup_tutti_emulator`)
-    che chiude solo le istanze configurate e preserva MuMuPlayer UI.
+    MuMuPlayer UI viene rilanciato dal launcher (`avvia_player`) al
+    primo avvio istanza del ciclo successivo.
     """
     import subprocess
     killed = []
@@ -299,28 +302,28 @@ def _cleanup_orfani_processi_startup(log_fn=None) -> None:
 
 def _cleanup_tutti_emulator(istanze: list[dict], dry_run: bool) -> None:
     """
-    Chiude emulator MuMu configurati (reset_istanza per ogni istanza).
+    Kill SECCO pre-ciclo di TUTTI i processi MuMu/adb via taskkill globale.
 
     Invocato all'inizio di ogni ciclo (prima del for istanze).
 
-    Motivazione: garantisce che ogni ciclo parta da uno stato MuMu pulito,
-    eliminando processi orfani rimasti da:
-      - crash/hang di un'istanza nel ciclo precedente
-      - esecuzione parallela con altro bot (dry-run orfano, ecc.)
+    29/04/2026 — sostituito loop `reset_istanza` per-istanza (che iterava
+    SOLO le istanze in `istanze_ciclo`, già filtrate su `abilitata=True`)
+    con il kill globale `_cleanup_globale_startup`. Motivazione: istanze
+    disabilitate (es. FauMorfeus indice 11) non venivano spente, lasciando
+    emulator orfani in vita. Il kill secco copre TUTTO indipendentemente
+    dai flag dashboard.
 
-    Failsafe: ogni reset è protetto da try/except — un'istanza che fallisce
-    il reset non blocca le altre.
+    Effetti:
+      - taskkill /F /IM su MuMuPlayer + MuMuVMMHeadless + MuMuNxMain +
+        MuMuNxDevice + adb.exe (con /T per child processes)
+      - MuMuPlayer UI verrà rilanciato dal launcher al primo avvio istanza
+        (avvia_player gestisce process not running)
 
-    Per il cleanup STARTUP usa `_cleanup_globale_startup()` (più veloce).
+    Argomento `istanze` mantenuto per signature compat (non usato).
     """
     if dry_run:
         return
-    for ist in istanze:
-        nome = ist.get("nome", "?")
-        try:
-            _launcher.reset_istanza(ist, lambda msg, n=nome: _log(n, msg))
-        except Exception as exc:
-            _log("MAIN", f"[WARN] cleanup orfano {nome}: {exc}")
+    _cleanup_globale_startup(lambda msg: _log("MAIN", msg))
 
 
 # ---------------------------------------------------------------------------

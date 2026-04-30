@@ -118,6 +118,7 @@ class CicloStorico:
     completato:    bool
     aborted:       bool = False # WU48 — ciclo interrotto (restart bot mid-ciclo)
     run_local:     int  = 0     # numero locale del bot (debug)
+    start_date:    str  = ""    # "29/04" — data di inizio ciclo (UTC)
 
 
 @dataclass
@@ -555,18 +556,51 @@ def get_ciclo_status() -> CicloStatus:
     return _cached("ciclo_status", _compute_ciclo_status)
 
 
+def _ts_to_local_hhmm(ts: str) -> str:
+    """WU72 (30/04) — converte timestamp ISO UTC in HH:MM ora locale."""
+    if not ts:
+        return "—"
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(ts).astimezone().strftime("%H:%M")
+    except Exception:
+        # Fallback al raw UTC se parse fallisce
+        return ts[11:16] if len(ts) >= 16 else "—"
+
+
+def _ts_to_local_date(ts: str) -> str:
+    """WU72 (30/04) — converte timestamp ISO UTC in DD/MM ora locale.
+    Necessario a cavallo di mezzanotte UTC (es. 22:58 UTC del 29/04
+    = 00:58 locale del 30/04 → mostra '30/04' non '29/04')."""
+    if not ts:
+        return "—"
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(ts).astimezone().strftime("%d/%m")
+    except Exception:
+        return f"{ts[8:10]}/{ts[5:7]}" if len(ts) >= 10 else "—"
+
+
 def get_storico_cicli(n: int = 20) -> List[CicloStorico]:
     """
     Ritorna ultimi N cicli completati o in corso (più recenti prima).
     Source: data/telemetry/cicli.json (file persistente).
+
+    WU72 (30/04 notte): start_hhmm/end_hhmm/start_date convertiti in ora
+    locale del server (era UTC raw, causando disallineamento di 2h con
+    le card istanza che mostrano locale, e date sbagliate a cavallo di
+    mezzanotte UTC).
     """
     cycles = _load_cicli_persistent()
     out: List[CicloStorico] = []
     for c in cycles[-n:]:
+        ts_start = c.get("start_ts") or ""
+        ts_end   = c.get("end_ts")   or ""
         out.append(CicloStorico(
             numero      = c["numero"],
-            start_hhmm  = c["start_ts"][11:16] if c.get("start_ts") else "—",
-            end_hhmm    = c["end_ts"][11:16]   if c.get("end_ts")   else "—",
+            start_hhmm  = _ts_to_local_hhmm(ts_start),
+            end_hhmm    = _ts_to_local_hhmm(ts_end),
+            start_date  = _ts_to_local_date(ts_start),
             durata_s    = int(c.get("durata_s", 0)),
             n_istanze   = len(c.get("istanze", {})),
             completato  = bool(c.get("completato", False)),

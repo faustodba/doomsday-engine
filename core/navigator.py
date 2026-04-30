@@ -40,6 +40,19 @@ class Screen(Enum):
     UNKNOWN = auto()
 
 
+class ADBUnhealthyError(RuntimeError):
+    """
+    Sollevata da vai_in_home() quando l'emulator è certamente bloccato:
+    reconnect ADB ritorna OK ma screencap continua a restituire None
+    per 2 cicli consecutivi (= emulator freezato, socket cosmetico).
+
+    L'orchestrator cattura questa eccezione, salta i task rimanenti del
+    tick, e segnala al main di chiudere l'istanza per reset al ciclo
+    successivo (Issue #56 — fix cascata ADB persistente).
+    """
+    pass
+
+
 @dataclass
 class NavigatorConfig:
     wait_after_action:  float = 2.0
@@ -99,6 +112,10 @@ class GameNavigator:
         self.matcher = matcher
         self.config  = config or NavigatorConfig()
         self._log    = log_fn or (lambda msg: None)
+        # Issue #56 — Tier 1 trigger: counter di reconnect ADB "OK" seguiti da
+        # screencap None subito dopo. Persistente tra chiamate vai_in_home() —
+        # si resetta solo quando HOME viene effettivamente raggiunta.
+        self._reconnect_failures = 0
 
     # ── Riconoscimento schermata ──────────────────────────────────────────────
 
@@ -137,7 +154,15 @@ class GameNavigator:
     # ── Navigazione HOME ──────────────────────────────────────────────────────
 
     def vai_in_home(self) -> bool:
-        """Porta il bot in HOME. Ritorna True se raggiunto."""
+        """
+        Porta il bot in HOME. Ritorna True se raggiunto.
+
+        Issue #56 — Solleva ADBUnhealthyError se reconnect ADB risulta cosmetico
+        (OK ma screencap None subito dopo) per 2 cicli consecutivi.
+
+        Issue #63 — Banner sconosciuti residui sono gestiti dal fallback
+        tap X automatico in dismiss_banners_loop (no più screenshot su disco).
+        """
         cfg = self.config
         none_streak = 0
         adb_recovery_done = False
@@ -155,6 +180,20 @@ class GameNavigator:
                             none_streak = 0
                             adb_recovery_done = True
                             continue
+                    # Issue #56 — Tier 1 trigger: se ABORT arriva DOPO un reconnect
+                    # OK, significa che il reconnect è stato cosmetico (socket vivo
+                    # ma emulator freezato). Conta queste occorrenze cross-chiamata.
+                    if adb_recovery_done:
+                        self._reconnect_failures += 1
+                        self._log(
+                            f"[NAV] reconnect ADB cosmetico — failure "
+                            f"{self._reconnect_failures}/2 (screencap None post-reconnect)"
+                        )
+                        if self._reconnect_failures >= 2:
+                            raise ADBUnhealthyError(
+                                f"reconnect ADB cosmetico {self._reconnect_failures}x — "
+                                f"emulator freezato, reset emergenziale"
+                            )
                     self._log(
                         f"[NAV] vai_in_home ABORT — screenshot None {none_streak}x "
                         f"consecutive (ADB unhealthy)"
@@ -168,6 +207,7 @@ class GameNavigator:
             self._log(f"[NAV] vai_in_home tentativo {attempt+1}/{cfg.max_attempts} — screen={screen.name}")
 
             if screen == Screen.HOME:
+                self._reconnect_failures = 0  # Issue #56 reset counter su success
                 return True
 
             if screen == Screen.MAP:

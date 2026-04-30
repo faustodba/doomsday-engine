@@ -248,16 +248,195 @@ def _load_storico_farm_today(istanza: str) -> Optional[dict]:
         return None
 
 
+def _load_storico_truppe() -> dict:
+    """
+    Legge data/storico_truppe.json. Schema:
+      {"FAU_00": [{"data":"YYYY-MM-DD","total_squads":N,"ts":"..."}, ...], ...}
+    Ritorna {} se file mancante o malformato.
+    """
+    try:
+        path = _PROD_ROOT / "data" / "storico_truppe.json"
+        if not path.exists():
+            return {}
+        with open(path, encoding="utf-8") as f:
+            d = json.load(f)
+        return d if isinstance(d, dict) else {}
+    except Exception:
+        return {}
+
+
+def get_truppe_istanza(nome: str) -> dict:
+    """
+    WU66 (Layout A) — dati truppe per card istanza.
+    Returns dict con:
+      - oggi:        int | None   (ultimo total_squads se data == today UTC)
+      - sette_gg_fa: int | None   (entry con data == today-7d, se esiste)
+      - delta:       int | None   (oggi - sette_gg_fa, se entrambi presenti)
+      - delta_pct:   float | None
+      - serie_7d:    list[int|None] (ultimi 7 giorni cronologici, fill con None)
+    """
+    from datetime import date, timedelta
+    storico = _load_storico_truppe()
+    entries = storico.get(nome) or []
+    today = date.today()  # UTC dipende dal context — usiamo locale del server (= UTC docker, locale dev)
+    # _today_utc() del modulo troops_reader usa UTC, ricalcolo manuale
+    from datetime import datetime, timezone
+    today_utc = datetime.now(timezone.utc).date()
+
+    # mappa data -> total_squads per accesso O(1)
+    by_date: dict[str, int] = {}
+    for e in entries:
+        try:
+            by_date[e["data"]] = int(e["total_squads"])
+        except Exception:
+            continue
+
+    oggi_iso = today_utc.isoformat()
+    sette_iso = (today_utc - timedelta(days=7)).isoformat()
+
+    oggi        = by_date.get(oggi_iso)
+    sette_gg_fa = by_date.get(sette_iso)
+    delta = (oggi - sette_gg_fa) if (oggi is not None and sette_gg_fa is not None) else None
+    delta_pct = (
+        round(delta / sette_gg_fa * 100, 1)
+        if delta is not None and sette_gg_fa
+        else None
+    )
+
+    # serie_7d: 7 valori cronologici, oggi-6 .. oggi
+    serie_7d: list[Optional[int]] = []
+    for d in range(6, -1, -1):
+        iso = (today_utc - timedelta(days=d)).isoformat()
+        serie_7d.append(by_date.get(iso))
+
+    return {
+        "oggi":        oggi,
+        "sette_gg_fa": sette_gg_fa,
+        "delta":       delta,
+        "delta_pct":   delta_pct,
+        "serie_7d":    serie_7d,
+    }
+
+
+def get_truppe_storico_aggregato(days: int = 8) -> dict:
+    """
+    WU66 (Layout B) — pannello storico truppe.
+    Ritorna dict con:
+      - per_istanza: list[dict] per ogni istanza, ognuno = output di
+                     get_truppe_istanza(nome) + nome
+      - totale:      dict con somme {oggi, sette_gg_fa, delta, delta_pct,
+                     serie_<days>}, basato sulle istanze con dati validi
+      - days:        finestra temporale (default 8 = oggi + 7 indietro)
+      - data_oggi:   ISO YYYY-MM-DD UTC
+
+    Nota: ordina per_istanza per delta_pct desc (chi cresce di più sopra),
+    None in fondo. Istanze senza alcuna entry sono escluse.
+    """
+    from datetime import datetime, timezone, timedelta
+    storico = _load_storico_truppe()
+    today_utc = datetime.now(timezone.utc).date()
+
+    # serie da considerare: oggi-(days-1) .. oggi
+    iso_seq = [
+        (today_utc - timedelta(days=d)).isoformat()
+        for d in range(days - 1, -1, -1)
+    ]
+
+    per_istanza: list[dict] = []
+    sum_serie:   list[Optional[int]] = [None] * days
+
+    for nome, entries in storico.items():
+        if not entries:
+            continue
+        by_date: dict[str, int] = {}
+        for e in entries:
+            try:
+                by_date[e["data"]] = int(e["total_squads"])
+            except Exception:
+                continue
+        if not by_date:
+            continue
+
+        oggi        = by_date.get(iso_seq[-1])
+        sette_gg_fa = by_date.get(iso_seq[0])
+        delta = (oggi - sette_gg_fa) if (oggi is not None and sette_gg_fa is not None) else None
+        delta_pct = (
+            round(delta / sette_gg_fa * 100, 1)
+            if delta is not None and sette_gg_fa
+            else None
+        )
+        serie = [by_date.get(iso) for iso in iso_seq]
+
+        per_istanza.append({
+            "nome":        nome,
+            "oggi":        oggi,
+            "sette_gg_fa": sette_gg_fa,
+            "delta":       delta,
+            "delta_pct":   delta_pct,
+            "serie":       serie,
+        })
+
+        for i, v in enumerate(serie):
+            if v is None:
+                continue
+            sum_serie[i] = (sum_serie[i] or 0) + v
+
+    # Sort: per nome istanza alfabetico (FAU_00..FAU_10, FauMorfeus in fondo)
+    # Cambio richiesto utente 30/04: prima era delta_pct desc, ora indice naturale.
+    per_istanza.sort(key=lambda r: r["nome"])
+
+    tot_oggi   = sum_serie[-1]
+    tot_sette  = sum_serie[0]
+    tot_delta  = (tot_oggi - tot_sette) if (tot_oggi is not None and tot_sette is not None) else None
+    tot_pct    = (
+        round(tot_delta / tot_sette * 100, 1)
+        if tot_delta is not None and tot_sette
+        else None
+    )
+
+    return {
+        "per_istanza": per_istanza,
+        "totale": {
+            "oggi":        tot_oggi,
+            "sette_gg_fa": tot_sette,
+            "delta":       tot_delta,
+            "delta_pct":   tot_pct,
+            "serie":       sum_serie,
+        },
+        "days":      days,
+        "data_oggi": today_utc.isoformat(),
+    }
+
+
 def _load_morfeus_state() -> MorfeusState:
-    """Legge data/morfeus_state.json. Ritorna stato 'mai letto' se file mancante."""
+    """
+    Legge data/morfeus_state.json. Ritorna stato 'mai letto' se file mancante.
+
+    WU58 (29/04): se ts è di un giorno UTC passato (capienza letta ieri o
+    prima), il limite NON è valido per oggi — ritorno daily_recv_limit=-1
+    per far mostrare "—" alla dashboard. Il bot rileggerà via OCR al primo
+    tick rifornimento di oggi.
+    """
     try:
         if not _MORFEUS_STATE.exists():
             return MorfeusState()
         with open(_MORFEUS_STATE, encoding="utf-8") as f:
             d = json.load(f)
+        ts_str = str(d.get("ts", ""))
+        recv   = int(d.get("daily_recv_limit", -1))
+        # Check stale: ts in giorno UTC passato → invalida valore daily
+        if ts_str and recv >= 0:
+            try:
+                from datetime import datetime, timezone
+                today_utc = datetime.now(timezone.utc).date().isoformat()
+                ts_date   = ts_str[:10]   # "YYYY-MM-DD" da ISO
+                if ts_date and ts_date != today_utc:
+                    recv = -1
+            except Exception:
+                pass
         return MorfeusState(
-            daily_recv_limit = int(d.get("daily_recv_limit", -1)),
-            ts               = str(d.get("ts", "")),
+            daily_recv_limit = recv,
+            ts               = ts_str,
             letto_da         = str(d.get("letto_da", "")),
             tassa_pct        = float(d.get("tassa_pct", 0.0) or 0.0),
         )
@@ -449,6 +628,25 @@ def get_produzione_istanze() -> list[dict]:
 
             # Quota rifornimento
             rif = state.get("rifornimento", {})
+            # WU58 (29/04): se data_riferimento != oggi UTC, lo state è stale
+            # (giorno precedente non resettato — task rifornimento OFF da >24h
+            # oppure pausa manutenzione lunga). Azzero IN MEMORIA i totali daily
+            # E le provviste OCR (sono di ieri, non valide come "snapshot oggi").
+            # Senza toccare il file: il bot rilegge OCR al primo tick di oggi.
+            from datetime import datetime, timezone
+            today_utc = datetime.now(timezone.utc).date().isoformat()
+            data_rif  = str(rif.get("data_riferimento") or "")
+            stale     = bool(data_rif) and data_rif != today_utc
+            if stale:
+                # Reset in-memory: dashboard mostra stato pulito di oggi
+                rif = {**rif,
+                       "spedizioni_oggi": 0,
+                       "inviato_oggi": {},
+                       "inviato_lordo_oggi": {},
+                       "tassa_oggi": {},
+                       "dettaglio_oggi": [],
+                       "provviste_residue": -1,        # — sul pannello
+                       "provviste_esaurite": False}
             quota_max       = int(rif.get("quota_max", 0) or 0)
             spedizioni_oggi = int(rif.get("spedizioni_oggi", 0) or 0)
             quota_esaurita  = quota_max > 0 and spedizioni_oggi >= quota_max
@@ -567,6 +765,22 @@ def get_risorse_farm() -> RisorseFarm:
                 continue
 
             rif = state.get("rifornimento", {})
+
+            # WU58 (29/04): se data_riferimento != oggi UTC → state stale,
+            # azzero IN MEMORIA i totali daily + provviste OCR (di ieri).
+            # Dashboard mostra 0 fino al primo tick rifornimento di oggi.
+            from datetime import datetime, timezone
+            today_utc = datetime.now(timezone.utc).date().isoformat()
+            data_rif  = str(rif.get("data_riferimento") or "")
+            if data_rif and data_rif != today_utc:
+                rif = {**rif,
+                       "spedizioni_oggi": 0,
+                       "inviato_oggi": {},
+                       "inviato_lordo_oggi": {},
+                       "tassa_oggi": {},
+                       "dettaglio_oggi": [],
+                       "provviste_residue": 0,
+                       "provviste_esaurite": False}
 
             # --- Inviato oggi — fonte: dettaglio_oggi (valori reali bot) ---
             # dettaglio_oggi è scritto dal bot al momento dell'invio effettivo,

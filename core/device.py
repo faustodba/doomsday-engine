@@ -384,20 +384,49 @@ class AdbDevice:
 
     def _screenshot_raw(self) -> Optional["Screenshot"]:
         """
-        Screenshot via screencap + pull — copia esatta del metodo V5 adb.py.
-        screencap viene passato come stringa unica al shell (non argomenti separati).
-        Lock per porta: istanze parallele non si bloccano a vicenda.
-        Livello base senza retry/reconnect: usato da screenshot() pubblico.
+        Screenshot in-memory via `adb exec-out screencap -p`.
+
+        WU76 (30/04 mattina) — port pipeline in-memory da V5 v5.24
+        ("Aggiunta pipeline screenshot in-memoria (exec-out)"). Pre-fix V6:
+        screencap+pull con 3 operazioni I/O su disco/sdcard per ogni
+        screenshot (write su /sdcard device, pull verso host, read host,
+        delete). Causa root probabile delle cascade ADB durante arena
+        (17 screencap × 4 I/O = 68 op/battaglia → saturazione MuMu).
+
+        Post-fix WU76: `exec-out screencap -p` riceve i bytes PNG via
+        stdout pipe → 0 file su disco. cv2.imdecode dai bytes diretti.
+        Risparmio stimato: 150-300ms/screen (V5 commento) + eliminazione
+        cascade ADB durante burst.
+
+        Fallback legacy (screencap+pull) se exec-out fallisce o ritorna
+        bytes invalidi (compatibilità ADB vecchio / MuMu non aggiornati).
         """
-        import tempfile
-
-        remote = f"/sdcard/v6_screen_{self.port}.png"
-        local  = os.path.join(
-            tempfile.gettempdir(), f"v6_screen_{self.port}.png"
-        )
-
         with _screencap_global_lock:
           with _screencap_lock_for(self._serial):
+            # Strategia primaria WU76: exec-out (in-memory)
+            try:
+                result = subprocess.run(
+                    [self.ADB, "-s", self._serial,
+                     "exec-out", "screencap", "-p"],
+                    capture_output=True, timeout=15,
+                )
+                png_bytes = result.stdout
+                # Sanity: PNG valido inizia con \x89PNG (8 bytes header)
+                if (png_bytes and len(png_bytes) >= 100
+                        and png_bytes[:4] == b"\x89PNG"):
+                    arr = np.frombuffer(png_bytes, dtype=np.uint8)
+                    frame = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                    if frame is not None:
+                        return Screenshot(frame)
+            except Exception:
+                pass  # fallthrough fallback
+
+            # Fallback legacy: screencap + pull (compat ADB vecchio)
+            import tempfile
+            remote = f"/sdcard/v6_screen_{self.port}.png"
+            local  = os.path.join(
+                tempfile.gettempdir(), f"v6_screen_{self.port}.png"
+            )
             try:
                 subprocess.run(
                     [self.ADB, "-s", self._serial,

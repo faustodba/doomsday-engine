@@ -490,20 +490,30 @@ def avvia_istanza(ist: dict, log_fn: Optional[Callable] = None) -> bool:
         _log(f"TIMEOUT: Android non started dopo {_boot_timeout:.0f}s", log_fn)
         return False
 
-    # 3. adb connect
+    # 3. adb connect (con retry — 29/04: bug scoperto su FAU_02 dove
+    # un singolo tentativo timeout faceva proseguire am start su socket
+    # morto, 3 tentativi am start tutti falliti, abort fasullo)
     _log(f"adb connect 127.0.0.1:{porta}", log_fn)
-    try:
-        result = subprocess.run(
-            [_adb, "connect", f"127.0.0.1:{porta}"],
-            capture_output=True, timeout=15,
-        )
-        out = result.stdout.decode(errors="replace").strip()
-        if "connected" not in out and "already connected" not in out:
-            _log(f"adb connect anomalia: {out}", log_fn)
-        else:
-            _log(f"adb connect: {out}", log_fn)
-    except Exception as exc:
-        _log(f"adb connect errore: {exc}", log_fn)
+    connected = False
+    for _adb_try in range(1, 4):
+        try:
+            result = subprocess.run(
+                [_adb, "connect", f"127.0.0.1:{porta}"],
+                capture_output=True, timeout=15,
+            )
+            out = result.stdout.decode(errors="replace").strip()
+            if "connected" in out or "already connected" in out:
+                _log(f"adb connect: {out}", log_fn)
+                connected = True
+                break
+            _log(f"adb connect anomalia (tent {_adb_try}/3): {out}", log_fn)
+        except Exception as exc:
+            _log(f"adb connect errore (tent {_adb_try}/3): {exc}", log_fn)
+        if _adb_try < 3:
+            time.sleep(5.0)
+
+    if not connected:
+        _log("ERRORE: adb connect fallito dopo 3 tentativi — abort istanza", log_fn)
         return False
 
     # 4. Avvia gioco
@@ -900,13 +910,14 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
 
     # 4. Stabilizzazione: attende HOME stabile senza popup/overlay
     # auto-WU16: sleep 5.0→3.0s, timeout 60→40s, stable_count >= 3
+    # 29/04 (post WU60+WU61): stable_count 3 → 5 (richiesta utente per stabilità extra)
     # Issue #68 (26/04/2026) — quando HOME instabile (reset contatore),
     # invocare ATTIVAMENTE dismiss_banners_loop per chiudere il banner che
     # ha causato l'instabilità (tipicamente AFK loot recovery). Pre-fix:
     # passive polling fino a stab_timeout 40s. Post-fix: <5s recovery se
     # banner catalogato.
     if nav is not None:
-        _log(f"[{nome}] stabilizzazione HOME (max 40s)...", log_fn)
+        _log(f"[{nome}] stabilizzazione HOME (max 60s, target 5/5)...", log_fn)
         stable_count = 0
         t_stab = time.time()
 
@@ -935,16 +946,20 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
         if _bd:
             _log(f"[{nome}] banner pre-stab chiusi: {_bd}", log_fn)
 
-        while time.time() - t_stab < 40:
-            time.sleep(3.0)
+        # WU71 (29/04 sera) — polling stabilizzazione HOME 3s → 1s.
+        # Saving: 5 stable_count × 2s = 10s/istanza ≈ 110s/ciclo (11 istanze).
+        # Trade-off: 3× screenshot+match al secondo durante stab (max 60s
+        # finestra). Su PC lento il costo CPU è bilanciato dal saving wallclock.
+        while time.time() - t_stab < 60:
+            time.sleep(1.0)
             try:
                 schermata = nav.schermata_corrente()
             except Exception:
                 schermata = Screen.UNKNOWN
             if schermata == Screen.HOME:
                 stable_count += 1
-                _log(f"[{nome}] HOME stabile {stable_count}/3", log_fn)
-                if stable_count >= 3:
+                _log(f"[{nome}] HOME stabile {stable_count}/5", log_fn)
+                if stable_count >= 5:
                     _log(f"[{nome}] HOME stabilizzata — pronti", log_fn)
                     break
             else:
@@ -972,6 +987,39 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
             except Exception:
                 pass
             _log(f"[{nome}] HOME raggiunto in {home_total_s:.0f}s", log_fn)
+
+            # WU60 (Issue #85 prereq) — applica settings lightweight client gioco
+            # ad ogni avvio istanza dopo HOME confermata. Idempotente: Optimize
+            # Mode gestito via template check, Graphics/Frame LOW = tap su
+            # slider/radio già in posizione (no-op visivo). Costo ~22s/istanza.
+            try:
+                from core.settings_helper import imposta_settings_lightweight
+
+                class _SettingsCtx:
+                    pass
+                _sctx = _SettingsCtx()
+                _sctx.device        = device
+                _sctx.matcher       = getattr(nav, "matcher", None)
+                _sctx.navigator     = nav
+                _sctx.instance_name = nome  # WU64 — necessario per cache_state.json
+
+                _t_set = time.time()
+                _ok_set = imposta_settings_lightweight(_sctx, log_fn=log_fn)
+                _dt_set = time.time() - _t_set
+                _log(f"[{nome}] settings lightweight ok={_ok_set} ({_dt_set:.1f}s)", log_fn)
+            except Exception as exc:
+                _log(f"[{nome}] settings lightweight errore: {exc}", log_fn)
+
+            # WU65 — lettura giornaliera Total Squads (storico crescita truppe).
+            # Skip-on-already-done via data/storico_truppe.json.
+            try:
+                from core.troops_reader import leggi_truppe_se_necessario
+                _t_tr = time.time()
+                _ok_tr = leggi_truppe_se_necessario(_sctx, log_fn=log_fn)
+                _dt_tr = time.time() - _t_tr
+                _log(f"[{nome}] truppe reader ok={_ok_tr} ({_dt_tr:.1f}s)", log_fn)
+            except Exception as exc:
+                _log(f"[{nome}] truppe reader errore: {exc}", log_fn)
         else:
             _log(f"[{nome}] vai_in_home() FALLITO", log_fn)
         return ok

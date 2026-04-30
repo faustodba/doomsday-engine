@@ -74,6 +74,7 @@ _DEFAULTS: dict[str, Any] = {
     "task_arena":             True,
     "task_arena_mercato":     True,
     "task_boost":             True,
+    "task_truppe":            True,
     "task_store":             True,
     "task_radar":             True,
     "task_radar_census":      False,
@@ -258,6 +259,16 @@ def merge_config(gcfg: dict, overrides: dict) -> dict:
     except Exception:
         pass
 
+    # ── flag globali root-level (WU55) ──────────────────────────────────────
+    # Flag a livello root di globali che non hanno una sezione dedicata.
+    # Estendibile: aggiungere chiavi qui se servono nuovi flag globali.
+    for _k in ("raccolta_ocr_debug",):
+        try:
+            if _k in globali:
+                merged[_k] = globali[_k]
+        except Exception:
+            pass
+
     # ── sistema ─────────────────────────────────────────────────────────────
     # Alias `tick_sleep_min` (dashboard Pydantic SistemaOverride) → `tick_sleep`
     # per backward compat bot che usa `tick_sleep` nativamente.
@@ -390,6 +401,7 @@ class GlobalConfig:
     task_arena:             bool = True
     task_arena_mercato:     bool = True
     task_boost:             bool = True
+    task_truppe:            bool = True
     task_store:             bool = True
     task_radar:             bool = True
     task_radar_census:      bool = False
@@ -489,6 +501,7 @@ class GlobalConfig:
             task_arena             = bool(t.get("arena",             True)),
             task_arena_mercato     = bool(t.get("arena_mercato",     True)),
             task_boost             = bool(t.get("boost",             True)),
+            task_truppe            = bool(t.get("truppe",            True)),
             task_store             = bool(t.get("store",             True)),
             task_radar             = bool(t.get("radar",             True)),
             task_radar_census      = bool(t.get("radar_census",      False)),
@@ -571,6 +584,7 @@ class GlobalConfig:
                 "arena":             self.task_arena,
                 "arena_mercato":     self.task_arena_mercato,
                 "boost":             self.task_boost,
+                "truppe":            self.task_truppe,
                 "store":             self.task_store,
                 "radar":             self.task_radar,
                 "radar_census":      self.task_radar_census,
@@ -753,6 +767,7 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
                 "arena":                 gcfg.task_arena,
                 "arena_mercato":         gcfg.task_arena_mercato,
                 "boost":                 gcfg.task_boost,
+                "truppe":                gcfg.task_truppe,
                 "store":                 gcfg.task_store,
                 "radar":                 gcfg.task_radar,
                 "radar_census":          gcfg.task_radar_census,
