@@ -50,6 +50,7 @@ xcopy /Y /Q "%SRC%\tasks\*.py"                 "%DST%\tasks\"      || goto :err
 xcopy /Y /Q "%SRC%\shared\*.py"                "%DST%\shared\"     || goto :err
 xcopy /Y /Q "%SRC%\config\*.py"                "%DST%\config\"     || goto :err
 xcopy /Y /Q "%SRC%\monitor\*.py"               "%DST%\monitor\"    || goto :err
+xcopy /Y /Q "%SRC%\tools\*.py"                 "%DST%\tools\"      || goto :err
 
 REM --- Schema scheduler (codice, non configurazione runtime) ---
 xcopy /Y /Q "%SRC%\config\task_setup.json"     "%DST%\config\"     || goto :err

@@ -58,6 +58,53 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Issue chiuse — Sessione 30/04 sera (cap nodi dataset + analisi saturazione)
+
+#### WU84. Cap nodi dataset — telemetry capacità OCR popup gather ✅
+
+Dato che l'utente ha osservato pattern molto diversi di saturazione raccolta tra
+istanze (es. FAU_06 87.5% slot pieni vs FAU_09 14.3%), serviva una metrica
+oggettiva per discriminare se la causa è (a) livello target alto, (b) marcia
+lunga, (c) capacità nominale, o (d) raccolta parziale di altri.
+
+**Censimento manuale 30/04** su FAU_07 (validato 9/9 OCR test):
+
+| Tipo (icona) | L6 | L7 |
+|---|---:|---:|
+| Pomodoro (Field) | 1,200,000 | 1,320,000 |
+| Legno (Sawmill) | 1,200,000 | 1,320,000 |
+| Acciaio (Steel Mill) | 600,000 | 660,000 |
+| Petrolio (Oil Refinery) | 240,000 | 264,000 |
+
+Pattern: **L7 = L6 × 1.10** (esatto). Pomodoro = Legno = base 100%,
+Acciaio = 50%, Petrolio = 20%.
+
+**Implementazione (4 file)**:
+- `shared/ocr_helpers.py` — `leggi_capacita_nodo(img)` con ROI fissa
+  `(270, 280, 420, 320)` (popup si apre sempre al centro mappa).
+  Cascade PSM 6 raw RGB → fallback PSM 6 binv (threshold 150). Validato 9/9
+  su screen reali FAU_07 (incluso nodo residuo 903,714 da raccolta in corso).
+- `shared/cap_nodi_dataset.py` — modulo nuovo, `registra_cap_sample(instance,
+  tipo, livello, capacita)` → append JSONL `data/cap_nodi_dataset.jsonl`.
+  Best-effort, silent on I/O error. Lock thread-safe.
+- `tasks/raccolta.py` — hook subito dopo `_leggi_livello_nodo` ([raccolta.py:1719](tasks/raccolta.py#L1719)).
+  Chiama OCR + registra sample anche su nodi sotto livello_min (copertura
+  completa dataset). `try/except` esterno: nessun impatto su tick raccolta.
+- `tools/analisi_cap_nodi.py` — script CLI, sezioni: capacità per (tipo,liv) /
+  campioni per istanza / residuo medio per (istanza,tipo). Flag `--prod` `--days N`.
+
+**Anche**: `sync_prod.bat` esteso con riga `xcopy tools/*.py` (mancava).
+
+**Use case**:
+- Capacità < max ⇒ nodo già parzialmente raccolto da altri
+- Massima osservata per (tipo, livello) = capacità nominale runtime
+- % residuo medio per istanza → indicatore sano competizione territorio
+- Sviluppi futuri: confronto load_squadra vs capacità → saturazione invio
+
+Memoria: `reference_capacita_nodi.md`. Sync prod + restart bot 30/04 19:18.
+
+---
+
 ### Issue chiuse — Sessione 30/04 mattina (arena fix completi + WU82-83)
 
 #### WU83. Arena rebuild truppe pre-1ª sfida del giorno ✅

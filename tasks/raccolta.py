@@ -1717,6 +1717,18 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
     # ─── Step 5: verifica livello nodo ──────────────────────────────────
     if screen_popup is not None:
         livello_nodo = _leggi_livello_nodo(ctx, screen_popup)
+
+        # Hook campionamento capacità nodo (dataset analitico).
+        # Logga (instance, tipo, livello, capacita) — capacita -1 se OCR fail.
+        # Richiama anche su nodi sotto livello_min per copertura completa.
+        try:
+            from shared.ocr_helpers import leggi_capacita_nodo
+            from shared.cap_nodi_dataset import registra_cap_sample
+            cap = leggi_capacita_nodo(screen_popup)
+            registra_cap_sample(ctx.instance_name, tipo, livello_nodo, cap)
+        except Exception:
+            pass
+
         livello_min  = int(_cfg(ctx, "RACCOLTA_LIVELLO_MIN"))
         if livello_nodo != -1 and livello_nodo < livello_min:
             ctx.log_msg(

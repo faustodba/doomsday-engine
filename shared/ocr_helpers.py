@@ -724,3 +724,57 @@ def leggi_contatore_slot(
 
     except Exception:
         return (-1, -1)
+
+
+# ==============================================================================
+# OCR capacità nodo — popup gather (validato 30/04/2026 su FAU_07)
+# ROI fissa: il popup si apre sempre al centro mappa dopo SEARCH+tap nodo.
+# Censimento capacità (cfr memory/reference_capacita_nodi.md):
+#   Pomodoro/Legno L7 = 1,320,000  L6 = 1,200,000
+#   Acciaio       L7 =   660,000  L6 =   600,000
+#   Petrolio      L7 =   264,000  L6 =   240,000
+#   Pattern: L7 = L6 × 1.10
+# ==============================================================================
+_ZONA_CAPACITA_NODO = (270, 280, 420, 320)  # 150×40 px — popup gather
+
+
+def _parse_int_with_commas(testo: str) -> int:
+    """Parse '1,320,000' → 1320000. Ritorna -1 se non valido."""
+    if not testo:
+        return -1
+    cleaned = testo.replace(",", "").strip()
+    if cleaned.isdigit():
+        return int(cleaned)
+    return -1
+
+
+def leggi_capacita_nodo(img) -> int:
+    """Legge il valore Quantity dal popup gather (capacità residua nodo).
+
+    Cascade: PSM 6 raw RGB → fallback PSM 6 binv (threshold 150).
+    Validato 9/9 su FAU_07 30/04: pomodoro/legno/acciaio/petrolio L6+L7.
+
+    Ritorna il valore intero (es. 1320000) o -1 se OCR fallisce.
+    """
+    if not _TESSERACT_OK:
+        return -1
+    try:
+        arr = _to_array(img)
+        x1, y1, x2, y2 = _ZONA_CAPACITA_NODO
+        roi = arr[y1:y2, x1:x2]
+        cfg = "--psm 6 -c tessedit_char_whitelist=0123456789,"
+
+        rgb = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
+        val = _parse_int_with_commas(_run_tesseract(rgb, cfg))
+        if val > 0:
+            return val
+
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        _, binv = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
+        val = _parse_int_with_commas(_run_tesseract(binv, cfg))
+        if val > 0:
+            return val
+
+        return -1
+    except Exception:
+        return -1
