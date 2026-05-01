@@ -141,13 +141,24 @@ def _detect_chapter_tab(screen, roi: tuple[int, int, int, int]) -> bool:
         return False
 
 
+_AP_MAX_PLAUSIBILE = 100  # cap reale AP giornaliero (milestone top=100)
+
+
 def _leggi_current_ap(screen, roi: tuple[int, int, int, int]) -> int:
     """Legge il valore Current AP dal pannello Daily Mission.
 
-    Pipeline: crop ROI → upscale 3x cubic → grayscale → threshold>200 → PSM7.
-    Validato 30/04 su FAU_01: ROI (180,130,240,175) → '55'.
+    Cascade preprocessing (validato live):
+      1. PSM 8 raw upscale 3x      (legge bene '75' su FAU_09)
+      2. PSM 7 binv threshold>200  (legge bene '55' su FAU_01)
+      3. PSM 7 raw fallback
+      4. PSM 8 binv fallback
 
-    Returns int (-1 se OCR fallisce).
+    Sanity: valori > 100 considerati misread OCR (cap realistico AP=100).
+    Pattern misread: bordo esagono contenitore numero -> '4' parassita
+    es. '75' letto come '475' (FAU_09 01/05). Cascade raw evita preprocessing
+    che amplifica il bordo.
+
+    Returns int (-1 se tutti i pass falliscono o valore implausibile).
     """
     try:
         from shared.ocr_helpers import _run_tesseract  # type: ignore
@@ -157,12 +168,26 @@ def _leggi_current_ap(screen, roi: tuple[int, int, int, int]) -> int:
         x1, y1, x2, y2 = roi
         crop = frame[y1:y2, x1:x2]
         h, w = crop.shape[:2]
-        up = cv2.resize(crop, (w * 3, h * 3), interpolation=cv2.INTER_CUBIC)
-        gray = cv2.cvtColor(up, cv2.COLOR_BGR2GRAY)
+        up_rgb = cv2.resize(crop, (w * 3, h * 3), interpolation=cv2.INTER_CUBIC)
+        gray = cv2.cvtColor(up_rgb, cv2.COLOR_BGR2GRAY)
         _, binv = cv2.threshold(gray, 200, 255, cv2.THRESH_BINARY)
-        cfg = "--psm 7 -c tessedit_char_whitelist=0123456789"
-        txt = _run_tesseract(binv, cfg)
-        return int(txt) if txt and txt.isdigit() else -1
+
+        cfg7 = "--psm 7 -c tessedit_char_whitelist=0123456789"
+        cfg8 = "--psm 8 -c tessedit_char_whitelist=0123456789"
+
+        # Cascade 4 pass — return primo valore plausibile (0..100)
+        for img_in, cfg in [
+            (up_rgb, cfg8),  # 1. raw + PSM8 (FAU_09 '75')
+            (binv,   cfg7),  # 2. binv + PSM7 (FAU_01 '55')
+            (up_rgb, cfg7),  # 3. raw + PSM7
+            (binv,   cfg8),  # 4. binv + PSM8 fallback
+        ]:
+            txt = _run_tesseract(img_in, cfg)
+            if txt and txt.isdigit():
+                val = int(txt)
+                if 0 <= val <= _AP_MAX_PLAUSIBILE:
+                    return val
+        return -1
     except Exception:
         return -1
 
