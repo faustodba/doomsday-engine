@@ -360,7 +360,7 @@
         <span class="filter-lbl">task</span>
         <select class="filter-sel" id="f-task" onchange="aggiornaStorico()">
           <option value="">tutti</option>
-          {% for t in ['raccolta','rifornimento','arena','vip','boost','store','alleanza','messaggi','zaino','radar','arena_mercato'] %}
+          {% for t in ['raccolta','raccolta_chiusura','rifornimento','arena','vip','boost','store','alleanza','messaggi','donazione','truppe','district_showdown','zaino','radar','arena_mercato','radar_census'] %}
           <option value="{{ t }}">{{ t }}</option>
           {% endfor %}
         </select>

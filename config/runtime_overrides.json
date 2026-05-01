@@ -8,6 +8,7 @@
       "radar_census": false,
       "rifornimento": true,
       "donazione": true,
+      "main_mission": true,
       "zaino": true,
       "arena": true,
       "arena_mercato": true,

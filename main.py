@@ -58,6 +58,7 @@ def _import_tasks() -> dict:
         ("tasks.raccolta_fast",  "RaccoltaFastTask"),      # WU57 — variante fast (sostituisce RaccoltaTask via tipologia=raccolta_fast)
         ("tasks.rifornimento",   "RifornimentoTask"),
         ("tasks.donazione",      "DonazioneTask"),
+        ("tasks.main_mission",   "MainMissionTask"),
         ("tasks.zaino",          "ZainoTask"),
         ("tasks.vip",            "VipTask"),
         ("tasks.alleanza",       "AlleanzaTask"),
@@ -837,16 +838,27 @@ def _thread_istanza(ist, tasks_cls, dry_run):
 
     ultimo = None
     if results:
-        last_entry = max(orc._entries, key=lambda e: e.last_run, default=None)
-        if last_entry and last_entry.last_result:
-            lr    = last_entry.last_result
-            tname = last_entry.task.name() if callable(last_entry.task.name) else last_entry.task.name
+        # WU87 — pre-fix: solo l'ultimo task (sempre raccolta_chiusura priority 200)
+        # finiva nello storico engine_status. Storico events dashboard mostrava
+        # quindi solo raccolta_chiusura con durate 0.0s, gli altri task invisibili.
+        # Post-fix: itera TUTTE le entries del tick corrente (last_run >= tick_start)
+        # e scrivi 1 record storico per ognuna in ordine cronologico.
+        entries_tick = sorted(
+            [e for e in orc._entries
+             if e.last_run and e.last_run >= _tick_start_ts and e.last_result],
+            key=lambda e: e.last_run,
+        )
+        for entry in entries_tick:
+            lr    = entry.last_result
+            tname = entry.task.name() if callable(entry.task.name) else entry.task.name
             cnts[tname] = cnts.get(tname, 0) + 1
-            ultimo = {"nome": tname, "esito": "ok" if lr.success else "err",
-                      "msg": (lr.message or "")[:120], "ts": datetime.now().strftime("%H:%M:%S"), "durata_s": 0}
+            ts_str = datetime.fromtimestamp(entry.last_run).strftime("%H:%M:%S")
+            esito  = "ok" if lr.success else "err"
+            ultimo = {"nome": tname, "esito": esito,
+                      "msg": (lr.message or "")[:120], "ts": ts_str, "durata_s": 0}
             _aggiungi_storico({"istanza": nome, "task": tname,
-                               "esito": "ok" if lr.success else "err",
-                               "ts": datetime.now().strftime("%H:%M:%S"),
+                               "esito": esito,
+                               "ts": ts_str,
                                "durata_s": 0, "msg": (lr.message or "")[:80]})
 
     errori = sum(1 for r in results if not r.success)

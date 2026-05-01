@@ -563,8 +563,8 @@ def partial_task_flags_v2(request: Request):
         "truppe", "arena",
         "store", "alleanza",
         "donazione", "messaggi",
-        "radar", "arena_mercato",
-        "district_showdown",
+        "main_mission", "radar",
+        "arena_mercato", "district_showdown",
     ]
 
     # auto-WU22 (27/04): rewrite as 2-col checkbox rows (style rifornimento .rr-cb)
@@ -1037,6 +1037,7 @@ def partial_produzione_istanze(request: Request):
                 "store":"store","arena":"arena","arena_mercato":"arenaM",
                 "zaino":"zaino","radar":"radar","radar_census":"radCens",
                 "rifornimento":"rifor","donazione":"donaz",
+                "main_mission":"mainM",
                 "district_showdown":"DS","raccolta":"racc",
             }
             parts = []
@@ -1156,12 +1157,50 @@ def partial_produzione_istanze(request: Request):
         ]
         sess_block = (
             f'<div style="font-size:11px;color:var(--text-dim);'
-            f'margin-top:5px;max-width:60%" '
+            f'margin-top:5px;flex:1;min-width:0" '
             f'title="tassa media: {tassa_pct_avg*100:.1f}%">'
             f'<div style="color:var(--accent);font-weight:600;text-align:center;'
             f'margin-bottom:2px;border-bottom:0.5px solid rgba(255,255,255,0.06);'
             f'padding-bottom:1px">rifornimento giornaliero</div>'
             f'{"".join(corr_kvs)}</div>'
+        )
+
+        # WU86 — ultimi 5 cicli istanza (avvio → chiusura, durata)
+        ultimi_cicli = []
+        try:
+            from dashboard.services.telemetry_reader import get_ultimi_cicli_istanza
+            ultimi_cicli = get_ultimi_cicli_istanza(nome, n=5)
+        except Exception:
+            pass
+
+        if ultimi_cicli:
+            rows_cicli = []
+            for c in ultimi_cicli:
+                dur_s = int(c.get("durata_s", 0))
+                dur_lbl = f'{dur_s//60}m{dur_s%60:02d}s'
+                rows_cicli.append(
+                    f'<div style="display:flex;justify-content:space-between;'
+                    f'gap:6px;font-size:11px;line-height:1.5">'
+                    f'<span style="color:var(--text-dim)">'
+                    f'{c["avvio_lbl"]}→{c["fine_lbl"]}</span>'
+                    f'<span style="color:var(--text)">{dur_lbl}</span></div>'
+                )
+            cicli_block = (
+                '<div style="font-size:11px;color:var(--text-dim);'
+                'margin-top:5px;flex:1;min-width:0">'
+                '<div style="color:var(--accent);font-weight:600;text-align:center;'
+                'margin-bottom:2px;border-bottom:0.5px solid rgba(255,255,255,0.06);'
+                'padding-bottom:1px">ultimi 5 cicli</div>'
+                + "".join(rows_cicli) + '</div>'
+            )
+        else:
+            cicli_block = ''
+
+        # Container flex side-by-side: rifornimento (sx) + ultimi cicli (dx)
+        bottom_block = (
+            '<div style="display:flex;gap:10px;align-items:flex-start">'
+            + sess_block + cicli_block +
+            '</div>'
         )
 
         # WU66 — riga truppe (Layout A): total oggi + Δ7gg + sparkline 7 giorni
@@ -1260,7 +1299,7 @@ def partial_produzione_istanze(request: Request):
             </tr></thead>
             <tbody>{rows}</tbody>
           </table>
-          {sess_block}
+          {bottom_block}
         </div>
         ''')
 

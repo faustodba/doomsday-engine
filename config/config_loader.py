@@ -66,6 +66,7 @@ _DEFAULTS: dict[str, Any] = {
     "task_raccolta":          True,
     "task_rifornimento":      False,
     "task_donazione":         True,
+    "task_main_mission":      True,
     "task_district_showdown": False,
     "task_zaino":             False,
     "task_vip":               True,
@@ -393,6 +394,7 @@ class GlobalConfig:
     task_raccolta:          bool = True
     task_rifornimento:      bool = False
     task_donazione:         bool = True
+    task_main_mission:      bool = True
     task_district_showdown: bool = False
     task_zaino:             bool = False
     task_vip:               bool = True
@@ -493,6 +495,7 @@ class GlobalConfig:
             task_raccolta          = bool(t.get("raccolta",          True)),
             task_rifornimento      = bool(t.get("rifornimento",      False)),
             task_donazione         = bool(t.get("donazione",         True)),
+            task_main_mission      = bool(t.get("main_mission",      True)),
             task_district_showdown = bool(t.get("district_showdown", False)),
             task_zaino             = bool(t.get("zaino",             False)),
             task_vip               = bool(t.get("vip",               True)),
@@ -576,6 +579,7 @@ class GlobalConfig:
                 "raccolta":          self.task_raccolta,
                 "rifornimento":      self.task_rifornimento,
                 "donazione":         self.task_donazione,
+                "main_mission":      self.task_main_mission,
                 "district_showdown": self.task_district_showdown,
                 "zaino":             self.task_zaino,
                 "vip":               self.task_vip,
@@ -759,6 +763,7 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
                 "rifornimento_mappa":    gcfg.rifornimento_mappa_abilitato,
                 "rifornimento_membri":   gcfg.rifornimento_membri_abilitato,
                 "donazione":             gcfg.task_donazione,
+                "main_mission":          gcfg.task_main_mission,
                 "district_showdown":     gcfg.task_district_showdown,
                 "zaino":                 gcfg.task_zaino,
                 "vip":                   gcfg.task_vip,

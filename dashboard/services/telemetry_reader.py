@@ -581,6 +581,48 @@ def _ts_to_local_date(ts: str) -> str:
         return f"{ts[8:10]}/{ts[5:7]}" if len(ts) >= 10 else "—"
 
 
+def get_ultimi_cicli_istanza(nome: str, n: int = 5) -> List[dict]:
+    """
+    Ultimi N cicli per istanza con (start_ts, end_ts, durata_s, esito) in ora LOCALE.
+
+    Source: data/telemetry/cicli.json. Itera in ordine inverso (più recenti prima)
+    e per ogni ciclo prende la sezione `istanze[nome]` se esiste.
+    Filtra solo cicli completati (`esito != "running"`).
+
+    Args:
+        nome: nome istanza es. "FAU_07"
+        n:    quanti cicli ritornare (default 5)
+
+    Returns:
+        Lista di dict {avvio_lbl, fine_lbl, durata_s, esito} con orari HH:MM locali.
+        Vuoto se nessun ciclo persistito o istanza mai eseguita.
+    """
+    cicli = _load_cicli_persistent() or []
+    out: List[dict] = []
+    # Ordine cronologico inverso (più recenti prima)
+    for ciclo in reversed(cicli):
+        istanze = ciclo.get("istanze") or {}
+        info = istanze.get(nome)
+        if not info:
+            continue
+        start_ts = info.get("start_ts") or ""
+        end_ts   = info.get("end_ts") or ""
+        esito    = info.get("esito") or "?"
+        durata_s = int(info.get("durata_s") or 0)
+        # Skip running (in corso): non ha end_ts utile
+        if esito == "running" or not end_ts:
+            continue
+        out.append({
+            "avvio_lbl": _ts_to_local_hhmm(start_ts),
+            "fine_lbl":  _ts_to_local_hhmm(end_ts),
+            "durata_s":  durata_s,
+            "esito":     esito,
+        })
+        if len(out) >= n:
+            break
+    return out
+
+
 def get_storico_cicli(n: int = 20) -> List[CicloStorico]:
     """
     Ritorna ultimi N cicli completati o in corso (più recenti prima).

@@ -58,6 +58,91 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Issue chiuse — Sessione 01/05 mezzogiorno (nuovo task Main Mission + dashboard fix)
+
+#### WU88. Nuovo task `main_mission` — Main + Daily + chest milestone ✅
+
+Aggiunto un nuovo task giornaliero (in realtà schedulato ogni 12h) per recuperare le
+ricompense delle Main Mission, Daily Mission e dei chest milestone bonus.
+
+**Pattern UI client**:
+- Pannello accessibile da HOME tap (33, 398) — icona laterale sinistra
+- 2 tab verticali a sinistra: "Main Missions" (50, 100) e "Daily Missions" (50, 185)
+- Default all'apertura: Daily Missions attivo
+- Pulsante CLAIM verde (80×35 px) appare a destra di ogni missione completata
+- Daily Missions ha barra progresso "Current AP" 0-100 con 5 chest milestone
+  alle soglie 20/40/60/80/100 (chest 140 visibile ma scroll, escluso dal task)
+- Ogni claim apre popup reward "Congratulations! You got" con risorse
+- Chiusura popup: tap su "empty space" del popup
+
+**Censimento capacità chest** (validato FAU_01 30/04 sera):
+| chest | coord | soglia AP |
+|-------|-------|----------:|
+| 20 | (397, 160) | 20 |
+| 40 | (517, 160) | 40 |
+| 60 | (633, 160) | 60 |
+| 80 | (751, 160) | 80 |
+| 100 | (873, 160) | 100 |
+
+**Flow operativo** (validato live FAU_00 + FAU_02 01/05):
+1. tap apri pannello (33, 398)
+2. tap tab Main (50, 100)
+3. loop CLAIM Main: find_one in ROI (790,265,880,305), tap fisso (832,284)
+   con auto-scroll lista del client, close popup (480, 80)
+4. tap tab Daily (50, 185)
+5. loop CLAIM Daily: find_one in ROI ampia (810,210,895,460), **tap dinamico
+   sul match** (cx, cy) — niente auto-scroll garantito
+6. **OCR Current AP DOPO i claim daily** (importante: i claim aggiungono punti)
+7. per ogni chest milestone <= AP: tap coord, close popup
+8. BACK x1
+
+**OCR Current AP** ROI `(180, 130, 240, 175)` — upscale 3x cubic + grayscale
++ threshold>200 + PSM7 whitelist `0123456789`. Validato 9/9 test.
+
+**Template CLAIM**: `pin/pin_btn_claim_mission.png` 80×35 px verde
+(diverso dal `pin/pin_claim.png` di alleanza — score basso 0.50 cross-match).
+Validato find_all 2/2 score 0.99-1.00 a soglia 0.80.
+
+**Bug collaterale risolto** durante test:
+- Pre-fix `tap_chiudi_popup = (480, 270)` centro pannello: se popup non c'era,
+  il tap cliccava una missione random e chiudeva il pannello (popup aperto su
+  Search nodo invece di reward), perdendo OCR AP successivo
+- Post-fix `(480, 80)` zona alta vuota — safe, sempre no-op se popup assente
+
+**Errore precedente sulle coord**: l'utente aveva inizialmente fornito coord
+errate per i tab (62, 109 + 862, 187) ma test live ha mostrato che:
+- (50, 100) = tab Main Mission (sx alto)
+- (50, 185) = tab Daily Mission (sx basso, default attivo)
+
+**Logica chest in funzione di AP**: tappare chest con `milestone <= AP`. Le chest
+già claimate hanno alone dorato (no-op silente al tap). Le non raggiunte sono
+dim (popup di errore chiuso silentemente da tap_chiudi_popup successivo).
+
+**Schedulazione**: priority=22 (dopo donazione=20, prima zaino=25),
+**periodic 12h** (utente ha richiesto 12h vs daily 24h iniziale per coprire
+2 esecuzioni nelle 24h, copre tutti i fusi reset evento).
+
+**File toccati** (8 file):
+- `tasks/main_mission.py` NEW (267 righe)
+- `templates/pin/pin_btn_claim_mission.png` NEW (80×35 verde)
+- `main.py` — `_catalogue` + `("tasks.main_mission", "MainMissionTask")`
+- `config/task_setup.json` — entry priority 22 periodic 12h
+- `config/runtime_overrides.json` — `"main_mission": true`
+- `config/config_loader.py` — 3 punti: DEFAULT_GLOBAL, GlobalConfig dataclass,
+  task_abilitato mapping
+- `dashboard/models.py` — TaskFlags `main_mission: bool = True`
+- `dashboard/app.py` — ORDER pill + ABBREV `"mainM"`
+
+**Validazione runtime**:
+- FAU_00 01/05 11:35: AP=50 letto, chest 20+40 tappati, pannello chiuso correttamente
+- FAU_02 01/05 11:54: 1 daily claim a (850, 306) score 0.978, AP 0→50 post-claim,
+  chest 20+40 tappati al 2° run
+
+**Delay**: PC lento richiede valori conservativi 3s/2.5s/2s/3s/2s
+(apri/tab_switch/post_tap/post_claim/back).
+
+---
+
 ### Issue chiuse — Sessione 01/05 mattina (store debug screenshot)
 
 #### WU85. Store debug screenshot buffer ✅
