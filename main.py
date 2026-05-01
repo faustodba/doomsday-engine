@@ -662,6 +662,14 @@ def _thread_istanza(ist, tasks_cls, dry_run):
     _log(nome, f"Thread avviato -- porta ADB {porta}")
     _aggiorna_stato_istanza(nome, {"stato": "waiting", "porta": porta})
 
+    # Hook metriche per-istanza: inizio tick
+    _tick_start_wall = time.time()
+    try:
+        from core.istanza_metrics import inizia_tick
+        inizia_tick(nome, cycle_id=int(_engine_stato.get("ciclo", 0) or 0))
+    except Exception:
+        pass
+
     with _contatori_lock:
         _contatori.setdefault(nome, {})
 
@@ -887,6 +895,24 @@ def _thread_istanza(ist, tasks_cls, dry_run):
 
     _aggiorna_stato_istanza(nome, {"stato": "idle"})
     _log(nome, "Thread completato.")
+
+    # Hook metriche per-istanza: fine tick (flush record JSONL)
+    try:
+        from core.istanza_metrics import (
+            chiudi_tick, imposta_task_duration,
+        )
+        # Propaga durate task dall'orchestrator
+        for entry in orc._entries:
+            if (entry.last_run and entry.last_run >= _tick_start_ts
+                    and getattr(entry, "last_duration_s", 0) > 0):
+                tname = entry.task.name() if callable(entry.task.name) else entry.task.name
+                imposta_task_duration(nome, tname, entry.last_duration_s)
+        # Outcome del tick (cascade ADB ha priorità)
+        _tick_outcome = "cascade" if adb_unhealthy else "ok"
+        _tick_total = round(time.time() - _tick_start_wall, 1)
+        chiudi_tick(nome, outcome=_tick_outcome, tick_total_s=_tick_total)
+    except Exception as exc:
+        _log(nome, f"[WARN] istanza_metrics flush: {exc}")
 
 
 def _scheduler_prossimi(orc) -> dict:

@@ -987,6 +987,12 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
             except Exception:
                 pass
             _log(f"[{nome}] HOME raggiunto in {home_total_s:.0f}s", log_fn)
+            # Hook metriche per-istanza (best-effort)
+            try:
+                from core.istanza_metrics import imposta_boot_home
+                imposta_boot_home(nome, home_total_s)
+            except Exception:
+                pass
 
             # WU60 (Issue #85 prereq) — applica settings lightweight client gioco
             # ad ogni avvio istanza dopo HOME confermata. Idempotente: Optimize

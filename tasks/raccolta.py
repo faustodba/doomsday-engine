@@ -1751,6 +1751,18 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
         _reset_to_mappa(ctx, obiettivo)
         return False, False, False
 
+    # Hook metriche per-istanza: dettaglio invio (best-effort)
+    try:
+        from core.istanza_metrics import aggiungi_invio_raccolta
+        _locals = locals()
+        _liv = int(_locals.get("livello_nodo", -1) or -1)
+        _cap = int(_locals.get("cap", -1) or -1)
+        aggiungi_invio_raccolta(
+            ctx.instance_name, tipo, _liv, _cap, int(eta_s or 0)
+        )
+    except Exception:
+        pass
+
     # Lettura contatore post-marcia (solo informativa — marcia già
     # confermata visivamente dalla chiusura della maschera).
     time.sleep(1.5)
@@ -2420,6 +2432,17 @@ class RaccoltaTask(Task):
             f"Raccolta: completata — {inviate_totali} squadre totali "
             f"(tentativi={tentativi_ciclo}, slot_pieni={slot_pieni})"
         )
+        # Hook metriche per-istanza: slot pre/post tick (best-effort)
+        try:
+            from core.istanza_metrics import imposta_raccolta_slot
+            imposta_raccolta_slot(
+                ctx.instance_name,
+                attive_pre=int(attive_inizio),
+                attive_post=int(attive_correnti),
+                totali=int(obiettivo),
+            )
+        except Exception:
+            pass
         # Output telemetria — Issue #53 Step 3
         out_data = {
             "inviate":          inviate_totali,
