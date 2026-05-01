@@ -22,19 +22,6 @@
 
     <div class="divider"></div>
 
-    <!-- ── WU66 STORICO TRUPPE 8gg ──────────────────────────── -->
-    <div class="section">
-      <div class="sec-label">📊 storico truppe (8 giorni)</div>
-      <div id="truppe-storico"
-           hx-get="/ui/partial/truppe-storico"
-           hx-trigger="load, every 60s"
-           hx-swap="innerHTML">
-        <div style="color:var(--text-dim);text-align:center;padding:12px">caricamento...</div>
-      </div>
-    </div>
-
-    <div class="divider"></div>
-
     <!-- ── CONFIGURAZIONE 2x2 ────────────────────────────── -->
     <div class="section">
       <div class="sec-label">configurazione</div>
@@ -272,7 +259,7 @@
 
     <!-- ── TELEMETRIA (WU37 — Issue #53 MVP) ──────────────── -->
     <div class="section">
-      <div class="sec-label">telemetria 24h</div>
+      <div class="sec-label">telemetria</div>
       <div class="tel-grid">
 
         <div class="tel-card">
@@ -330,7 +317,7 @@
           <div class="tel-foot">events 7gg · outlier rimossi via Tukey fences IQR×1.5 · cv = std/media</div>
         </div>
 
-        <div class="tel-card tel-full">
+        <div class="tel-card">
           <div class="tel-head">📈 trend 7gg</div>
           <div id="tel-trend"
                hx-get="/ui/partial/telemetria-trend"
@@ -339,6 +326,17 @@
             <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
           </div>
           <div class="tel-foot">data/storico_farm.json (90gg retention)</div>
+        </div>
+
+        <div class="tel-card">
+          <div class="tel-head">📊 storico truppe (8 giorni)</div>
+          <div id="truppe-storico"
+               hx-get="/ui/partial/truppe-storico"
+               hx-trigger="load, every 60s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">data/storico_truppe.json · 8 giorni</div>
         </div>
 
       </div>
