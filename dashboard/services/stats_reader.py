@@ -329,8 +329,8 @@ def get_truppe_storico_aggregato(days: int = 8) -> dict:
       - days:        finestra temporale (default 8 = oggi + 7 indietro)
       - data_oggi:   ISO YYYY-MM-DD UTC
 
-    Nota: ordina per_istanza per delta_pct desc (chi cresce di più sopra),
-    None in fondo. Istanze senza alcuna entry sono escluse.
+    Mostra TUTTE le istanze in instances.json (incluso disabilitate +
+    quelle senza storico) — riga vuota se nessun dato registrato.
     """
     from datetime import datetime, timezone, timedelta
     storico = _load_storico_truppe()
@@ -345,17 +345,24 @@ def get_truppe_storico_aggregato(days: int = 8) -> dict:
     per_istanza: list[dict] = []
     sum_serie:   list[Optional[int]] = [None] * days
 
-    for nome, entries in storico.items():
-        if not entries:
-            continue
+    # Iter su tutte le istanze configurate (anche disabilitate / senza storico)
+    try:
+        from config.config_loader import load_instances
+        nomi_configurati = [i.get("nome", "") for i in load_instances() if i.get("nome")]
+    except Exception:
+        nomi_configurati = []
+    # Fallback ai nomi presenti nello storico (compat)
+    nomi_storico = list(storico.keys())
+    nomi_tutti = list(dict.fromkeys(nomi_configurati + nomi_storico))  # dedup mantenendo ordine
+
+    for nome in nomi_tutti:
+        entries = storico.get(nome, []) or []
         by_date: dict[str, int] = {}
         for e in entries:
             try:
                 by_date[e["data"]] = int(e["total_squads"])
             except Exception:
                 continue
-        if not by_date:
-            continue
 
         oggi        = by_date.get(iso_seq[-1])
         sette_gg_fa = by_date.get(iso_seq[0])
