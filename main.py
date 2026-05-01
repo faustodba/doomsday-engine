@@ -854,12 +854,13 @@ def _thread_istanza(ist, tasks_cls, dry_run):
             cnts[tname] = cnts.get(tname, 0) + 1
             ts_str = datetime.fromtimestamp(entry.last_run).strftime("%H:%M:%S")
             esito  = "ok" if lr.success else "err"
+            durata = round(float(getattr(entry, "last_duration_s", 0.0) or 0.0), 1)
             ultimo = {"nome": tname, "esito": esito,
-                      "msg": (lr.message or "")[:120], "ts": ts_str, "durata_s": 0}
+                      "msg": (lr.message or "")[:120], "ts": ts_str, "durata_s": durata}
             _aggiungi_storico({"istanza": nome, "task": tname,
                                "esito": esito,
                                "ts": ts_str,
-                               "durata_s": 0, "msg": (lr.message or "")[:80]})
+                               "durata_s": durata, "msg": (lr.message or "")[:80]})
 
     errori = sum(1 for r in results if not r.success)
     _aggiorna_stato_istanza(nome, {"stato": "waiting", "task_eseguiti": dict(cnts),

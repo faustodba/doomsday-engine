@@ -79,6 +79,7 @@ class _TaskEntry:
     last_run: float        # timestamp Unix ultimo run (0.0 = mai eseguito)
     last_result: Optional[TaskResult] = None
     enabled: bool = True
+    last_duration_s: float = 0.0  # durata ultima esecuzione (per dashboard storico)
 
 
 # ==============================================================================
@@ -283,6 +284,7 @@ class Orchestrator:
                 cycle=cycle_num,
             )
 
+            _run_start = time.time()
             try:
                 result = entry.task.run(self._ctx)
             except ADBUnhealthyError as exc:
@@ -322,6 +324,7 @@ class Orchestrator:
             # (skip = condizione gestita correttamente, non un fail).
             # Su fail/eccezione → last_run resta invariato → al prossimo
             # tick il task viene riprovato.
+            entry.last_duration_s = time.time() - _run_start
             if result.success or result.skipped:
                 entry.last_run = time.time()
             entry.last_result = result

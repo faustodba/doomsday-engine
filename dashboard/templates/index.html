@@ -351,16 +351,16 @@
       <div class="sec-label">storico eventi</div>
       <div class="filter-row">
         <span class="filter-lbl">istanza</span>
-        <select class="filter-sel" id="f-istanza" onchange="aggiornaStorico()">
+        <select class="filter-sel" id="f-istanza" name="istanza" onchange="aggiornaStorico()">
           <option value="">tutte</option>
           {% for ist in istanze %}
           <option value="{{ ist.nome }}">{{ ist.nome }}</option>
           {% endfor %}
         </select>
         <span class="filter-lbl">task</span>
-        <select class="filter-sel" id="f-task" onchange="aggiornaStorico()">
+        <select class="filter-sel" id="f-task" name="task" onchange="aggiornaStorico()">
           <option value="">tutti</option>
-          {% for t in ['raccolta','raccolta_chiusura','rifornimento','arena','vip','boost','store','alleanza','messaggi','donazione','truppe','district_showdown','zaino','radar','arena_mercato','radar_census'] %}
+          {% for t in ['raccolta','raccolta_chiusura','rifornimento','arena','vip','boost','store','alleanza','messaggi','donazione','truppe','main_mission','district_showdown','zaino','radar','arena_mercato','radar_census'] %}
           <option value="{{ t }}">{{ t }}</option>
           {% endfor %}
         </select>
@@ -371,6 +371,7 @@
           <tbody id="storico-body"
                  hx-get="/ui/partial/storico"
                  hx-trigger="load, every 30s"
+                 hx-include="#f-istanza, #f-task"
                  hx-swap="innerHTML">
             <tr><td colspan="6" style="color:var(--text-dim);font-size:9px;padding:8px">caricamento...</td></tr>
           </tbody>
