@@ -35,6 +35,8 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
+from datetime import datetime as _dt
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from core.task import Task, TaskContext, TaskResult
@@ -43,6 +45,54 @@ from shared.ui_helpers import attendi_template
 if TYPE_CHECKING:
     from core.device import MuMuDevice, FakeDevice
     from shared.template_matcher import TemplateMatcher
+
+
+# ==============================================================================
+# Debug buffer — su fail/skip dumpa tutti gli screenshot accumulati
+# Toggle: _DEBUG_STORE_FAIL_DUMP (True = attiva).
+# Su success: discard buffer (nessun disco).
+# Su fail/skip: salva in data/store_debug/{istanza}_{ts}_{step:02d}_{label}.png.
+# ==============================================================================
+_DEBUG_STORE_FAIL_DUMP = True
+
+
+class _StoreDebugBuf:
+    """Buffer in-memory di screenshot durante esecuzione store."""
+
+    def __init__(self, instance: str) -> None:
+        self.instance = instance
+        self.shots: list[tuple[str, object]] = []  # [(label, screen)]
+
+    def snap(self, device, label: str) -> None:
+        """Cattura screenshot e accumula con label."""
+        try:
+            shot = device.screenshot()
+            if shot is not None:
+                self.shots.append((label, shot))
+        except Exception:
+            pass
+
+    def flush(self, log) -> None:
+        """Salva tutti gli screenshot accumulati su disco."""
+        if not self.shots:
+            return
+        try:
+            import cv2
+            root = Path(__file__).resolve().parents[1]
+            out_dir = root / "data" / "store_debug"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            ts = _dt.now().strftime("%Y%m%d_%H%M%S")
+            saved = 0
+            for idx, (label, screen) in enumerate(self.shots):
+                frame = getattr(screen, "frame", None)
+                if frame is None:
+                    continue
+                fn = f"{self.instance}_{ts}_{idx:02d}_{label}.png"
+                cv2.imwrite(str(out_dir / fn), frame)
+                saved += 1
+            log(f"[DEBUG] dump store: {saved}/{len(self.shots)} shot in data/store_debug/")
+        except Exception as exc:
+            log(f"[DEBUG] flush fallito: {exc}")
 
 
 # ==============================================================================
@@ -189,6 +239,12 @@ class StoreTask(Task):
             # log
                 ctx.log_msg(f"[STORE] {msg}")
 
+        # Buffer debug screenshot (flush solo on fail/skip)
+        self._debug_buf = (
+            _StoreDebugBuf(getattr(ctx, "instance_name", "?"))
+            if _DEBUG_STORE_FAIL_DUMP else None
+        )
+
         # ── Step 0: assicura HOME ─────────────────────────────────────────────
         if ctx.navigator is not None:
             if not ctx.navigator.vai_in_home():
@@ -201,9 +257,21 @@ class StoreTask(Task):
                 device, matcher, log, cfg
             )
         except Exception as exc:
+            if self._debug_buf is not None:
+                self._debug_buf.snap(device, "exception")
+                self._debug_buf.flush(log)
             return TaskResult.fail(f"Eccezione non gestita: {exc}", step="esegui_store")
 
+        # Flush debug buffer solo se NON completato OK
+        if self._debug_buf is not None and esito != _Esito.COMPLETATO:
+            self._debug_buf.flush(log)
+
         return self._mappa_esito(esito, acquistati, refreshed, log)
+
+    def _snap(self, device, label: str) -> None:
+        """Cattura screenshot in buffer debug (no-op se debug disabilitato)."""
+        if self._debug_buf is not None:
+            self._debug_buf.snap(device, label)
 
     # ── Flusso principale ─────────────────────────────────────────────────────
 
@@ -220,7 +288,9 @@ class StoreTask(Task):
         """
 
         # ── Gestione banner ───────────────────────────────────────────────────
+        self._snap(device, "00_pre_banner")
         stato_banner = self._comprimi_banner(device, matcher, log, cfg)
+        self._snap(device, "01_post_banner")
         roi_corrente = (
             cfg.roi_home_banner_chiuso
             if stato_banner in ("aperto", "chiuso")
@@ -275,6 +345,7 @@ class StoreTask(Task):
                 break
 
         if not candidates:
+            self._snap(device, f"02_no_candidates_best{best_score:.2f}".replace(".", "_"))
             log(f"Store NON trovato dopo {len(cfg.griglia)} posizioni"
                 f" (best score={best_score:.3f} < soglia={cfg.soglia_store:.2f})")
             return _Esito.STORE_NON_TROVATO, 0, False
@@ -325,6 +396,7 @@ class StoreTask(Task):
             # else: continua al prossimo candidato
 
         if not result or not result.found:
+            self._snap(device, "03_rematch_fail")
             log(f"Store re-match fallito per tutti i {len(candidates)} candidati")
             return _Esito.STORE_NON_TROVATO, 0, False
 
@@ -364,6 +436,7 @@ class StoreTask(Task):
         # Pre-tap: cerca pin_mercante sull'edificio
         # Se trovato → tap preciso su (cx_merc, cy_merc) apre popup direttamente
         # Se non trovato → tap su edificio → label + carrello
+        self._snap(device, "10_pre_tap_mercante")
         shot_pre = device.screenshot()
         r_merc = matcher.find_one(shot_pre, cfg.tmpl_mercante,
                                   threshold=cfg.soglia_mercante,
@@ -374,10 +447,12 @@ class StoreTask(Task):
             log(f"Mercante visibile — tap diretto ({r_merc.cx},{r_merc.cy})")
             device.tap(r_merc.cx, r_merc.cy)
             time.sleep(cfg.wait_tap)
+            self._snap(device, "11_post_tap_diretto")
         else:
             log(f"Tap edificio ({cx_store},{cy_store})")
             device.tap(cx_store, cy_store)
             time.sleep(cfg.wait_tap)
+            self._snap(device, "11_post_tap_edificio")
 
             shot = device.screenshot()
 
@@ -385,6 +460,7 @@ class StoreTask(Task):
             s_label = matcher.score(shot, cfg.tmpl_store_attivo)
             log(f"Label: score={s_label:.3f} (soglia={cfg.soglia_store_attivo:.2f})")
             if s_label < cfg.soglia_store_attivo:
+                self._snap(device, f"12_label_fail_{s_label:.2f}".replace(".", "_"))
                 log("Label non trovata — abort")
                 device.back()
                 time.sleep(cfg.wait_back)
@@ -394,6 +470,7 @@ class StoreTask(Task):
                                       threshold=cfg.soglia_carrello)
             log(f"Carrello: score={r_carr.score:.3f} (soglia={cfg.soglia_carrello:.2f})")
             if not r_carr.found:
+                self._snap(device, f"13_carrello_fail_{r_carr.score:.2f}".replace(".", "_"))
                 log("Carrello non trovato — abort")
                 device.back()
                 time.sleep(cfg.wait_back)
@@ -433,6 +510,10 @@ class StoreTask(Task):
             and s_merch_open > s_merch_close
         )
         if not merchant_ok:
+            self._snap(
+                device,
+                f"14_merch_open{s_merch_open:.2f}_close{s_merch_close:.2f}".replace(".", "_"),
+            )
             if s_merch_close >= cfg.soglia_merchant and s_merch_close > s_merch_open:
                 log("VIP Store attivo — Mysterious Merchant assente — abort")
             else:

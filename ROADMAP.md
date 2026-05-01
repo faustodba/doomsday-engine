@@ -58,6 +58,33 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Issue chiuse — Sessione 01/05 mattina (store debug screenshot)
+
+#### WU85. Store debug screenshot buffer ✅
+
+Issue: notte 30/04→1/05 store ha avuto **68% fail/skip** (15/22). Pattern bimodale
+temporale (peggio sera/notte 23:00-00:30, ok alba 04:50-05:50). Tre modalità di
+fail distinte:
+- 6× `Store non trovato nella griglia` (scan grid fallisce)
+- 9× `Merchant non confermato` (post-tap mercante UI sbagliata)
+- 1× `Label non trovata`, 1× `Carrello non trovato`
+
+**Implementazione**: buffer in-memory `_StoreDebugBuf` accumula screenshot ai
+punti chiave durante esecuzione. Flush su disco SOLO se outcome != COMPLETATO
+(no spreco disco sui ~30% successi).
+
+Punti snap (8 totali):
+- `_esegui_store`: pre-banner, post-banner, no-candidates, rematch-fail
+- `_gestisci_negozio`: pre-tap-mercante, post-tap, label-fail, carrello-fail, merch-open-close
+
+Path output: `data/store_debug/{istanza}_{ts}_{idx:02d}_{label}.png`.
+Toggle `_DEBUG_STORE_FAIL_DUMP=True` (disattivare dopo analisi).
+
+Decisione: data district_showdown ha cadenza mensile (non bug, fail nei giorni
+fuori finestra) e bug `livello = -1` lasciato in pending.
+
+---
+
 ### Issue chiuse — Sessione 30/04 sera (cap nodi dataset + analisi saturazione)
 
 #### WU84. Cap nodi dataset — telemetry capacità OCR popup gather ✅
