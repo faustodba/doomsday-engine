@@ -54,21 +54,31 @@ class MainMissionConfig:
     # --- Apertura pannello ---
     tap_apri_pannello: tuple[int, int] = (33, 398)
 
-    # --- Tab (validate live FAU_00 01/05) ---
-    # Lato sinistro pannello: Main Missions (alto), Daily Missions (sotto).
+    # --- Tab (validate live FAU_00/02 01/05 + FAU_08 3-tab variant) ---
+    # Lato sinistro pannello: tab verticali, layout dinamico:
+    #   2-tab (default): Main Missions (alto), Daily Missions (sotto)
+    #   3-tab (Chapter unlocked): Chapter Missions, Main Missions, Daily Missions
     # Default all'apertura: Daily Missions attivo.
-    tap_tab_main:  tuple[int, int] = (50, 100)
-    tap_tab_daily: tuple[int, int] = (50, 185)
+    # Detection runtime via OCR testo "Chapter" in ROI tab top.
+    tap_tab_main_2t:    tuple[int, int] = (50, 100)
+    tap_tab_daily_2t:   tuple[int, int] = (50, 185)
+    tap_tab_chapter_3t: tuple[int, int] = (50, 105)
+    tap_tab_main_3t:    tuple[int, int] = (50, 185)
+    tap_tab_daily_3t:   tuple[int, int] = (50, 265)
+    # ROI OCR per detection Chapter tab (zona top-sx tab list)
+    ocr_chapter_roi:    tuple[int, int, int, int] = (10, 75, 110, 135)
+    # CLAIM Chapter — pulsante singolo in basso-destra (verde se 7/7, grigio else)
+    # Tap cieco safe: grigio = no-op silente.
+    tap_claim_chapter:  tuple[int, int] = (850, 455)
 
     # --- CLAIM template (Main + Daily — stesso pulsante UI verde) ---
     pin_claim:      str = "pin/pin_btn_claim_mission.png"
     soglia_claim:   float = 0.80
     max_claim_loop: int = 30
 
-    # --- Main Mission CLAIM ROI (lista in alto, riga ricompensa fissa) ---
-    # La lista auto-scrolla dopo ogni claim; riga reward sempre nella stessa zona.
-    tap_claim_main: tuple[int, int] = (832, 284)  # tap fisso (lista auto-scrolla)
-    roi_claim_main: tuple[int, int, int, int] = (790, 265, 880, 305)
+    # --- Main Mission CLAIM ROI (lista verticale missioni) ---
+    # Tap dinamico sul match (validato FAU_08 01/05: niente auto-scroll garantito).
+    roi_claim_main: tuple[int, int, int, int] = (790, 100, 890, 470)
 
     # --- Daily Mission CLAIM ROI (lista verticale missioni) ---
     # Tap dinamico sul match (no auto-scroll garantito).
@@ -103,6 +113,33 @@ class MainMissionConfig:
 # ---------------------------------------------------------------------------
 # OCR Current AP
 # ---------------------------------------------------------------------------
+
+def _detect_chapter_tab(screen, roi: tuple[int, int, int, int]) -> bool:
+    """True se la tab Chapter Missions è visibile (3-tab layout).
+
+    OCR testo zona tab top-sx: cerca substring "chapter" / "chap" / "cha".
+    Su istanze 2-tab quella zona contiene "Main Missions" (no match).
+    Best-effort: in caso di errore ritorna False (assume 2-tab default).
+    """
+    try:
+        from shared.ocr_helpers import _run_tesseract  # type: ignore
+        frame = getattr(screen, "frame", None)
+        if frame is None:
+            return False
+        x1, y1, x2, y2 = roi
+        crop = frame[y1:y2, x1:x2]
+        h, w = crop.shape[:2]
+        up = cv2.resize(crop, (w * 2, h * 2), interpolation=cv2.INTER_CUBIC)
+        gray = cv2.cvtColor(up, cv2.COLOR_BGR2GRAY)
+        # Testo bianco su sfondo scuro - threshold inverso
+        _, binv = cv2.threshold(gray, 100, 255, cv2.THRESH_BINARY)
+        cfg = "--psm 6"
+        txt = _run_tesseract(binv, cfg).lower()
+        # Match permissivo (font rendering può saltare lettere)
+        return any(s in txt for s in ("chapter", "chap", "cha"))
+    except Exception:
+        return False
+
 
 def _leggi_current_ap(screen, roi: tuple[int, int, int, int]) -> int:
     """Legge il valore Current AP dal pannello Daily Mission.
@@ -190,30 +227,57 @@ class MainMissionTask(BaseTask):
             ctx.device.tap(*cfg.tap_apri_pannello)
             time.sleep(cfg.wait_apri_pannello)
 
-            # Step 2: tab Main Mission (assicura attiva)
-            ctx.device.tap(*cfg.tap_tab_main)
+            # Step 2: detect layout 2-tab vs 3-tab via OCR top tab.
+            # Default all'apertura: Daily attivo (tab in fondo). Se Chapter
+            # esiste è in cima; OCR testo per distinguere.
+            screen_init = ctx.device.screenshot()
+            has_chapter = _detect_chapter_tab(screen_init, cfg.ocr_chapter_roi) if screen_init else False
+            if has_chapter:
+                tap_main  = cfg.tap_tab_main_3t
+                tap_daily = cfg.tap_tab_daily_3t
+                log(f"[MAIN_MISSION] layout 3-tab (Chapter+Main+Daily)")
+            else:
+                tap_main  = cfg.tap_tab_main_2t
+                tap_daily = cfg.tap_tab_daily_2t
+                log(f"[MAIN_MISSION] layout 2-tab (Main+Daily)")
+
+            # Step 2b: tab Chapter Missions (se presente) - tap CLAIM cieco
+            n_chapter = 0
+            if has_chapter:
+                ctx.device.tap(*cfg.tap_tab_chapter_3t)
+                time.sleep(cfg.wait_tab_switch)
+                # Tap cieco CLAIM Chapter (grigio = no-op safe, verde = claim batch)
+                log(f"[MAIN_MISSION] Chapter: tap CLAIM {cfg.tap_claim_chapter}")
+                ctx.device.tap(*cfg.tap_claim_chapter)
+                time.sleep(cfg.wait_post_claim)
+                ctx.device.tap(*cfg.tap_chiudi_popup)
+                time.sleep(cfg.wait_post_tap)
+                n_chapter = 1  # tap eseguito (potrebbe essere stato no-op)
+
+            # Step 3: tab Main Mission
+            ctx.device.tap(*tap_main)
             time.sleep(cfg.wait_tab_switch)
 
-            # Step 3: loop CLAIM Main Mission (tap fisso, lista auto-scrolla)
+            # Step 4: loop CLAIM Main Mission (tap fisso, lista auto-scrolla)
             n_main = self._loop_claim_main(ctx)
             log(f"[MAIN_MISSION] Main: {n_main} claim")
 
-            # Step 4: tab Daily Mission
-            ctx.device.tap(*cfg.tap_tab_daily)
+            # Step 5: tab Daily Mission
+            ctx.device.tap(*tap_daily)
             time.sleep(cfg.wait_tab_switch)
 
-            # Step 5: loop CLAIM Daily (tap dinamico — completare missioni dà AP).
+            # Step 6: loop CLAIM Daily (tap dinamico — completare missioni dà AP).
             # AP letto DOPO i claim: completare le missioni daily aggiunge punti AP,
             # quindi i chest milestone vanno valutati con AP aggiornato.
             n_daily = self._loop_claim_daily(ctx)
             log(f"[MAIN_MISSION] Daily: {n_daily} claim")
 
-            # Step 6: OCR Current AP DOPO i claim daily (AP aggiornato)
+            # Step 7: OCR Current AP DOPO i claim daily (AP aggiornato)
             screen_post = ctx.device.screenshot()
             ap = _leggi_current_ap(screen_post, cfg.ocr_ap_roi) if screen_post else -1
             log(f"[MAIN_MISSION] Current AP (post-claim)={ap}")
 
-            # Step 7: claim chest milestone con AP aggiornato
+            # Step 8: claim chest milestone con AP aggiornato
             n_chest = self._claim_chest_milestone_with_ap(ctx, ap)
             log(f"[MAIN_MISSION] Daily chest: {n_chest} tap")
 
@@ -221,10 +285,13 @@ class MainMissionTask(BaseTask):
             ctx.device.key("KEYCODE_BACK")
             time.sleep(cfg.wait_back)
 
-            log(f"[MAIN_MISSION] completato — main={n_main} daily={n_daily} chest={n_chest}")
+            log(f"[MAIN_MISSION] completato — chapter={n_chapter} main={n_main} "
+                f"daily={n_daily} chest={n_chest}")
             return TaskResult.ok(
-                f"Main Mission completata — main={n_main} daily={n_daily} chest={n_chest}",
-                main_claim=n_main, daily_claim=n_daily, chest_claim=n_chest,
+                f"Main Mission completata — chapter={n_chapter} main={n_main} "
+                f"daily={n_daily} chest={n_chest}",
+                chapter_claim=n_chapter, main_claim=n_main,
+                daily_claim=n_daily, chest_claim=n_chest,
             )
 
         except Exception as exc:
@@ -236,8 +303,12 @@ class MainMissionTask(BaseTask):
     # ------------------------------------------------------------------
 
     def _loop_claim_main(self, ctx: TaskContext) -> int:
-        """Loop tap CLAIM Main Mission finché c'è pulsante verde nella ROI.
-        Tap fisso (832, 284): la lista auto-scrolla dopo ogni claim."""
+        """Loop CLAIM Main Mission - tap dinamico su match template.
+
+        WU88-bis fix: alcune missioni hanno il pulsante CLAIM in posizione
+        non standard (es. su FAU_08 'Warfare: Upgrade Battle Center' a y=165
+        invece di y=284). Tap dinamico al match center robusto.
+        """
         cfg = self.cfg
         n = 0
         for i in range(cfg.max_claim_loop):
@@ -257,12 +328,11 @@ class MainMissionTask(BaseTask):
                 )
                 break
             ctx.log_msg(
-                f"[MAIN_MISSION] claim Main {n+1} -> tap {cfg.tap_claim_main} "
-                f"(score={r.score:.3f})"
+                f"[MAIN_MISSION] claim Main {n+1} -> tap ({r.cx},{r.cy}) "
+                f"score={r.score:.3f}"
             )
-            ctx.device.tap(*cfg.tap_claim_main)
+            ctx.device.tap(r.cx, r.cy)
             time.sleep(cfg.wait_post_claim)
-            # Chiudi popup reward
             ctx.device.tap(*cfg.tap_chiudi_popup)
             time.sleep(cfg.wait_post_tap)
             n += 1
