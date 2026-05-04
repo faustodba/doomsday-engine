@@ -398,13 +398,50 @@ def _rifornimento_will_skip(istanza: str) -> bool:
         return False
 
 
+def _district_showdown_will_skip() -> bool:
+    """
+    True se DistrictShowdownTask gira come NOOP per:
+      - flag `task.district_showdown` disabilitato (WU108: veto esplicito)
+      - fuori window evento (Ven 00:00 UTC → Lun 01:00 UTC, vedi
+        tasks/district_showdown.py::_is_in_event_window)
+    """
+    try:
+        from datetime import datetime as _dt, timezone as _tz
+        # Veto flag dashboard
+        ov_path = _root() / "config" / "runtime_overrides.json"
+        if ov_path.exists():
+            ov = json.loads(ov_path.read_text(encoding="utf-8"))
+            flags = (ov.get("globali") or {}).get("task") or {}
+            if not flags.get("district_showdown", False):
+                return True
+        # Window check (replica logica DS task)
+        now = _dt.now(_tz.utc)
+        wd  = now.weekday()   # 0=lun … 6=dom
+        h   = now.hour
+        # Lunedì: in window se h < 1 (default ds_end_hour=1)
+        if wd == 0:   return not (h < 1)
+        # Venerdì: in window se h >= 0 (default ds_start_hour=0)
+        if wd == 4:   return not (h >= 0)
+        # Sabato/Domenica: sempre in window
+        if wd in (5, 6): return False
+        # Mar/Mer/Gio: fuori window
+        return True
+    except Exception:
+        return False
+
+
 def _task_will_be_noop(task_name: str,
                        istanza: Optional[str],
                        tick_sleep_s: float) -> bool:
     """
     Guard di stato per task con `interval_hours == 0` (always-due) ma che
-    in pratica girano come NOOP frequentemente. Estensibile a zaino,
-    donazione, arena, truppe, ecc. nei prossimi step.
+    in pratica girano come NOOP frequentemente. Estensibile ad altri task
+    nei prossimi step.
+
+    Coperti:
+      - boost              → boost.scadenza > now+tick+anticipo
+      - rifornimento       → master saturo / provviste esaurite / quota raggiunta
+      - district_showdown  → flag disabilitato / fuori window UTC
     """
     if not istanza:
         return False
@@ -412,6 +449,8 @@ def _task_will_be_noop(task_name: str,
         return _boost_will_skip(istanza, tick_sleep_s)
     if task_name == "rifornimento":
         return _rifornimento_will_skip(istanza)
+    if task_name == "district_showdown":
+        return _district_showdown_will_skip()
     return False
 
 
