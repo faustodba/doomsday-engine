@@ -156,8 +156,10 @@ def save_instances_fields(updates: dict[str, dict]) -> None:
     Scrittura atomica (tmp + os.replace).
     Solleva IOError su errori di scrittura.
     """
-    # WU50 — raccolta_fuori_territorio è un default statico per-istanza
-    allowed_fields = {"max_squadre", "layout", "livello", "raccolta_fuori_territorio"}
+    # WU50  — raccolta_fuori_territorio è un default statico per-istanza
+    # master — flag istanza rifugio destinatario (esclusione aggregati)
+    allowed_fields = {"max_squadre", "layout", "livello",
+                      "raccolta_fuori_territorio", "master"}
 
     # Filtra solo campi ammessi
     filtered: dict[str, dict] = {}

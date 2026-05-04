@@ -1,18 +1,21 @@
 # ==============================================================================
 #  DOOMSDAY ENGINE V6 - shared/cap_nodi_dataset.py
 #
-#  Logger campioni capacità nodo durante raccolta.
+#  Logger campioni capacità nodo + carico squadra durante raccolta.
 #
 #  Scrive 1 record JSONL per ogni nodo aperto (tap nodo + popup gather):
-#    {ts, instance, tipo, livello, capacita}
+#    {ts, instance, tipo, livello, capacita, load_squadra}
 #
-#  - capacita -1 = OCR fallita
-#  - capacita > 0 = valore letto (può essere < max nominale = nodo già parzialmente raccolto)
+#  - capacita -1     = OCR fallita (popup gather)
+#  - capacita > 0    = quantità residua nodo (può essere < nominale = nodo già parz. raccolto)
+#  - load_squadra -1 = OCR fallita / marcia non eseguita (es. slot pieni, no squads)
+#  - load_squadra >0 = quanto effettivamente la squadra raccoglierà = min(squadra_max, cap_residuo)
 #
 #  Uso analitico (cfr tools/analisi_cap_nodi.py):
 #    - max(capacita per (tipo, livello)) → capacità nominale
 #    - capacita / max → % residuo
-#    - inviate × load_squadra vs capacita_attuale → saturazione invio
+#    - load_squadra / capacita → 100% squadra satura il nodo, <100% squadra underprovisioned
+#    - load_squadra / cap_nominale_max → copertura per istanza (KPI obiettivo training truppe)
 #
 #  Storage: data/cap_nodi_dataset.jsonl (append-only).
 #  Retention: nessuna (file cresce ~12 istanze × ~3 nodi/ciclo × ~18 cicli/die ≈ 650/die).
@@ -47,14 +50,18 @@ def _dataset_path() -> Path:
 
 
 def registra_cap_sample(instance: str, tipo: str, livello: int,
-                        capacita: int) -> None:
+                        capacita: int, load_squadra: int = -1) -> None:
     """Append 1 record JSONL.
 
     Args:
-        instance: nome istanza ("FAU_07" / "FauMorfeus" / ...)
-        tipo:     "campo" | "segheria" | "acciaio" | "petrolio"
-        livello:  6 / 7 / -1 se non letto
-        capacita: valore Quantity letto da OCR popup, -1 se OCR fallita
+        instance:     nome istanza ("FAU_07" / "FauMorfeus" / ...)
+        tipo:         "campo" | "segheria" | "acciaio" | "petrolio"
+        livello:      6 / 7 / -1 se non letto
+        capacita:     valore Quantity letto da OCR popup gather, -1 se OCR fallita
+        load_squadra: valore "Load" letto da OCR maschera invio, -1 se non
+                      disponibile (marcia fallita prima della maschera, OCR fail).
+                      Se >0 indica quanto la squadra raccoglierà effettivamente
+                      = min(squadra_max_truppe, cap_residuo_nodo).
 
     Non solleva eccezioni: errore I/O = silent skip (logging best-effort).
     """
@@ -64,6 +71,7 @@ def registra_cap_sample(instance: str, tipo: str, livello: int,
         "tipo": tipo,
         "livello": livello,
         "capacita": capacita,
+        "load_squadra": load_squadra,
     }
     line = json.dumps(record, ensure_ascii=False) + "\n"
     try:

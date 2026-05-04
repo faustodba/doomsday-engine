@@ -1,256 +1,487 @@
 {% extends "base.html" %}
 {% set active = "global" %}
-{% block title %}Global Config — Doomsday V6{% endblock %}
+{% block title %}Config — Doomsday V6{% endblock %}
 
 {% block content %}
 
 <div class="banner-restart">
-  ⚠ Le modifiche a global_config.json richiedono <strong>riavvio del bot</strong> per avere effetto.
-  runtime_overrides.json (task flags, rifornimento) è hot-reload senza restart — usa la pagina <a href="/ui/config">config</a>.
+  <strong>config</strong> = baseline statica <code>global_config.json</code> · <span style="color:#f87171">richiede RIAVVIO bot</span> per applicare.<br>
+  Per toggle on/off rapidi (task, istanze) usa la <a href="/ui/">overview</a> · hot-reload al prossimo tick.
 </div>
 
-<form id="global-form">
+{% set sis = cfg.get('sistema',{}) %}
+{% set rfg = cfg.get('rifugio',{}) %}
+{% set ric = cfg.get('rifornimento_comune',{}) %}
+{% set rif = cfg.get('rifornimento',{}) %}
+{% set zai = cfg.get('zaino',{}) %}
+{% set rac = cfg.get('raccolta',{}) %}
+{% set alc = rac.get('allocazione',{}) %}
+{% set tsk = cfg.get('task',{}) %}
+{% set mum = cfg.get('mumu',{}) %}
 
-  <!-- ── SISTEMA ─────────────────────────────────────────────────────────── -->
-  <div class="section">
-    <div class="section-title">sistema</div>
-    <div style="display:flex;flex-wrap:wrap;gap:16px">
-      <div class="form-group">
-        <label class="form-label">tick_sleep (s)</label>
-        <input class="form-input" type="number" id="sistema__tick_sleep"
-               value="{{ cfg.get('sistema',{}).get('tick_sleep', 300) }}" style="width:100px">
+<!-- ── CONFIGURAZIONE 4-card (clone overview, target=global_config) ─── -->
+<div class="section">
+  <div class="sec-label">configurazione</div>
+  <div class="cfg4">
+
+    <!-- COL 0: SISTEMA + TASK FLAGS BASELINE -->
+    <div class="col-box" id="gc-col-sistema">
+      <div class="col-head">
+        <span class="col-title">sistema</span>
       </div>
-      <div class="form-group">
-        <label class="form-label">max_parallel</label>
-        <input class="form-input" type="number" id="sistema__max_parallel"
-               value="{{ cfg.get('sistema',{}).get('max_parallel', 1) }}" style="width:80px">
+      <div class="col-body">
+        <div class="p-row">
+          <span class="p-lbl">max parallel</span>
+          <input class="p-inp" id="gc-parallel" type="number"
+                 value="{{ sis.get('max_parallel', 1) }}" min="1" max="12" style="width:50px">
+        </div>
+        <div class="p-row">
+          <span class="p-lbl">tick sleep (s)</span>
+          <input class="p-inp" id="gc-sleep" type="number"
+                 value="{{ sis.get('tick_sleep', 60) }}" min="0" step="30" style="width:60px">
+        </div>
+        <div class="col-sep"></div>
+        <div class="col-sub">task baseline (default reset)</div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px">
+          {% for tk in ['raccolta','rifornimento','zaino','vip','alleanza','messaggi','arena','arena_mercato','boost','store','radar','radar_census','donazione','main_mission','district_showdown','truppe'] %}
+          <label style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text-dim);cursor:pointer">
+            <input type="checkbox" id="gc-task-{{ tk }}" {% if tsk.get(tk) %}checked{% endif %}>
+            <span>{{ tk }}</span>
+          </label>
+          {% endfor %}
+        </div>
+        <div class="col-sep"></div>
+        <div class="col-sub">flag globali</div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--text-dim);cursor:pointer">
+          <input type="checkbox" id="gc-auto-learn" {% if cfg.get('auto_learn_banner', True) %}checked{% endif %}>
+          <span>auto-learn banner (WU93)</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--text-dim);cursor:pointer;margin-top:3px">
+          <input type="checkbox" id="gc-ocr-debug" {% if cfg.get('raccolta_ocr_debug') %}checked{% endif %}>
+          <span>raccolta OCR debug (WU55)</span>
+        </label>
+      </div>
+      <div class="col-foot">
+        <button class="btn btn-primary btn-full" onclick="gcSalvaSistema()">⬡ salva sistema</button>
+        <div class="save-row">
+          <span class="save-ok" id="gc-sis-ok">✓ salvato</span>
+          <span class="save-err" id="gc-sis-err"></span>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- ── RACCOLTA ────────────────────────────────────────────────────────── -->
-  <div class="section">
-    <div class="section-title">raccolta</div>
-    <div style="display:flex;flex-wrap:wrap;gap:16px">
-      <div class="form-group">
-        <label class="form-label">livello nodo</label>
-        <input class="form-input" type="number" id="raccolta__livello_nodo"
-               value="{{ cfg.get('raccolta',{}).get('livello_nodo', 6) }}" style="width:80px">
+    <!-- COL 1: RIFORNIMENTO -->
+    <div class="col-box" id="gc-col-rif">
+      <div class="col-head">
+        <span class="col-title">rifornimento</span>
+        <div class="col-status">
+          <div class="col-status-dot {{ 'on' if tsk.get('rifornimento') else 'off' }}"></div>
+          <span class="col-status-lbl">{{ 'on' if tsk.get('rifornimento') else 'off' }}</span>
+        </div>
       </div>
-      {% set alloc = cfg.get('raccolta',{}).get('allocazione',{}) %}
-      {% for risorsa in ['pomodoro','legno','petrolio','acciaio'] %}
-      <div class="form-group">
-        <label class="form-label">alloc {{ risorsa }}</label>
-        <input class="form-input" type="number" step="0.05" min="0" max="1"
-               id="raccolta__allocazione__{{ risorsa }}"
-               value="{{ alloc.get(risorsa, 0.25) }}" style="width:80px">
+      <div class="col-body">
+        <div class="p-row">
+          <span class="p-lbl">destinatario</span>
+          <input class="p-inp" id="gc-r-account" type="text"
+                 value="{{ ric.get('dooms_account','FauMorfeus') }}" style="width:100px">
+        </div>
+        <div class="p-row">
+          <span class="p-lbl">max sped./ciclo</span>
+          <input class="p-inp" id="gc-r-maxsped" type="number"
+                 value="{{ ric.get('max_spedizioni_ciclo',5) }}" style="width:44px">
+        </div>
+        <div class="col-sep"></div>
+        <div class="col-sub">soglie invio (M)</div>
+        {% for r,ico,default in [('campo','🍅',5.0),('legno','🪵',5.0),('acciaio','⚙',3.5),('petrolio','🛢',2.5)] %}
+        <div class="rr {% if not ric.get(r+'_abilitato',True) %}flagoff{% endif %}" id="gc-rr-{{ r }}">
+          <span class="rr-ico">{{ ico }}</span>
+          <span class="rr-name">{{ r }}</span>
+          <input class="rr-inp" id="gc-r-soglia-{{ r }}" type="number" step="0.5"
+                 value="{{ ric.get('soglia_'+r+'_m', default) }}">
+          <span class="rr-unit">M</span>
+          <div class="rr-flag">
+            <input class="rr-cb" type="checkbox" id="gc-r-flag-{{ r }}"
+                   {{ 'checked' if ric.get(r+'_abilitato',True) else '' }}
+                   onchange="toggleRR('gc-rr-{{ r }}',this)">
+          </div>
+        </div>
+        {% endfor %}
+        <div class="col-sep"></div>
+        <div class="col-sub">modalità</div>
+        <div class="mode-row">
+          <div class="mode-btn {% if rif.get('mappa_abilitata') %}active{% endif %}"
+               id="gc-mode-mappa" onclick="gcSetMode('mappa')">🗺 mappa</div>
+          <div class="mode-btn {% if rif.get('membri_abilitati') %}active{% endif %}"
+               id="gc-mode-membri" onclick="gcSetMode('membri')">👥 membri</div>
+        </div>
+        <div class="p-row" style="margin-top:6px">
+          <span class="p-lbl">rifugio X</span>
+          <input class="p-inp" id="gc-r-rifx" type="number"
+                 value="{{ rfg.get('coord_x',680) }}" style="width:60px">
+          <span class="p-lbl">Y</span>
+          <input class="p-inp" id="gc-r-rify" type="number"
+                 value="{{ rfg.get('coord_y',531) }}" style="width:60px">
+        </div>
       </div>
-      {% endfor %}
-    </div>
-  </div>
-
-  <!-- ── RIFORNIMENTO COMUNE ─────────────────────────────────────────────── -->
-  <div class="section">
-    <div class="section-title">rifornimento comune</div>
-    {% set rif = cfg.get('rifornimento_comune',{}) %}
-    <div style="display:flex;flex-wrap:wrap;gap:16px;margin-bottom:12px">
-      <div class="form-group">
-        <label class="form-label">dooms_account</label>
-        <input class="form-input" type="text" id="rifornimento_comune__dooms_account"
-               value="{{ rif.get('dooms_account','') }}" style="width:160px">
-      </div>
-      <div class="form-group">
-        <label class="form-label">max spedizioni ciclo</label>
-        <input class="form-input" type="number" id="rifornimento_comune__max_spedizioni_ciclo"
-               value="{{ rif.get('max_spedizioni_ciclo', 5) }}" style="width:80px">
-      </div>
-    </div>
-    <div style="display:flex;flex-wrap:wrap;gap:16px">
-      {% for risorsa, label in [('campo','campo'),('legno','legno'),('petrolio','petrolio'),('acciaio','acciaio')] %}
-      <div class="form-group" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--r);padding:10px 14px;min-width:160px">
-        <div style="font-family:var(--font-mono);font-size:11px;color:var(--accent);margin-bottom:8px">{{ label }}</div>
-        <label class="form-label">soglia (m)</label>
-        <input class="form-input" type="number" step="0.5"
-               id="rifornimento_comune__soglia_{{ risorsa }}_m"
-               value="{{ rif.get('soglia_' + risorsa + '_m', 5.0) }}" style="width:80px;margin-bottom:6px">
-        <br>
-        <label class="form-label">abilitato</label>
-        <select class="form-input" id="rifornimento_comune__{{ risorsa }}_abilitato" style="width:70px">
-          <option value="true"  {% if rif.get(risorsa+'_abilitato', True) %}selected{% endif %}>sì</option>
-          <option value="false" {% if not rif.get(risorsa+'_abilitato', True) %}selected{% endif %}>no</option>
-        </select>
-      </div>
-      {% endfor %}
-    </div>
-  </div>
-
-  <!-- ── RIFORNIMENTO MAPPA ──────────────────────────────────────────────── -->
-  <div class="section">
-    <div class="section-title">rifornimento mappa</div>
-    {% set rifm = cfg.get('rifornimento_mappa',{}) %}
-    <div style="display:flex;flex-wrap:wrap;gap:16px">
-      <div class="form-group">
-        <label class="form-label">abilitato</label>
-        <select class="form-input" id="rifornimento_mappa__abilitato" style="width:70px">
-          <option value="true"  {% if rifm.get('abilitato') %}selected{% endif %}>sì</option>
-          <option value="false" {% if not rifm.get('abilitato') %}selected{% endif %}>no</option>
-        </select>
-      </div>
-      <div class="form-group">
-        <label class="form-label">rifugio X</label>
-        <input class="form-input" type="number" id="rifornimento_mappa__rifugio_x"
-               value="{{ rifm.get('rifugio_x', 687) }}" style="width:80px">
-      </div>
-      <div class="form-group">
-        <label class="form-label">rifugio Y</label>
-        <input class="form-input" type="number" id="rifornimento_mappa__rifugio_y"
-               value="{{ rifm.get('rifugio_y', 532) }}" style="width:80px">
+      <div class="col-foot">
+        <button class="btn btn-primary btn-full" onclick="gcSalvaRifornimento()">⬡ salva rifornimento</button>
+        <div class="save-row">
+          <span class="save-ok" id="gc-rif-ok">✓ salvato</span>
+          <span class="save-err" id="gc-rif-err"></span>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- ── ZAINO ───────────────────────────────────────────────────────────── -->
-  <div class="section">
-    <div class="section-title">zaino</div>
-    {% set z = cfg.get('zaino',{}) %}
-    <div style="display:flex;flex-wrap:wrap;gap:16px">
-      <div class="form-group">
-        <label class="form-label">modalità</label>
-        <select class="form-input" id="zaino__modalita" style="width:90px">
-          <option value="bag"    {% if z.get('modalita','bag')=='bag' %}selected{% endif %}>bag</option>
-          <option value="svuota" {% if z.get('modalita')=='svuota' %}selected{% endif %}>svuota</option>
-        </select>
+    <!-- COL 2: ZAINO -->
+    <div class="col-box" id="gc-col-zaino">
+      <div class="col-head">
+        <span class="col-title">zaino</span>
+        <div class="col-status">
+          <div class="col-status-dot {{ 'on' if tsk.get('zaino') else 'off' }}"></div>
+          <span class="col-status-lbl">{{ 'on' if tsk.get('zaino') else 'off' }}</span>
+        </div>
       </div>
-      {% for risorsa in ['pomodoro','legno','petrolio','acciaio'] %}
-      <div class="form-group" style="background:var(--bg-card);border:1px solid var(--border);border-radius:var(--r);padding:10px 14px;min-width:150px">
-        <div style="font-family:var(--font-mono);font-size:11px;color:var(--accent);margin-bottom:8px">{{ risorsa }}</div>
-        <label class="form-label">soglia (m)</label>
-        <input class="form-input" type="number" step="1"
-               id="zaino__soglia_{{ risorsa }}_m"
-               value="{{ z.get('soglia_' + risorsa + '_m', 10.0) }}" style="width:80px;margin-bottom:6px">
-        <br>
-        <label class="form-label">usa</label>
-        <select class="form-input" id="zaino__usa_{{ risorsa }}" style="width:70px">
-          <option value="true"  {% if z.get('usa_'+risorsa, True) %}selected{% endif %}>sì</option>
-          <option value="false" {% if not z.get('usa_'+risorsa, True) %}selected{% endif %}>no</option>
-        </select>
+      <div class="col-body">
+        <div class="p-row">
+          <span class="p-lbl">modalità</span>
+          <div class="mode-row" style="flex:1">
+            <div class="mode-btn {% if zai.get('modalita','bag')=='bag' %}active{% endif %}"
+                 id="gc-z-mode-bag" onclick="gcSetZainoMode('bag')">bag</div>
+            <div class="mode-btn {% if zai.get('modalita')=='svuota' %}active{% endif %}"
+                 id="gc-z-mode-svuota" onclick="gcSetZainoMode('svuota')">svuota</div>
+          </div>
+        </div>
+        <div class="col-sep"></div>
+        <div class="col-sub">soglie deposito (M)</div>
+        {% for r,ico,default in [('pomodoro','🍅',20.0),('legno','🪵',20.0),('acciaio','⚙',10.0),('petrolio','🛢',5.0)] %}
+        <div class="rr {% if not zai.get('usa_'+r,True) %}flagoff{% endif %}" id="gc-zr-{{ r }}">
+          <span class="rr-ico">{{ ico }}</span>
+          <span class="rr-name">{{ r }}</span>
+          <input class="rr-inp" id="gc-z-soglia-{{ r }}" type="number" step="1"
+                 value="{{ zai.get('soglia_'+r+'_m', default) }}">
+          <span class="rr-unit">M</span>
+          <div class="rr-flag">
+            <input class="rr-cb" type="checkbox" id="gc-z-flag-{{ r }}"
+                   {{ 'checked' if zai.get('usa_'+r,True) else '' }}
+                   onchange="toggleRR('gc-zr-{{ r }}',this)">
+          </div>
+        </div>
+        {% endfor %}
       </div>
-      {% endfor %}
-    </div>
-  </div>
-
-  <!-- ── MUMU — read only ────────────────────────────────────────────────── -->
-  <div class="section">
-    <div class="section-title">mumu — sola lettura</div>
-    {% set m = cfg.get('mumu',{}) %}
-    <div style="display:flex;flex-wrap:wrap;gap:16px">
-      {% for key in ['timeout_adb_s','timeout_carica_s','delay_carica_iniz_s','n_back_pulizia','timeout_player_s'] %}
-      <div class="form-group">
-        <label class="form-label">{{ key }}</label>
-        <input class="form-input" type="number" value="{{ m.get(key,'—') }}"
-               style="width:90px;opacity:0.5" disabled>
-      </div>
-      {% endfor %}
-      <div class="form-group" style="flex:1;min-width:260px">
-        <label class="form-label">manager path</label>
-        <input class="form-input" type="text" value="{{ m.get('manager','') }}"
-               style="width:100%;opacity:0.5" disabled>
+      <div class="col-foot">
+        <button class="btn btn-primary btn-full" onclick="gcSalvaZaino()">⬡ salva zaino</button>
+        <div class="save-row">
+          <span class="save-ok" id="gc-zaino-ok">✓ salvato</span>
+          <span class="save-err" id="gc-zaino-err"></span>
+        </div>
       </div>
     </div>
-  </div>
 
-  <!-- ── SALVA ───────────────────────────────────────────────────────────── -->
-  <div style="display:flex;align-items:center;gap:16px;padding:16px 0">
-    <button type="button" class="btn btn-primary" onclick="__saveGlobal()">
-      salva global_config
-    </button>
-    <span id="save-ok"  style="font-family:var(--font-mono);font-size:11px;color:var(--accent);opacity:0;transition:opacity 0.3s">✓ salvato — riavvia il bot</span>
-    <span id="save-err" style="font-family:var(--font-mono);font-size:11px;color:#e06c75;opacity:0;transition:opacity 0.3s"></span>
-  </div>
+    <!-- COL 3: ALLOCAZIONE -->
+    <div class="col-box" id="gc-col-alloc">
+      <div class="col-head">
+        <span class="col-title">allocazione raccolta</span>
+      </div>
+      <div class="col-body">
+        <div class="p-row">
+          <span class="p-lbl">livello nodo</span>
+          <input class="p-inp" id="gc-livello-nodo" type="number" min="1" max="9"
+                 value="{{ rac.get('livello_nodo',6) }}" style="width:50px">
+        </div>
+        <div class="col-sep"></div>
+        <div class="col-sub">% per tipo risorsa</div>
+        {% for r,ico,default in [('pomodoro','🍅',35),('legno','🪵',35),('acciaio','⚙',10),('petrolio','🛢',20)] %}
+        <div class="rr" id="gc-ar-{{ r }}">
+          <span class="rr-ico">{{ ico }}</span>
+          <span class="rr-name">{{ r }}</span>
+          <input class="rr-inp" id="gc-a-{{ r }}" type="number" step="5" min="0" max="100"
+                 value="{{ alc.get(r, default) | round | int }}"
+                 oninput="gcUpdateAllocTotal()">
+          <span class="rr-unit">%</span>
+        </div>
+        {% endfor %}
+        <div class="alloc-total">
+          <span class="alloc-lbl">totale</span>
+          <span class="alloc-val ok" id="gc-alloc-total">100%</span>
+        </div>
+        <div class="alloc-bar"><div class="alloc-fill" id="gc-alloc-bar" style="width:100%"></div></div>
+        <div class="alloc-warn" id="gc-alloc-warn"></div>
+      </div>
+      <div class="col-foot">
+        <button class="btn btn-primary btn-full" onclick="gcSalvaAllocazione()">⬡ salva allocazione</button>
+        <div class="save-row">
+          <span class="save-ok" id="gc-alloc-ok">✓ salvato</span>
+          <span class="save-err" id="gc-alloc-err"></span>
+        </div>
+      </div>
+    </div>
 
-</form>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ── ISTANZE (default statici) ─────────────────── -->
+<div class="section">
+  <div class="sec-label">istanze (default statici) · scrive su instances.json + runtime_overrides</div>
+  <div style="overflow-x:auto">
+    <table class="ist-tbl">
+      <thead>
+        <tr>
+          <th>on</th><th>nome</th><th>porta</th><th>profilo</th><th>truppe</th>
+          <th>sq.</th><th>liv.</th><th>layout</th>
+          <th title="raccolta fuori territorio (WU50)">FT</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ist in instances %}
+        {% set ov = overrides.get('istanze', {}).get(ist.nome, {}) %}
+        {% set ist_on = ov.get('abilitata', ist.get('abilitata', True)) %}
+        {% set tipo = ov.get('tipologia', ist.get('profilo','full')) %}
+        {% set fuori = ov.get('raccolta_fuori_territorio', ist.get('raccolta_fuori_territorio', False)) %}
+        {% set is_master = ist.nome in master_names %}
+        <tr data-nome="{{ ist.nome }}" {% if not ist_on %}class="disabled"{% endif %}>
+          <td>
+            <input class="gc-ist-cb" type="checkbox" {% if ist_on %}checked{% endif %}>
+          </td>
+          <td class="gc-ist-name-col"><span style="font-family:var(--font-mono);font-weight:600">{{ ist.nome }}</span>
+            {% if is_master %}<span title="master" style="color:#f5c542;font-weight:700;margin-left:4px">★</span>{% endif %}
+          </td>
+          <td style="font-family:var(--font-mono);color:var(--text-dim)">{{ ist.porta }}</td>
+          <td>
+            <select class="gc-ist-prof" style="width:130px;font-size:10px">
+              <option value="full"          {% if tipo=='full'          %}selected{% endif %}>completo</option>
+              <option value="raccolta_fast" {% if tipo=='raccolta_fast' %}selected{% endif %}>completo · fast</option>
+              <option value="raccolta_only" {% if tipo=='raccolta_only' %}selected{% endif %}>solo raccolta</option>
+              <option value="raccolta"      {% if tipo=='raccolta'      %}selected{% endif %}>raccolta</option>
+            </select>
+          </td>
+          <td>
+            <input class="gc-ist-truppe" type="number" min="0"
+                   value="{{ ov.get('truppe', ist.get('truppe', 0)) }}" style="width:72px">
+          </td>
+          <td>
+            <input class="gc-ist-sq" type="number" min="1" max="6"
+                   value="{{ ov.get('max_squadre', ist.get('max_squadre', 4)) }}" style="width:52px">
+          </td>
+          <td>
+            <input class="gc-ist-lv" type="number" min="1" max="9"
+                   value="{{ ov.get('livello', ist.get('livello', 6)) }}" style="width:52px">
+          </td>
+          <td>
+            <input class="gc-ist-layout" type="number" min="1" max="5"
+                   value="{{ ov.get('layout', ist.get('layout', 1)) or 1 }}" style="width:52px">
+          </td>
+          <td>
+            <input class="gc-ist-fuori-terr" type="checkbox" {% if fuori %}checked{% endif %}>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="save-row" style="margin-top:10px">
+    <button class="btn btn-primary" onclick="gcSalvaIstanze()">⬡ salva istanze</button>
+    <span class="save-note">scrive su instances.json + runtime_overrides · attivo al prossimo avvio istanza</span>
+    <span class="save-ok" id="gc-ist-ok">✓ salvato</span>
+    <span class="save-err" id="gc-ist-err"></span>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ── MUMU (read-only) ───────────────────────────── -->
+<div class="section">
+  <div class="sec-label">mumu — sola lettura</div>
+  <div style="display:flex;flex-wrap:wrap;gap:14px;padding:10px 0">
+    {% for k in ['timeout_adb_s','timeout_carica_s','delay_carica_iniz_s','n_back_pulizia','timeout_player_s'] %}
+    <div class="form-group">
+      <label class="form-label">{{ k }}</label>
+      <input class="form-input" type="number" value="{{ mum.get(k,'—') }}"
+             style="width:90px;opacity:0.5" disabled>
+    </div>
+    {% endfor %}
+    <div class="form-group" style="flex:1;min-width:300px">
+      <label class="form-label">manager path</label>
+      <input class="form-input" type="text" value="{{ mum.get('manager','') }}"
+             style="width:100%;opacity:0.5" disabled>
+    </div>
+  </div>
+</div>
 
 <script>
-function __readField(id, type) {
-  const el = document.getElementById(id);
-  if (!el) return undefined;
-  if (type === 'bool')   return el.value === 'true';
-  if (type === 'int')    return parseInt(el.value, 10);
-  if (type === 'float')  return parseFloat(el.value);
-  return el.value;
+// ── Helper minimi (riusa pattern overview ma scope locale gc-*) ─────────────
+function gcG(id){ return document.getElementById(id); }
+function gcGv(id){ const e=gcG(id); return e?e.value:''; }
+function gcGn(id){ const e=gcG(id); return e?(parseFloat(e.value)||0):0; }
+function gcGi(id){ const e=gcG(id); return e?(parseInt(e.value,10)||0):0; }
+function gcGb(id){ const e=gcG(id); return e?!!e.checked:false; }
+
+function gcShowMsg(okId, errId, ok, msg) {
+  const okEl = gcG(okId), errEl = gcG(errId);
+  if (ok) {
+    if (okEl) { okEl.style.opacity='1'; setTimeout(()=>okEl.style.opacity='0', 3000); }
+  } else {
+    if (errEl) {
+      errEl.textContent = '✗ ' + (msg || 'errore');
+      errEl.style.opacity='1';
+      setTimeout(()=>errEl.style.opacity='0', 5000);
+    }
+  }
 }
 
-function __saveGlobal() {
-  // Costruisce il payload completo con struttura annidata
+async function gcApiPatch(payload) {
+  try {
+    const resp = await fetch('/api/config/global', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json().catch(() => ({}));
+    return { ok: resp.ok, data };
+  } catch (e) {
+    return { ok: false, data: { detail: 'network error' } };
+  }
+}
+
+function gcSetMode(mode) {
+  ['mappa','membri'].forEach(m => gcG('gc-mode-'+m)?.classList.toggle('active', m===mode));
+}
+function gcSetZainoMode(mode) {
+  ['bag','svuota'].forEach(m => gcG('gc-z-mode-'+m)?.classList.toggle('active', m===mode));
+}
+
+function gcUpdateAllocTotal() {
+  let tot = 0;
+  ['pomodoro','legno','acciaio','petrolio'].forEach(r => { tot += gcGn('gc-a-'+r); });
+  tot = Math.round(tot);
+  const tEl = gcG('gc-alloc-total');
+  const bEl = gcG('gc-alloc-bar');
+  const wEl = gcG('gc-alloc-warn');
+  if (tEl) {
+    tEl.textContent = tot + '%';
+    tEl.className = 'alloc-val ' + (tot===100 ? 'ok' : 'warn');
+  }
+  if (bEl) {
+    bEl.style.width = Math.min(tot,100) + '%';
+    bEl.className = 'alloc-fill' + (tot>100 ? ' over' : '');
+  }
+  if (wEl) wEl.textContent = tot!==100 ? `⚠ totale ${tot}% — il bot normalizzerà` : '';
+}
+
+// ── SAVE: ogni card → PATCH /api/config/global con la sua sezione ──────────
+
+async function gcSalvaSistema() {
+  // Costruisce sezione sistema + task + auto_learn_banner + raccolta_ocr_debug
+  const taskList = ['raccolta','rifornimento','zaino','vip','alleanza','messaggi','arena','arena_mercato','boost','store','radar','radar_census','donazione','main_mission','district_showdown','truppe'];
+  const task = {};
+  taskList.forEach(t => { task[t] = gcGb('gc-task-'+t); });
   const payload = {
-    sistema: {
-      tick_sleep:   __readField('sistema__tick_sleep',   'int'),
-      max_parallel: __readField('sistema__max_parallel', 'int'),
-    },
-    raccolta: {
-      livello_nodo: __readField('raccolta__livello_nodo', 'int'),
-      allocazione: {
-        pomodoro: __readField('raccolta__allocazione__pomodoro', 'float'),
-        legno:    __readField('raccolta__allocazione__legno',    'float'),
-        petrolio: __readField('raccolta__allocazione__petrolio', 'float'),
-        acciaio:  __readField('raccolta__allocazione__acciaio',  'float'),
-      }
-    },
+    sistema: { max_parallel: gcGi('gc-parallel'), tick_sleep: gcGi('gc-sleep') },
+    task: task,
+    auto_learn_banner: gcGb('gc-auto-learn'),
+    raccolta_ocr_debug: gcGb('gc-ocr-debug'),
+  };
+  const { ok, data } = await gcApiPatch(payload);
+  gcShowMsg('gc-sis-ok', 'gc-sis-err', ok, data.detail || '');
+}
+
+async function gcSalvaRifornimento() {
+  const mappaOn = gcG('gc-mode-mappa')?.classList.contains('active') || false;
+  const memOn   = gcG('gc-mode-membri')?.classList.contains('active') || false;
+  const payload = {
     rifornimento_comune: {
-      dooms_account:         __readField('rifornimento_comune__dooms_account',         'str'),
-      max_spedizioni_ciclo:  __readField('rifornimento_comune__max_spedizioni_ciclo',  'int'),
-      soglia_campo_m:        __readField('rifornimento_comune__soglia_campo_m',        'float'),
-      soglia_legno_m:        __readField('rifornimento_comune__soglia_legno_m',        'float'),
-      soglia_petrolio_m:     __readField('rifornimento_comune__soglia_petrolio_m',     'float'),
-      soglia_acciaio_m:      __readField('rifornimento_comune__soglia_acciaio_m',      'float'),
-      campo_abilitato:       __readField('rifornimento_comune__campo_abilitato',       'bool'),
-      legno_abilitato:       __readField('rifornimento_comune__legno_abilitato',       'bool'),
-      petrolio_abilitato:    __readField('rifornimento_comune__petrolio_abilitato',    'bool'),
-      acciaio_abilitato:     __readField('rifornimento_comune__acciaio_abilitato',     'bool'),
+      dooms_account: gcGv('gc-r-account'),
+      max_spedizioni_ciclo: gcGi('gc-r-maxsped'),
+      soglia_campo_m:    gcGn('gc-r-soglia-campo'),
+      soglia_legno_m:    gcGn('gc-r-soglia-legno'),
+      soglia_petrolio_m: gcGn('gc-r-soglia-petrolio'),
+      soglia_acciaio_m:  gcGn('gc-r-soglia-acciaio'),
+      campo_abilitato:    gcGb('gc-r-flag-campo'),
+      legno_abilitato:    gcGb('gc-r-flag-legno'),
+      petrolio_abilitato: gcGb('gc-r-flag-petrolio'),
+      acciaio_abilitato:  gcGb('gc-r-flag-acciaio'),
     },
-    rifornimento_mappa: {
-      abilitato: __readField('rifornimento_mappa__abilitato', 'bool'),
-      rifugio_x: __readField('rifornimento_mappa__rifugio_x', 'int'),
-      rifugio_y: __readField('rifornimento_mappa__rifugio_y', 'int'),
+    rifornimento: {
+      mappa_abilitata: mappaOn,
+      membri_abilitati: memOn,
+      provviste_max: 100,
+      soglia_campo_m: gcGn('gc-r-soglia-campo'),
     },
+    rifugio: { coord_x: gcGi('gc-r-rifx'), coord_y: gcGi('gc-r-rify') },
+  };
+  const { ok, data } = await gcApiPatch(payload);
+  gcShowMsg('gc-rif-ok', 'gc-rif-err', ok, data.detail || '');
+}
+
+async function gcSalvaZaino() {
+  const modalita = gcG('gc-z-mode-bag')?.classList.contains('active') ? 'bag' : 'svuota';
+  const payload = {
     zaino: {
-      modalita:          __readField('zaino__modalita', 'str'),
-      usa_pomodoro:      __readField('zaino__usa_pomodoro',  'bool'),
-      usa_legno:         __readField('zaino__usa_legno',     'bool'),
-      usa_petrolio:      __readField('zaino__usa_petrolio',  'bool'),
-      usa_acciaio:       __readField('zaino__usa_acciaio',   'bool'),
-      soglia_pomodoro_m: __readField('zaino__soglia_pomodoro_m', 'float'),
-      soglia_legno_m:    __readField('zaino__soglia_legno_m',    'float'),
-      soglia_petrolio_m: __readField('zaino__soglia_petrolio_m', 'float'),
-      soglia_acciaio_m:  __readField('zaino__soglia_acciaio_m',  'float'),
+      modalita,
+      usa_pomodoro:  gcGb('gc-z-flag-pomodoro'),
+      usa_legno:     gcGb('gc-z-flag-legno'),
+      usa_petrolio:  gcGb('gc-z-flag-petrolio'),
+      usa_acciaio:   gcGb('gc-z-flag-acciaio'),
+      soglia_pomodoro_m: gcGn('gc-z-soglia-pomodoro'),
+      soglia_legno_m:    gcGn('gc-z-soglia-legno'),
+      soglia_petrolio_m: gcGn('gc-z-soglia-petrolio'),
+      soglia_acciaio_m:  gcGn('gc-z-soglia-acciaio'),
     },
   };
-
-  fetch('/api/config/global', {
-    method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(payload),
-  })
-  .then(r => r.json().then(data => ({status: r.status, data})))
-  .then(({status, data}) => {
-    if (status === 200) {
-      const ok = document.getElementById('save-ok');
-      ok.style.opacity = '1';
-      setTimeout(() => ok.style.opacity = '0', 3000);
-    } else {
-      const err = document.getElementById('save-err');
-      err.textContent = '✗ ' + (data.detail || 'errore ' + status);
-      err.style.opacity = '1';
-      setTimeout(() => err.style.opacity = '0', 5000);
-    }
-  })
-  .catch(e => {
-    const err = document.getElementById('save-err');
-    err.textContent = '✗ network error';
-    err.style.opacity = '1';
-    setTimeout(() => err.style.opacity = '0', 5000);
-  });
+  const { ok, data } = await gcApiPatch(payload);
+  gcShowMsg('gc-zaino-ok', 'gc-zaino-err', ok, data.detail || '');
 }
+
+async function gcSalvaAllocazione() {
+  // global_config usa percentuali 0-100 (come dashboard)
+  const payload = {
+    raccolta: {
+      livello_nodo: gcGi('gc-livello-nodo'),
+      soglia_allocazione: 3,
+      allocazione: {
+        pomodoro: gcGn('gc-a-pomodoro'),
+        legno:    gcGn('gc-a-legno'),
+        petrolio: gcGn('gc-a-petrolio'),
+        acciaio:  gcGn('gc-a-acciaio'),
+      },
+    },
+  };
+  const { ok, data } = await gcApiPatch(payload);
+  gcShowMsg('gc-alloc-ok', 'gc-alloc-err', ok, data.detail || '');
+}
+
+async function gcSalvaIstanze() {
+  const rows = document.querySelectorAll('tr[data-nome]');
+  const istanze = {};
+  rows.forEach(tr => {
+    const nome = tr.dataset.nome;
+    if (!nome) return;
+    istanze[nome] = {
+      abilitata:    tr.querySelector('.gc-ist-cb')?.checked ?? true,
+      truppe:       parseInt(tr.querySelector('.gc-ist-truppe')?.value)||0,
+      tipologia:    tr.querySelector('.gc-ist-prof')?.value||'full',
+      fascia_oraria: null,
+      max_squadre:  parseInt(tr.querySelector('.gc-ist-sq')?.value)||null,
+      livello:      parseInt(tr.querySelector('.gc-ist-lv')?.value)||null,
+      layout:       parseInt(tr.querySelector('.gc-ist-layout')?.value)||null,
+      raccolta_fuori_territorio: tr.querySelector('.gc-ist-fuori-terr')?.checked ?? false,
+    };
+  });
+  try {
+    const resp = await fetch('/api/config/istanze', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ istanze }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    gcShowMsg('gc-ist-ok', 'gc-ist-err', resp.ok, data.detail || '');
+  } catch (e) {
+    gcShowMsg('gc-ist-ok', 'gc-ist-err', false, 'network error');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => { gcUpdateAllocTotal(); });
 </script>
 
 {% endblock %}

@@ -1030,6 +1030,11 @@ class ZainoTask(Task):
         modalita = _cfg(ctx, "ZAINO_MODALITA")
         ctx.log_msg(f"[ZAINO]{modo}Modalità: {modalita.upper()}")
 
+        # WU115 — debug buffer (hot-reload via globali.debug_tasks.zaino)
+        from shared.debug_buffer import DebugBuffer
+        debug = DebugBuffer.for_task("zaino", getattr(ctx, "instance_name", "_unknown"))
+        debug.snap("00_pre_zaino", ctx.device.screenshot() if ctx.device else None)
+
         # ── MODALITÀ SVUOTA ───────────────────────────────────────────────────
         if modalita == "svuota":
             if dry_run:
@@ -1087,10 +1092,18 @@ class ZainoTask(Task):
             esiti = _esegui_bag(ctx, da_caricare, dry_run=dry_run)
         except Exception as exc:
             ctx.log_msg(f"[ZAINO]{modo}Errore: {exc}")
+            debug.snap("99_exception_bag", ctx.device.screenshot() if ctx.device else None)
+            debug.flush(success=False, log_fn=ctx.log_msg)
             return TaskResult(
                 success=False, message=f"errore: {exc}",
                 data={r: 0.0 for r in ["pomodoro","legno","acciaio","petrolio"]},
             )
+
+        debug.snap("01_post_bag", ctx.device.screenshot() if ctx.device else None)
+        # Anomalia: gap calcolato ma 0 caricato (failure silente bag)
+        totale_caricato = sum(esiti.values())
+        anomalia = bool(da_caricare) and totale_caricato == 0
+        debug.flush(success=True, force=anomalia, log_fn=ctx.log_msg)
 
         totale = sum(esiti.values())
         msg    = f"{'[DRY] ' if dry_run else ''}scaricato {totale:.3f}M totale"

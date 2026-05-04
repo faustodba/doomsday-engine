@@ -64,7 +64,11 @@ from shared.ui_helpers import attendi_template
 
 _TAP_CAMPAIGN        = (584, 486)   # bottone Campaign in home (layout 1 standard)
 _TAP_ARENA_OF_DOOM   = (321, 297)   # card Arena of Doom nella schermata Campaign
-_TAP_ULTIMA_SFIDA    = (745, 482)   # pulsante Challenge ultima riga lista (V5 config)
+_TAP_PRIMA_SFIDA     = (745, 250)   # pulsante Challenge prima riga lista (WU 04/05).
+                                    # Pre-fix: TAP_ULTIMA_SFIDA=(745,482) tappava
+                                    # ultima riga (5/5) — falliva quando lista <5
+                                    # righe (account low-level / opponenti scarsi).
+                                    # Prima riga sempre presente se la lista esiste.
 _TAP_START_CHALLENGE = (730, 451)   # bottone START CHALLENGE (V5 config)
 _TAP_ESAURITE_CANCEL = (334, 380)   # Cancel nel popup "sfide esaurite"
 _TAP_CONGRATULATIONS = (480, 440)   # Continue nel popup Congratulations generico
@@ -86,6 +90,11 @@ _TAP_SKIP_CHECKBOX    = (723, 488)  # checkbox Skip (salta animazione battaglia)
 # data/arena_deploy_state.json.
 _TAP_REMOVE_TRUPPA = [(80,  80), (80, 148), (80, 216), (80, 283), (80, 351)]
 _TAP_OPEN_CELLA    = [(42, 100), (42, 170), (42, 240), (42, 310), (42, 380)]
+
+# WU115 (04/05) — debug screenshot via shared/debug_buffer (hot-reload).
+# Toggle config: globali.debug_tasks.arena (default False). Sostituisce il
+# pattern modulo-level WU114 (_DEBUG_REBUILD_DUMP) con architettura unificata.
+
 _TAP_READY_DEPLOY  = (723, 482)
 _DELAY_REBUILD_S   = 0.8
 
@@ -395,7 +404,7 @@ class ArenaTask(Task):
             ctx.log_msg("[ARENA] [PRE-SFIDA] lista non visibile — abort sfida")
             return "errore"
 
-        ctx.device.tap(*_TAP_ULTIMA_SFIDA)
+        ctx.device.tap(*_TAP_PRIMA_SFIDA)
         time.sleep(3.0)
 
         # CHECK-PURCHASE: sfide esaurite?
@@ -690,9 +699,18 @@ class ArenaTask(Task):
                  sarà ignorata silenziosamente se lucchettata.
 
         Test live FAU_06 30/04 (4 celle): power 431k → 685k post-rebuild (+59%).
+
+        WU114 (04/05): debug screenshot buffer per analisi rebuild non completo.
+        Snap a punti chiave (pre/post rimozione, per ogni cella pre/post tap+READY,
+        post-rebuild). Flush in `data/arena_debug/{ist}_{ts}_{idx}_{label}.png`.
         """
         ctx.log_msg(f"[ARENA] [WU83] rebuild truppe — {n_celle} celle")
         n = max(1, min(5, int(n_celle)))
+
+        # WU115 — debug buffer via shared/debug_buffer (hot-reload via config)
+        from shared.debug_buffer import DebugBuffer
+        debug = DebugBuffer.for_task("arena", getattr(ctx, "instance_name", "_unknown"))
+        debug.snap("00_pre_rebuild", ctx.device.screenshot())
 
         # Step 1: rimuovi N truppe correnti
         for i in range(n):
@@ -700,6 +718,7 @@ class ArenaTask(Task):
             ctx.device.tap(x, y)
             time.sleep(_DELAY_REBUILD_S)
         time.sleep(2.0)  # stabilizzazione UI post-rimozione
+        debug.snap("01_post_rimozione", ctx.device.screenshot())
 
         # Step 2: riempi N celle con auto-deploy
         for i in range(n):
@@ -707,8 +726,15 @@ class ArenaTask(Task):
             ctx.log_msg(f"[ARENA] [WU83] cella {i+1}/{n} — tap ({x},{y}) + READY")
             ctx.device.tap(x, y)
             time.sleep(2.5)  # apertura selettore truppe
+            debug.snap(f"02_cella{i+1}_open_selettore", ctx.device.screenshot())
             ctx.device.tap(*_TAP_READY_DEPLOY)
             time.sleep(2.5)  # ready + chiusura pannello
+            debug.snap(f"03_cella{i+1}_post_ready", ctx.device.screenshot())
+
+        debug.snap("04_post_rebuild_complete", ctx.device.screenshot())
+        # WU115: rebuild è always-flush quando debug enabled (force=True).
+        # Saving disco gestito dal toggle config + cleanup automatico 7gg.
+        debug.flush(success=True, force=True, log_fn=ctx.log_msg)
 
 
 # ──────────────────────────────────────────────────────────────────────────────

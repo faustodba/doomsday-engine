@@ -109,6 +109,12 @@ def save_globals(payload: PayloadGlobals):
     # Sistema sempre sovrascritto (solo 2 campi, poco rischio di miss)
     ov.globali.sistema = payload.sistema
 
+    # WU89-Step4 — Skip Predictor flags (None = no update, preservation pattern)
+    if payload.skip_predictor_enabled is not None:
+        ov.globali.skip_predictor_enabled = bool(payload.skip_predictor_enabled)
+    if payload.skip_predictor_shadow_only is not None:
+        ov.globali.skip_predictor_shadow_only = bool(payload.skip_predictor_shadow_only)
+
     _save_ov(ov)
     return {
         "ok": True, "restart_required": False, "sezione": "globals",
@@ -231,7 +237,8 @@ def save_istanze(payload: PayloadIstanze):
     _save_ov(ov)
 
     # Estrai campi da scrivere su instances.json (max_squadre, layout, livello,
-    # raccolta_fuori_territorio — WU50 default statico per istanza)
+    # raccolta_fuori_territorio — WU50 default statico per istanza,
+    # master — flag istanza rifugio destinatario)
     instances_updates: dict[str, dict] = {}
     for nome, ist_ov in payload.istanze.items():
         upd = {}
@@ -244,7 +251,16 @@ def save_istanze(payload: PayloadIstanze):
         # WU50 — flag fuori territorio sempre persistito in instances.json
         # (è un default statico per-istanza, configurabile da dashboard)
         upd["raccolta_fuori_territorio"] = bool(ist_ov.raccolta_fuori_territorio)
+        # master flag persistito in instances.json (default statico per-istanza)
+        upd["master"] = bool(ist_ov.master)
         instances_updates[nome] = upd
+
+    # Invalida cache instance_meta (master flag potrebbe essere cambiato)
+    try:
+        from shared.instance_meta import invalidate_cache
+        invalidate_cache()
+    except Exception:
+        pass
 
     errors: list[str] = []
     if instances_updates:

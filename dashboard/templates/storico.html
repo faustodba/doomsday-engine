@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Doomsday V6 — Storico eventi{% endblock %}
+{% block content %}
+
+<div class="page-layout">
+
+  <div class="main-col" style="width:100%">
+
+    <!-- ── STORICO EVENTI ─────────────────────────────────── -->
+    <div class="section">
+      <div class="sec-label">storico eventi</div>
+      <div class="filter-row">
+        <span class="filter-lbl">istanza</span>
+        <select class="filter-sel" id="f-istanza" name="istanza" onchange="aggiornaStorico()">
+          <option value="">tutte</option>
+          {% for ist in istanze %}
+          <option value="{{ ist.nome }}">{{ ist.nome }}</option>
+          {% endfor %}
+        </select>
+        <span class="filter-lbl">task</span>
+        <select class="filter-sel" id="f-task" name="task" onchange="aggiornaStorico()">
+          <option value="">tutti</option>
+          {% for t in ['raccolta','raccolta_chiusura','rifornimento','arena','vip','boost','store','alleanza','messaggi','donazione','truppe','main_mission','district_showdown','zaino','radar','arena_mercato','radar_census'] %}
+          <option value="{{ t }}">{{ t }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div style="overflow-x:auto">
+        <table class="st-tbl">
+          <thead><tr><th>ts</th><th>istanza</th><th>task</th><th>esito</th><th>durata</th><th>msg</th></tr></thead>
+          <tbody id="storico-body"
+                 hx-get="/ui/partial/storico"
+                 hx-trigger="load, every 30s"
+                 hx-include="#f-istanza, #f-task"
+                 hx-swap="innerHTML">
+            <tr><td colspan="6" style="color:var(--text-dim);font-size:9px;padding:8px">caricamento...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+
+</div>
+
+<script>
+const g  = id => document.getElementById(id);
+const gv = id => g(id)?.value ?? '';
+
+function aggiornaStorico() {
+  const params = new URLSearchParams();
+  const ist = gv('f-istanza'); if (ist) params.set('istanza', ist);
+  const tsk = gv('f-task');    if (tsk) params.set('task', tsk);
+  htmx.ajax('GET', '/ui/partial/storico?'+params, {target:'#storico-body', swap:'innerHTML'});
+}
+</script>
+
+{% endblock %}

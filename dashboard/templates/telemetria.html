@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Doomsday V6 — Telemetria{% endblock %}
+{% block content %}
+
+<div class="page-layout">
+
+  <!-- ══════════════════════════════════════════════════════
+       COLONNA UNICA — telemetria full-width
+       ══════════════════════════════════════════════════════ -->
+  <div class="main-col" style="width:100%">
+
+    <!-- ── TELEMETRIA (WU37 — Issue #53 MVP) ──────────────── -->
+    <div class="section">
+      <div class="sec-label">telemetria</div>
+      <div class="tel-grid">
+
+        <div class="tel-card">
+          <div class="tel-head">📊 telemetria task</div>
+          <div id="tel-task"
+               hx-get="/ui/partial/telemetria-task"
+               hx-trigger="load, every 30s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">scan rolling 24h logs/FAU_*.jsonl · refresh 30s</div>
+        </div>
+
+        <div class="tel-card">
+          <div class="tel-head">📚 storico cicli</div>
+          <div id="tel-storico-cicli"
+               hx-get="/ui/partial/telemetria-storico-cicli"
+               hx-trigger="load, every 60s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">data/telemetry/cicli.json · ultimi 15 cicli</div>
+        </div>
+
+        <div class="tel-card">
+          <div class="tel-head">⚠️ health 24h</div>
+          <div id="tel-health"
+               hx-get="/ui/partial/telemetria-health"
+               hx-trigger="load, every 30s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">pattern noti su 24h (memoria progetto)</div>
+        </div>
+
+        <div class="tel-card">
+          <div class="tel-head">🔄 ciclo corrente</div>
+          <div id="tel-ciclo"
+               hx-get="/ui/partial/telemetria-ciclo"
+               hx-trigger="load, every 10s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">engine_status.json · refresh 10s</div>
+        </div>
+
+        <div class="tel-card tel-full">
+          <div class="tel-head">⏱ tempi medi task — 7gg (filtro IQR, escluso district)</div>
+          <div id="tel-tempi-medi"
+               hx-get="/ui/partial/telemetria-tempi-medi"
+               hx-trigger="load, every 120s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">events 7gg · outlier rimossi via Tukey fences IQR×1.5 · cv = std/media</div>
+        </div>
+
+        {# WU119 — "📈 trend 7gg" spostato in home (sidebar destra "risorse farm") #}
+
+        <div class="tel-card">
+          <div class="tel-head">📊 storico truppe (8 giorni)</div>
+          <div id="truppe-storico"
+               hx-get="/ui/partial/truppe-storico"
+               hx-trigger="load, every 60s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">data/storico_truppe.json · 8 giorni</div>
+        </div>
+
+        {# WU115 — Debug screenshot per task (hot-reload via dashboard) #}
+        <div class="tel-card">
+          <div class="tel-head">🐛 debug screenshot per task</div>
+          <div id="debug-tasks-panel"
+               hx-get="/ui/partial/debug-tasks"
+               hx-trigger="load, every 30s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">flush condizionale (on fail/anomaly) · cleanup 7gg · hot-reload no restart</div>
+        </div>
+
+        {# WU118 — Copertura squadre ultimi 5 cicli #}
+        <div class="tel-card tel-full">
+          <div class="tel-head">🛡 copertura squadre — ultimi 5 cicli (sat / non sat per tipo)</div>
+          <div id="copertura-cicli"
+               hx-get="/ui/partial/copertura-cicli"
+               hx-trigger="load, every 60s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">data/istanza_metrics.jsonl · WU116 load_squadra · soglia 95% · ordine: 🍅 🪵 ⚙ 🛢</div>
+        </div>
+
+        {# Predictor pannelli (cycle + skip) spostati in pagina dedicata /ui/predictor (WU-CycleAccuracy 04/05) #}
+
+      </div>
+    </div>
+
+  </div><!-- /main-col -->
+
+</div><!-- /page-layout -->
+
+{% endblock %}

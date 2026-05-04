@@ -159,13 +159,16 @@ class DistrictShowdownTask(Task):
         # Gate device/matcher
         if ctx.device is None or ctx.matcher is None:
             return False
-        # auto-WU17 (27/04): gate temporale override del flag manuale.
-        # Il task DS è completamente time-driven: si auto-attiva durante
-        # l'evento (Ven 00:00 → Lun 00:00 UTC) e auto-disattiva fuori,
-        # indipendentemente da task_abilitato("district_showdown"). Evita
-        # il rischio "flag dimenticato disabilitato" durante l'evento.
-        # Il sub-step 5 (Fund Raid) ha gate proprio `_is_in_fund_raid_window`
-        # (Dom 20:00 → Lun 00:00 UTC).
+        # WU108 (03/05): rispetta flag manuale dashboard come VETO esplicito.
+        # Pre-WU108 il flag era ignorato (auto-WU17 27/04: "evita flag dimenticato
+        # disabilitato durante evento"). Risultato: 201 fail/201 exec quando l'evento
+        # esiste in window ma l'icona non c'è (es. evento saltato, account low-level).
+        # Il flag dashboard è ora la fonte di verità: l'utente sa quando disabilitare.
+        if hasattr(ctx.config, "task_abilitato"):
+            if not ctx.config.task_abilitato("district_showdown"):
+                return False
+        # Window temporale evento DS (Ven 00:00 → Lun 01:00 UTC). Sub-step 5
+        # (Fund Raid) ha gate proprio `_is_in_fund_raid_window` (Dom 20:00 → Lun 00:00).
         return self._is_in_event_window()
 
     def e_dovuto(self, ctx: TaskContext) -> bool:  # noqa: ARG002
@@ -387,6 +390,13 @@ class DistrictShowdownTask(Task):
         cfg = self._cfg
         ctx.log_msg("[DS] Avvio DistrictShowdownTask")
 
+        # WU115 — debug buffer (hot-reload via globali.debug_tasks.district_showdown)
+        from shared.debug_buffer import DebugBuffer
+        _dbg = DebugBuffer.for_task("district_showdown",
+                                     getattr(ctx, "instance_name", "_unknown"))
+        if _dbg.enabled:
+            _dbg.snap("00_pre_ds", ctx.device.screenshot())
+
         # 1. Naviga alla home come punto di partenza stabile
         ctx.navigator.vai_in_home()
         time.sleep(cfg.delay_dopo_tap_minor)
@@ -394,20 +404,32 @@ class DistrictShowdownTask(Task):
         # 2. Cerca e tap icona evento nella barra top
         if not self._apri_evento(ctx):
             ctx.log_msg("[DS] Icona district_showdown non trovata — skip")
+            if _dbg.enabled:
+                _dbg.snap("99_icona_non_trovata", ctx.device.screenshot())
+            _dbg.flush(success=False, log_fn=ctx.log_msg)
             ctx.navigator.vai_in_home()
             return TaskResult(success=False, message="icona evento non trovata")
 
         # 3. Attiva Auto Roll
         if not self._attiva_auto_roll(ctx):
             ctx.log_msg("[DS] Auto Roll non avviato — back e skip")
+            if _dbg.enabled:
+                _dbg.snap("99_auto_roll_fallito", ctx.device.screenshot())
+            _dbg.flush(success=False, log_fn=ctx.log_msg)
             ctx.device.back()
             time.sleep(cfg.delay_dopo_tap_minor)
             ctx.navigator.vai_in_home()
             return TaskResult(success=False, message="auto roll non avviato")
 
+        if _dbg.enabled:
+            _dbg.snap("01_pre_loop_monitoring", ctx.device.screenshot())
+
         # 4. Loop monitoring dadi (fase 1)
         esito = self._loop_monitoring(ctx)
         ctx.log_msg(f"[DS] Fine fase 1: {esito}")
+
+        if _dbg.enabled:
+            _dbg.snap(f"02_post_loop_{esito}", ctx.device.screenshot())
 
         # Fasi 2, 3 e 4 — reclamo reward SOLO se dadi realmente completati.
         # Se esito e' "uscita_rilevata" o "timeout" il gioco non e' completato
@@ -440,6 +462,13 @@ class DistrictShowdownTask(Task):
             ctx.device.back()
             time.sleep(cfg.delay_dopo_tap_minor)
         ctx.navigator.vai_in_home()
+
+        # WU115 — flush debug buffer.
+        # Anomalia: esito ∈ {timeout, errore} (uscita_rilevata e dadi_esauriti
+        # sono outcome legittimi del flusso evento).
+        anomalia = esito in ("timeout", "errore")
+        _dbg.flush(success=not anomalia, log_fn=ctx.log_msg)
+
         # Output telemetria — Issue #53 Step 3
         return TaskResult(
             success=True,

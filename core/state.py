@@ -130,6 +130,14 @@ class RifornimentoState:
     # provviste_residue netta = lordo × (1 - tassa_pct_avg)).
     tassa_pct_avg: float = 0.23  # default 23% comune nel gioco
 
+    # WU106 (03/05) — cap di invio individuale dell'istanza, scoperto alla
+    # PRIMA spedizione del giorno UTC e cristallizzato fino al reset.
+    # Permette di stimare quante spedizioni può fare l'istanza nel giorno
+    # senza dover dipendere dal `Daily Receiving Limit` del master (che è
+    # un limite separato, globale, gestito da provviste_esaurite).
+    cap_invio_iniziale_oggi: int = -1   # NETTO, primo provviste_residue letto
+    qta_max_invio_lordo:     int = -1   # LORDO max per singolo invio (clamped form)
+
     def _controlla_reset(self) -> None:
         """Se siamo in un nuovo giorno UTC, azzera il contatore e le statistiche."""
         oggi = _today_utc()
@@ -144,6 +152,9 @@ class RifornimentoState:
             self.inviato_lordo_oggi = {}
             self.tassa_oggi         = {}
             # tassa_pct_avg si conserva (è una stima cumulativa, no reset)
+            # WU106: reset cap istanza giornaliero (verrà ri-scoperto al primo invio)
+            self.cap_invio_iniziale_oggi = -1
+            self.qta_max_invio_lordo     = -1
 
     @property
     def quota_esaurita(self) -> bool:
@@ -166,6 +177,23 @@ class RifornimentoState:
         """
         self._controlla_reset()
         return not self.provviste_esaurite
+
+    def registra_cap_giornaliero(self, cap_invio: int, qta_max_lordo: int) -> None:
+        """
+        WU106 — Salva il cap di invio individuale dell'istanza alla PRIMA
+        spedizione del giorno UTC. Idempotente intra-giornata: se i campi
+        sono già valorizzati (>= 0) non li sovrascrive.
+
+        Args:
+            cap_invio:     provviste_residue letto al popup di invio (NETTO)
+            qta_max_lordo: input clamped al popup compila (LORDO singolo invio)
+        """
+        self._controlla_reset()
+        # Idempotenza: una sola scrittura per giornata UTC
+        if self.cap_invio_iniziale_oggi < 0 and cap_invio >= 0:
+            self.cap_invio_iniziale_oggi = int(cap_invio)
+        if self.qta_max_invio_lordo < 0 and qta_max_lordo > 0:
+            self.qta_max_invio_lordo = int(qta_max_lordo)
 
     def segna_provviste_esaurite(self) -> None:
         """
@@ -257,6 +285,9 @@ class RifornimentoState:
             inviato_lordo_oggi  = dict(d.get("inviato_lordo_oggi", {})),
             tassa_oggi          = dict(d.get("tassa_oggi",         {})),
             tassa_pct_avg       = float(d.get("tassa_pct_avg",     0.23)),
+            # WU106: cap istanza giornaliero (default -1 per legacy)
+            cap_invio_iniziale_oggi = int(d.get("cap_invio_iniziale_oggi", -1)),
+            qta_max_invio_lordo     = int(d.get("qta_max_invio_lordo",     -1)),
         )
 
     def to_dict(self) -> dict:
@@ -273,6 +304,9 @@ class RifornimentoState:
             "inviato_lordo_oggi": self.inviato_lordo_oggi,
             "tassa_oggi":         self.tassa_oggi,
             "tassa_pct_avg":      self.tassa_pct_avg,
+            # WU106: cap istanza giornaliero scoperto al primo invio
+            "cap_invio_iniziale_oggi": self.cap_invio_iniziale_oggi,
+            "qta_max_invio_lordo":     self.qta_max_invio_lordo,
         }
 
 
@@ -818,6 +852,9 @@ class ProduzioneSession:
     durata_sec:        float | None = None
     produzione_qty:    dict | None = None  # {risorsa: qty totale prodotta}
     produzione_oraria: dict | None = None  # {risorsa: qty/h}
+    # Issue #25 fix (03/05): tracking delta diamanti per sessione
+    diamanti_finali:   int  = -1
+    diamanti_delta:    int  = 0   # diamanti_finali - diamanti_iniziali (calcolato a chiusura)
 
     @classmethod
     def from_dict(cls, d: dict) -> "ProduzioneSession":
@@ -836,6 +873,8 @@ class ProduzioneSession:
             durata_sec=d.get("durata_sec"),
             produzione_qty=d.get("produzione_qty"),
             produzione_oraria=d.get("produzione_oraria"),
+            diamanti_finali=d.get("diamanti_finali", -1),
+            diamanti_delta=d.get("diamanti_delta", 0),
         )
 
     def to_dict(self) -> dict:
@@ -854,6 +893,8 @@ class ProduzioneSession:
             "durata_sec": self.durata_sec,
             "produzione_qty": self.produzione_qty,
             "produzione_oraria": self.produzione_oraria,
+            "diamanti_finali": self.diamanti_finali,
+            "diamanti_delta":  self.diamanti_delta,
         }
 
     def aggiungi_rifornimento(self, risorsa: str, qta_clamped: int, tassa_amount: int) -> None:
@@ -1028,6 +1069,7 @@ class InstanceState:
         self,
         risorse_finali: dict,
         ts_fine: str,
+        diamanti_finali: int = -1,
     ) -> "ProduzioneSession | None":
         """
         Chiude la sessione corrente con risorse_finali OCR (lette all'avvio
@@ -1072,6 +1114,13 @@ class InstanceState:
         sess.durata_sec     = durata
         sess.produzione_qty = prod_qty
         sess.produzione_oraria = prod_ora
+        # Issue #25 fix (03/05): persiste delta diamanti se entrambi i valori
+        # sono validi (>= 0). Diamanti_iniziali a -1 = mai letto → no delta.
+        if diamanti_finali >= 0 and sess.diamanti_iniziali >= 0:
+            sess.diamanti_finali = int(diamanti_finali)
+            sess.diamanti_delta  = int(diamanti_finali) - int(sess.diamanti_iniziali)
+        elif diamanti_finali >= 0:
+            sess.diamanti_finali = int(diamanti_finali)
 
         # WU47 — propaga produzione_oraria a metrics.*_per_ora.
         # La dashboard "produzione/ora — farm aggregata" somma questi valori

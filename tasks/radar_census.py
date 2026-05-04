@@ -271,9 +271,15 @@ class RadarCensusTask(Task):
 
         nome = ctx.instance_name
 
+        # WU115 — debug buffer (hot-reload via globali.debug_tasks.radar_census)
+        from shared.debug_buffer import DebugBuffer
+        debug = DebugBuffer.for_task("radar_census", nome or "_unknown")
+        debug.snap("00_pre_census", ctx.device.screenshot())
+
         # Verifica templates
         if not TEMPLATES_DIR.is_dir():
             log(f"templates/ non trovato: {TEMPLATES_DIR}")
+            debug.flush(success=False, log_fn=log)
             return TaskResult.fail("templates/ mancante",
                                    icone_rilevate=0)
 
@@ -333,9 +339,14 @@ class RadarCensusTask(Task):
 
         if not matches:
             log("Nessuna icona rilevata dal detector")
+            # Anomalia: census attivato ma 0 detection → potenziale UI cambiata
+            debug.flush(success=True, force=True, log_fn=log)
             return TaskResult.ok("nessuna icona rilevata", icone_rilevate=0)
 
         log(f"Rilevate {len(matches)} icone — catalogazione...")
+        debug.snap("01_post_detect", ctx.device.screenshot())
+        # Detection riuscita — flush solo se debug attivo (no anomalia)
+        debug.flush(success=True, force=False, log_fn=log)
 
         # Prepara directory output
         ts      = datetime.now().strftime("%Y%m%d_%H%M%S")

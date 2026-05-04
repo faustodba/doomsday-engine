@@ -77,16 +77,35 @@ class MessaggiTask(Task):
             if not ctx.navigator.vai_in_home():
                 return TaskResult.fail("Navigator non ha raggiunto HOME", step="assicura_home")
 
+        # WU115 — debug buffer (hot-reload via globali.debug_tasks.messaggi)
+        from shared.debug_buffer import DebugBuffer
+        debug = DebugBuffer.for_task("messaggi", getattr(ctx, "instance_name", "_unknown"))
+        self._dbg = debug
+
         try:
             esito, alliance_ok, system_ok = self._esegui_messaggi(
                 device, matcher, ctx.navigator, log, cfg
             )
         except Exception as exc:
+            debug.snap("99_exception", device.screenshot())
+            debug.flush(success=False, log_fn=log)
             return TaskResult.fail(f"Eccezione: {exc}", step="esegui_messaggi")
+
+        # Anomalia: schermata aperta ma 0 claim su entrambe le tab
+        anomalia = (esito == _Esito.OK and not alliance_ok and not system_ok)
+        debug.flush(
+            success=(esito == _Esito.OK),
+            force=anomalia,
+            log_fn=log,
+        )
 
         return self._mappa_esito(esito, alliance_ok, system_ok, log)
 
     def _esegui_messaggi(self, device, matcher, navigator, log, cfg):
+        _dbg = getattr(self, "_dbg", None)
+        if _dbg is not None:
+            _dbg.snap("00_pre_open", device.screenshot())
+
         log(f"Tap icona messaggi {cfg.tap_icona_messaggi}")
         device.tap(*cfg.tap_icona_messaggi)
         time.sleep(1.0)  # Slow-PC: 0.3 → 1.0 (pre-verifica pin aperto)
@@ -95,6 +114,8 @@ class MessaggiTask(Task):
                                      cfg.soglia_alliance, cfg.roi_alliance,
                                      retry=2, retry_sleep=cfg.retry_sleep_open,
                                      log=log, label="PRE-OPEN")
+        if _dbg is not None:
+            _dbg.snap("01_post_open", device.screenshot())
         if not ok_open:
             log("ANOMALIA: schermata non aperta — BACK + abort")
             device.back()
@@ -106,10 +127,14 @@ class MessaggiTask(Task):
                                          cfg.tap_tab_alliance, cfg.tmpl_alliance,
                                          cfg.soglia_alliance, cfg.roi_alliance,
                                          "Alliance", log, cfg)
+        if _dbg is not None:
+            _dbg.snap("02_post_alliance", device.screenshot())
         system_ok   = self._gestisci_tab(device, matcher,
                                          cfg.tap_tab_system, cfg.tmpl_system,
                                          cfg.soglia_system, cfg.roi_system,
                                          "System", log, cfg)
+        if _dbg is not None:
+            _dbg.snap("03_post_system", device.screenshot())
 
         log(f"Tap X chiudi {cfg.tap_close}")
         device.tap(*cfg.tap_close)

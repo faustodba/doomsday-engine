@@ -10,7 +10,8 @@
     "livello": 7,
     "profilo": "full",
     "abilitata": true,
-    "fascia_oraria": ""
+    "fascia_oraria": "",
+    "master": false
   },
   {
     "nome": "FAU_01",
@@ -23,7 +24,8 @@
     "livello": 6,
     "profilo": "full",
     "abilitata": true,
-    "fascia_oraria": ""
+    "fascia_oraria": "",
+    "master": false
   },
   {
     "nome": "FAU_02",
@@ -36,7 +38,8 @@
     "livello": 6,
     "profilo": "full",
     "abilitata": true,
-    "fascia_oraria": ""
+    "fascia_oraria": "",
+    "master": false
   },
   {
     "nome": "FAU_03",
@@ -49,7 +52,8 @@
     "livello": 6,
     "profilo": "full",
     "abilitata": true,
-    "fascia_oraria": ""
+    "fascia_oraria": "",
+    "master": false
   },
   {
     "nome": "FAU_04",
@@ -62,7 +66,8 @@
     "livello": 6,
     "profilo": "full",
     "abilitata": true,
-    "fascia_oraria": ""
+    "fascia_oraria": "",
+    "master": false
   },
   {
     "nome": "FAU_05",
@@ -75,7 +80,8 @@
     "livello": 6,
     "profilo": "full",
     "abilitata": true,
-    "fascia_oraria": ""
+    "fascia_oraria": "",
+    "master": false
   },
   {
     "nome": "FAU_06",
@@ -88,7 +94,8 @@
     "livello": 6,
     "profilo": "full",
     "abilitata": true,
-    "fascia_oraria": ""
+    "fascia_oraria": "",
+    "master": false
   },
   {
     "nome": "FAU_07",
@@ -101,7 +108,8 @@
     "livello": 6,
     "profilo": "full",
     "abilitata": true,
-    "fascia_oraria": ""
+    "fascia_oraria": "",
+    "master": false
   },
   {
     "nome": "FAU_08",
@@ -114,7 +122,8 @@
     "livello": 6,
     "profilo": "full",
     "abilitata": true,
-    "fascia_oraria": ""
+    "fascia_oraria": "",
+    "master": false
   },
   {
     "nome": "FAU_09",
@@ -127,7 +136,8 @@
     "livello": 6,
     "profilo": "full",
     "abilitata": true,
-    "fascia_oraria": ""
+    "fascia_oraria": "",
+    "master": false
   },
   {
     "nome": "FAU_10",
@@ -140,7 +150,8 @@
     "livello": 6,
     "profilo": "full",
     "abilitata": true,
-    "fascia_oraria": ""
+    "fascia_oraria": "",
+    "master": false
   },
   {
     "nome": "FauMorfeus",
@@ -153,6 +164,7 @@
     "livello": 7,
     "profilo": "raccolta_only",
     "abilitata": true,
-    "fascia_oraria": ""
+    "fascia_oraria": "",
+    "master": true
   }
 ]

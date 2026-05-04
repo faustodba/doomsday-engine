@@ -165,17 +165,35 @@ def check_instances() -> tuple[bool, list[dict]]:
 def check_ctx(istanze: list[dict]) -> bool:
     section("3. TaskContext dry-run per ogni istanza")
     import main as M
+    # Issue #23 fix (03/05): _build_ctx richiede GlobalConfig (dataclass),
+    # non dict. Pre-fix passava {} → fallimento 'dict' object has no
+    # attribute 'livello_nodo' su tutte le 12 istanze. Inoltre passa
+    # anche merged overrides perché post-WU94 baseline reset tutti i task
+    # sono OFF di default in global_config; runtime_overrides definisce i
+    # task abilitati realmente.
+    from config.config_loader import load_global, load_overrides, merge_config
+    import json
+    GLOBAL_PATH    = os.path.join(ROOT, "config", "global_config.json")
+    OVERRIDES_PATH = os.path.join(ROOT, "config", "runtime_overrides.json")
+    gcfg = load_global(GLOBAL_PATH)
+    try:
+        ovr = load_overrides(OVERRIDES_PATH) or {}
+    except Exception:
+        ovr = {}
     ok = True
     for ist in istanze:
         try:
-            ctx = M._build_ctx(ist, {}, dry_run=True)
+            ist_overrides = (ovr.get("istanze") or {}).get(ist["nome"], {})
+            ctx = M._build_ctx(ist, gcfg, dry_run=True, ist_overrides=ist_overrides)
             ok &= check(
                 f"  {ist['nome']}  ctx.instance_name={ctx.instance_name}",
                 ctx.instance_name == ist["nome"],
             )
-            # Verifica config minima
+            # Verifica config minima — task_abilitato deve essere chiamabile
+            # senza eccezione (ritorna bool, no assertion sul valore: dipende
+            # dalla config attuale dell'istanza, non dal smoke test).
             assert ctx.config is not None
-            assert ctx.config.task_abilitato("raccolta") is True
+            assert isinstance(ctx.config.task_abilitato("raccolta"), bool)
         except Exception as exc:
             ok &= check(f"  {ist['nome']}", False, str(exc))
     return ok

@@ -586,7 +586,16 @@ def detect_anomaly_patterns(events: list) -> dict:
     # ── Pattern 3: task_timeout_recurring ─────────────────────────────────────
     # Threshold basato su mediana × 3 (più robusto di p95 quando outliers
     # contaminano la distribuzione: p95 di [50,50,50,50,50,300,300,300]=300).
+    #
+    # WU109 (03/05) — esclusione `raccolta_chiusura` dalla detection: il task
+    # ha distribuzione bimodale legittima (mediana ~3s in skip-mode "0 squadre
+    # libere", 60-225s in work-mode "invio 1-4 marce"). La soglia mediana×3
+    # genera falsi positivi: tutti gli outlier osservati avevano `invii≥1` ed
+    # erano lavoro reale, non timeout patologico. Esclusione cosmetica.
+    EXCLUDED_TASKS_TIMEOUT = {"raccolta_chiusura"}
     for task_name, evs in by_task.items():
+        if task_name in EXCLUDED_TASKS_TIMEOUT:
+            continue
         durs = [e.duration_s for e in evs if e.duration_s > 0]
         if len(durs) < 5:
             continue
@@ -656,9 +665,16 @@ def _build_rollup_from_events(events: list) -> dict:
     if not events:
         return rollup
 
+    # Master istanze (FauMorfeus): escluse dai rollup ordinari
+    # (totals/per_task/per_instance/anomalies). La dashboard le mostra in
+    # sezione dedicata con dati specifici (capienza ricezione, truppe).
+    from shared.instance_meta import is_master_instance
+
     by_task: dict = {}
     by_inst: dict = {}
     for ev in events:
+        if is_master_instance(ev.instance):
+            continue
         by_task.setdefault(ev.task, []).append(ev)
         by_inst.setdefault(ev.instance, []).append(ev)
         rollup["totals"]["events"] += 1

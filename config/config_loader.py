@@ -260,10 +260,12 @@ def merge_config(gcfg: dict, overrides: dict) -> dict:
     except Exception:
         pass
 
-    # ── flag globali root-level (WU55) ──────────────────────────────────────
+    # ── flag globali root-level (WU55, WU93, WU89-step3, WU115) ─────────────
     # Flag a livello root di globali che non hanno una sezione dedicata.
     # Estendibile: aggiungere chiavi qui se servono nuovi flag globali.
-    for _k in ("raccolta_ocr_debug",):
+    for _k in ("raccolta_ocr_debug", "auto_learn_banner",
+               "skip_predictor_enabled", "skip_predictor_shadow_only",
+               "debug_tasks"):
         try:
             if _k in globali:
                 merged[_k] = globali[_k]
@@ -271,16 +273,20 @@ def merge_config(gcfg: dict, overrides: dict) -> dict:
             pass
 
     # ── sistema ─────────────────────────────────────────────────────────────
-    # Alias `tick_sleep_min` (dashboard Pydantic SistemaOverride) → `tick_sleep`
-    # per backward compat bot che usa `tick_sleep` nativamente.
+    # Alias `tick_sleep_min` (dashboard Pydantic SistemaOverride, MINUTI) →
+    # `tick_sleep` (bot nativo, SECONDI). Conversione esplicita ×60.
+    # Bug storico (03/05): l'alias era senza conversione → dashboard mostrava
+    # tick=5 mentre il bot girava a tick=60s indipendentemente dal config.
     try:
         ov_sistema = globali.get("sistema", {})
         if ov_sistema:
             if "sistema" not in merged:
                 merged["sistema"] = {}
             for k, v in ov_sistema.items():
-                key = "tick_sleep" if k == "tick_sleep_min" else k
-                merged["sistema"][key] = v
+                if k == "tick_sleep_min":
+                    merged["sistema"]["tick_sleep"] = int(v) * 60
+                else:
+                    merged["sistema"][k] = v
     except Exception:
         pass
 
@@ -411,6 +417,19 @@ class GlobalConfig:
     # WU55 — Data collection OCR slot (debug analisi HOME vs MAPPA)
     raccolta_ocr_debug:     bool = False
 
+    # WU93 — BannerLearner auto-apprendimento banner non catalogati
+    # WU110 (03/05) — DEPRECATO, default False. La pipeline learn non scattava
+    # mai in pratica perché il fallback X cerchio dorato dismisses i banner
+    # prima del learner. Vedi shared/banner_learner.py + shared/learned_banners.py.
+    auto_learn_banner:      bool = False
+
+    # WU89 Step 3 — Skip Predictor (flag-driven, default OFF + shadow first)
+    skip_predictor_enabled:     bool = False
+    skip_predictor_shadow_only: bool = True
+
+    # WU115 — Debug screenshot per task (hot-reload via shared/debug_buffer.py)
+    debug_tasks:            dict = field(default_factory=dict)
+
     # Rifornimento — parametri comuni
     dooms_account:                    str   = ""
     rifornimento_max_spedizioni_ciclo: int  = 5
@@ -513,6 +532,27 @@ class GlobalConfig:
             raccolta_ocr_debug     = bool(
                 raw.get("raccolta_ocr_debug",
                         raw.get("globali", {}).get("raccolta_ocr_debug", False))
+            ),
+
+            # WU93/WU110 — BannerLearner auto-apprendimento (default False, deprecato)
+            auto_learn_banner      = bool(
+                raw.get("auto_learn_banner",
+                        raw.get("globali", {}).get("auto_learn_banner", False))
+            ),
+
+            # WU89 Step 3 — Skip Predictor (default OFF, shadow first)
+            skip_predictor_enabled     = bool(
+                raw.get("skip_predictor_enabled",
+                        raw.get("globali", {}).get("skip_predictor_enabled", False))
+            ),
+            skip_predictor_shadow_only = bool(
+                raw.get("skip_predictor_shadow_only",
+                        raw.get("globali", {}).get("skip_predictor_shadow_only", True))
+            ),
+            # WU115 — Debug screenshot per task (dict {task: bool}, hot-reload)
+            debug_tasks = dict(
+                raw.get("debug_tasks",
+                        raw.get("globali", {}).get("debug_tasks", {})) or {}
             ),
 
             # Rifornimento — comune

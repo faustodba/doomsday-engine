@@ -1,0 +1,34 @@
+{
+  "_meta": {
+    "schema_version": "1.0",
+    "unit": "minuti (T_raccolta puro, sottratto andata+ritorno ~2min)",
+    "ref": "FAU_00 best gatherers, saturazione 100%",
+    "fonte": "utente 04/05/2026",
+    "note": [
+      "T_raccolta = saturazione × T_L_max[livello] × multiplier_istanza",
+      "Validato modello: T_L7/T_L6 = 1.097 ≈ cap_L7/cap_L6 = 1.10 (rate squadra costante)",
+      "Multiplier per istanza è stima preliminare (1.3x default per istanze farm),",
+      "ricalibrabile empiricamente dopo accumulo dati post-WU116 (1+ settimana)."
+    ]
+  },
+  "_default_per_livello": {
+    "5":  100,
+    "6":  114,
+    "7":  125
+  },
+  "_multiplier_per_istanza": {
+    "_default":   1.3,
+    "FAU_00":     1.0,
+    "FAU_01":     1.3,
+    "FAU_02":     1.3,
+    "FAU_03":     1.3,
+    "FAU_04":     1.3,
+    "FAU_05":     1.3,
+    "FAU_06":     1.3,
+    "FAU_07":     1.3,
+    "FAU_08":     1.3,
+    "FAU_09":     1.5,
+    "FAU_10":     1.4,
+    "FauMorfeus": 1.0
+  }
+}

@@ -900,18 +900,21 @@ def _compute_trend_7gg() -> List[TrendSeries]:
     if not days:
         return []
 
+    from shared.instance_meta import is_master_instance
     spediz_per_day = []
     inviato_per_day = []
     provviste_per_day = []
     for day in days:
         ist_data = d[day]
-        sped = sum(int(v.get("spedizioni", 0) or 0) for v in ist_data.values())
+        sped = sum(int(v.get("spedizioni", 0) or 0)
+                   for k, v in ist_data.items() if not is_master_instance(k))
         inv = sum(
             int(v.get("pomodoro", 0) or 0) + int(v.get("legno", 0) or 0)
             + int(v.get("acciaio", 0) or 0) + int(v.get("petrolio", 0) or 0)
-            for v in ist_data.values()
+            for k, v in ist_data.items() if not is_master_instance(k)
         )
-        prov = sum(int(v.get("provviste_residue", 0) or 0) for v in ist_data.values())
+        prov = sum(int(v.get("provviste_residue", 0) or 0)
+                   for k, v in ist_data.items() if not is_master_instance(k))
         spediz_per_day.append(sped)
         inviato_per_day.append(inv)
         provviste_per_day.append(prov)

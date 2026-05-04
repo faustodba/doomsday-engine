@@ -1,0 +1,256 @@
+{% extends "base.html" %}
+{% set active = "config" %}
+{% block title %}Config — Doomsday V6{% endblock %}
+
+{% block content %}
+
+<div class="banner-restart">
+  <strong>config</strong> = override <code>runtime_overrides.json</code> · <span style="color:#4ade80">HOT-RELOAD</span> al prossimo tick.<br>
+  Per la baseline statica vedi <a href="/ui/config/global">global config</a> (richiede riavvio bot).
+</div>
+
+{% set glob = overrides.get("globali", {}) %}
+{% set rif = glob.get("rifornimento", {}) %}
+{% set ric = glob.get("rifornimento_comune", {}) %}
+{% set rfg = glob.get("rifugio", {}) %}
+{% set zai = glob.get("zaino", {}) %}
+{% set rac = glob.get("raccolta", {}) %}
+{% set alc = rac.get("allocazione", {}) %}
+{% set sis = glob.get("sistema", {}) %}
+
+<!-- ── SISTEMA + FLAG GLOBALI ─────────────────────── -->
+<div class="section">
+  <div class="sec-label">sistema · flag globali</div>
+  <div class="tel-grid">
+
+    <div class="tel-card">
+      <div class="tel-head">🔧 sistema</div>
+      <form style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end"
+            hx-put="/api/config/globals"
+            hx-ext="json-enc"
+            hx-swap="none"
+            hx-on::after-request="document.getElementById('sis-ok').style.opacity='1';setTimeout(()=>document.getElementById('sis-ok').style.opacity='0',2000)">
+        <div class="form-group">
+          <label class="form-label">max parallel (1-12)</label>
+          <input class="form-input" type="number" name="sistema[max_parallel]" min="1" max="12"
+                 value="{{ sis.get('max_parallel', 1) }}" style="width:90px">
+        </div>
+        <div class="form-group">
+          <label class="form-label">tick sleep (min)</label>
+          <input class="form-input" type="number" name="sistema[tick_sleep_min]" min="0" max="1440"
+                 value="{{ sis.get('tick_sleep_min', 1) }}" style="width:90px">
+        </div>
+        <button type="submit" class="btn btn-primary">salva</button>
+        <span id="sis-ok" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);opacity:0;transition:opacity 0.3s">✓ salvato</span>
+      </form>
+      <div class="tel-foot">parallelismo istanze · sleep tra cicli · hot-reload</div>
+    </div>
+
+    <div class="tel-card">
+      <div class="tel-head">🚩 flag globali</div>
+      {% set _alb = glob.get('auto_learn_banner', True) %}
+      <div style="display:flex;align-items:center;gap:10px;padding:6px 0">
+        <span style="flex:1;font-size:12px">
+          <strong>auto-learn banner</strong> <span style="color:var(--text-dim);font-size:10px">(WU93)</span>
+        </span>
+        <span style="color:{% if _alb %}#4ade80{% else %}#f87171{% endif %};font-weight:700;font-size:11px">
+          {% if _alb %}ON{% else %}OFF{% endif %}
+        </span>
+        <button hx-post="/api/banner-learner/{% if _alb %}disable{% else %}enable{% endif %}"
+                hx-swap="none" hx-on::after-request="location.reload()"
+                style="padding:3px 10px;font-size:10px;background:var(--bg-light);
+                       border:1px solid var(--border);color:var(--text);border-radius:3px;cursor:pointer">
+          {% if _alb %}OFF{% else %}ON{% endif %}
+        </button>
+      </div>
+      {% set _rod = glob.get('raccolta_ocr_debug', False) %}
+      <div style="display:flex;align-items:center;gap:10px;padding:6px 0;border-top:0.5px solid var(--border)">
+        <span style="flex:1;font-size:12px">
+          <strong>raccolta OCR debug</strong> <span style="color:var(--text-dim);font-size:10px">(WU55)</span>
+        </span>
+        <span style="color:{% if _rod %}#4ade80{% else %}#f87171{% endif %};font-weight:700;font-size:11px">
+          {% if _rod %}ON{% else %}OFF{% endif %}
+        </span>
+        <button hx-post="/api/raccolta-ocr-debug/{% if _rod %}off{% else %}on{% endif %}"
+                hx-swap="none" hx-on::after-request="location.reload()"
+                style="padding:3px 10px;font-size:10px;background:var(--bg-light);
+                       border:1px solid var(--border);color:var(--text);border-radius:3px;cursor:pointer">
+          {% if _rod %}OFF{% else %}ON{% endif %}
+        </button>
+      </div>
+      <div class="tel-foot">toggle pipeline auto-discovery · debug dataset OCR</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ── RIFORNIMENTO ───────────────────────────────── -->
+<div class="section">
+  <div class="sec-label">rifornimento</div>
+  <div class="tel-grid">
+    <div class="tel-card tel-full">
+      <div class="tel-head">📦 rifornimento — modalità · rifugio · risorse</div>
+      <form style="display:flex;flex-direction:column;gap:14px"
+            hx-put="/api/config/rifornimento"
+            hx-ext="json-enc"
+            hx-swap="none"
+            hx-on::after-request="document.getElementById('rif-ok').style.opacity='1';setTimeout(()=>document.getElementById('rif-ok').style.opacity='0',2000)">
+
+        <div style="display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end">
+          <div class="form-group">
+            <label class="form-label">modalità mappa</label>
+            <select class="form-input" name="mappa_abilitata" style="width:80px">
+              <option value="true"  {% if rif.get('mappa_abilitata') %}selected{% endif %}>sì</option>
+              <option value="false" {% if not rif.get('mappa_abilitata') %}selected{% endif %}>no</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">modalità membri</label>
+            <select class="form-input" name="membri_abilitati" style="width:80px">
+              <option value="true"  {% if rif.get('membri_abilitati') %}selected{% endif %}>sì</option>
+              <option value="false" {% if not rif.get('membri_abilitati', True) %}selected{% endif %}>no</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">rifugio X</label>
+            <input class="form-input" type="number" name="rifugio[coord_x]"
+                   value="{{ rfg.get('coord_x', 680) }}" style="width:90px">
+          </div>
+          <div class="form-group">
+            <label class="form-label">rifugio Y</label>
+            <input class="form-input" type="number" name="rifugio[coord_y]"
+                   value="{{ rfg.get('coord_y', 531) }}" style="width:90px">
+          </div>
+          <div class="form-group">
+            <label class="form-label">dooms account</label>
+            <input class="form-input" type="text" name="rifornimento_comune[dooms_account]"
+                   value="{{ ric.get('dooms_account', 'FauMorfeus') }}" style="width:140px">
+          </div>
+          <div class="form-group">
+            <label class="form-label">max sped./ciclo</label>
+            <input class="form-input" type="number" name="rifornimento_comune[max_spedizioni_ciclo]"
+                   value="{{ ric.get('max_spedizioni_ciclo', 5) }}" style="width:80px">
+          </div>
+        </div>
+
+        <table class="tel-table" style="max-width:560px">
+          <thead>
+            <tr>
+              <th style="text-align:left">risorsa</th>
+              <th style="text-align:left">abilitata</th>
+              <th style="text-align:left">soglia (m)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in [("campo","🍅"),("legno","🪵"),("petrolio","🛢"),("acciaio","⚙")] %}
+            <tr>
+              <td style="font-family:var(--font-mono)">{{ r[1] }} {{ r[0] }}</td>
+              <td>
+                <select class="form-input" name="rifornimento_comune[{{ r[0] }}_abilitato]" style="width:70px">
+                  <option value="true"  {% if ric.get(r[0]+'_abilitato', True) %}selected{% endif %}>sì</option>
+                  <option value="false" {% if not ric.get(r[0]+'_abilitato', True) %}selected{% endif %}>no</option>
+                </select>
+              </td>
+              <td>
+                <input class="form-input" type="number" step="0.1" min="0"
+                       name="rifornimento_comune[soglia_{{ r[0] }}_m]"
+                       value="{{ ric.get('soglia_'+r[0]+'_m', 5.0) }}" style="width:90px">
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+
+        <div>
+          <button type="submit" class="btn btn-primary">salva rifornimento</button>
+          <span id="rif-ok" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);opacity:0;transition:opacity 0.3s;margin-left:8px">✓ salvato</span>
+        </div>
+      </form>
+      <div class="tel-foot">modalità mappa/membri mutuamente esclusive · hot-reload</div>
+    </div>
+  </div>
+</div>
+
+<!-- ── ZAINO + ALLOCAZIONE ────────────────────────── -->
+<div class="section">
+  <div class="sec-label">zaino · allocazione raccolta</div>
+  <div class="tel-grid">
+
+    <div class="tel-card">
+      <div class="tel-head">🎒 zaino</div>
+      <form style="display:flex;flex-direction:column;gap:12px"
+            hx-put="/api/config/zaino"
+            hx-ext="json-enc"
+            hx-swap="none"
+            hx-on::after-request="document.getElementById('zai-ok').style.opacity='1';setTimeout(()=>document.getElementById('zai-ok').style.opacity='0',2000)">
+        <div class="form-group" style="max-width:260px">
+          <label class="form-label">modalità</label>
+          <select class="form-input" name="zaino[modalita]">
+            <option value="bag"    {% if zai.get('modalita','bag')=='bag' %}selected{% endif %}>bag (scarica fino a soglia)</option>
+            <option value="svuota" {% if zai.get('modalita','bag')=='svuota' %}selected{% endif %}>svuota (tutto)</option>
+          </select>
+        </div>
+        <table class="tel-table">
+          <thead>
+            <tr>
+              <th style="text-align:left">risorsa</th>
+              <th style="text-align:left">usa</th>
+              <th style="text-align:left">soglia (m)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in [("pomodoro","🍅"),("legno","🪵"),("petrolio","🛢"),("acciaio","⚙")] %}
+            <tr>
+              <td style="font-family:var(--font-mono)">{{ r[1] }} {{ r[0] }}</td>
+              <td>
+                <select class="form-input" name="zaino[usa_{{ r[0] }}]" style="width:70px">
+                  <option value="true"  {% if zai.get('usa_'+r[0], True) %}selected{% endif %}>sì</option>
+                  <option value="false" {% if not zai.get('usa_'+r[0], True) %}selected{% endif %}>no</option>
+                </select>
+              </td>
+              <td>
+                <input class="form-input" type="number" step="0.1" min="0"
+                       name="zaino[soglia_{{ r[0] }}_m]"
+                       value="{{ zai.get('soglia_'+r[0]+'_m', 20.0) }}" style="width:90px">
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+        <div>
+          <button type="submit" class="btn btn-primary">salva zaino</button>
+          <span id="zai-ok" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);opacity:0;transition:opacity 0.3s;margin-left:8px">✓ salvato</span>
+        </div>
+      </form>
+      <div class="tel-foot">modalità bag/svuota · soglie deposito per risorsa</div>
+    </div>
+
+    <div class="tel-card">
+      <div class="tel-head">📊 allocazione raccolta (% somma 100)</div>
+      <form style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end"
+            hx-put="/api/config/allocazione"
+            hx-ext="json-enc"
+            hx-swap="none"
+            hx-on::after-request="document.getElementById('alc-ok').style.opacity='1';setTimeout(()=>document.getElementById('alc-ok').style.opacity='0',2000)">
+        {% for r in [("pomodoro","🍅"),("legno","🪵"),("petrolio","🛢"),("acciaio","⚙")] %}
+        <div class="form-group">
+          <label class="form-label">{{ r[1] }} {{ r[0] }}</label>
+          <input class="form-input" type="number" step="0.5" min="0" max="100"
+                 name="allocazione[{{ r[0] }}]"
+                 value="{{ alc.get(r[0], 25) }}" style="width:80px">
+        </div>
+        {% endfor %}
+        <button type="submit" class="btn btn-primary">salva allocazione</button>
+        <span id="alc-ok" style="font-family:var(--font-mono);font-size:11px;color:var(--accent);opacity:0;transition:opacity 0.3s">✓ salvato</span>
+      </form>
+      <div class="tel-foot">priorità marce raccolta · normalizzato dal bot</div>
+    </div>
+
+  </div>
+</div>
+
+<div class="tel-foot" style="text-align:center;margin-top:12px;font-size:10px">
+  task flags + tabella istanze sono nella <a href="/ui/">overview</a> · qui solo i parametri di configurazione
+</div>
+
+{% endblock %}

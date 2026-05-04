@@ -28,6 +28,7 @@ from fastapi.templating import Jinja2Templates
 from dashboard.routers import (
     api_status, api_stats,
     api_config_global, api_config_overrides, api_log,
+    api_debug,
 )
 
 
@@ -65,8 +66,59 @@ def _env_label() -> dict:
 # Lifespan
 # ==============================================================================
 
+_predictor_recorder_task = None
+
+
+async def _predictor_recorder_loop():
+    """Background task: ogni 15 min snapshot cycle predictor + evaluate completed cycles."""
+    import asyncio
+    from core.cycle_duration_predictor import predict_cycle_from_config
+    from core.cycle_predictor_recorder import (
+        record_snapshot, evaluate_cycles, SNAPSHOT_INTERVAL_MIN,
+    )
+    print(f"[DASHBOARD] predictor recorder avviato (snapshot ogni {SNAPSHOT_INTERVAL_MIN}min)")
+    while True:
+        try:
+            res = predict_cycle_from_config(strict_schedule=True)
+            if "error" not in res:
+                # Costruisci input_context per analisi reproducibile
+                per_ist = res.get("per_istanza", {}) or {}
+                sched_dbg = res.get("schedule_debug", {}) or {}
+                input_context = {
+                    "istanze_abilitate": list(per_ist.keys()),
+                    "task_globali_abilitati": sorted({
+                        t for tasks in (
+                            (info.get("due", []) + info.get("skipped", []))
+                            for info in sched_dbg.values()
+                        )
+                        for t in tasks
+                    }),
+                    "tasks_per_istanza_due": {
+                        inst: info.get("due", []) for inst, info in sched_dbg.items()
+                    },
+                    "per_istanza_predicted_s": {
+                        inst: round(p.get("T_s", 0), 1)
+                        for inst, p in per_ist.items()
+                    },
+                    "tick_sleep_s": float(res.get("tick_sleep_s", 0)),
+                }
+                record_snapshot(
+                    predicted_min=float(res.get("T_ciclo_min", 0)),
+                    n_istanze=int(res.get("n_istanze", 0)),
+                    confidence=str(res.get("confidence", "?")),
+                    input_context=input_context,
+                )
+            n_eval = evaluate_cycles()
+            if n_eval > 0:
+                print(f"[DASHBOARD] cycle accuracy evaluated: {n_eval} cicli")
+        except Exception as exc:
+            print(f"[DASHBOARD] predictor recorder errore: {exc}")
+        await asyncio.sleep(SNAPSHOT_INTERVAL_MIN * 60)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    import asyncio
     from dashboard.services.config_manager import (
         get_global_config, get_overrides, get_instances,
     )
@@ -77,8 +129,13 @@ async def lifespan(app: FastAPI):
     print(f"[DASHBOARD] overrides:     {len(ov.get('istanze', {}))} istanze")
     print(f"[DASHBOARD] instances:     {len(insts)} istanze")
     print(f"[DASHBOARD] API docs:      http://localhost:8765/docs")
+    # Avvia background task predictor recorder
+    global _predictor_recorder_task
+    _predictor_recorder_task = asyncio.create_task(_predictor_recorder_loop())
     yield
     print("[DASHBOARD] shutdown.")
+    if _predictor_recorder_task and not _predictor_recorder_task.done():
+        _predictor_recorder_task.cancel()
 
 
 # ==============================================================================
@@ -104,6 +161,7 @@ app.include_router(api_stats.router)
 app.include_router(api_config_global.router)
 app.include_router(api_config_overrides.router)
 app.include_router(api_log.router)
+app.include_router(api_debug.router)   # WU115 — debug screenshot per task
 
 
 # ==============================================================================
@@ -138,6 +196,41 @@ def ui_index(request: Request):
         "active":  "home",
         "cfg":     get_merged_config(),
         "istanze": get_instances(),
+        **_env_label(),
+    })
+
+
+@app.get("/ui/telemetria", include_in_schema=False)
+def ui_telemetria(request: Request):
+    """Pagina dedicata telemetria — pannelli analytics.
+
+    Refactor 04/05: estratta da home (`/ui`) per alleggerire la dashboard.
+    Storico eventi spostato a sua volta su `/ui/storico` (pagina separata).
+    """
+    from dashboard.services.config_manager import get_instances
+    return templates.TemplateResponse(request, "telemetria.html", {
+        "active":  "telemetria",
+        "istanze": get_instances(),
+        **_env_label(),
+    })
+
+
+@app.get("/ui/storico", include_in_schema=False)
+def ui_storico(request: Request):
+    """Pagina dedicata storico eventi — tabella filtrabile per istanza+task."""
+    from dashboard.services.config_manager import get_instances
+    return templates.TemplateResponse(request, "storico.html", {
+        "active":  "storico",
+        "istanze": get_instances(),
+        **_env_label(),
+    })
+
+
+@app.get("/ui/predictor", include_in_schema=False)
+def ui_predictor(request: Request):
+    """Pagina dedicata predictor — cycle duration + skip squadre fuori."""
+    return templates.TemplateResponse(request, "predictor.html", {
+        "active": "predictor",
         **_env_label(),
     })
 
@@ -404,24 +497,35 @@ def ui_instance(request: Request, nome: str):
 
 @app.get("/ui/config", include_in_schema=False)
 def ui_config(request: Request):
-    from dashboard.services.config_manager import (
-        get_global_config, get_overrides, get_instances,
-    )
-    return templates.TemplateResponse(request, "config_overrides.html", {
-        "active":    "config",
-        "overrides": get_overrides(),
-        "instances": get_instances(),
-        "gcfg":      get_global_config(),
-        **_env_label(),
-    })
+    """Redirect alla pagina global config — la pagina dedicata agli override
+    runtime è stata rimossa (duplicava overview per task flags + istanze, e
+    duplicava global config per le altre sezioni). WU98 02/05/2026."""
+    from fastapi.responses import RedirectResponse
+    return RedirectResponse(url="/ui/config/global", status_code=302)
 
 
 @app.get("/ui/config/global", include_in_schema=False)
 def ui_config_global(request: Request):
-    from dashboard.services.config_manager import get_global_config
+    """Pagina config — legge global_config.json RAW (no round-trip via
+    GlobalConfig dataclass che perde campi nuovi: rifugio, rifornimento
+    unificato, auto_learn_banner, raccolta_ocr_debug, soglia_allocazione,
+    e converte allocazione in frazioni 0-1)."""
+    import json
+    from dashboard.services.config_manager import (
+        _GLOBAL_CONFIG_PATH, get_instances, get_overrides,
+    )
+    from shared.instance_meta import get_master_instances
+    try:
+        with open(_GLOBAL_CONFIG_PATH, "r", encoding="utf-8") as f:
+            cfg_raw = json.load(f)
+    except Exception:
+        cfg_raw = {}
     return templates.TemplateResponse(request, "config_global.html", {
-        "active": "global",
-        "cfg":    get_global_config(),
+        "active":       "global",
+        "cfg":          cfg_raw,
+        "instances":    get_instances(),
+        "overrides":    get_overrides(),
+        "master_names": set(get_master_instances()),
         **_env_label(),
     })
 
@@ -554,17 +658,19 @@ def partial_task_flags_v2(request: Request):
         },
     }
 
-    # raccolta esclusa: è sempre attiva, non controllabile da UI.
     # auto-WU24 (27/04): rifornimento+zaino accoppiati nella stessa riga
     # del grid 2-col (compound side-by-side, no più span 2 cols).
+    # WU94 (02/05): raccolta ora controllabile via flag globale task.raccolta;
+    # esposta in cima all'ORDER come task base.
     ORDER = [
-        "rifornimento", "zaino",
-        "vip", "boost",
-        "truppe", "arena",
-        "store", "alleanza",
-        "donazione", "messaggi",
-        "main_mission", "radar",
-        "arena_mercato", "district_showdown",
+        "raccolta", "rifornimento",
+        "zaino", "vip",
+        "boost", "truppe",
+        "arena", "store",
+        "alleanza", "donazione",
+        "messaggi", "main_mission",
+        "radar", "arena_mercato",
+        "district_showdown",
     ]
 
     # auto-WU22 (27/04): rewrite as 2-col checkbox rows (style rifornimento .rr-cb)
@@ -618,6 +724,7 @@ def partial_task_flags_v2(request: Request):
 def partial_ist_table(request: Request):
     from dashboard.services.config_manager import get_instances, get_overrides
     from dashboard.services.stats_reader import get_engine_status
+    from shared.instance_meta import is_master_instance
     insts = get_instances()
     ov    = get_overrides()
     es    = get_engine_status()
@@ -642,6 +749,30 @@ def partial_ist_table(request: Request):
         stato       = ist_status.stato if ist_status else ("idle" if not abilitata else "unknown")
         # WU52 — quando istanza disabilitata, gli altri campi sono read-only
         disabled_attr = "disabled" if not abilitata else ""
+        # WU101/WU121 — ★ marker accanto al nome se istanza master (hardcoded
+        # in shared/instance_meta._HARDCODED_MASTERS, no UI toggle). Coerente
+        # con card_istanza partial e altri panel.
+        master_marker = ' <span title="istanza master (ricevente)" style="color:#ffc107;margin-right:2px">★</span>' if is_master_instance(nome) else ''
+
+        # Badge "stato" sostituito da timestamp ultima esecuzione task se disponibile.
+        # `ultimo_task.ts` è HH:MM:SS (no data). Aggiungo data odierna server-side
+        # (engine_status viene aggiornato in continuo, ts si riferisce a oggi).
+        # Fallback: se nessun ultimo_task → mostra stato badge.
+        ut = ist_status.ultimo_task if ist_status else None
+        ut_ts   = getattr(ut, "ts", None) if ut else None
+        ut_nome = getattr(ut, "nome", None) if ut else None
+        if ut_ts:
+            from datetime import datetime as _dt
+            today_dm = _dt.now().strftime("%d/%m")
+            ut_lbl = ut_nome or "?"
+            badge_html = (
+                f'<span class="badge ts" style="margin-left:4px;color:var(--text-dim);'
+                f'font-family:var(--font-mono);font-size:9px"'
+                f' title="ultimo task: {ut_lbl}">'
+                f'{today_dm} {ut_ts}</span>'
+            )
+        else:
+            badge_html = f'<span class="badge {stato}" style="margin-left:4px">{stato}</span>'
 
         fascia_da = ""
         fascia_a  = ""
@@ -659,8 +790,8 @@ def partial_ist_table(request: Request):
                      style="accent-color:var(--accent);width:13px;height:13px;cursor:pointer"
                      onchange="onIstToggle(this)"></td>
           <td>
-            <span class="ist-name-col{nome_css}">{nome}</span>
-            <span class="badge {stato}" style="margin-left:4px">{stato}</span>
+            <span class="ist-name-col{nome_css}">{master_marker}{nome}</span>
+            {badge_html}
           </td>
           <td><input type="number" class="ist-truppe" value="{truppe}" {disabled_attr}
                      min="0" step="1000" style="width:62px"></td>
@@ -847,7 +978,9 @@ def partial_produzione_istanze(request: Request):
     No scroll: tutte le istanze visibili.
     """
     from dashboard.services.stats_reader import get_produzione_istanze
-    dati = get_produzione_istanze()
+    # Include master in fondo alla griglia: card con badge ★ + bordo dorato
+    # (i dati aggregati continuano a escluderla, vedi get_risorse_farm)
+    dati = get_produzione_istanze(include_master=True)
     if not dati:
         return HTMLResponse(
             '<div style="color:var(--text-dim);text-align:center;padding:12px">'
@@ -872,9 +1005,13 @@ def partial_produzione_istanze(request: Request):
             return f"{sign}{v/1_000:.0f}K"
         return f"{sign}{v:.0f}"
 
+    # Master istanze in fondo alla griglia (priorità rendering ordinarie)
+    dati = sorted(dati, key=lambda r: (bool(r.get("master", False)), r.get("nome", "")))
+
     cards_html = []
     for entry in dati:
         nome = entry.get("nome", "?")
+        is_master = bool(entry.get("master", False))
         # auto-WU21 (27/04): istanze disabilitate continuano a comparire
         # con gli ultimi dati persistiti. Stile faded + badge DISABLED.
         is_abilitata = bool(entry.get("abilitata", False))
@@ -1272,15 +1409,18 @@ def partial_produzione_istanze(request: Request):
             f'</div>'
         )
 
+        master_border = "border:1.5px solid #f5c542;" if is_master else "border:1px solid var(--border);"
+        master_star = '<span title="master — rifugio destinatario" style="color:#f5c542;font-weight:700;margin-right:2px">★</span>' if is_master else ""
+        master_pill = '<span style="background:rgba(245,197,66,0.15);color:#f5c542;font-size:9px;font-weight:600;padding:1px 5px;border-radius:3px;letter-spacing:0.5px;margin-left:4px">MASTER</span>' if is_master else ""
         cards_html.append(f'''
-        <div class="prod-card" style="background:var(--bg-card);border:1px solid var(--border);
+        <div class="prod-card" style="background:var(--bg-card);{master_border}
              border-radius:5px;padding:8px 10px;font-size:12px;opacity:{card_opacity}">
           <div style="display:flex;justify-content:space-between;align-items:center;
                margin-bottom:4px;font-weight:600;font-size:14px">
             <span style="display:flex;align-items:center;gap:6px">
               <span style="display:inline-block;width:8px;height:8px;border-radius:50%;
                 background:{stato_col}"></span>
-              {nome}
+              {master_star}{nome}{master_pill}
               <span style="background:{badge_bg};color:{stato_col};font-size:10px;
                 font-weight:600;padding:1px 6px;border-radius:3px;text-transform:uppercase;
                 letter-spacing:0.5px">{stato}</span>
@@ -1312,6 +1452,376 @@ def partial_produzione_istanze(request: Request):
     return HTMLResponse(
         '<div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));'
         'gap:6px">' + "".join(cards_html) + '</div>'
+    )
+
+
+@app.get("/ui/partial/cycle-prediction", include_in_schema=False)
+def partial_cycle_prediction(request: Request):
+    """
+    WU-CycleDur (04/05) — pannello stima durata ciclo bot.
+
+    Mostra: T_ciclo_atteso (min), breakdown per istanza, schedule debug
+    (quali task girano per ogni istanza al prossimo tick).
+
+    Source: `core.cycle_duration_predictor.predict_cycle_from_config(strict=True)`.
+    Refresh ogni 60s (rolling stats TTL 30min, schedule cambia ogni minuto).
+    """
+    try:
+        from core.cycle_duration_predictor import predict_cycle_from_config
+        res = predict_cycle_from_config(strict_schedule=True)
+    except Exception as exc:
+        return HTMLResponse(
+            f'<div style="color:var(--text-dim);text-align:center;padding:8px">'
+            f'errore caricamento: {exc}</div>'
+        )
+    if "error" in res:
+        return HTMLResponse(
+            f'<div style="color:var(--text-dim);text-align:center;padding:8px">'
+            f'{res["error"]}</div>'
+        )
+
+    t_min = res.get("T_ciclo_min", 0)
+    t_s   = res.get("T_ciclo_s", 0)
+    n_ist = res.get("n_istanze", 0)
+    conf  = res.get("confidence", "?")
+    tick  = res.get("tick_sleep_s", 0)
+    per_ist = res.get("per_istanza", {})
+    sched_dbg = res.get("schedule_debug", {})
+
+    conf_color = {"alta": "#4caf50", "media": "#ff9800", "bassa": "#f44336"}.get(conf, "var(--text-dim)")
+
+    # Header
+    head = (
+        f'<div style="display:flex;align-items:baseline;gap:18px;margin-bottom:10px">'
+        f'<div><span style="font-size:22px;font-weight:700;color:var(--accent)">{t_min:.1f}</span>'
+        f'<span style="font-size:11px;color:var(--text-dim);margin-left:4px">min</span></div>'
+        f'<div style="color:var(--text-dim);font-size:11px">'
+        f'{n_ist} istanze · sleep {tick:.0f}s · confidence '
+        f'<span style="color:{conf_color};font-weight:600">{conf}</span></div></div>'
+    )
+
+    # Tabella per istanza (sorted by T_s desc)
+    sorted_inst = sorted(per_ist.items(), key=lambda kv: -kv[1].get("T_s", 0))
+    rows = []
+    for inst, p in sorted_inst:
+        t_inst_s = p.get("T_s", 0)
+        boot_s   = p.get("boot_home_s", 0)
+        c_inst   = p.get("confidence", "?")
+        c_color  = {"alta": "#4caf50", "media": "#ff9800", "bassa": "#f44336"}.get(c_inst, "var(--text-dim)")
+        # Schedule debug per istanza
+        dbg = sched_dbg.get(inst, {})
+        n_due  = len(dbg.get("due", []))
+        n_skip = len(dbg.get("skipped", []))
+        due_str  = ", ".join(dbg.get("due", []))
+        skip_str = ", ".join(dbg.get("skipped", []))
+        rows.append(
+            f'<tr>'
+            f'<td style="font-weight:600">{inst}</td>'
+            f'<td style="text-align:right;font-family:monospace">{t_inst_s/60:.1f}m</td>'
+            f'<td style="text-align:right;color:var(--text-dim);font-size:10px">{boot_s:.0f}s</td>'
+            f'<td style="text-align:center"><span style="color:#4caf50;font-weight:600">{n_due}</span>'
+            f'<span style="color:var(--text-dim)">/{n_due+n_skip}</span></td>'
+            f'<td style="color:var(--text-dim);font-size:10px" title="DUE: {due_str} || SKIP: {skip_str}">'
+            f'{due_str[:60]}{"…" if len(due_str)>60 else ""}</td>'
+            f'<td style="color:{c_color};font-size:10px;text-align:right">{c_inst}</td>'
+            f'</tr>'
+        )
+
+    table = (
+        '<table class="tel-table"><thead><tr>'
+        '<th>istanza</th>'
+        '<th style="text-align:right">T</th>'
+        '<th style="text-align:right">boot</th>'
+        '<th style="text-align:center">due/tot</th>'
+        '<th>task pianificati</th>'
+        '<th style="text-align:right">conf</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(rows)}</tbody></table>'
+    )
+
+    return HTMLResponse(head + table)
+
+
+@app.get("/ui/partial/cycle-snapshot-detail", include_in_schema=False)
+def partial_cycle_snapshot_detail(request: Request):
+    """
+    WU-CycleAccuracy — drilldown del ciclo corrente o specificato:
+    mostra input_context (istanze abilitate, task abilitati globali, task per
+    istanza, breakdown T_s) + what-if (T_ciclo se skippo singola istanza).
+
+    Query: ?cycle=N (default: ultimo snapshot disponibile).
+    """
+    from core.cycle_predictor_recorder import (
+        get_snapshot_for_cycle, read_recent_snapshots,
+    )
+    cycle_str = request.query_params.get("cycle", "")
+    snap = None
+    if cycle_str:
+        try:
+            snap = get_snapshot_for_cycle(int(cycle_str))
+        except Exception:
+            pass
+    if snap is None:
+        # Ultimo snapshot disponibile
+        recent = read_recent_snapshots(1)
+        snap = recent[0] if recent else None
+    if snap is None:
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:8px;font-size:11px">'
+            'nessuno snapshot disponibile</div>'
+        )
+
+    cn          = snap.get("cycle_numero", "?")
+    elapsed_min = snap.get("elapsed_min", 0)
+    pred        = snap.get("predicted_min", 0)
+    ts          = snap.get("ts", "")[:19]
+    ic          = snap.get("input_context", {}) or {}
+    istanze_ab  = ic.get("istanze_abilitate", []) or []
+    task_glob   = ic.get("task_globali_abilitati", []) or []
+    task_per    = ic.get("tasks_per_istanza_due", {}) or {}
+    per_ist     = ic.get("per_istanza_predicted_s", {}) or {}
+    tick_sleep  = ic.get("tick_sleep_s", 0)
+
+    # Header info ciclo
+    header = (
+        f'<div style="display:flex;gap:16px;font-size:11px;margin-bottom:10px">'
+        f'<div><span style="color:var(--text-dim)">ciclo</span> '
+        f'<b style="color:var(--accent)">#{cn}</b></div>'
+        f'<div><span style="color:var(--text-dim)">snapshot @</span> '
+        f'<b>{elapsed_min:.0f}min</b></div>'
+        f'<div><span style="color:var(--text-dim)">predicted</span> '
+        f'<b>{pred:.1f}min</b></div>'
+        f'<div><span style="color:var(--text-dim)">istanze</span> '
+        f'<b>{len(istanze_ab)}</b></div>'
+        f'<div><span style="color:var(--text-dim)">tick_sleep</span> '
+        f'<b>{tick_sleep:.0f}s</b></div>'
+        f'<div style="color:var(--text-dim);margin-left:auto">{ts}</div>'
+        f'</div>'
+    )
+
+    # Task globali abilitati
+    tasks_section = (
+        f'<div style="margin-bottom:10px">'
+        f'<div style="font-size:9px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">'
+        f'task globali abilitati ({len(task_glob)})</div>'
+        f'<div style="font-family:monospace;font-size:10px;color:var(--text)">'
+        f'{", ".join(task_glob) or "<i style=\"color:var(--text-dim)\">nessuno</i>"}'
+        f'</div></div>'
+    )
+
+    # Tabella per istanza con what-if
+    rows = []
+    for inst in sorted(istanze_ab):
+        t_s = per_ist.get(inst, 0)
+        due_tasks = task_per.get(inst, [])
+        # What-if: T_ciclo SE skippo questa istanza
+        t_ciclo_s = sum(per_ist.values()) + tick_sleep
+        t_skip_s  = t_ciclo_s - t_s
+        savings   = t_s
+        savings_pct = 100 * t_s / t_ciclo_s if t_ciclo_s > 0 else 0
+        rows.append(
+            f'<tr>'
+            f'<td style="font-weight:600">{inst}</td>'
+            f'<td style="text-align:right;font-family:monospace">{t_s/60:.1f}m</td>'
+            f'<td style="text-align:center"><span style="color:#4caf50">{len(due_tasks)}</span></td>'
+            f'<td style="color:var(--text-dim);font-size:10px;font-family:monospace">'
+            f'{", ".join(due_tasks) or "<i>—</i>"}</td>'
+            f'<td style="text-align:right;color:var(--accent);font-family:monospace">'
+            f'{t_skip_s/60:.1f}m</td>'
+            f'<td style="text-align:right;color:#ff9800;font-size:10px">'
+            f'-{savings/60:.1f}m ({savings_pct:.0f}%)</td>'
+            f'</tr>'
+        )
+
+    tot_pred = sum(per_ist.values()) + tick_sleep
+    table = (
+        '<table class="tel-table"><thead><tr>'
+        '<th>istanza</th>'
+        '<th style="text-align:right">T_s</th>'
+        '<th style="text-align:center">N task</th>'
+        '<th>task pianificati</th>'
+        '<th style="text-align:right" title="T_ciclo se skippo questa istanza">'
+        'T_ciclo skip</th>'
+        '<th style="text-align:right">saving</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(rows)}</tbody>'
+        f'<tfoot><tr style="border-top:1px solid var(--border)">'
+        f'<td colspan="2" style="font-weight:600">TOTALE</td>'
+        f'<td colspan="2" style="text-align:right;color:var(--text-dim);font-size:10px">'
+        f'+ tick_sleep {tick_sleep:.0f}s</td>'
+        f'<td style="text-align:right;font-family:monospace;font-weight:600;color:var(--accent)">'
+        f'{tot_pred/60:.1f}m</td>'
+        f'<td></td></tr></tfoot></table>'
+    )
+
+    return HTMLResponse(header + tasks_section + table)
+
+
+@app.get("/ui/partial/cycle-accuracy", include_in_schema=False)
+def partial_cycle_accuracy(request: Request):
+    """
+    WU-CycleAccuracy — accuracy storica del cycle predictor per ciclo.
+
+    Mostra ultimi N=10 cicli completati con: actual_min, snapshots presi durante
+    il ciclo (elapsed_min, predicted_min, error_pct).
+    """
+    from core.cycle_predictor_recorder import read_recent_accuracy
+    rows = read_recent_accuracy(n_cycles=10)
+    if not rows:
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:8px;font-size:11px">'
+            'nessun ciclo valutato — il primo snapshot è preso ad avvio dashboard,<br>'
+            'i cicli iniziati dopo accumulo dati avranno errori_pct calcolati'
+            '</div>'
+        )
+
+    body = []
+    for r in rows:
+        cn = r.get("cycle_numero", "?")
+        actual = r.get("actual_min", 0)
+        snaps = r.get("snapshots", []) or []
+        n_snaps = len(snaps)
+        # Calcola errore medio se ci sono snapshots
+        if n_snaps > 0:
+            avg_err = sum(s.get("error_pct", 0) for s in snaps) / n_snaps
+            min_err = min(s.get("error_pct", 0) for s in snaps)
+            max_err = max(s.get("error_pct", 0) for s in snaps)
+            err_summary = f"avg {avg_err:.1f}% (min {min_err:.1f} max {max_err:.1f})"
+            err_color = "#4caf50" if avg_err < 10 else ("#ff9800" if avg_err < 25 else "#f44336")
+        else:
+            err_summary = "no snapshots"
+            err_color = "var(--text-dim)"
+        # Lista snapshots compatta
+        snaps_str = " · ".join(
+            f'+{s.get("elapsed_min",0):.0f}m={s.get("predicted_min",0):.0f}m({s.get("error_pct",0):.0f}%)'
+            for s in snaps[:5]
+        )
+        body.append(
+            f'<tr>'
+            f'<td style="font-weight:600;color:var(--accent)">#{cn}</td>'
+            f'<td style="text-align:right;font-family:monospace">{actual:.1f}m</td>'
+            f'<td style="text-align:center;font-size:10px">{n_snaps}</td>'
+            f'<td style="color:{err_color};font-weight:500">{err_summary}</td>'
+            f'<td style="color:var(--text-dim);font-size:10px;font-family:monospace">{snaps_str}</td>'
+            f'</tr>'
+        )
+    return HTMLResponse(
+        '<table class="tel-table"><thead><tr>'
+        '<th>ciclo</th>'
+        '<th style="text-align:right">actual</th>'
+        '<th style="text-align:center">N snap</th>'
+        '<th>errore medio</th>'
+        '<th>snapshots (elapsed=predicted/err%)</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table>'
+    )
+
+
+@app.get("/ui/partial/predictor-decisions", include_in_schema=False)
+def partial_predictor_decisions(request: Request):
+    """
+    WU89-Step4 — pannello live decisioni Skip Predictor.
+
+    Mostra ultime 30 decisioni in ordine cronologico inverso (più recenti
+    prime), con colori per outcome (skip live applied=rosso, shadow=arancione,
+    proceed=grigio). Aggiorna ogni 15s via HTMX.
+
+    Source: `data/predictor_decisions.jsonl` (scritto da main.py al passaggio
+    del hook in _thread_istanza).
+    """
+    from dashboard.services.stats_reader import get_predictor_decisions
+    rows = get_predictor_decisions(n=30)
+    if not rows:
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:12px;font-size:11px">'
+            'nessuna decisione registrata.<br>'
+            '<span style="color:var(--text-dim);font-size:10px">'
+            'attiva il predictor in <code>home → sistema → predictor</code> '
+            'e attendi il primo tick istanza dopo il prossimo restart bot</span></div>'
+        )
+    body = []
+    for r in rows:
+        ts    = r.get("ts_local", "?")
+        inst  = r.get("instance", "?")
+        mode  = r.get("mode", "?")
+        skip  = bool(r.get("should_skip"))
+        reas  = r.get("reason", "?")
+        score = float(r.get("score", 0))
+        appl  = bool(r.get("applied"))
+        gr    = r.get("guardrail")
+        sig   = r.get("signals") or {}
+        gp    = bool(r.get("growth_phase"))
+
+        # Color coding
+        if appl:
+            row_color = "#f44336"   # rosso: skip applicato live
+            badge = "SKIP LIVE"
+        elif skip and mode == "SHADOW":
+            row_color = "#ff9800"   # arancione: skip shadow (no apply)
+            badge = "SKIP SHADOW"
+        elif gr:
+            row_color = "#9c27b0"   # viola: guardrail block
+            badge = f"GR-{gr}"
+        else:
+            row_color = "var(--text-dim)"
+            badge = "PROCEED"
+        # Signals compact
+        sig_str = " ".join(f"{k}={v}" for k, v in list(sig.items())[:5])
+        if len(sig_str) > 80:
+            sig_str = sig_str[:77] + "..."
+        gp_marker = ' <span style="color:#4caf50;font-size:9px">GROWTH</span>' if gp else ""
+        body.append(
+            f'<tr>'
+            f'<td style="color:var(--text-dim);font-size:10px;white-space:nowrap">{ts}</td>'
+            f'<td style="font-weight:600">{inst}</td>'
+            f'<td style="color:{row_color};font-weight:600;font-size:10px">{badge}</td>'
+            f'<td style="color:var(--accent);font-size:10px">{reas}</td>'
+            f'<td style="text-align:right;font-family:monospace;font-size:10px">{score:.2f}</td>'
+            f'<td style="color:var(--text-dim);font-size:9px;font-family:monospace">{sig_str}{gp_marker}</td>'
+            f'</tr>'
+        )
+    return HTMLResponse(
+        '<table class="tel-table"><thead><tr>'
+        '<th>ts</th><th>ist</th><th>esito</th><th>regola</th>'
+        '<th style="text-align:right">score</th><th>signals</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table>'
+    )
+
+
+@app.get("/ui/partial/copertura-cicli", include_in_schema=False)
+def partial_copertura_cicli(request: Request):
+    """
+    WU118 (04/05) — pannello copertura squadre ultimi 5 cicli per istanza.
+
+    Per ogni istanza non-master mostra:
+      - Lista ultimi 5 cicli (cycle_id, ts) con n_satura/n_invii e per-tipo
+      - Totali aggregati nei 5 cicli per tipo (pomodoro/legno/acciaio/petrolio)
+
+    Ordine tipi UI: pomodoro, legno, acciaio, petrolio (fisso).
+    Soglia "satura": load_squadra >= cap_nodo × 0.95 (margine OCR noise).
+
+    Dati: data/istanza_metrics.jsonl (post-WU116 hanno load_squadra).
+    Pre-WU116: invii con load=-1 contati come "?" (no OCR).
+    """
+    from dashboard.services.stats_reader import (
+        get_copertura_ultimi_cicli, _LABEL_ORDINE, _LABEL_ICONA,
+    )
+    data = get_copertura_ultimi_cicli(n_cicli=5)
+    if not data:
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:12px">'
+            'nessun dato copertura — record disponibili dopo prossimo restart '
+            'bot (WU116 hook in raccolta.py)</div>'
+        )
+    return templates.TemplateResponse(
+        request,
+        "partials/copertura_cicli.html",
+        {
+            "data":         data,
+            "label_ordine": _LABEL_ORDINE,
+            "label_icona":  _LABEL_ICONA,
+        },
     )
 
 
@@ -1439,6 +1949,37 @@ def partial_truppe_storico(request: Request):
         f'</tr>'
     )
 
+    # Riga MASTER (FauMorfeus o altre istanze master) — fuori dal totale
+    master_row_html = ""
+    m = data.get("master")
+    if m:
+        m_d, m_p = m.get("delta"), m.get("delta_pct")
+        m_serie = m.get("serie") or [None] * days
+        m_delta_lbl, m_delta_col = _delta_cell(m_d, m_p)
+        mvals = [v for v in m_serie if v is not None]
+        if mvals:
+            m_mn, m_mx = min(mvals), max(mvals)
+            m_rng = (m_mx - m_mn) or 1
+            m_spark = _spark(m_serie, m_mn, m_rng)
+        else:
+            m_spark = "·" * days
+        m_spark_tip = " · ".join(
+            f"{date_labels[i]}: {(v if v is not None else '—')}"
+            for i, v in enumerate(m_serie)
+        )
+        master_row_html = (
+            f'<tr style="border-top:0.5px dashed var(--border);'
+            f'background:rgba(245,197,66,0.04)">'
+            f'<td style="padding:5px 8px;font-weight:600;color:#f5c542">'
+            f'<span title="master — rifugio destinatario">★</span> {m["nome"]}</td>'
+            f'<td style="padding:5px 8px;text-align:right">{_fmt(m.get("oggi"))}</td>'
+            f'<td style="padding:5px 8px;text-align:right;color:var(--text-dim)">{_fmt(m.get("sette_gg_fa"))}</td>'
+            f'<td style="padding:5px 8px;text-align:right;color:{m_delta_col}">{m_delta_lbl}</td>'
+            f'<td style="padding:5px 8px;font-family:monospace;font-size:14px;'
+            f'color:#f5c542;letter-spacing:1px" title="{m_spark_tip}">{m_spark}</td>'
+            f'</tr>'
+        )
+
     header = (
         f'<thead><tr style="color:var(--text-dim);font-size:11px;'
         f'border-bottom:1px solid var(--border)">'
@@ -1454,8 +1995,243 @@ def partial_truppe_storico(request: Request):
 
     return HTMLResponse(
         f'<table style="width:100%;border-collapse:collapse;font-size:12px">'
-        f'{header}<tbody>{"".join(rows)}{tot_row}</tbody></table>'
+        f'{header}<tbody>{"".join(rows)}{tot_row}{master_row_html}</tbody></table>'
     )
+
+
+@app.get("/ui/partial/debug-tasks", include_in_schema=False)
+def partial_debug_tasks(request: Request):
+    """
+    WU115 — pannello debug screenshot per task (hot-reload via config).
+
+    Mostra toggle pill per ogni task noto, click invia PATCH a
+    /api/debug-tasks/{task}/{enable|disable} e re-renderizza il partial.
+    HTMX refresh ogni 30s (sync con cache TTL shared/debug_buffer).
+    """
+    from shared.debug_buffer import get_all_debug_status
+
+    # Lista task noti (deve corrispondere a _KNOWN_TASKS in api_debug.py)
+    known_tasks = ["arena", "arena_mercato", "store", "vip", "messaggi", "boost",
+                   "alleanza", "donazione", "radar", "radar_census",
+                   "truppe", "zaino", "main_mission",
+                   "raccolta", "raccolta_chiusura", "rifornimento",
+                   "district_showdown"]
+    raw_status = get_all_debug_status()
+    status: dict[str, bool] = {}
+    for t in known_tasks:
+        status[t] = bool(raw_status.get(t, False))
+    # Aggiungi eventuali task in config NON in known (per visibilità)
+    for t, v in raw_status.items():
+        if t not in status:
+            status[t] = bool(v)
+
+    active_count = sum(1 for v in status.values() if v)
+
+    pills = []
+    for task in sorted(status.keys()):
+        on = status[task]
+        action = "disable" if on else "enable"
+        bg = "#f5c542" if on else "rgba(255,255,255,0.08)"
+        fg = "#0f0f0f" if on else "var(--text)"
+        border = "1.5px solid #f5c542" if on else "1px solid var(--border)"
+        label = f"🐛 {task}"
+        # NB: usiamo /ui/debug-tasks/... che ritorna HTML del partial
+        # (l'API JSON sta su /api/debug-tasks/... per consumer programmatici)
+        pills.append(
+            f'<button hx-patch="/ui/debug-tasks/{task}/{action}" '
+            f'hx-target="#debug-tasks-panel" hx-swap="innerHTML" '
+            f'hx-trigger="click" '
+            f'style="background:{bg};color:{fg};border:{border};'
+            f'border-radius:14px;padding:4px 12px;font-size:11px;'
+            f'font-weight:{600 if on else 400};cursor:pointer;'
+            f'margin:2px 4px 2px 0;letter-spacing:0.3px" '
+            f'title="click per {action}">'
+            f'{label}</button>'
+        )
+
+    summary = (
+        f'<div style="color:var(--text-dim);font-size:10px;padding:4px 0">'
+        f'{active_count} task con debug attivo · click pill per toggle'
+        f'</div>'
+    )
+    pills_html = (
+        f'<div style="display:flex;flex-wrap:wrap;align-items:center;'
+        f'padding:4px 0">{"".join(pills)}</div>'
+    )
+
+    return HTMLResponse(f'{summary}{pills_html}')
+
+
+# UI wrapper: PATCH che ritorna HTML del partial (per HTMX swap automatico).
+# Path separato da /api/debug-tasks (JSON) per evitare conflitto router.
+@app.api_route("/ui/debug-tasks/{task_name}/{action}", methods=["PATCH"],
+               include_in_schema=False)
+def _ui_patch_debug_task(task_name: str, action: str, request: Request):
+    """HTMX wrapper: applica toggle e ritorna partial HTML aggiornato."""
+    from dashboard.routers.api_debug import patch_debug_task
+    try:
+        patch_debug_task(task_name, action)
+    except Exception:
+        pass
+    return partial_debug_tasks(request)
+
+
+@app.get("/ui/partial/learned-banners", include_in_schema=False)
+def partial_learned_banners(request: Request):
+    """
+    WU93 — pannello banner appresi automaticamente dal BannerLearner.
+    Mostra:
+      - Toggle ON/OFF globale del learner (`globali.auto_learn_banner`)
+      - Tabella entry appresi con metadati + actions (disable/enable/delete).
+    """
+    from shared.learned_banners import load_all
+    from dashboard.services.config_manager import get_overrides
+
+    # Leggi stato learner globale
+    try:
+        ov = get_overrides() or {}
+        learner_enabled = bool(ov.get("globali", {}).get("auto_learn_banner", True))
+    except Exception:
+        learner_enabled = True
+
+    learner_color = "#4ade80" if learner_enabled else "#f87171"
+    learner_lbl = "ATTIVO" if learner_enabled else "DISATTIVO"
+    toggle_action = "disable" if learner_enabled else "enable"
+    toggle_lbl = "Disattiva learner" if learner_enabled else "Attiva learner"
+
+    toggle_row = (
+        f'<div style="display:flex;align-items:center;gap:12px;'
+        f'padding:8px 12px;margin-bottom:8px;background:rgba(255,255,255,0.02);'
+        f'border:1px solid var(--border);border-radius:4px">'
+        f'<span style="font-size:11px;color:var(--text-dim)">processo learner:</span>'
+        f'<span style="color:{learner_color};font-weight:700;font-size:12px">{learner_lbl}</span>'
+        f'<button hx-post="/api/banner-learner/{toggle_action}" '
+        f'hx-target="#learned-banners-panel" hx-swap="innerHTML" '
+        f'style="margin-left:auto;padding:4px 12px;font-size:11px;'
+        f'background:var(--bg-light);border:1px solid var(--border);'
+        f'color:var(--text);border-radius:3px;cursor:pointer">{toggle_lbl}</button>'
+        f'</div>'
+    )
+
+    banners = load_all()
+    if not banners:
+        return HTMLResponse(
+            toggle_row +
+            '<div style="color:var(--text-dim);text-align:center;padding:12px">'
+            'nessun banner appreso (verranno aggiunti automaticamente quando il '
+            'bot incontra un popup non catalogato e riesce a chiuderlo)</div>'
+        )
+
+    rows = []
+    for b in sorted(banners, key=lambda x: x.created_at, reverse=True):
+        succ_rate = (
+            f"{100*b.success_count/b.hit_count:.0f}%"
+            if b.hit_count > 0 else "—"
+        )
+        last = (b.last_used or b.created_at)[:16].replace("T", " ")
+        status_color = "#4ade80" if b.enabled else "#f87171"
+        status_lbl = "ON" if b.enabled else "OFF"
+        toggle_action = "disable" if b.enabled else "enable"
+        toggle_lbl = "Disabilita" if b.enabled else "Abilita"
+        rows.append(
+            f'<tr style="border-bottom:0.5px solid rgba(255,255,255,0.04)">'
+            f'<td style="padding:4px 8px;font-family:monospace;font-size:11px">{b.name}</td>'
+            f'<td style="padding:4px 8px;text-align:center">'
+            f'<img src="/learned-template/{b.name}/x" '
+            f'style="height:32px;border:1px solid var(--border);border-radius:3px" '
+            f'title="X tag" /></td>'
+            f'<td style="padding:4px 8px;text-align:center">{b.x_coords[0]},{b.x_coords[1]}</td>'
+            f'<td style="padding:4px 8px;text-align:right">{b.hit_count}</td>'
+            f'<td style="padding:4px 8px;text-align:right;color:{"#4ade80" if b.success_count >= b.fail_count else "#f87171"}">{succ_rate}</td>'
+            f'<td style="padding:4px 8px;text-align:right">{b.fail_streak}</td>'
+            f'<td style="padding:4px 8px;font-size:11px;color:var(--text-dim)">{last}</td>'
+            f'<td style="padding:4px 8px;text-align:center;color:{status_color};font-weight:700">{status_lbl}</td>'
+            f'<td style="padding:4px 8px;text-align:center">'
+            f'<button hx-post="/api/learned-banners/{b.name}/{toggle_action}" '
+            f'hx-target="#learned-banners-panel" hx-swap="innerHTML" '
+            f'style="padding:2px 8px;font-size:11px;background:var(--bg-light);'
+            f'border:1px solid var(--border);color:var(--text);border-radius:3px;'
+            f'cursor:pointer;margin-right:4px">{toggle_lbl}</button>'
+            f'<button hx-post="/api/learned-banners/{b.name}/delete" '
+            f'hx-target="#learned-banners-panel" hx-swap="innerHTML" '
+            f'hx-confirm="Eliminare definitivamente {b.name}?" '
+            f'style="padding:2px 8px;font-size:11px;background:rgba(248,113,113,0.1);'
+            f'border:1px solid #f87171;color:#f87171;border-radius:3px;cursor:pointer">'
+            f'Elimina</button></td>'
+            f'</tr>'
+        )
+
+    header = (
+        '<thead><tr style="color:var(--text-dim);font-size:11px;'
+        'border-bottom:1px solid var(--border)">'
+        '<th style="text-align:left;padding:4px 8px">name</th>'
+        '<th style="text-align:center;padding:4px 8px">X</th>'
+        '<th style="text-align:center;padding:4px 8px">coord</th>'
+        '<th style="text-align:right;padding:4px 8px">hits</th>'
+        '<th style="text-align:right;padding:4px 8px">succ%</th>'
+        '<th style="text-align:right;padding:4px 8px">fail streak</th>'
+        '<th style="text-align:left;padding:4px 8px">last used</th>'
+        '<th style="text-align:center;padding:4px 8px">stato</th>'
+        '<th style="text-align:center;padding:4px 8px">azioni</th>'
+        '</tr></thead>'
+    )
+
+    return HTMLResponse(
+        toggle_row +
+        f'<table style="width:100%;border-collapse:collapse;font-size:12px">'
+        f'{header}<tbody>{"".join(rows)}</tbody></table>'
+    )
+
+
+@app.post("/api/banner-learner/{action}", include_in_schema=False)
+def api_banner_learner_toggle(action: str):
+    """Toggle ON/OFF globale del BannerLearner. Persiste in
+    runtime_overrides.json globali.auto_learn_banner."""
+    from dashboard.services.config_manager import get_overrides, save_overrides
+    if action not in ("enable", "disable"):
+        return HTMLResponse(f"action sconosciuta: {action}", status_code=400)
+    enabled = (action == "enable")
+    try:
+        ov = get_overrides() or {}
+        if "globali" not in ov:
+            ov["globali"] = {}
+        ov["globali"]["auto_learn_banner"] = enabled
+        save_overrides(ov)
+    except Exception as exc:
+        return HTMLResponse(f"errore: {exc}", status_code=500)
+    return partial_learned_banners(None)
+
+
+@app.get("/learned-template/{name}/{kind}", include_in_schema=False)
+def learned_template_image(name: str, kind: str):
+    """Serve i PNG dei template learned per anteprima dashboard."""
+    from shared.learned_banners import load_all, _resolve_root
+    from fastapi.responses import FileResponse
+    if kind not in ("x", "title"):
+        return HTMLResponse("kind non valido", status_code=400)
+    for b in load_all():
+        if b.name == name:
+            path = _resolve_root() / (b.x_path if kind == "x" else b.title_path)
+            if path.exists():
+                return FileResponse(str(path), media_type="image/png")
+            return HTMLResponse("template mancante", status_code=404)
+    return HTMLResponse("banner non trovato", status_code=404)
+
+
+@app.post("/api/learned-banners/{name}/{action}", include_in_schema=False)
+def api_learned_banner_action(name: str, action: str):
+    """Disable / enable / delete di un learned banner. Ritorna il pannello aggiornato."""
+    from shared.learned_banners import set_enabled, delete as delete_learned
+    if action == "disable":
+        set_enabled(name, False)
+    elif action == "enable":
+        set_enabled(name, True)
+    elif action == "delete":
+        delete_learned(name)
+    else:
+        return HTMLResponse(f"action sconosciuta: {action}", status_code=400)
+    # Restituisce il pannello aggiornato per HTMX swap
+    return partial_learned_banners(None)
 
 
 @app.get("/ui/partial/res-oraria", include_in_schema=False)

@@ -1,8 +1,9 @@
 {% set stato = s.stato_live %}
 {% set badge_class = "badge-" + stato %}
-<div class="card">
+{% set is_master = s.master if s.master is defined else False %}
+<div class="card{% if is_master %} card-master{% endif %}">
   <div class="card-header">
-    <span class="card-name">{{ s.nome }}</span>
+    <span class="card-name">{% if is_master %}<span title="master — rifugio destinatario" style="color:#f5c542;font-weight:700;margin-right:4px">★</span>{% endif %}{{ s.nome }}</span>
     <span class="badge {{ badge_class }}">{{ stato }}</span>
   </div>
   <div class="card-body">
@@ -20,7 +21,7 @@
     {% endif %}
     {% if s.ultimo_tick.ts_inizio %}
     <div class="card-row">
-      <span class="card-label">avvio</span>
+      <span class="card-label">{{ "avvio" if stato == "running" else "ultimo avvio" }}</span>
       <span class="card-value">{{ s.ultimo_tick.ts_inizio[11:19] }}</span>
     </div>
     {% endif %}

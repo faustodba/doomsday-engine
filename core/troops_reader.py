@@ -33,7 +33,12 @@ from typing import Callable, Optional
 _TAP_AVATAR     = (48,  37)   # Avatar profilo HOME
 _TAP_SQUADS_TAB = (895, 509)  # Tab "Squads" in basso-dx Commander Info
 
-_ZONE_TOTAL_SQUADS = (830, 60, 945, 90)  # x0,y0,x1,y1 — header "Total Squads:"
+_ZONE_TOTAL_SQUADS = (740, 55, 950, 95)  # x0,y0,x1,y1 — header "Total Squads:"
+                                          # 04/05: ROI estesa da (830,60,945,90)
+                                          # a (740,55,950,95). Validato FAU_09:
+                                          # OCR legge "190,260" reale (vs "18,084"
+                                          # con ROI vecchia — ultima "0" tagliata
+                                          # dal bordo destro x=945).
 
 _DELAY_NAV  = 4.5  # tap → render (allineato a settings_helper PC lento)
 _DELAY_BACK = 3.0

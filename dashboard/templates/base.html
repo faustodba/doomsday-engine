@@ -6,6 +6,39 @@
   <title>{% block title %}Doomsday V6{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
   <script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js" defer></script>
+  <!-- json-enc inline: parse 'sezione[campo]' → nested object + coerce + JSON serialize
+       per form con hx-ext="json-enc" (l'estensione non è shipped, ricostruiamo qui) -->
+  <script defer>
+    document.addEventListener('htmx:configRequest', function(evt) {
+      var p = evt.detail.parameters;
+      if (!p || typeof p !== 'object' || typeof p === 'string') return;
+      var elt = evt.detail.elt;
+      var isJsonEnc = elt && elt.closest && elt.closest('[hx-ext~="json-enc"], [hx-ext*="json-enc"]');
+      var nested = {};
+      Object.keys(p).forEach(function(k) {
+        var m = k.match(/^([^\[]+)\[([^\]]+)\]$/);
+        var v = p[k];
+        // coerce common strings (true/false/numeric)
+        if (v === 'true') v = true;
+        else if (v === 'false') v = false;
+        else if (typeof v === 'string' && v.trim() !== '' && /^-?\d+(\.\d+)?$/.test(v)) {
+          v = parseFloat(v);
+        }
+        if (m) {
+          if (!nested[m[1]]) nested[m[1]] = {};
+          nested[m[1]][m[2]] = v;
+        } else {
+          nested[k] = v;
+        }
+      });
+      if (isJsonEnc) {
+        evt.detail.headers['Content-Type'] = 'application/json';
+        evt.detail.parameters = JSON.stringify(nested);
+      } else {
+        evt.detail.parameters = nested;
+      }
+    });
+  </script>
 </head>
 <body>
 <div class="layout">
@@ -19,8 +52,10 @@
     {% endif %}
     <nav class="topbar-nav">
       <a href="/ui" class="{% if active=='home' %}active{% endif %}">home</a>
-      <a href="/ui/config" class="{% if active=='config' %}active{% endif %}">config</a>
-      <a href="/ui/config/global" class="{% if active=='global' %}active{% endif %}">global cfg</a>
+      <a href="/ui/telemetria" class="{% if active=='telemetria' %}active{% endif %}">telemetria</a>
+      <a href="/ui/predictor" class="{% if active=='predictor' %}active{% endif %}">predictor</a>
+      <a href="/ui/storico" class="{% if active=='storico' %}active{% endif %}">storico</a>
+      <a href="/ui/config/global" class="{% if active=='global' %}active{% endif %}">config</a>
       <a href="/docs" target="_blank">api</a>
     </nav>
     <div class="topbar-counters"

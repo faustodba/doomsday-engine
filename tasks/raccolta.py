@@ -1489,6 +1489,20 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int,
         else:
             ctx.log_msg("Raccolta: ETA marcia non leggibile")
 
+        # Step 2b: OCR carico squadra ("Load") dalla stessa maschera invio.
+        # Confrontato con cap_nodo letto in popup gather, permette di calcolare
+        # la copertura squadra: load < cap → squadra underprovisioned (poche
+        # truppe), il nodo non chiude e non rigenera al max.
+        # Stashed su ctx: il caller (_invia_squadra) lo registra con cap_nodo.
+        try:
+            from shared.ocr_helpers import leggi_load_squadra
+            load_val = leggi_load_squadra(screen)
+            ctx._raccolta_load_squadra = load_val  # type: ignore[attr-defined]
+            if load_val > 0:
+                ctx.log_msg(f"Raccolta: Load squadra={load_val:,}")
+        except Exception:
+            ctx._raccolta_load_squadra = -1  # type: ignore[attr-defined]
+
     # Imposta truppe
     if n_truppe and n_truppe > 0:
         ctx.log_msg(f"Raccolta: imposta truppe={n_truppe}")
@@ -1714,51 +1728,68 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
         except Exception:
             pass
 
-    # ─── Step 5: verifica livello nodo ──────────────────────────────────
+    # ─── Step 5: livello nodo + campionamento capacità ──────────────────
+    # Ground truth livello = `lv` (impostato in LENTE pre-CERCA, validato dal
+    # log "[LV-PANEL] Level:N match=N"). OCR popup `_leggi_livello_nodo` resta
+    # come diagnostica: se discorda, log WARN ma non blocca (CERCA filtra per
+    # livello, fallback diversi sono casi edge non osservati).
+    livello_nodo = lv
+    cap = -1
     if screen_popup is not None:
-        livello_nodo = _leggi_livello_nodo(ctx, screen_popup)
+        livello_ocr = _leggi_livello_nodo(ctx, screen_popup)
+        if livello_ocr != -1 and livello_ocr != lv:
+            ctx.log_msg(
+                f"Raccolta [{tipo}]: WARN livello discrepanza "
+                f"CERCA=Lv.{lv} OCR_popup=Lv.{livello_ocr} — uso CERCA"
+            )
 
-        # Hook campionamento capacità nodo (dataset analitico).
-        # Logga (instance, tipo, livello, capacita) — capacita -1 se OCR fail.
-        # Richiama anche su nodi sotto livello_min per copertura completa.
+        # OCR capacità nodo (popup gather). Registrazione differita al post-marcia
+        # per includere `load_squadra` letto dalla maschera invio (vedi sotto).
         try:
             from shared.ocr_helpers import leggi_capacita_nodo
-            from shared.cap_nodi_dataset import registra_cap_sample
             cap = leggi_capacita_nodo(screen_popup)
-            registra_cap_sample(ctx.instance_name, tipo, livello_nodo, cap)
         except Exception:
-            pass
+            cap = -1
 
-        livello_min  = int(_cfg(ctx, "RACCOLTA_LIVELLO_MIN"))
-        if livello_nodo != -1 and livello_nodo < livello_min:
-            ctx.log_msg(
-                f"Raccolta [{tipo}]: nodo Lv.{livello_nodo} < min {livello_min} "
-                f"— blacklist + tipo bloccato"
-            )
-            blacklist.commit(chiave, eta_s=None)
-            ctx.device.key("KEYCODE_BACK")
-            time.sleep(0.5)
-            _reset_to_mappa(ctx, obiettivo)
-            return False, True, False
-        elif livello_nodo != -1:
-            ctx.log_msg(f"Raccolta [{tipo}]: nodo Lv.{livello_nodo} ✓")
+        ctx.log_msg(f"Raccolta [{tipo}]: nodo Lv.{livello_nodo} ✓")
 
     # ─── Step 6: esegui marcia ──────────────────────────────────────────
+    # Reset stash load_squadra prima di _esegui_marcia (settato dentro)
+    ctx._raccolta_load_squadra = -1  # type: ignore[attr-defined]
     ok, eta_s = _esegui_marcia(ctx, n_truppe)
+
+    # Hook dataset cap_nodi (cap + load_squadra combinati). Best-effort.
+    # Eseguito sia su marcia OK che FAIL: cap è sempre stato letto dal popup,
+    # load è -1 se la maschera non si è aperta (slot pieni, no squads, retry fail).
+    try:
+        from shared.cap_nodi_dataset import registra_cap_sample
+        load_val = int(getattr(ctx, "_raccolta_load_squadra", -1))
+        registra_cap_sample(ctx.instance_name, tipo, livello_nodo, cap, load_val)
+    except Exception:
+        pass
+
     if not ok:
         ctx.log_msg(f"Raccolta [{tipo}]: marcia FALLITA — rollback")
         blacklist.rollback(chiave)
         _reset_to_mappa(ctx, obiettivo)
         return False, False, False
 
+    # ts_invio catturato DOPO _esegui_marcia OK (analogo pattern rifornimento
+    # FIX 23/04 — Issue #29). Serve al predictor per stimare ts_libero come
+    # ts_invio + 2*eta + tempo_raccolta_empirico.
+    from datetime import datetime as _dt, timezone as _tz
+    ts_invio_iso = _dt.now(_tz.utc).isoformat()
+
     # Hook metriche per-istanza: dettaglio invio (best-effort)
+    # livello_nodo = ground truth da CERCA (lv); cap = residua OCR popup (-1 se fail);
+    # load_squadra = WU116 OCR maschera invio (-1 se non letto/marcia fail).
     try:
         from core.istanza_metrics import aggiungi_invio_raccolta
-        _locals = locals()
-        _liv = int(_locals.get("livello_nodo", -1) or -1)
-        _cap = int(_locals.get("cap", -1) or -1)
+        load_val = int(getattr(ctx, "_raccolta_load_squadra", -1))
         aggiungi_invio_raccolta(
-            ctx.instance_name, tipo, _liv, _cap, int(eta_s or 0)
+            ctx.instance_name, tipo, int(livello_nodo), int(cap),
+            int(eta_s or 0), ts_invio_iso=ts_invio_iso,
+            load_squadra=load_val,
         )
     except Exception:
         pass
@@ -2169,6 +2200,13 @@ class RaccoltaTask(Task):
             ctx.log_msg("Raccolta: modulo disabilitato — skip")
             return TaskResult(success=True, message="disabilitato", data={"inviate": 0})
 
+        # WU115 — debug buffer (hot-reload via globali.debug_tasks.<name>)
+        # name() distingue raccolta vs raccolta_chiusura → toggle indipendenti
+        from shared.debug_buffer import DebugBuffer
+        _dbg = DebugBuffer.for_task(self.name(), getattr(ctx, "instance_name", "_unknown"))
+        if _dbg.enabled:
+            _dbg.snap("00_pre_raccolta", ctx.device.screenshot() if ctx.device else None)
+
         # Issue #64 — sync con rifornimento: se l'ultima spedizione rifornimento
         # è ancora in volo, gli slot squadra OCR risulterebbero occupati. Wait
         # SEMPRE fino al rientro per leggere slot reali (no soglia, no skip).
@@ -2457,6 +2495,12 @@ class RaccoltaTask(Task):
                 out_data["tipologie_bloccate"] = tipologie_bloccate
         except Exception:
             pass
+        # WU115 — flush debug. Anomalia: avevamo slot liberi ma 0 marce inviate
+        # (es. tipo bloccato silente, fallimento OCR cerca, mappa non centrata).
+        if _dbg.enabled:
+            _dbg.snap("99_post_raccolta", ctx.device.screenshot() if ctx.device else None)
+        anomalia = bool(libere) and inviate_totali == 0
+        _dbg.flush(success=True, force=anomalia, log_fn=ctx.log_msg)
         return TaskResult(
             success=True,
             message=f"{inviate_totali} squadre inviate",

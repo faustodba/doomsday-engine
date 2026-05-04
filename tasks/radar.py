@@ -158,18 +158,25 @@ class RadarTask(Task):
 
         tap_icona = _cfg(ctx, "TAP_RADAR_ICONA")
 
+        # WU115 — debug buffer (hot-reload via globali.debug_tasks.radar)
+        from shared.debug_buffer import DebugBuffer
+        debug = DebugBuffer.for_task("radar", getattr(ctx, "instance_name", "_unknown"))
+
         # 1. Verifica badge
         log("Verifica badge rosso Radar Station...")
         screen = ctx.device.screenshot()
+        debug.snap("00_pre_badge_check", screen)
         if screen is None:
             errore = "screenshot fallito — skip"
             log(f"ERRORE: {errore}")
+            debug.flush(success=False, log_fn=log)
             return TaskResult(success=False,
                               data=self._data(False, 0, 0, errore))
 
         frame = _frame_from_screenshot(screen)
         if not self._ha_badge(frame, tap_icona, ctx, log):
             log("Nessun badge rosso rilevato — skip")
+            debug.clear()  # no anomalia, skip pulito
             return TaskResult(success=True,
                               data=self._data(True, 0, 0, None))
 
@@ -180,6 +187,7 @@ class RadarTask(Task):
         time.sleep(0.5)  # minimo animazione tap
         log("Attesa apertura mappa + notifiche (10s)...")
         time.sleep(10.0)  # intenzionale — attesa notifiche
+        debug.snap("01_post_open_radar", ctx.device.screenshot())
 
         # 3. Loop pallini
         try:
@@ -187,6 +195,7 @@ class RadarTask(Task):
         except Exception as exc:
             errore = str(exc)
             log(f"ERRORE loop pallini: {exc}")
+            debug.snap("99_exception_loop", ctx.device.screenshot())
 
         # 4. Census opzionale
         if _cfg(ctx, "RADAR_CENSUS_ABILITATO"):
@@ -201,11 +210,16 @@ class RadarTask(Task):
         else:
             log("Census disabilitato (RADAR_CENSUS_ABILITATO=False)")
 
+        debug.snap("02_post_loop", ctx.device.screenshot())
+
         # 5. Torna home
         ctx.device.back()
         time.sleep(1.0)
 
         log(f"Completato — pallini={pallini_tappati} census={census_icone}")
+        # Anomalia: badge rilevato ma 0 pallini tappati (badge falso o UI errata)
+        anomalia = (pallini_tappati == 0 and errore is None)
+        debug.flush(success=(errore is None), force=anomalia, log_fn=log)
         return TaskResult(
             success=errore is None,
             data=self._data(True, pallini_tappati, census_icone, errore),

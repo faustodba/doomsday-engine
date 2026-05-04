@@ -1,8 +1,8 @@
 {
-  "_note": "Doomsday Engine V6 — Configurazione globale. Letto ad ogni tick. Modificabile dalla dashboard.",
+  "_note": "Doomsday Engine V6 — Configurazione globale STATICA (baseline reset). Letto ad ogni tick. Override applicati da runtime_overrides.json (modificati dalla dashboard). Default: tutti i task DISATTIVATI per partenza neutra.",
   "sistema": {
-    "tick_sleep": 300,
-    "max_parallel": 2
+    "tick_sleep": 60,
+    "max_parallel": 1
   },
   "mumu": {
     "manager": "C:\\Program Files\\Netease\\MuMuPlayer\\nx_main\\MuMuManager.exe",
@@ -15,22 +15,31 @@
     "timeout_player_s": 60
   },
   "task": {
-    "raccolta": true,
+    "_note": "Tutti i task default FALSE — l'utente abilita esplicitamente solo quelli desiderati via dashboard. Reset configurazione = riparti da neutra.",
+    "raccolta": false,
     "rifornimento": false,
-    "zaino": true,
-    "vip": true,
-    "alleanza": true,
-    "messaggi": true,
-    "arena": true,
-    "arena_mercato": true,
-    "boost": true,
-    "store": true,
-    "radar": true,
-    "radar_census": true,
-    "district_showdown": false
+    "zaino": false,
+    "vip": false,
+    "alleanza": false,
+    "messaggi": false,
+    "arena": false,
+    "arena_mercato": false,
+    "boost": false,
+    "store": false,
+    "radar": false,
+    "radar_census": false,
+    "donazione": false,
+    "main_mission": false,
+    "district_showdown": false,
+    "truppe": false
+  },
+  "rifugio": {
+    "_note": "Coordinate edificio rifugio per rifornimento via mappa",
+    "coord_x": 680,
+    "coord_y": 531
   },
   "rifornimento_comune": {
-    "_note": "Parametri condivisi da entrambe le modalità di rifornimento",
+    "_note": "Parametri condivisi mappa+membri",
     "dooms_account": "FauMorfeus",
     "max_spedizioni_ciclo": 5,
     "soglia_campo_m": 5.0,
@@ -40,22 +49,18 @@
     "campo_abilitato": true,
     "legno_abilitato": true,
     "petrolio_abilitato": true,
-    "acciaio_abilitato": false,
+    "acciaio_abilitato": true,
     "qta_pomodoro": 999000000,
     "qta_legno": 999000000,
     "qta_petrolio": 999000000,
     "qta_acciaio": 999000000
   },
-  "rifornimento_mappa": {
-    "_note": "Navigazione via coordinate mappa",
-    "abilitato": false,
-    "rifugio_x": 687,
-    "rifugio_y": 532
-  },
-  "rifornimento_membri": {
-    "_note": "Navigazione via lista membri alleanza",
-    "abilitato": false,
-    "avatar_template": "pin/avatar.png"
+  "rifornimento": {
+    "_note": "Modalità rifornimento — Issue #40: unica fonte mappa_abilitata + membri_abilitati (legacy rifornimento_mappa/rifornimento_membri rimosse)",
+    "soglia_campo_m": 5.0,
+    "mappa_abilitata": true,
+    "membri_abilitati": false,
+    "provviste_max": 100
   },
   "zaino": {
     "_note": "modalita: bag=scarica fino a soglia via BAG | svuota=svuota tutto da HOME (mutuamente esclusive)",
@@ -70,12 +75,18 @@
     "soglia_acciaio_m": 10.0
   },
   "raccolta": {
+    "_note": "Allocazione in percentuali 0-100 (somma 100). soglia_allocazione = num_marce_minime per fascia.",
     "livello_nodo": 6,
+    "soglia_allocazione": 3,
     "allocazione": {
-      "pomodoro": 0.35,
-      "legno": 0.35,
-      "petrolio": 0.2,
-      "acciaio": 0.1
+      "pomodoro": 35.0,
+      "legno": 35.0,
+      "petrolio": 20.0,
+      "acciaio": 10.0
     }
-  }
+  },
+  "raccolta_ocr_debug": false,
+  "auto_learn_banner": false,
+  "skip_predictor_enabled": false,
+  "skip_predictor_shadow_only": true
 }

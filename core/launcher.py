@@ -793,8 +793,19 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
                     mini = _Mini()
                     mini.device = device
                     mini.matcher = ctx.matcher
+                    # WU93: abilita BannerLearner solo dopo streak UNKNOWN >= 4
+                    # (= ~14s di blocco) per evitare tap aggressivi su transizioni
+                    # normali. Il learner cattura screenshot, detect X candidate,
+                    # tap+valida, registra in data/learned_banners.json se sblocca.
+                    # Flag globale `globali.auto_learn_banner` (default True)
+                    # disabilita il learner runtime via dashboard.
+                    _learner_enabled_cfg = bool(
+                        getattr(getattr(ctx, "config", None), "auto_learn_banner", True)
+                    )
+                    _enable_learner = unknown_streak >= 4 and _learner_enabled_cfg
                     bd = _dbl(mini, max_iter=2,
-                             log_fn=lambda m: _log(f"[{nome}] {m}", log_fn))
+                             log_fn=lambda m: _log(f"[{nome}] {m}", log_fn),
+                             enable_learner=_enable_learner)
                     if bd:
                         # Banner trovato e chiuso, salta il BACK di questa iter
                         time.sleep(1.0)
@@ -998,23 +1009,36 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
             # ad ogni avvio istanza dopo HOME confermata. Idempotente: Optimize
             # Mode gestito via template check, Graphics/Frame LOW = tap su
             # slider/radio già in posizione (no-op visivo). Costo ~22s/istanza.
-            try:
-                from core.settings_helper import imposta_settings_lightweight
+            #
+            # WU112 (03/05 notte): skip per tipologia=raccolta_only (FauMorfeus
+            # e simili master). Le istanze raccolta_only hanno task minimi
+            # (solo RaccoltaTask) e non beneficiano del settings tweak — il
+            # tap "Graphics Quality HIGH" cambiava settings utente senza motivo.
+            _tipologia_inst = (
+                getattr(getattr(ctx, "config", None), "tipologia", None)
+                or getattr(getattr(ctx, "config", None), "profilo", None)
+                or "full"
+            )
+            if str(_tipologia_inst) == "raccolta_only":
+                _log(f"[{nome}] settings lightweight SKIP (tipologia=raccolta_only)", log_fn)
+            else:
+                try:
+                    from core.settings_helper import imposta_settings_lightweight
 
-                class _SettingsCtx:
-                    pass
-                _sctx = _SettingsCtx()
-                _sctx.device        = device
-                _sctx.matcher       = getattr(nav, "matcher", None)
-                _sctx.navigator     = nav
-                _sctx.instance_name = nome  # WU64 — necessario per cache_state.json
+                    class _SettingsCtx:
+                        pass
+                    _sctx = _SettingsCtx()
+                    _sctx.device        = device
+                    _sctx.matcher       = getattr(nav, "matcher", None)
+                    _sctx.navigator     = nav
+                    _sctx.instance_name = nome  # WU64 — necessario per cache_state.json
 
-                _t_set = time.time()
-                _ok_set = imposta_settings_lightweight(_sctx, log_fn=log_fn)
-                _dt_set = time.time() - _t_set
-                _log(f"[{nome}] settings lightweight ok={_ok_set} ({_dt_set:.1f}s)", log_fn)
-            except Exception as exc:
-                _log(f"[{nome}] settings lightweight errore: {exc}", log_fn)
+                    _t_set = time.time()
+                    _ok_set = imposta_settings_lightweight(_sctx, log_fn=log_fn)
+                    _dt_set = time.time() - _t_set
+                    _log(f"[{nome}] settings lightweight ok={_ok_set} ({_dt_set:.1f}s)", log_fn)
+                except Exception as exc:
+                    _log(f"[{nome}] settings lightweight errore: {exc}", log_fn)
 
             # WU65 — lettura giornaliera Total Squads (storico crescita truppe).
             # Skip-on-already-done via data/storico_truppe.json.

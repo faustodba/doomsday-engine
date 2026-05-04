@@ -778,3 +778,76 @@ def leggi_capacita_nodo(img) -> int:
         return -1
     except Exception:
         return -1
+
+
+# ==============================================================================
+# OCR carico squadra ("Load") — maschera invio raccolta
+# ROI fissa: maschera centrata, valore Load sopra il bottone MARCH.
+# Validato 6/6 su FAU_01 04/05: campo L6/L7, acciaio L6, petrolio (5-cifre),
+# truppe ridotte (caso underprovisioning).
+# Cascade: raw RGB → binv 150 (binv 200 distorce le cifre piccole "5"→"9").
+# Estrae il primo gruppo digit-virgola (binv 150 a volte ha rumore extra
+# sotto, dal timer ETA).
+# ==============================================================================
+_ZONA_LOAD_SQUADRA = (610, 420, 780, 455)  # 170×35 px — sopra MARCH btn
+
+_LOAD_RE = re.compile(r"\d{1,3}(?:,\d{3})+|\d{1,7}")
+
+
+def _parse_first_int_with_commas(testo: str) -> int:
+    """Estrae il primo numero (con o senza virgole) dal testo, ritorna int.
+
+    Pattern: '\\d{1,3}(?:,\\d{3})+' (con virgole) oppure '\\d{1,7}' (senza).
+    Usato da leggi_load_squadra: binv 150 a volte include caratteri spuri
+    dopo il numero (es. timer ETA sotto la riga Load) — questa funzione
+    estrae solo la prima sequenza di cifre validate.
+
+    Ritorna -1 se nessun match.
+    """
+    if not testo:
+        return -1
+    m = _LOAD_RE.search(testo)
+    if not m:
+        return -1
+    return int(m.group(0).replace(",", ""))
+
+
+def leggi_load_squadra(img) -> int:
+    """Legge il valore "Load" dalla maschera invio raccolta.
+
+    Il valore è il carico effettivo che la squadra raccoglierà:
+        load = min(squadra_max_truppe, cap_nodo_residuo)
+
+    Confrontato con `leggi_capacita_nodo` permette di calcolare la
+    saturazione: se load < cap_nodo → squadra underprovisioned (poche
+    truppe), il nodo non verrà chiuso al 100% e non rigenererà al max.
+
+    Cascade: raw RGB → binv 150 (binv 200 distorce cifre piccole).
+    Estrae il primo gruppo digit-comma per ignorare rumore ETA timer.
+
+    Validato 6/6 su FAU_01 04/05.
+
+    Ritorna il valore intero (es. 1320012) o -1 se OCR fallisce.
+    """
+    if not _TESSERACT_OK:
+        return -1
+    try:
+        arr = _to_array(img)
+        x1, y1, x2, y2 = _ZONA_LOAD_SQUADRA
+        roi = arr[y1:y2, x1:x2]
+        cfg = "--psm 6 -c tessedit_char_whitelist=0123456789,"
+
+        rgb = cv2.cvtColor(roi, cv2.COLOR_BGR2RGB)
+        val = _parse_first_int_with_commas(_run_tesseract(rgb, cfg))
+        if val > 0:
+            return val
+
+        gray = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY)
+        _, binv = cv2.threshold(gray, 150, 255, cv2.THRESH_BINARY)
+        val = _parse_first_int_with_commas(_run_tesseract(binv, cfg))
+        if val > 0:
+            return val
+
+        return -1
+    except Exception:
+        return -1

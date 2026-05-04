@@ -238,7 +238,8 @@ def is_loading_splash(ctx, log_fn=None) -> bool:
 # Banner catalog — dismissal pipeline (auto-WU21)
 # ==============================================================================
 
-def dismiss_banners_loop(ctx, max_iter: int = 8, log_fn=None) -> dict[str, int]:
+def dismiss_banners_loop(ctx, max_iter: int = 8, log_fn=None,
+                         enable_learner: bool = False) -> dict[str, int]:
     """
     Itera screenshot + match contro BANNER_CATALOG e applica l'azione di
     chiusura specifica per ogni banner riconosciuto. Continua finché:
@@ -249,9 +250,15 @@ def dismiss_banners_loop(ctx, max_iter: int = 8, log_fn=None) -> dict[str, int]:
     UNKNOWN polls e tempo di stabilizzazione.
 
     Args:
-        ctx:      TaskContext con device + matcher
-        max_iter: cap iterazioni (default 8)
-        log_fn:   logger opzionale
+        ctx:            TaskContext con device + matcher
+        max_iter:       cap iterazioni (default 8)
+        log_fn:         logger opzionale
+        enable_learner: se True, attiva BannerLearner come ultimo fallback
+                        quando nessun banner statico/dinamico/X cerchio matcha.
+                        Cattura screenshot, detect X candidate, tap+valida,
+                        registra in learned_banners.json se sblocca.
+                        Da abilitare SOLO quando il caller ha già verificato
+                        UNKNOWN persistente (es. attendi_home streak >= 4).
 
     Returns:
         dict {banner_name: count} = quante volte ogni banner è stato chiuso.
@@ -259,6 +266,12 @@ def dismiss_banners_loop(ctx, max_iter: int = 8, log_fn=None) -> dict[str, int]:
     """
     import time as _t
     from shared.banner_catalog import BANNER_CATALOG
+    # WU93: estende il catalog runtime con i learned banners attivi
+    try:
+        from shared.learned_banners import load_learned_as_specs as _load_learned
+        _learned_specs = _load_learned()
+    except Exception:
+        _learned_specs = []
 
     log = log_fn or (lambda _msg: None)
     counts: dict[str, int] = {}
@@ -266,8 +279,11 @@ def dismiss_banners_loop(ctx, max_iter: int = 8, log_fn=None) -> dict[str, int]:
     if ctx.device is None or ctx.matcher is None:
         return counts
 
-    # Catalog ordinato per priority
-    catalog = sorted(BANNER_CATALOG, key=lambda b: b.priority)
+    # Catalog ordinato per priority (statici + learned a priority 4)
+    catalog = sorted(list(BANNER_CATALOG) + _learned_specs, key=lambda b: b.priority)
+
+    # WU93: track ultimo learned banner dismissed (per record outcome a fine loop)
+    _last_dismissed_learned: str | None = None
 
     for it in range(max_iter):
         screen = ctx.device.screenshot()
@@ -353,6 +369,7 @@ def dismiss_banners_loop(ctx, max_iter: int = 8, log_fn=None) -> dict[str, int]:
                     counts[spec.name] = counts.get(spec.name, 0) + 1
                     any_dismissed = True
                     log(f"[BANNER-LOOP] {spec.name} chiuso (score={score:.3f}) {action_label} iter {it+1}")
+                    _last_dismissed_learned = spec.name if spec.name.startswith("learned_") else None
                     break  # ricomincia screenshot da zero
 
         if not any_dismissed:
@@ -412,9 +429,96 @@ def dismiss_banners_loop(ctx, max_iter: int = 8, log_fn=None) -> dict[str, int]:
                 score_map = ctx.matcher.score(screen, "pin/pin_shelter.png")
                 if score_home >= 0.70 or score_map >= 0.70:
                     log(f"[BANNER-LOOP] HOME/MAP pulita dopo {it} iter, dismissed={counts}")
+                    # WU93: ultimo learned dismissed → marca SUCCESS
+                    if _last_dismissed_learned:
+                        try:
+                            from shared.learned_banners import record_outcome
+                            record_outcome(_last_dismissed_learned, success=True)
+                        except Exception:
+                            pass
                     break
             except Exception:
                 pass
+
+            # WU93 — Step LEARNER (solo se enable_learner=True). Tentativo
+            # di scoperta automatica di X di chiusura per popup non catalogati.
+            # Eseguito UNA SOLA VOLTA per chiamata, alla prima iter senza progresso.
+            if enable_learner and not counts:
+                try:
+                    from shared.banner_learner import (
+                        detect_x_candidates, crop_template_x, crop_title_zone,
+                        visual_diff_score,
+                    )
+                    from shared.learned_banners import (
+                        find_duplicate, register_new, record_outcome,
+                    )
+                    pre_frame = getattr(screen, "frame", None)
+                    if pre_frame is not None:
+                        candidates = detect_x_candidates(pre_frame)
+                        log(f"[LEARNER] detect_x_candidates: {len(candidates)} candidate")
+                        # Test top 3
+                        learned_success = False
+                        for ci, cand in enumerate(candidates[:3]):
+                            log(
+                                f"[LEARNER] tentativo {ci+1}/{min(3,len(candidates))}: "
+                                f"cx={cand.cx} cy={cand.cy} score={cand.score:.3f}"
+                            )
+                            ctx.device.tap(cand.cx, cand.cy)
+                            _t.sleep(1.5)
+                            post_screen = ctx.device.screenshot()
+                            post_frame = getattr(post_screen, "frame", None) if post_screen is not None else None
+                            if post_frame is None:
+                                continue
+                            # (a) visual diff
+                            vdiff = visual_diff_score(pre_frame, post_frame)
+                            # (b) classify check: HOME/MAP raggiunti?
+                            try:
+                                score_home_p = ctx.matcher.score(post_screen, "pin/pin_region.png")
+                                score_map_p = ctx.matcher.score(post_screen, "pin/pin_shelter.png")
+                            except Exception:
+                                score_home_p = 0.0; score_map_p = 0.0
+                            unblocked = (
+                                vdiff >= 0.10
+                                and (score_home_p >= 0.70 or score_map_p >= 0.70)
+                            )
+                            log(
+                                f"[LEARNER]   vdiff={vdiff:.3f} score_home={score_home_p:.2f} "
+                                f"score_map={score_map_p:.2f} unblocked={unblocked}"
+                            )
+                            if unblocked:
+                                # Crop template X + title
+                                x_tmpl = crop_template_x(pre_frame, cand)
+                                # ROI title: stima dalla posizione della X (popup classico
+                                # ha titolo nella stessa banda y, allineato a sinistra)
+                                title_y1 = max(0, cand.cy - 30)
+                                title_y2 = min(540, cand.cy + 20)
+                                title_x1 = 40
+                                title_x2 = max(400, cand.cx - 50)
+                                title_roi = (title_x1, title_y1, title_x2, title_y2)
+                                title_tmpl = crop_title_zone(pre_frame, title_roi)
+                                # Dedup
+                                dup = find_duplicate(title_tmpl)
+                                if dup is not None:
+                                    record_outcome(dup.name, success=True)
+                                    log(f"[LEARNER] duplicate match: {dup.name} (hit_count++)")
+                                else:
+                                    entry = register_new(
+                                        title_img=title_tmpl,
+                                        x_img=x_tmpl,
+                                        x_coords=(cand.cx, cand.cy),
+                                        title_roi=title_roi,
+                                    )
+                                    log(
+                                        f"[LEARNER] NEW banner registrato: {entry.name} "
+                                        f"(x_coords={entry.x_coords}, x_size={entry.x_size})"
+                                    )
+                                counts["_learned"] = counts.get("_learned", 0) + 1
+                                learned_success = True
+                                break
+                        if learned_success:
+                            continue  # ricomincia loop, screenshot fresco
+                except Exception as exc:
+                    log(f"[LEARNER] errore: {exc}")
 
             # Step C — break: caller (vai_in_home / attendi_home) gestisce con
             # BACK o fallback proprio.
@@ -422,8 +526,23 @@ def dismiss_banners_loop(ctx, max_iter: int = 8, log_fn=None) -> dict[str, int]:
                 log("[BANNER-LOOP] nessun banner riconosciuto al primo scan")
             else:
                 log(f"[BANNER-LOOP] no banner+no X+no HOME dopo {it} iter — break")
+            # WU93: ultimo learned dismissed senza progresso → marca FAIL
+            if _last_dismissed_learned:
+                try:
+                    from shared.learned_banners import record_outcome
+                    record_outcome(_last_dismissed_learned, success=False)
+                except Exception:
+                    pass
             break
     else:
         log(f"[BANNER-LOOP] max_iter={max_iter} raggiunto, dismissed={counts}")
+        # WU93: ultimo learned dismissed con max_iter → considera FAIL (non
+        # ha sbloccato definitivamente)
+        if _last_dismissed_learned:
+            try:
+                from shared.learned_banners import record_outcome
+                record_outcome(_last_dismissed_learned, success=False)
+            except Exception:
+                pass
 
     return counts

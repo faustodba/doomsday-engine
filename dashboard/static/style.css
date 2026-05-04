@@ -541,3 +541,91 @@ html, body {
   border-bottom: 0.5px solid rgba(255,255,255,0.04);
 }
 .tel-table tr:last-child td { border-bottom: none; }
+
+/* WU119 — overrides quando la tel-table è dentro .res-block (sidebar farm
+   sticky con larghezza ridotta). Compatta padding + sparkline più stretta
+   per evitare overflow orizzontale (issue: valori "79"/"106.2M" troncati). */
+.res-block .tel-table { table-layout: fixed; font-size: 11px; }
+.res-block .tel-table td {
+  padding: 3px 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.res-block .tel-table td:nth-child(1) { width: 38%; }   /* label */
+.res-block .tel-table td:nth-child(2) {                 /* sparkline */
+  font-size: 12px !important;
+  letter-spacing: 0 !important;
+  width: 30%;
+}
+.res-block .tel-table td:nth-child(3) {                 /* current */
+  text-align: right;
+  width: 18%;
+  font-size: 11px !important;
+}
+.res-block .tel-table td:nth-child(4) {                 /* delta */
+  width: 14%;
+  font-size: 9px !important;
+  text-align: right;
+}
+
+/* WU118 — Tabella copertura squadre ultimi 5 cicli */
+.cov-tbl {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.cov-tbl th {
+  text-align: left;
+  color: var(--text-dim);
+  font-weight: 400;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  padding: 6px 8px;
+  border-bottom: 0.5px solid var(--border);
+}
+.cov-tbl tr.cov-sub th {
+  font-size: 11px;
+  padding: 4px 8px;
+  text-align: center;
+}
+.cov-tbl td {
+  padding: 5px 6px;
+  border-bottom: 0.5px solid rgba(255,255,255,0.04);
+  text-align: center;
+  vertical-align: middle;
+}
+.cov-tbl tr:last-child td { border-bottom: none; }
+.cov-ist {
+  text-align: left !important;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+  padding-right: 10px !important;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.cov-cell {
+  font-size: 12px;
+  border-radius: 3px;
+  min-width: 64px;
+}
+.cov-cell.empty { color: var(--text-dim); }
+.cov-cell.ok    { background: rgba(76, 175, 80, 0.10); }
+.cov-cell.warn  { background: rgba(255, 165, 0, 0.10); }
+.cov-cell.bad   { background: rgba(244, 67, 54, 0.12); }
+.cov-cell .cov-cyc  { font-weight: 600; color: var(--accent); font-size: 12px; }
+.cov-cell .cov-time { color: var(--text-dim); font-size: 11px; }
+.cov-cell .cov-frac { font-size: 12px; }
+.cov-tipo {
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 3px;
+  min-width: 56px;
+}
+.cov-tipo.empty { color: var(--text-dim); }
+.cov-tipo.ok    { background: rgba(76, 175, 80, 0.14); color: #6abf6e; }
+.cov-tipo.warn  { background: rgba(255, 165, 0, 0.14); color: #ffa500; }
+.cov-tipo.bad   { background: rgba(244, 67, 54, 0.16); color: #f44336; }
+.cov-tipo-frac { font-weight: 600; }
+.cov-tipo-unk { color: var(--text-dim); font-size: 11px; margin-left: 3px; }

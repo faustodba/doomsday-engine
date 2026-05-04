@@ -1,0 +1,73 @@
+{# WU118 — Copertura squadre ultimi 5 cicli per istanza
+   Ordine tipi nodi: pomodoro, legno, acciaio, petrolio (fisso, da
+   _LABEL_ORDINE in stats_reader.py).
+   Verdetto: SATURA (load >= cap × 0.95) | NON SATURA (load < cap × 0.95).
+   "?" indica invii con load_squadra=-1 (record pre-WU116 / marcia fail).
+#}
+<table class="cov-tbl">
+  <thead>
+    <tr>
+      <th>istanza</th>
+      <th colspan="5" style="text-align:center">ultimi 5 cicli (cycle_id · ora locale · n_sat/n_inv)</th>
+      <th colspan="4" style="text-align:center">totali tipo (sat/n)</th>
+    </tr>
+    <tr class="cov-sub">
+      <th></th>
+      <th>c-4</th><th>c-3</th><th>c-2</th><th>c-1</th><th>c-0</th>
+      {% for lbl in label_ordine %}
+      <th title="{{ lbl }}">{{ label_icona[lbl] }}</th>
+      {% endfor %}
+    </tr>
+  </thead>
+  <tbody>
+    {% for row in data %}
+    <tr>
+      <td class="cov-ist">{{ row.istanza }}</td>
+
+      {# Le 5 colonne cicli — pad con vuoti se < 5 cicli #}
+      {% set n_cicli = row.cicli|length %}
+      {% set pad = 5 - n_cicli %}
+      {% for _ in range(pad) %}
+      <td class="cov-cell empty">—</td>
+      {% endfor %}
+      {% for c in row.cicli %}
+        {% set known = c.n_invii - c.n_unknown %}
+        {% if known > 0 %}
+          {% set pct = (100 * c.n_satura / known)|round|int %}
+          {% set cls = 'ok' if pct >= 95 else ('warn' if pct >= 50 else 'bad') %}
+        {% else %}
+          {# Tutti gli invii sono unknown (record pre-WU116 / OCR fail): #}
+          {# nessun verdetto possibile, classe neutra "empty" (grigio) invece di bad. #}
+          {% set cls = 'empty' %}
+        {% endif %}
+        <td class="cov-cell {{ cls }}" title="ciclo {{ c.cycle_id }} {{ c.ts }} ({{ c.outcome }}) — {{ c.n_satura }}/{{ known }} satura{% if c.n_unknown %} (+{{ c.n_unknown }}?){% endif %}">
+          <div class="cov-cyc">#{{ c.cycle_id }}</div>
+          <div class="cov-time">{{ c.ts.split(' ')[1] if ' ' in c.ts else c.ts }}</div>
+          <div class="cov-frac">{{ c.n_satura }}/{{ known }}{% if c.n_unknown %}+{{ c.n_unknown }}?{% endif %}</div>
+        </td>
+      {% endfor %}
+
+      {# Aggregato per tipo (pomodoro/legno/acciaio/petrolio) #}
+      {% for lbl in label_ordine %}
+        {% set t = row.totali[lbl] %}
+        {% set k = t.n - t.unk %}
+        {% if k > 0 %}
+          {% set p = (100 * t.sat / k)|round|int %}
+          {% set tcls = 'ok' if p >= 95 else ('warn' if p >= 50 else 'bad') %}
+        {% else %}
+          {# Tutti unknown → classe neutra (grigio) invece di bad. #}
+          {% set tcls = 'empty' %}
+        {% endif %}
+        {% if t.n == 0 %}
+          <td class="cov-tipo empty">—</td>
+        {% else %}
+          <td class="cov-tipo {{ tcls }}" title="{{ lbl }}: {{ t.sat }}/{{ k }} satura{% if t.unk %} (+{{ t.unk }}?){% endif %}">
+            <span class="cov-tipo-frac">{{ t.sat }}/{{ k }}</span>
+            {% if t.unk %}<span class="cov-tipo-unk">+{{ t.unk }}?</span>{% endif %}
+          </td>
+        {% endif %}
+      {% endfor %}
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>

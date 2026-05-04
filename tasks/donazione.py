@@ -118,18 +118,34 @@ class DonazioneTask(BaseTask):
 
         ctx.log_msg("[DONAZIONE] avvio")
 
+        # WU115 — debug buffer (hot-reload via globali.debug_tasks.donazione)
+        from shared.debug_buffer import DebugBuffer
+        debug = DebugBuffer.for_task("donazione", getattr(ctx, "instance_name", "_unknown"))
+        self._dbg = debug
+
         try:
+            debug.snap("00_pre_naviga", ctx.device.screenshot())
+
             # 1. Naviga ad Alliance → Technology
             if not self._naviga_technology(ctx):
+                debug.snap("99_naviga_fallita", ctx.device.screenshot())
+                debug.flush(success=False, log_fn=ctx.log_msg)
                 return TaskResult(success=False, message="navigazione fallita")
+
+            debug.snap("01_post_naviga_tech", ctx.device.screenshot())
 
             # 2. Cerca marked e dona
             donate_count = self._cerca_e_dona(ctx)
+
+            debug.snap("03_post_dona", ctx.device.screenshot())
 
             # 3. Torna in home
             ctx.navigator.vai_in_home()
 
             ctx.log_msg(f"[DONAZIONE] completato — donate={donate_count}")
+            # Anomalia: completato OK ma 0 donate (atteso 24-30 per run periodic 8h)
+            anomalia = (donate_count == 0)
+            debug.flush(success=True, force=anomalia, log_fn=ctx.log_msg)
             return TaskResult(
                 success=True,
                 message=f"donate={donate_count}",
@@ -138,6 +154,8 @@ class DonazioneTask(BaseTask):
 
         except Exception as exc:  # pylint: disable=broad-except
             ctx.log_msg(f"[DONAZIONE] errore imprevisto: {exc}")
+            debug.snap("99_exception", ctx.device.screenshot())
+            debug.flush(success=False, log_fn=ctx.log_msg)
             ctx.navigator.vai_in_home()
             return TaskResult(success=False, message=str(exc))
 

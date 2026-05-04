@@ -146,6 +146,33 @@ BANNER_CATALOG: list[BannerSpec] = [
     ),
 
     # ==================================================================
+    # PRIORITY 2 — "Equipment Report" popup IAP (discovery 02/05/2026)
+    # ==================================================================
+    # Popup in-app purchase che appare ad alcune istanze al primo avvio
+    # della sessione. Titolo "Equipment Report" su carta beige + countdown
+    # sotto + lista 6 icone equipment + CTA "€19,99 / instantly receive
+    # 1750x". Blocca la HOME → classify UNKNOWN persistente per ~57s
+    # finché il bot tappa cieco con _unmatched_tap_x e si sblocca.
+    # Discovery via debug_task/boot_unknown/FAU_02_*streak4_20260502_094902.png.
+    #
+    # CHIUSURA: piccolo cartellino bordeaux con X bianca/oro a forma di
+    # diamante in alto-destra del popup (zona ~800-855 × 25-80) +
+    # graffetta metallica adiacente. NON è la stessa X cerchio dorato
+    # di pin_btn_x_close (forma diversa, sfondo rosso).
+    BannerSpec(
+        name="equipment_report",
+        template="pin/pin_equipment_report_title.png",
+        roi=(40, 20, 410, 70),
+        threshold=0.80,
+        dismiss_action="tap_template",
+        dismiss_template="pin/pin_btn_x_tag_diamond.png",
+        dismiss_template_roi=(780, 15, 880, 90),
+        dismiss_template_soglia=0.75,
+        wait_after_s=1.5,  # animazione chiusura popup
+        priority=2,
+    ),
+
+    # ==================================================================
     # PRIORITY 5 — banner laterale eventi (HOME, non-modale)
     # ==================================================================
     # DISABILITATO 26/04/2026 (auto-WU16) — il tap di chiusura su (345,63)

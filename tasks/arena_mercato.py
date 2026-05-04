@@ -73,6 +73,10 @@ _TAP_GLORY_CONTINUE = (471, 432)
 
 _MERCATO_MAX_ITER   = 20   # guard anti-loop totale (FASE 1 + FASE 2)
 
+# WU115 (04/05) — debug screenshot via shared/debug_buffer (hot-reload).
+# Toggle config: globali.debug_tasks.arena_mercato (default False).
+# Sostituisce WU113 _DEBUG_MERCATO_DUMP modulo-level con architettura unificata.
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Configurazione template
@@ -141,6 +145,14 @@ class ArenaMercatoTask(Task):
         acquisti_15  = 0
         errore: str | None = None
 
+        # WU115 — debug buffer (hot-reload via globali.debug_tasks.arena_mercato)
+        from shared.debug_buffer import DebugBuffer
+        debug = DebugBuffer.for_task(
+            "arena_mercato",
+            getattr(ctx, "instance_name", "_unknown"),
+        )
+        ctx._mercato_debug = debug   # accessibile da metodi interni
+
         # 1. HOME
         if not self._assicura_home(ctx):
             errore = "impossibile raggiungere home"
@@ -164,7 +176,11 @@ class ArenaMercatoTask(Task):
         # 4. Ritorno home
         self._torna_home(ctx)
 
-        successo = errore is None
+        # WU115 — flush condizionale: anomalia = 0 acquisti totali
+        successo  = errore is None
+        anomalia  = (acquisti_360 == 0 and acquisti_15 == 0) and not errore
+        debug.flush(success=successo, force=anomalia, log_fn=ctx.log_msg)
+
         ctx.log_msg(
             "[MERCATO-ARENA] completato — pack360=%d pack15=%d%s",
             acquisti_360, acquisti_15,
@@ -260,10 +276,26 @@ class ArenaMercatoTask(Task):
 
         Ritorna: (acquisti_360, acquisti_15)
         """
-        # Tap carrello — prima azione (come in V5 _visita_mercato_arena)
+        # WU113 (04/05): debug snap pre-tap carrello
+        debug = getattr(ctx, "_mercato_debug", None)
+        if debug is not None:
+            screen_pre = ctx.device.screenshot()
+            debug.snap("00_pre_carrello", screen_pre)
+
+        # Tap carrello — prima azione (come in V5 _visita_mercato_arena).
+        # WU113 — sleep 0.3 → 2.0s per rispettare regola DELAY UI vincolante:
+        # tap che apre popup/overlay richiede 2.0s minimo prima dello screenshot
+        # successivo per garantire UI renderizzata. Pre-fix: lo store si apriva
+        # MA i template venivano cercati in screenshot transitorio (animazione
+        # ancora in corso) → score basso per pin_360_open/close (-0.03/0.07).
         ctx.log_msg("[MERCATO-ARENA] tap carrello (905,68) → Arena Store")
         ctx.device.tap(*_TAP_CARRELLO)
-        time.sleep(0.3)  # minimo animazione tap
+        time.sleep(2.0)  # WU113: regola DELAY UI (era 0.3s, troppo corto)
+
+        # WU113 — debug snap post-tap carrello (store dovrebbe essere aperto)
+        if debug is not None:
+            screen_post = ctx.device.screenshot()
+            debug.snap("01_post_carrello", screen_post)
 
         acquisti_360     = 0
         acquisti_15      = 0
@@ -274,6 +306,10 @@ class ArenaMercatoTask(Task):
             if screen is None:
                 ctx.log_msg("[MERCATO-ARENA] screenshot fallito (iter=%d) — stop", iterazione)
                 break
+
+            # WU113 — debug snap a 1ª iterazione (pre-check templates)
+            if debug is not None and iterazione == 0:
+                debug.snap("02_iter0_pre_check_360", screen)
 
             if not pack360_esaurito:
                 # ── FASE 1: Pack 360 ─────────────────────────────────────────
@@ -295,6 +331,9 @@ class ArenaMercatoTask(Task):
                     if screen is None:
                         ctx.log_msg("[MERCATO-ARENA] screenshot fallito dopo switch — stop")
                         break
+                    # WU113 — debug snap pre-check pack 15
+                    if debug is not None:
+                        debug.snap("03_pre_check_15", screen)
                     if self._pulsante_15_attivo(ctx, screen):
                         ctx.log_msg("[MERCATO-15] pulsante attivo — tap pack 15")
                         ctx.device.tap(*_TAP_PACK15)

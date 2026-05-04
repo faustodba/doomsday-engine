@@ -58,6 +58,1357 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Issue chiuse — Sessione 03/05 notte (WU101-104 — Master istanza generalizzato + Fix raccolta + Predictor 5-invii)
+
+#### Issue trovata: tutte le istanze skippano raccolta dopo modifica dashboard ✅ (Fix A + B)
+
+**Sintomo**: dalle 18:23 UTC del 03/05, tutti i tick mostravano `Orchestrator: [raccolta] should_run=False → saltato`. Validato su FAU_01 ciclo 18:45-18:48 (rifornimento OK, raccolta SKIP).
+
+**Root cause**: il modello Pydantic `TaskFlags` ([dashboard/models.py:40-78](dashboard/models.py)) **non aveva il campo `raccolta`** (commentato "non controllabile, gira sempre"). Conseguenza: ogni `_save_ov(ov)` chiamato da PUT /globals, /rifornimento, /zaino, /allocazione, /istanze, PATCH toggle, ecc. faceva `model_dump()` serializzando solo i 15 task **senza** raccolta. La chiave veniva quindi rimossa da `runtime_overrides.json::globali.task` ad ogni salvataggio. Fallback su `global_config.json::task.raccolta = false` (baseline reset WU94) → raccolta disabilitata su tutte le istanze.
+
+**Fix A (immediato, hot-reload)**: aggiunta `"raccolta": true` direttamente in `runtime_overrides.json::globali.task` per ripristinare al prossimo tick.
+
+**Fix B (root cause)**: aggiunto `raccolta: bool = True` al modello `TaskFlags`. UI non lo espone come toggle (resta sempre ON), ma la chiave è preservata nel JSON ad ogni `_save_ov`.
+
+**Validazione**: `TaskFlags().raccolta = True`, `model_fields` include `raccolta`. Da prossimo restart dashboard, ogni save preserva la chiave automaticamente.
+
+#### WU101. Master istanza — flag config-driven generalizzato ✅
+
+**Obiettivo**: marcare un'istanza come "rifugio destinatario" (riceve risorse via rifornimento ma non invia) per escluderla dagli aggregati ordinari (telemetria, predictor, ranking dashboard). Generalizzato per supportare N master, non solo FauMorfeus.
+
+**Componenti** (1 modulo nuovo + 9 punti di esclusione + UI):
+
+1. **`shared/instance_meta.py`** (NEW ~115 righe) — helper config-driven:
+   - `is_master_instance(nome) → bool` (cache 30s)
+   - `get_master_instances() → frozenset[str]`
+   - `filter_ordinary(istanze) → list[str]`
+   - `invalidate_cache()` per forzare refresh dopo PATCH
+   - Lettura: `instances.json::[].master` (default statico) + `runtime_overrides.json::istanze.<nome>.master` (override hot, prevale)
+
+2. **Schema config esteso**:
+   - `IstanzaOverride.master: bool = False` ([dashboard/models.py:222](dashboard/models.py))
+   - `InstanceStats.master: bool = False` ([dashboard/models.py:374](dashboard/models.py))
+   - `instances.json::[].master` persistito da `save_instances_fields` (allowed_fields esteso)
+
+3. **9 punti di esclusione lato server**:
+   - `core/skip_predictor.py::predict()` — early return `should_skip=False, reason="master_instance"`
+   - `tools/predictor_shadow.py` — filtra master nel grouping
+   - `dashboard/services/stats_reader.py::get_truppe_storico_aggregato` — espone master in campo dedicato `master_row`
+   - `dashboard/services/stats_reader.py::get_all_stats(include_master=False)` — esclusione opt-in
+   - `dashboard/services/stats_reader.py::get_produzione_istanze` — esclude master da card produzione
+   - `dashboard/services/stats_reader.py::get_risorse_farm` — non somma master ai totali
+   - `dashboard/services/stats_reader.py::get_produzione_storico_24h` — esclude master da sparkline 12h
+   - `dashboard/services/telemetry_reader.py::_compute_trend_7gg` — esclude master da sum giornalieri
+   - `core/telemetry.py::_build_rollup_from_events` — esclude master da `live.json::per_instance/per_task/totals/anomalies`
+
+4. **Dashboard UI**:
+   - `config_global.html` tabella istanze: colonna "M" toggle + ★ accanto al nome
+   - `partials/card_istanza.html`: ★ + class `card-master`
+   - `app.py::partial_truppe_storico`: riga master con sfondo dorato `#f5c542` separata dal totale
+
+5. **Cache invalidation**: `invalidate_cache()` chiamato automaticamente in PUT `/api/config/istanze` quando il flag master può essere cambiato.
+
+6. **Migrazione**: FauMorfeus.master=true sia dev che prod, sia in instances.json che in runtime_overrides.json. Tutte le altre istanze hanno `master: false` esplicito.
+
+**Smoke test 7/7 verdi**:
+- `is_master_instance('FauMorfeus')=True`, `is_master_instance('FAU_00')=False`
+- `predict('FauMorfeus').reason=master_instance, should_skip=False`
+- `get_produzione_istanze()` → 11 istanze (no FauMorfeus)
+- `get_truppe_storico_aggregato()` → per_istanza len=11 + master={nome:FauMorfeus,...}
+- `InstanceStats(FauMorfeus).master=True`
+
+#### WU102. TaskFlags.raccolta — fix root cause Bug A ✅
+
+Vedi sezione "Issue trovata" sopra. Modifica minima (1 campo aggiunto al modello Pydantic) con docstring dettagliata che spiega il bug storico per evitare regressione futura.
+
+#### WU103. Predictor 5-invii target + rifornimento metrics ✅
+
+**Estensione skip predictor** per valutare cicli combinando raccolta + rifornimento.
+
+1. **Hook rifornimento metrics** ([core/istanza_metrics.py](core/istanza_metrics.py)):
+   ```python
+   aggiungi_invio_rifornimento(istanza, risorsa, qta_netta, eta_residua_s)
+   ```
+   Hook in `tasks/rifornimento.py` (mappa+membri) post-`registra_spedizione`. Schema record esteso con `rifornimento.invii[]` accanto a `raccolta.invii[]`.
+
+2. **Nuova regola predictor** `_rule_low_total_invii` ([core/skip_predictor.py](core/skip_predictor.py)):
+   - `TARGET_INVII_CICLO = 5` (configurable tunable)
+   - `LOW_INVII_AVG_RATIO = 0.5` → soglia avg = 2.5
+   - Logica: ultimi 3 cicli, se avg(raccolta.invii + rifornimento.invii) < 2.5 → skip suggerito (score 0.60)
+   - **Guard**: regola disattiva se nessun ciclo della finestra ha rifornimento (copre già `_rule_trend_magro`)
+
+3. **Tool predictor_shadow esteso** con sezione "Valutazione rifornimento":
+   ```
+   istanza    cicli rif_on rif_off avg_inv_on avg_inv_off  delta
+   ```
+   Confronta avg_total_invii con/senza rifornimento per stimare ROI del task.
+   Pre-restart: 426 record/3gg → tutti `rif_off=N, rif_on=0` (rifornimento.invii non era tracciato). Post-restart: la sezione si popolerà con dati reali.
+
+#### Issue BASSE chiuse in batch — sessione 03/05 notte tarda ✅
+
+5 issue BASSE chiuse contemporaneamente:
+
+- **#5 Alleanza coord hardcoded — WU111** (correzione 03/05 sera, wontfix iniziale errato). Pre-fix: `_esegui_alleanza` usava `device.tap(*coord_alleanza)` coord fissa (760, 505). Pattern obsoleto: gli altri task (donazione/rifornimento/arena/arena_mercato) usano `nav.tap_barra(ctx, "alliance")` con template matching dinamico (`pin_alliance.png`). Su istanze con barra inferiore con meno bottoni il bottone Alliance shifta → tap fisso falliva. **Fix**: `_esegui_alleanza(ctx, device, ...)` ora prima tenta `nav.tap_barra(ctx, "alliance")`, fallback a coord fissa se navigator None o tap_barra ritorna False. Pattern coerente con altri task. Note: 15 test pre-esistenti in test_alleanza.py falliscono per `cfg.coord_rivendica` obsoleto (debt pre-esistente, no regressione fix).
+
+- **#19 stdout race buffer** — fix `set PYTHONUNBUFFERED=1` aggiunto a `run_prod.bat`. Stdout line-buffered → no race finale ciclo. Effetto al prossimo restart bot.
+
+- **#21 gitignore + rifornimento_mappa.py legacy** — verificato: `.gitignore` 0 duplicati (61 righe), `rifornimento_mappa.py` legacy file inesistente, riferimenti residui solo in commenti storici. **Bonus fix**: `index.html` schema legacy (`cfg.rifornimento_mappa.abilitato`/`rifornimento_membri.abilitato`) migrato a schema unificato (`cfg.rifornimento.mappa_abilitata`/`membri_abilitati`) post-WU40/WU94. Pannello rifornimento overview ora rispecchia config reale.
+
+- **#23 smoke_test GlobalConfig dict vs dataclass** — `smoke_test.py::check_ctx` passava `{}` (dict) a `_build_ctx(ist, gcfg, ...)` → `gcfg.livello_nodo` falliva con `'dict' object has no attribute`. Fix: `gcfg = load_global()` + carica `runtime_overrides.json` per `ist_overrides` per-istanza + assert `task_abilitato` `isinstance bool` invece di `is True` (post-WU94 baseline reset task default OFF). Validato: 12/12 istanze TaskContext OK.
+
+- **#25 Tracciamento diamanti nello state** — pre-fix: `ProduzioneSession.diamanti_iniziali` salvato in `apri_sessione`, ma `chiudi_sessione_e_calcola(risorse_finali, ts_fine)` non riceveva `diamanti_finali` → delta mai calcolato. Fix: aggiunti campi `diamanti_finali: int = -1` + `diamanti_delta: int = 0` a `ProduzioneSession` (with `from_dict`/`to_dict`), parametro `diamanti_finali` opzionale in `chiudi_sessione_e_calcola`, chiamata in `main.py` ora passa `rd.diamanti`. Smoke test: round-trip OK, delta calcolato correttamente (test +20 diamanti accumulati).
+
+#### WU89-Step4. Skip Predictor live hook (flag-driven) ✅
+
+**Obiettivo**: portare in produzione il predictor implementato in shadow-only Step 3 (03/05). Permette di **skippare cicli inefficaci** prima dell'avvio MuMu (saving ~600s/skip).
+
+**Vincolo utente**: nessuna modifica struttura/funzionalità bot — comportamento attuale invariato di default. Attivazione controllata da flag.
+
+**Architettura 3-stati** (controllata da 2 flag in `globali`):
+
+| `enabled` | `shadow_only` | Comportamento |
+|-----------|---------------|---------------|
+| **False** | * | No-op completo. Bot identico ad oggi (default deploy) |
+| **True** | **True** | Predict + log + telemetria, **no skip applicato** |
+| **True** | **False** | Predict + log + telemetria + **applica skip** se `should_skip=True` |
+
+**Hook position** (`main.py::_thread_istanza`):
+
+```
+1. Setup contatori, ctx, orchestrator
+2. Restore schedule
+3. ★ NUOVO: Skip Predictor hook (early-return su skip)
+4. Avvio MuMu (avvia_istanza)
+5. Boot HOME + tick task
+```
+
+Posizione strategica: PRIMA di `avvia_istanza` → se skip applicato evitiamo TUTTO il costo del boot (settings, attendi_home, banner dismissal, task).
+
+**Componenti aggiunti** (`main.py` solo):
+
+1. **Module-level state** (~5 righe):
+```python
+_predictor_states: dict = {}              # IstanzaSkipState per nome
+_predictor_decisions_lock = threading.Lock()
+```
+
+2. **Helper telemetria** `_append_predictor_decision(nome, decision, mode, applied)` (~25 righe):
+   - Append JSONL a `data/predictor_decisions.jsonl`
+   - Schema: `{ts, instance, mode, should_skip, reason, score, signals, growth_phase, guardrail, applied}`
+   - `applied=True` solo se LIVE + should_skip + no guardrail block
+   - Best-effort (silent on I/O error)
+
+3. **Hook block** in `_thread_istanza` post-restore-schedule (~50 righe):
+   - Read flag `gcfg.skip_predictor_enabled` → no-op se False
+   - `predict(nome, history, state=skip_state)` con history da `load_metrics_history(last_n=20)`
+   - Log decisione `[PREDICTOR-{mode}] should_skip=... reason=...`
+   - Append a JSONL
+   - Se `applied`: increment `last_skip_count_consec`, chiama `chiudi_tick(outcome="skipped_by_predictor")`, aggiorna stato istanza, **early return**
+   - Se non skip: reset `last_skip_count_consec=0`, increment `cicli_totali`
+   - Try/except attorno tutto: errore predictor = continua flow normale
+
+**Failsafe**:
+- `gcfg.skip_predictor_enabled=False` (default) → 0 impact, hook no-op
+- Try/except: errore predictor non blocca bot
+- Reset state count su no-skip
+- Guardrail già implementato in `predict()` Step 3 (max 3 skip consec → forza retry, RE_EVAL_CICLI=6, COOLDOWN_POST_RETRY_CICLI=2)
+- Master istanze sempre `should_skip=False` (early return in `predict()`)
+
+**Smoke test 3/3 scenari**:
+- proceed shadow (no skip) → applied=False, log mode=SHADOW
+- skip live applied → applied=True, log mode=LIVE, early return
+- skip shadow not applied → applied=False, log mode=SHADOW
+
+**Telemetria** (`data/predictor_decisions.jsonl` NEW):
+```json
+{"ts": "2026-05-04T...", "instance": "FAU_09", "mode": "LIVE",
+ "should_skip": true, "reason": "low_total_invii", "score": 0.6,
+ "signals": {"avg_3": 1.8, "target": 5}, "growth_phase": false,
+ "guardrail": null, "applied": true}
+```
+
+Alimenta Step 5 (dashboard precision/recall) in futuro.
+
+**Workflow operativo attivazione**:
+
+1. **Deploy + restart bot** → flag default `enabled=False` → bot invariato
+2. **Test shadow** (1-2 giorni): da dashboard config setta `enabled=True, shadow_only=True` → tick successivo logga decisioni senza tagliare. Hot-reload, no restart richiesto.
+3. **Analizza** dopo 6-12 cicli: leggi `predictor_decisions.jsonl`. Verifica:
+   - Quante "skip suggested" sono effettivamente cicli inutili (precision)
+   - Quanti cicli inutili NON sono identificati (recall)
+   - Se `guardrail_triggered` blocca pattern utili
+4. **Attiva live**: se metrics OK → setta `shadow_only=False` → predictor inizia a tagliare cicli inefficaci. Saving stimato: ~480-600s × N skip/giorno.
+
+#### WU-CycleAccuracy. Cycle Predictor recorder + accuracy fine-ciclo + drilldown what-if ✅
+
+Background task in dashboard `lifespan` esegue ogni 15 min:
+1. **`record_snapshot()`**: append `data/predictions/cycle_snapshots.jsonl` con
+   `{ts, cycle_numero, elapsed_min, predicted_min, n_istanze, confidence,
+     input_context: {istanze_abilitate, task_globali_abilitati,
+                     tasks_per_istanza_due, per_istanza_predicted_s,
+                     tick_sleep_s}}`. Auto-correlazione cycle_numero
+   leggendo `cicli.json::ciclo in corso`.
+2. **`evaluate_cycles()`**: per cicli completati non ancora valutati
+   calcola `actual_min = end - start` + per ogni snapshot
+   `error_pct = |predicted - actual| / actual × 100`. Output
+   `data/predictions/cycle_accuracy.jsonl`.
+
+**Pagina dedicata `/ui/predictor`** (NEW): 3 sezioni:
+- Cycle Predictor: stima corrente schedule-aware + drilldown
+  what-if (T_ciclo se skippo istanza X) + accuracy storica
+- Skip Predictor: live decisions stream + futuro accuracy panel
+- Configurazione: link a toggle home + tool CLI
+
+**File**: `core/cycle_predictor_recorder.py` (NEW ~210), endpoint
+`/ui/partial/cycle-snapshot-detail` + `/ui/partial/cycle-accuracy`,
+`dashboard/templates/predictor.html` (NEW), nav link in `base.html`,
+pannelli predictor rimossi da `/ui/telemetria` (consolidamento).
+
+**Use-case what-if**: per ogni istanza la riga del drilldown mostra
+"T_ciclo skip" = T_ciclo - T_istanza, con saving in min e %. Permette
+decisioni informate su quale istanza disabilitare temporaneamente.
+
+#### WU-CycleDur. Cycle Duration Predictor — stima durata ciclo bot schedule-aware ✅
+
+**Obiettivo**: predire `T_ciclo` del bot (come gap_atteso per skip
+predictor + planning + tuning tick_sleep_min).
+
+**Modello**: `T_ciclo = Σ_istanza (boot_home_median + Σ task_due_median) + tick_sleep_s`.
+
+**Schedule-aware (strict_schedule=True)**:
+- Lettura `state[istanza].schedule[task]` = ISO last_run
+- Lettura `task_setup.json` per `interval_hours` + schedule type
+- `_is_task_due(task, entry, last_run, now_utc)`:
+  - `schedule="always"` o `interval=0` → sempre
+  - `last_run=None` → primo run, gira
+  - `elapsed_h < interval_h` → no skip
+  - Edge `main_mission`: gate UTC≥20 (WU91)
+- Per tipologia istanza: raccolta_only/raccolta_fast/full filtrata
+
+**Rolling stats**: median ultimi 20 record da `istanza_metrics.jsonl`.
+Cache TTL 30min.
+
+**Output prod 04/05**:
+```
+STRICT  T_ciclo: 81.5 min   (rispetta schedule)
+OLD     T_ciclo: 125.7 min  (sovrastimata)
+Delta:  44.2 min eliminati
+```
+
+**Confidence**: alta (≥10 samples), media (3-9), bassa (<3).
+
+**Tool CLI**: `python tools/predict_cycle.py --prod [--verbose] [--istanza X]`.
+
+**Vincolo memoria**: aggiunta/modifica task richiede aggiornamento
+sincrono di `core/cycle_duration_predictor.py::CLASS_TO_TASK_NAME` +
+edge cases in `_is_task_due` (memoria `feedback_cycle_predictor_sync`).
+
+**File**: `core/cycle_duration_predictor.py` (NEW ~360),
+`tools/predict_cycle.py` (NEW ~100), `config/predictor_t_l_max.json`
+(NEW baseline 11 istanze × 3 livelli + multiplier per-istanza FAU_00=1.0,
+default=1.3, FAU_09=1.5, FAU_10=1.4).
+
+**Refactor `core/skip_predictor.py::_rule_squadre_fuori`**:
+da threshold statico `2 × avg_eta + 30s` a modello empirico
+`T_min_rientro vs gap_atteso` dinamico:
+```
+T_marcia[i]    = 2 × eta_i + sat_i × T_L_max[livello_i, istanza]
+sat_i          = load_squadra_i / cap_nominale_L_max[livello_i, tipo_i]
+T_min_rientro  = min(T_marcia[i] for i in invii)
+gap_atteso     = predict_cycle_duration() / 60   # via cycle predictor
+
+SE attive_post=totali AND T_min_rientro > gap_atteso → SKIP score 0.90
+```
+
+#### WU121. Master FauMorfeus ripristino + ★ marker uniforme dashboard ✅
+
+**Diagnosi utente**: master indicator FauMorfeus assente in dashboard — verifica `is_master_instance("FauMorfeus") = False`, `get_master_instances() = frozenset()` vuoto.
+
+**Root cause**: flag perso da config (probabile artefatto save dashboard recente con Pydantic che setta default `master=False` per chiavi non esplicitamente passate).
+
+**Fix**:
+- `instances.json` (prod) — `FauMorfeus.master = true` (dev era già OK)
+- `runtime_overrides.json` (prod) — `istanze.FauMorfeus.master = true` (dev OK)
+- Cache invalidata via `shared.instance_meta.invalidate_cache()`
+- `dashboard/app.py::partial_ist_table` ([app.py:660+](dashboard/app.py)) aggiunto ★ marker accanto al nome se `is_master_instance(nome)` — era l'unico pannello che mancava (gli altri 4: produzione-istanze cards, truppe-storico, ist-table /ui/config/global, copertura-cicli avevano già la logica).
+
+**Validazione**: 4/4 pannelli renderizzano ★+FauMorfeus correttamente.
+
+**Effetto**: i 9 punti di esclusione server-side (predictor, telemetry, rollup farm, copertura squadre) tornano a operare. FauMorfeus non più sommata con istanze produttive nei totali farm.
+
+#### WU120. Bug tick_sleep unit mismatch — campo secondi, save minuti ✅
+
+**Sintomo utente**: dashboard mostra `tick sleep 1800` (= 30 min) inaspettato dopo save.
+
+**Root cause** ([dashboard/templates/index.html:43-46](dashboard/templates/index.html) pre-fix):
+- Display: `value="{{ cfg.sistema.tick_sleep }}"` → SECONDI (es. 1800)
+- Label: `tick sleep (s)`
+- Save: `sistema: {tick_sleep_min: gi('g-sleep')}` → backend `SistemaOverride.tick_sleep_min` (MINUTI, ge=0 le=1440)
+
+→ Utente inserisce 30 (intendendo 30 secondi per debug rapido) → backend salva 30 minuti → al refresh display mostra 30×60=1800 secondi → confusione.
+
+**Fix**: campo unificato in MINUTI:
+```jinja
+value="{{ ((cfg.tick_sleep|int) // 60) }}"
+min="1" max="1440" step="1"
+title="intervallo tra cicli bot in minuti (1-1440)"
+```
++ label `tick sleep (min)`.
+
+`config_global.html` (pagina `/ui/config/global`) NON toccata — usa schema baseline `tick_sleep` in secondi direttamente, già coerente.
+
+**Bonus diagnosi**: prod aveva `tick_sleep_min=300` (5h!) — artefatto dello stesso bug. Post-fix display mostra "300 min", utente correggerà a 5 (validato `feedback_tick_sleep_rifornimento.md`) o 15 (post-rifornimento attivato).
+
+#### WU119. Riordino risorse uniformato pomodoro/legno/acciaio/petrolio ✅
+
+**Sintomo utente**: card rifornimento/zaino non rispettavano l'ordine canonico richiesto `🍅 pomodoro → 🪵 legno → ⚙ acciaio → 🛢 petrolio`. Pre-fix: alcuni pannelli mostravano `... petrolio/acciaio` (swap).
+
+**Fix coerente in 3 file**:
+- `dashboard/templates/index.html` — 5 modifiche: rifornimento card (line 91), zaino card (171), sidebar res-totali sezioni "raccolto" e "nodi" (277, 285), ora-tbl header (305), JS `updateAllocTotal` array (418)
+- `dashboard/templates/config_global.html` — 3 modifiche: rifornimento card (95), zaino card (156), JS `gcUpdateAllocTotal` array (361)
+- `dashboard/services/stats_reader.py` — `_RISORSE_STANDARD` tuple + tupla locale `_load_storico_farm_today`
+
+**Validazione automatica**: 7/7 endpoint check posizione emoji nell'HTML rendered:
+```
+/ui              order ok ✓ (🍅<🪵<⚙<🛢)
+/ui/config/global order ok ✓
+/ui/partial/res-totali order ok ✓
++ /ui/telemetria, /ui/partial/res-oraria, /ui/partial/produzione-istanze, /ui/partial/copertura-cicli
+```
+
+#### WU118. Refactor dashboard — telemetria/storico pagine separate + copertura squadre + report ciclo ✅
+
+**Pre-refactor**: home `/ui` con 8 tel-card + storico eventi + cards istanze + cfg4 + tabella istanze + sidebar — pagina overcrowded.
+
+**Refactor 7-step**:
+
+1. **`dashboard/templates/telemetria.html`** (NEW ~120 righe) — pagina dedicata con 8 tel-card spostate da home: telemetria task, storico cicli, health 24h, ciclo corrente, tempi medi 7gg, storico truppe, debug screenshot per task, **+ copertura squadre 5 cicli** (NEW)
+
+2. **`dashboard/templates/storico.html`** (NEW ~50 righe) — pagina dedicata con sola tabella storico eventi (filtri istanza+task, refresh 30s)
+
+3. **Routes nuove** in `dashboard/app.py`:
+   - `GET /ui/telemetria` → render `telemetria.html`
+   - `GET /ui/storico` → render `storico.html`
+
+4. **Nav link** in `dashboard/templates/base.html` topbar:
+   ```
+   home | telemetria | storico | config | api
+   ```
+
+5. **Pannello copertura squadre** (semantica WU116 load_squadra):
+   - `dashboard/services/stats_reader.py::get_copertura_ultimi_cicli(n=5)` — aggrega da `data/istanza_metrics.jsonl`, esclude master, ordine fisso pomodoro/legno/acciaio/petrolio
+   - `dashboard/app.py::partial_copertura_cicli` endpoint `GET /ui/partial/copertura-cicli`
+   - `dashboard/templates/partials/copertura_cicli.html` (NEW) — tabella `cov-tbl` con riga per istanza, 5 colonne cicli + 4 colonne totali tipo
+   - CSS `.cov-tbl/.cov-cell/.cov-tipo` con color-coding ok/warn/bad
+   - Soglia "satura": `load_squadra >= cap_nodo × 0.95`
+
+6. **Trend 7gg spostato** da pagina telemetria a sidebar destra di home (semantica produzione storica). Posizione: TOP della sezione "risorse farm". CSS override `.res-block .tel-table` con `table-layout:fixed` + colonne 38/30/18/14% per evitare overflow orizzontale.
+
+7. **Estensione `core/istanza_metrics.py::aggiungi_invio_raccolta`** con param `load_squadra: int = -1` opzionale (backward compat). `tasks/raccolta.py` passa `ctx._raccolta_load_squadra` stashed da WU116.
+
+**Tool CLI** (`tools/report_copertura_ciclo.py` NEW):
+```
+python tools/report_copertura_ciclo.py [--prod] [--days N] [--istanza X] [--last N]
+```
+Output per istanza × ciclo con SATURA/NON SATURA per ogni invio + aggregato ciclo + riepilogo globale.
+
+**Effetto operativo**: dashboard home alleggerita. Restano: cards produzione istanze, cfg4 sistema/rifornimento/zaino/allocazione, tabella istanze mumuplayer, sidebar farm (trend 7gg top + res-totali + res-oraria).
+
+#### WU117. Arena tap prima sfida invece di ultima — robustezza lista incompleta ✅
+
+**Sintomo**: bug latente potenziale segnalato dall'utente — la coord `_TAP_ULTIMA_SFIDA=(745,482)` ([tasks/arena.py:67](tasks/arena.py) pre-fix) puntava all'**ultima riga** della lista sfide arena (5° rigo). Se la lista mostra meno di 5 righe (account low-level con pochi opponenti, opponenti già sfidati nello stesso giorno), il tap cade su area vuota o su elemento adiacente non desiderato → fail silenzioso o comportamento errato.
+
+**Fix**: rinominata costante `_TAP_PRIMA_SFIDA=(745,250)` calibrata visivamente su FAU_01 04/05 (vedi `c:/tmp/maschera_inv/marker_5_rows.png` con 5 cerchi colorati su righe candidate). La **prima riga è sempre presente** quando la lista contiene almeno 1 sfida → tap robusto indipendentemente dal numero di righe visibili.
+
+**File modificato**:
+- `tasks/arena.py:67` — costante rinominata
+- `tasks/arena.py:403` — unico call site aggiornato
+
+**Test**: rinviato a produzione 05/05 (sfide arena giornaliere FAU_01 esaurite dal test arena_mercato + dalla navigazione manuale di calibrazione).
+
+#### WU116. OCR carico squadra (Load) + dataset copertura squadre + tool analisi ✅
+
+**Obiettivo**: rilevare istanze con squadra **underprovisioned** (poche truppe) → la squadra non riempie il nodo → il nodo resta aperto, non rigenera al max → spreco efficienza farm globale.
+
+**Razionale gameplay**: con `RACCOLTA_TRUPPE=0` (modalità auto, default), il gioco determina automaticamente il minimo numero di truppe necessarie per saturare il nodo. Se la squadra non ha abbastanza truppe → `load_squadra < cap_nodo` → la marcia raccoglie solo `load` (truppe complete) → cap residuo > 0 → un'altra istanza/giocatore deve "chiudere" il nodo prima che possa rigenerare al massimo nominale.
+
+**4 file modificati**:
+
+**1. `shared/ocr_helpers.py`** — funzione OCR + ROI calibrata
+- `_ZONA_LOAD_SQUADRA = (610, 420, 780, 455)` — 170×35 px, sopra MARCH btn
+- `leggi_load_squadra(img)` — cascade `raw → binv150` con regex `_LOAD_RE` per estrarre primo gruppo digit-comma (resiste a rumore timer ETA sottostante)
+- Validato 8/8 test FAU_01: cifre 5-9 caratteri, popup gather no falsi positivi
+- `binv200` scartato: distorce cifre piccole ("5"→"9" su petrolio 90,153)
+
+**2. `shared/cap_nodi_dataset.py`** — schema esteso
+- `registra_cap_sample()` accetta param opzionale `load_squadra: int = -1` (backward compat)
+- Schema record JSONL: `{ts, instance, tipo, livello, capacita, load_squadra}`
+- `load_squadra=-1` → marcia non eseguita / OCR fallita
+
+**3. `tasks/raccolta.py`** — hook
+- `_esegui_marcia` legge load post-`_leggi_eta_marcia` e stash su `ctx._raccolta_load_squadra`
+- Registrazione differita al post-marcia → 1 record per invio invece di 2
+- Su marcia FAIL: `load=-1`, ma cap (popup gather) comunque registrato
+
+**4. `tools/analisi_cap_nodi.py`** — nuova sezione analisi
+- **Sezione 4 "Copertura squadra"** per (istanza, tipo) = `load_squadra / cap_nodo`
+- Verdetti: `OK satura ≥95% / marginale 75-94% / ⚠ underprovisioned <75%`
+- Aggregato per istanza con copertura media tutti i tipi
+
+**Smoke test**: dataset finto con 8 record validati. FAU_09 con load=708,822/1,200,000 → 50% copertura → riconosciuto correttamente come "⚠ underprovisioned".
+
+**Esempio output reale atteso post-restart**:
+```
+istanza      campo  segheria  acciaio  petrolio   media   verdetto
+FAU_00      100%     100%     100%     100%       100%   ✓ OK satura
+FAU_05       97%      94%      99%     100%        97%   ✓ OK satura
+FAU_09       58%      62%      55%      60%        59%   ⚠ truppe insufficienti
+```
+
+**Effetto operativo**: dopo restart bot, ogni invio raccolta genera record completo. Il KPI copertura guida la decisione di training truppe nelle istanze deboli (priorità task `truppe`).
+
+#### WU115. Sistema debug screenshot unificato — hot-reload + dashboard toggle ✅
+
+**Obiettivo**: architettura debug screenshot indipendente dal funzionamento del bot, attivabile/disattivabile per ogni task **senza riavviare** via dashboard. Sostituisce i 3 toggle modulo-level (`_DEBUG_REBUILD_DUMP`, `_DEBUG_MERCATO_DUMP`, `_DEBUG_STORE_FAIL_DUMP`) con sistema generalizzato a 17 task.
+
+**Componenti** (Steps A→E):
+
+**A — `shared/debug_buffer.py`** (~220 righe NEW)
+- `DebugBuffer.for_task(task_name, instance_name)` factory
+- `buf.snap(label, screen)` / `buf.snap_array(label, frame)` — accumula in-memory
+- `buf.flush(success, force, log_fn)` — scrive su disco condizionale
+- `is_debug_enabled(task)` / `get_all_debug_status()` / `set_debug_enabled(task, enabled)` — API config
+- `invalidate_cache()` — refresh manuale (chiamato dopo PATCH)
+- `cleanup_old(days=7)` — pulizia automatica file vecchi
+
+**Logica flush** (key insight):
+| success | force | flush? | uso tipico |
+|---|---|:-:|---|
+| True | False | NO | task ok, no anomalie → save disk |
+| False | * | SI | task fail tecnico → debug |
+| True | True | SI | success ma anomalia logica (es. acquisti=0) |
+
+**B — Schema config**
+- `dashboard/models.py::GlobaliOverride.debug_tasks: Dict[str,bool] = {}`
+- `config/config_loader.py::GlobalConfig.debug_tasks: dict = {}`
+- Merge propagato in `_merge_globali` + lettura in `_from_raw`
+
+Path config: `runtime_overrides.json::globali.debug_tasks.{task_name}`
+
+**C — Migrazione 3 task** (arena, arena_mercato, store)
+- Rimossi 3 toggle modulo-level + 2 classi `_StoreDebugBuf`/`_MercatoDebugBuf` (~130 righe legacy)
+- Sostituiti con `DebugBuffer.for_task()` pattern (~37 righe nuove)
+- `arena._rebuild_truppe`: snap a 5+(N×2) punti, flush sempre (force=True)
+- `arena_mercato.run`: snap a 4 punti, flush condizionale (force=acquisti=0)
+- `store.run`: snap a punti chiave, flush condizionale (force=esito!=COMPLETATO)
+
+**D — Endpoint API JSON** (`dashboard/routers/api_debug.py` NEW ~95 righe)
+- `GET /api/debug-tasks` → `{known_tasks, status, active_count}` (JSON)
+- `PATCH /api/debug-tasks/{task}/{enable|disable}` → toggle + invalidate cache (JSON)
+
+**E — Endpoint UI HTML** (`dashboard/app.py` +75 righe)
+- `GET /ui/partial/debug-tasks` → render pannello con pill toggle
+- `PATCH /ui/debug-tasks/{task}/{action}` → toggle + ritorna partial aggiornato (HTMX swap)
+- Pannello "🐛 debug screenshot per task" in `index.html` (sostituisce posizione del rimosso "🧠 banner appresi" WU110)
+
+**Storage**: `data/{task}_debug/{istanza}_{ts}_{idx:02d}_{label}.png`
+**Cache TTL**: 30s (sync con typical refresh dashboard)
+**Cleanup**: 7gg (chiamare `cleanup_old()` da main.py o launcher)
+
+**Smoke test**: 5/5 API JSON + 5/5 UI HTML + 10/10 pytest arena_mercato. Test debt pre-esistenti (store 5 fail, arena 9 fail) invariati.
+
+**Aggiungere debug a un nuovo task** (effort ~5 righe):
+```python
+from shared.debug_buffer import DebugBuffer
+debug = DebugBuffer.for_task("nome_task", instance_name)
+debug.snap("00_start", screen)
+# ... lavoro ...
+debug.flush(success=ok, force=anomalia)
+```
+Poi aggiungere `"nome_task"` a `_KNOWN_TASKS` in `api_debug.py` per visibilità in dashboard.
+
+**Step F — Espansione 14 task** (03/05 sera, ordine utente)
+
+Migrazione progressiva del pattern DebugBuffer ai task rimanenti, con **anomalia logic** specifica per ognuno:
+
+| # | Task | Snap (esempio) | Anomalia (force=...) |
+|---|------|---------------|---------------------|
+| 1 | `vip` | 4 (pre/post_open, post_cass, post_free) + 99_exception | `cass_ok=False AND free_ok=False` |
+| 2 | `messaggi` | 4 (alliance, system, post_claim) + 99_exc | `not alliance_ok AND not system_ok` |
+| 3 | `boost` | 4 (pre_tap, popup_manage, scroll_speed, frame_use) + 99_exc | `outcome ∈ {POPUP_NON_APERTO, SPEED_NON_TROVATO, ERRORE}` |
+| 4 | `alleanza` | 5 (pre_tap, post_dono, pre_claim, post_claim, post_raccogli) + 99_exc | `rivendiche=0` |
+| 5 | `donazione` | 3 (pre_naviga, post_tech, post_dona) + 99_naviga + 99_exc | `donate_count=0` |
+| 6 | `radar` | 3 (badge_check, post_open, post_loop) + 99_exc | `pallini_tappati=0 AND no errore` |
+| 7 | `radar_census` | 2 (pre_census, post_detect) | `matches vuoto` |
+| 8 | `truppe` | 3 (counter_read, post_loop, ciclo_fail) + 99_exc | `ok < iterazioni` |
+| 9 | `zaino` | 2 (pre_zaino, post_bag) + 99_exc | `bool(da_caricare) AND totale_caricato=0` |
+| 10 | `main_mission` | 3 (pre_open, post_open, post_claim) + 99_exc | tutti claim=0 |
+| 11 | `raccolta` (+ chiusura sub-classe) | 2 (pre, post) — usa `self.name()` per distinguere | `bool(libere) AND inviate_totali=0` |
+| 12 | `rifornimento` | 2 (pre, post) | `max_sped>0 AND spedizioni=0` |
+| 14 | `district_showdown` | 4 (pre_ds, pre_loop, post_loop_<esito>, 99_icona/99_auto_roll) | `esito ∈ {timeout, errore}` |
+
+**Totale tasks coperti**: **17/17** (3 originali Step C — arena, arena_mercato, store — + 14 da Step F).
+
+**Lista completa `_KNOWN_TASKS`** ([dashboard/routers/api_debug.py](dashboard/routers/api_debug.py)):
+```
+arena, arena_mercato, store, vip, messaggi, boost, alleanza, donazione,
+radar, radar_census, truppe, zaino, main_mission, raccolta, raccolta_chiusura,
+rifornimento, district_showdown
+```
+
+**Effetto operativo**: utente abilita debug per un task via dashboard (toggle pill) → al **prossimo run** del task su qualsiasi istanza, screenshot di tutti i punti chiave salvati su `data/{task}_debug/`. Disabilita → no più screenshot. Hot-reload (TTL cache 30s).
+
+**Convenzioni snap label**: `00_pre_*`, `01_*`, `02_*`, `99_*` (terminale anomalo o exception). Il buffer accoda in memoria; il flush condizionale evita scrittura su disco quando il task riesce senza anomalia.
+
+#### WU110. BannerLearner cleanup — deprecato, default disable ✅
+
+**Diagnosi**: WU93 implementata 02/05 con `auto_learn_banner=True` di default. Verifica 03/05 sera:
+- `data/learned_banners.json` **non esiste** (mai creato)
+- `0 eventi [LEARNER]` in tutti i log (.jsonl + .bak)
+- 6 `_unmatched_tap_x` dismiss in 4h (opportunità mancate)
+- 311 snapshot `boot_unknown/` su disco (input dataset sprecato)
+
+**Root cause** ([shared/ui_helpers.py:446](shared/ui_helpers.py)):
+```python
+if enable_learner and not counts:
+    # ... pipeline learn ...
+```
+
+L'ordine di esecuzione del loop in `dismiss_banners_loop`:
+1. Match catalog statico → tap → counts popolato → break
+2. Se nulla:
+   - Step A1 fallback `pin_btn_x_close` (X cerchio dorato) → tap → `counts["_unmatched_tap_x"]+=1` → continue
+   - Step A2 fallback `pin_btn_back_arrow` → tap → `counts["_unmatched_tap_back"]+=1` → continue
+   - Step B HOME/MAP check
+   - Step LEARNER → **SKIPPATO** perché `counts` non vuoto
+
+Il fallback X cerchio dorato ha priorità sul learner. La pipeline learn non scatta in pratica.
+
+**Fix opzione B** (cleanup):
+
+1. **Default `False`** in 4 punti:
+   - `dashboard/models.py::GlobaliOverride.auto_learn_banner` → False
+   - `config/config_loader.py::GlobalConfig.auto_learn_banner` → False
+   - `config/global_config.json::auto_learn_banner` → False (dev+prod)
+   - `config/runtime_overrides.json::globali.auto_learn_banner` → False (prod)
+
+2. **Docstring DEPRECATO** in 2 moduli (lasciati per git history):
+   - `shared/banner_learner.py`
+   - `shared/learned_banners.py`
+
+3. **Pannello dashboard rimosso** da `index.html` (sostituito con commento HTML + motivazione). Endpoint server-side `/ui/partial/learned-banners` lasciato attivo (compat).
+
+**Smoke test 4/4 verdi**:
+- merge_config con runtime_overrides → top-level `auto_learn_banner=False`
+- `GlobalConfig._from_raw` → `auto_learn_banner=False`
+- Syntax check sui 4 file modificati
+- 311 snapshot boot_unknown intatti (no cleanup automatico)
+
+**Riattivazione futura**: refactor `learn-after-fallback` (~50 righe) — modificare il check `if enable_learner and not counts:` per attivarsi anche dopo `_unmatched_tap_x>=2` per stessa istanza, salvando `pre_frame` PRIMA del fallback.
+
+#### WU109. Telemetry pattern detector — esclusione raccolta_chiusura ✅
+
+**Sintomo**: pattern detector flaggava 15 esecuzioni `raccolta_chiusura` come outlier (max 225s, severity high) ma erano comportamento legittimo.
+
+**Analisi**: il task ha **distribuzione bimodale**:
+- **Skip mode** (mediana 3.4s): "Slot OCR letti → 0 libere → return immediato"
+- **Work mode** (60-225s): "Slot libere → invio 1-4 marce raccolta"
+
+Tutti i 29 outlier osservati nelle ultime 7gg avevano `invii ≥ 1` (lavoro reale). La soglia `mediana × 3` dell'algoritmo fallisce su distribuzioni bimodali (la mediana 3s × 3 = 9s mentre il work-mode è naturalmente 60s+).
+
+**Fix** ([core/telemetry.py:594-597](core/telemetry.py)):
+```python
+EXCLUDED_TASKS_TIMEOUT = {"raccolta_chiusura"}
+for task_name, evs in by_task.items():
+    if task_name in EXCLUDED_TASKS_TIMEOUT:
+        continue
+    ...
+```
+
+Modifica cosmetica: non incide sul comportamento del bot, solo sul detector → live.json. La detection per gli altri task resta attiva e legittima (es. raccolta principale ha distribuzione più gaussiana, alert utili).
+
+**Validazione**: pre-fix 2 entries (raccolta + raccolta_chiusura), post-fix 1 entry (solo raccolta count=8 max=332s severity high). raccolta_chiusura escluso correttamente.
+
+#### WU108. DistrictShowdown ignora flag dashboard — fix veto esplicito ✅
+
+**Sintomo (utente)**: District Showdown disabilitato dalla dashboard, ma il task girava comunque. Verifica live.json: 201 esecuzioni, 0% ok, last_err `"icona evento non trovata"`. Costo: 5.6s × 201 ≈ 19 min/die sprecati.
+
+**Root cause** ([tasks/district_showdown.py:158-169](tasks/district_showdown.py)):
+```python
+def should_run(self, ctx) -> bool:
+    if ctx.device is None or ctx.matcher is None:
+        return False
+    # auto-WU17 (27/04): gate temporale OVERRIDE del flag manuale.
+    return self._is_in_event_window()   # ← ignora task_abilitato
+```
+
+Il commento storico citava "evita rischio flag dimenticato disabilitato durante evento" — ma genera il problema opposto: l'utente non può disabilitare il task neanche volendo (es. evento saltato settimana, account low-level che non vede icona, popup promo che copre l'icona).
+
+**Fix**: aggiunto check `task_abilitato("district_showdown")` come **VETO esplicito** prima della window check:
+```python
+def should_run(self, ctx) -> bool:
+    if ctx.device is None or ctx.matcher is None:
+        return False
+    if hasattr(ctx.config, "task_abilitato"):
+        if not ctx.config.task_abilitato("district_showdown"):
+            return False   # flag dashboard come veto esplicito
+    return self._is_in_event_window()
+```
+
+**Logica risultante**:
+- Flag OFF → skip immediato (utente sa cosa fa)
+- Flag ON + fuori window → skip (autoregolazione temporale)
+- Flag ON + in window → run (esegue task)
+
+**Smoke test**: 2/2 verdi (flag=False → should_run=False; flag=True → dipende da window).
+
+**Effetto**: hot-reload al prossimo tick di ciascuna istanza. Da prossimo ciclo, DS skip immediato → -5.6s × 11 = ~60s/ciclo recuperati. Dashboard ora autoritativa.
+
+#### WU107. Tick_sleep dashboard ignorato dal bot — fix conversione + lettura config ✅
+
+**Sintomo (utente)**: dashboard mostra `tick_sleep_min=5` (5 minuti tra cicli), ma il bot reale girava ogni **60 secondi** (1 minuto).
+
+**Verifica oggettiva**: gap fra fine ciclo N e inizio ciclo N+1 da `data/telemetry/cicli.json`:
+```
+ciclo 119→120: 60s
+ciclo 120→121: 60s
+ciclo 121→122: 60s
+... (uniforme)
+```
+Confermato 60s = `--tick-sleep 60` da `run_prod.bat`, indipendente dal config dashboard.
+
+**Doppio bug**:
+
+1. **`config_loader._merge_globali`** ([config_loader.py:282-284](config/config_loader.py)) faceva alias `tick_sleep_min → tick_sleep` **senza conversione minuti→secondi**:
+   ```python
+   key = "tick_sleep" if k == "tick_sleep_min" else k
+   merged["sistema"][key] = v   # 5 (min) salvato come 5 (sec)
+   ```
+
+2. **`main.py::SLEEP_CICLO`** ([main.py:1065](main.py)) usava SOLO `args.tick_sleep` da CLI, **ignorando completamente il merged config**. Quindi anche se il config_loader avesse fatto la conversione corretta, il valore non sarebbe stato letto.
+
+**Fix combinato**:
+
+a) **`config_loader.py`** — conversione esplicita `tick_sleep_min × 60 → tick_sleep_secondi`:
+   ```python
+   if k == "tick_sleep_min":
+       merged["sistema"]["tick_sleep"] = int(v) * 60
+   else:
+       merged["sistema"][k] = v
+   ```
+
+b) **`main.py`** — argparse default `--tick-sleep=-1` (sentinel "leggi da config") + risoluzione priorità:
+   ```python
+   if args.tick_sleep < 0:
+       _tick_cfg = merged.get("sistema", {}).get("tick_sleep")
+       args.tick_sleep = _tick_cfg if _tick_cfg >= 0 else 300
+       _log("MAIN", f"tick_sleep da config: {args.tick_sleep}s (={args.tick_sleep/60:.1f}min)")
+   else:
+       _log("MAIN", f"tick_sleep CLI esplicito: {args.tick_sleep}s")
+   ```
+
+c) **`run_prod.bat`** — rimosso `--tick-sleep 60` esplicito (lascia che il config decida). CLI override resta disponibile per test/debug.
+
+**Priorità risolta**: CLI esplicito (positivo) > config (`tick_sleep_min × 60`) > default 300s.
+
+**Validazione**: smoke test `merge_config` su prod conferma `runtime_overrides.tick_sleep_min=5` → `merged.sistema.tick_sleep=300`. Effetto al prossimo restart bot.
+
+#### WU106. Cap istanza rifornimento — cattura giornaliera alla prima spedizione ✅
+
+**Obiettivo**: scoprire e persistere il cap di invio individuale di ogni istanza (il `provviste_residue` letto al popup compila è la capacità giornaliera DI INVIO dell'istanza, separato dal cap di RICEZIONE del rifugio FauMorfeus pari a 200M netti). Permette stime di quote dinamiche per istanza senza dover dipendere solo dal cap globale.
+
+**Modifiche** ([core/state.py](core/state.py) + [tasks/rifornimento.py](tasks/rifornimento.py)):
+
+1. **`RifornimentoState`** — 2 nuovi campi:
+   - `cap_invio_iniziale_oggi: int = -1` — NETTO, primo `provviste_residue` letto del giorno
+   - `qta_max_invio_lordo: int = -1` — LORDO max per singolo invio (input clamped al popup compila)
+
+2. **`_controlla_reset()`** — azzera entrambi a `-1` al cambio giorno UTC
+
+3. **`registra_cap_giornaliero(cap_invio, qta_max_lordo)`** — metodo nuovo, idempotente (scrive solo se attuale `<0`). Cristallizza i valori alla prima esposizione del giorno.
+
+4. **Hook in task** (rami MAPPA + MEMBRI): alla prima spedizione (`spedizioni_oggi==0`), prima di `registra_spedizione`, chiama `registra_cap_giornaliero(provviste_lette, qta_lordo)`. Log:
+   ```
+   Rifornimento: [WU106] cap istanza giornaliero=22.5M netti | qta max singolo invio=1.56M lordo
+   ```
+
+5. **Persistenza** — `to_dict`/`from_dict` con compat legacy (default `-1` per state pre-WU106).
+
+**Esempio dati attesi** (post-restart, primi cicli del 04/05 UTC):
+- FAU_09: cap ~22.5M netti, qta_max ~1.56M lordo
+- FAU_10: cap ~26M netti, qta_max ~1.55M lordo
+- FAU_08: cap ~22M netti, qta_max ~1.55M lordo
+- ecc.
+
+**Vantaggi**:
+- Distinguiamo le istanze con cap diverso (livello edificio Embassy/HQ?)
+- Predictor può stimare `target_sped_ciclo = (cap_residuo / qta_max_lordo) / cicli_rimanenti`
+- Dashboard può mostrare "cap giornaliero usato: X / Y M (Z%)" sulla card istanza
+- Analisi storica di crescita dei cap (correla con upgrade edifici)
+
+**Smoke test**: idempotenza OK, reset OK, round-trip serializzazione OK.
+
+#### WU105. Rifornimento — bug "1 spedizione invece di 5" ✅
+
+**Sintomo**: FAU_09 ciclo 18:27 con `slot liberi=1` ha inviato 1 sola spedizione invece delle 5 di default. Pattern riproducibile su tutte le istanze con slot iniziale basso (1-2 squadre libere mentre le altre erano fuori per raccolta del ciclo precedente).
+
+**Log incriminante**:
+```
+slot liberi=1
+spedizione 1 inviata
+slot liberi=0
+slot 0 — attendo 86s        ← attende rientro
+nessun slot libero dopo attesa — stop   ← BUG: esce sempre
+```
+
+**Root cause** ([tasks/rifornimento.py:1328-1338](tasks/rifornimento.py)): il branch `if slot == 0` chiamava `time.sleep(attesa)` + `_aggiorna_coda(coda_volo)` per attendere il rientro, ma poi faceva `break` **incondizionatamente**, senza ricontrollare lo slot. La squadra rientrava ma il loop usciva.
+
+**Fix**: dopo `time.sleep(attesa) + _aggiorna_coda`, fa `continue` invece di `break`. Il prossimo giro del while legge lo slot OCR (ora libero) e procede con la prossima spedizione. Caso `coda vuota + slot=0` rimane `break` (squadre fuori per altri task, no rientro previsto).
+
+**Modo "membri"** non impattato: assume `_MAX_SWIPE_TOP` slot, non legge UI.
+
+**Saving atteso**: con slot iniziale 1-2, le istanze passano da 1-2 spedizioni/ciclo a 4-5 (limite max_sped). ~3-4 spedizioni in più × 11 istanze × 12 cicli/giorno = ~30-50 spedizioni in più/die. Daily Receiving Limit FauMorfeus rimane il vero bottleneck, ma sfruttiamo meglio gli slot tornati durante il ciclo.
+
+#### WU104. run_prod.bat — pre-kill bot orfani via PowerShell ✅
+
+**Problema**: lanciando `run_prod.bat` con un bot precedente già in esecuzione, c'era una finestra di ~10-15s di import Python in cui due bot scrivevano simultaneamente su `engine_status.json`, `state/`, `logs/`. Il bot ha già `_cleanup_orfani_processi_startup` ([main.py:209-301](main.py)) che killa orfani al boot, ma agisce dopo che l'import è iniziato.
+
+**Fix**: pre-kill nel batch PRIMA di lanciare il nuovo Python:
+```bat
+powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -like '*main.py*' -and $_.CommandLine -notlike '*-m uvicorn*' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+timeout /t 2 /nobreak >nul
+```
+
+Esclusione `-m uvicorn` per non killare la dashboard se mai lanciata da Python con argomenti misti. 2s di grace per release file handle prima del nuovo lancio. Doppia rete: se qualcosa scappa, `_cleanup_orfani_processi_startup` al boot lo recupera.
+
+---
+
+### Issue chiuse — Sessione 03/05 sera (WU89-Step3 Skip Predictor + tick_sleep validato + config istanze update)
+
+#### WU89-Step3. Skip Predictor — modulo flag-driven, no side-effect ✅
+
+**Obiettivo**: predire se un'istanza dovrebbe essere skippata al prossimo
+tick basandosi su metriche storiche, senza modificare la struttura del bot.
+
+**Componenti** (3 file nuovi + 4 modifiche config):
+
+1. **`core/skip_predictor.py`** (NEW ~270 righe) — pure function:
+   ```python
+   predict(istanza, history, state) → SkipDecision(
+     should_skip, reason, score, signals, growth_phase, guardrail_triggered
+   )
+   ```
+
+2. **5 regole** (in ordine priorità):
+   - `squadre_fuori` (0.85): slot saturi + ritorno bot prematuro (<2×ETA+30s)
+   - `trend_magro` (0.65): last 3 cicli avg_inv < 0.5
+   - `recovery` (0.75): outcome ultimo='degraded' + gap < 5min
+   - `low_prod` (0.55): produzione <100K/h cumulativo + min 5 cicli + prod>0
+   - `proceed` (default): no skip
+
+3. **Growth phase protection**: truppe < 100K → blocca regola low_prod
+   (preserva loop raccolta→risorse→truppe→raccoglitori). Gestisce caso
+   FAU_09 (truppe basse, in fase di crescita).
+
+4. **Guardrail anti-stallo** (l'istanza non muore mai):
+   - Max 3 skip consecutivi → 4° tick forza retry
+   - Re-evaluation ogni 6 cicli (anche se predictor dice skip)
+   - Cooldown 2 cicli post-retry
+
+5. **`tools/predictor_shadow.py`** (NEW ~110 righe) — CLI replay:
+   ```bash
+   python tools/predictor_shadow.py --prod --days 3
+   python tools/predictor_shadow.py --prod --istanza FAU_03 --verbose
+   ```
+
+6. **Flag config** (default OFF, shadow first):
+   - `skip_predictor_enabled: false` in runtime_overrides + global_config
+   - `skip_predictor_shadow_only: true`
+   - Aggiunti a `GlobaliOverride` Pydantic + `GlobalConfig` dataclass
+
+**Validazione shadow** (416 record / 3 giorni):
+- 33 skip suggeriti (7.9% delle decisioni)
+- 44 guardrail-blocked (anti-stallo attivo)
+- Saving stimato: 116 min se applicato live
+- Pattern: FAU_10 32 guardrail-blocked (low_prod ricorrente)
+- FAU_09 protetta da growth_phase (truppe <100K)
+
+**Step 4-5 NON implementati** (decisi insieme all'utente):
+- Step 4: hook orchestrator in `main.py` (consumer del predictor)
+- Step 5: pannello dashboard shadow/live
+
+Validazione step 3 in modalità shadow per accumulo dati prima di
+decidere se procedere con step 4-5.
+
+#### tick_sleep_min 1 → 5 (validato 03/05)
+
+`runtime_overrides.json::globali.sistema.tick_sleep_min` da 1 a 5 (60s →
+300s). Effetto misurato in 5 ore post-cambio:
+- Raccolta efficacy: 64% → **74%** (+9pp aggregato)
+- FAU_03: 29% → 75% (+46pp, big win)
+- FAU_06: 57% → 75% (+18pp)
+- 0 cascade ADB, 0 home FALLITO
+- Throughput orario raccolta: ~10 → ~14 squadre/h (+40%)
+
+**Caveat (memoria salvata)**: validato SOLO con rifornimento OFF. Se
+riattivato ricalcolare (probabile 8-15 min).
+
+#### Config istanze update (utente, da dashboard)
+
+`runtime_overrides.json::istanze` modificato:
+- **FAU_00..FAU_05 + FauMorfeus**: livello 7 (era solo FAU_00 a lvl 7)
+- **FAU_06..FAU_10**: livello 6 (invariate)
+- **FauMorfeus**: abilitata (era false). Tipologia `raccolta_only`,
+  max_squadre 5, lvl 7
+
+Implicazioni:
+- 12 istanze attive nel ciclo bot (era 11)
+- Cap nodi medi: 6 istanze su nodi L7 (1.04M avg) + 5 su L6 (0.95M avg)
+- Tempo raccolta su nodi L7 leggermente maggiore (×1.10)
+
+---
+
+### Issue chiuse — Sessione 02/05 mattina+pomeriggio (WU90-99)
+
+#### WU99. Dashboard config — layout 4-card identico overview ✅
+
+**Richiesta utente** (con screenshot di riferimento): "le configurazioni nel
+menù config devo avere lo stesso layout di home". L'overview ha già un blocco
+"configurazione" con 4 card affiancate (`cfg4` grid: Sistema · Rifornimento ·
+Zaino · Allocazione) con stile compatto e intuitivo. La pagina
+`/ui/config/global` aveva invece il layout `tel-card` standard.
+
+**Modifiche al template `config_global.html`**:
+
+- Sostituite le sezioni Sistema · Flag globali · Rifornimento · Zaino ·
+  Allocazione con un blocco `cfg4` clonato da `index.html` (4 col-box).
+- Card **Sistema** include: max_parallel · tick_sleep · 16 task baseline
+  (checkbox 2-col) · 2 flag globali (auto_learn_banner, raccolta_ocr_debug).
+- Card **Rifornimento** identica overview ma con coord rifugio dal nuovo
+  schema unificato (`rifugio.coord_x/y`).
+- Card **Zaino** identica.
+- Card **Allocazione** include `livello_nodo` + 4 percentuali con totale e
+  barra visiva.
+- ID prefissati con `gc-` per evitare collisioni con la sezione overview
+  inclusa nello stesso DOM (anche se solo overview ha la propria sezione,
+  prevenzione futura).
+- Funzioni JS dedicate `gcSalvaSistema/Rifornimento/Zaino/Allocazione/Istanze`
+  che chiamano nuovo endpoint `PATCH /api/config/global`.
+
+**Tabella istanze** rimasta invariata sotto la sezione configurazione.
+
+**Mumu read-only** in fondo.
+
+**Nuovo endpoint** `PATCH /api/config/global` (`api_config_global.py`):
+
+- Merge incrementale top-level: ogni card invia solo la sua sezione, il
+  resto del file è preservato.
+- Scrive dict raw (no round-trip via `GlobalConfig._from_raw → to_dict()`)
+  perché il dataclass perde campi nuovi (rifugio, rifornimento unificato,
+  auto_learn_banner, raccolta_ocr_debug, soglia_allocazione).
+- `_save_global_raw()` helper: scrittura atomica tmp + replace.
+
+**Validazione**: PATCH `{sistema: {tick_sleep: 90}}` aggiorna solo sistema,
+preserva rifugio/rifornimento/raccolta.allocazione (35/35/20/10
+percentuali)/auto_learn_banner/raccolta_ocr_debug.
+
+
+
+#### WU98. Pagina /ui/config eliminata — unica config = /ui/config/global ✅
+
+**Osservazione utente**: la pagina `/ui/config` era completamente ridondante:
+- task flags + tabella istanze duplicano la overview
+- sistema · flag globali · rifornimento · zaino · allocazione duplicano
+  `/ui/config/global`
+
+**Decisione**: tenere solo `/ui/config/global` come unica pagina di
+configurazione, con tutte le sezioni più una nuova per le istanze di default.
+
+**Modifiche**:
+1. **Redirect** `GET /ui/config` → 302 `/ui/config/global`
+2. **Menu nav semplificato** (`base.html`): rimossa voce "config", lasciata
+   solo "config" → punta a `/ui/config/global`
+3. **Template** `config_overrides.html` rinominato `.legacy` (backup)
+4. **Nuova sezione** "🤖 istanze (default statici)" in `config_global.html`:
+   - Tabella editabile: nome+porta (RO) · tipologia · max_squadre · livello ·
+     layout · truppe · fuori_territorio · abilitata
+   - JS `__saveIstanze()` raccoglie i campi `name="istanze__{nome}__{campo}"`
+     e fa PUT `/api/config/istanze` (scrive su `instances.json` +
+     `runtime_overrides.json::istanze`)
+5. **Endpoint UI** `/ui/config/global` aggiornato per passare anche
+   `instances` + `overrides` al template
+
+**Pagina finale `/ui/config/global`** (6 sezioni, 60KB):
+- Sistema · Flag globali
+- Task — baseline (default reset = tutti OFF)
+- Rifornimento (modalità · rifugio · risorse)
+- Zaino · Allocazione raccolta
+- **Istanze (default statici)** ← NEW
+- Mumu — sola lettura
+
+
+
+#### WU97. Dashboard config — rimozione duplicate con overview ✅
+
+**Osservazione utente post-restart**: la pagina `/ui/config` "sembra una
+duplicazione della overview". Verifica conferma: 2 sezioni replicate.
+
+**Sezioni rimosse**:
+1. **Task flags** — già visibile nell'overview come pill `task-flags-v2`
+   (riga 51 `index.html`)
+2. **Istanze (abilitazione rapida)** — già visibile nell'overview come
+   tabella `ist-table` (riga 243 `index.html`) con stessi controlli toggle
+
+**Sezioni rimaste in `/ui/config`** (config-specific, non duplicate):
+- Sistema (`max_parallel`, `tick_sleep_min`)
+- Flag globali (`auto_learn_banner` toggle, `raccolta_ocr_debug` toggle)
+- Rifornimento (modalità · rifugio · risorse · soglie)
+- Zaino (modalità · usa · soglie)
+- Allocazione raccolta (4 percentuali)
+
+**Footnote** in fondo pagina rimanda alla overview per task flags e istanze.
+
+**Saving**: page size 38KB → 19KB (-50%), rendering più veloce + niente
+confusione utente sul "perché due pagine ripetono le stesse cose".
+
+
+
+#### WU96. Dashboard config + global config — layout uniforme ✅
+
+**Obiettivo**: rendere `/ui/config` e `/ui/config/global` coerenti col layout
+della dashboard principale (`index.html`) e chiarire visivamente la differenza
+tra le due pagine.
+
+**Pattern unificato applicato a entrambe**:
+
+```
+<div class="section">
+  <div class="sec-label">titolo sezione</div>
+  <div class="tel-grid">
+    <div class="tel-card">
+      <div class="tel-head">🔧 nome card</div>
+      ...form/contenuto...
+      <div class="tel-foot">descrizione/info</div>
+    </div>
+    ...più card affiancate...
+  </div>
+</div>
+```
+
+**Banner top esplicativo** (entrambe le pagine):
+- `/ui/config` → "config = override `runtime_overrides.json` · HOT-RELOAD
+  al prossimo tick. Per la baseline statica vedi global config (richiede
+  riavvio bot)."
+- `/ui/config/global` → "global config = baseline statica `global_config.json` ·
+  richiede RIAVVIO bot. È la configurazione di reset (cancellando
+  runtime_overrides.json il bot riparte da qui). Per modifiche hot-reload
+  usa config."
+
+**Modernizzazione `config_global.html`**: era id-based + JS save manuale
+legacy → ora HTMX nested via listener `htmx:configRequest` (riusato da WU95).
+Hidden input per `mumu[*]` paths e `rifornimento_comune[qta_*]` per non
+perderli al save (il dataclass `_from_raw` userebbe i default sostituendo
+i valori utente).
+
+**Sezioni global_config**: sistema · flag globali · task baseline ·
+rifornimento (modalità+rifugio+risorse) · zaino · allocazione raccolta ·
+mumu (sola lettura).
+
+**Verifica rendering**:
+- GET `/ui/config`: 38KB · 5 sec-label, 7 tel-card, 5 tel-grid, 7 tel-head
+- GET `/ui/config/global`: 27KB · 5 sec-label, 7 tel-card, 5 tel-grid, 7 tel-head
+- Layout count identico in entrambe le pagine.
+
+
+
+#### WU95. Dashboard config_overrides.html — sezioni complete riallineate ✅
+
+**Pre-fix**: la pagina `/ui/config` esponeva solo `task flags` + sub-form
+rifornimento parziale (3 campi) + tabella istanze. Mancavano molte sezioni
+del global_config statico.
+
+**Sezioni aggiunte**:
+
+1. **Sistema** — form `max_parallel` + `tick_sleep_min` → PUT /api/config/globals
+2. **Rifornimento completo** — modalità (mappa/membri) + rifugio (coord_x/y) +
+   comune (account, max spedizioni, 4 risorse × {abilitata, soglia})
+   → PUT /api/config/rifornimento
+3. **Zaino** — modalità (bag/svuota) + 4 risorse × {usa, soglia}
+   → PUT /api/config/zaino
+4. **Allocazione raccolta** — 4 percentuali (somma 100)
+   → PUT /api/config/allocazione
+5. **Flag globali** — toggle `auto_learn_banner` (WU93) +
+   `raccolta_ocr_debug` (WU55) con descrizione e color-coded status
+6. **Task flags** + **Istanze** (preesistenti)
+
+**Helper JS in `base.html`**: listener `htmx:configRequest` globale che:
+- Parsa nomi form `name="sezione[campo]"` → object nested
+  (es. `sistema[max_parallel]: "60"` → `{sistema: {max_parallel: 60}}`)
+- Coerce string → bool/number (`"true"` → `True`, `"60"` → `60`)
+- Serializza JSON con `Content-Type: application/json` per form
+  `hx-ext="json-enc"` (l'estensione non era shipped — ricostruita inline)
+
+**Validazione**: smoke test GET `/ui/config` → status 200, tutte le 7 sezioni
+presenti nel rendering. Pydantic payload validation OK su tutti gli endpoint.
+
+
+
+#### WU94. global_config.json baseline reset ✅
+
+**Obiettivo**: rendere `config/global_config.json` la baseline neutra di reset
+configurazione. Allineato a tutti i task implementati + valori dashboard +
+schema unificato.
+
+**Modifiche**:
+
+1. **`task` — tutti default `false`** (16 task: raccolta, rifornimento,
+   zaino, vip, alleanza, messaggi, arena, arena_mercato, boost, store, radar,
+   radar_census, donazione, main_mission, district_showdown, truppe). Reset
+   = partenza neutra, utente attiva esplicitamente solo quelli desiderati.
+2. **`sistema`**: `tick_sleep=60` (1 minuto), `max_parallel=1`.
+3. **`rifornimento_comune.acciaio_abilitato`**: `false → true` (allineato a
+   dashboard).
+4. **`rifornimento`**: schema unificato (`mappa_abilitata`, `membri_abilitati`,
+   `provviste_max`) — Issue #40. Rimosse legacy `rifornimento_mappa` e
+   `rifornimento_membri`.
+5. **`zaino`**: identico dashboard.
+6. **`raccolta.allocazione`**: percentuali 0-100 (35/35/20/10) come dashboard
+   (era frazioni 0-1).
+7. **`raccolta.soglia_allocazione`**: aggiunto (default 3).
+8. **`rifugio`**: aggiunta sezione (`coord_x=680, coord_y=531`).
+9. **`raccolta_ocr_debug`**: aggiunto (default false).
+10. **`auto_learn_banner`**: aggiunto (default true) — WU93.
+
+**Verifica reset (runtime_overrides vuoto)**:
+- 16/16 task = false
+- sistema = (1, 60s)
+- auto_learn_banner = true
+- Tutto il resto coerente
+
+**Backup precedente**: `global_config.json.bak.20260502_pre_reset` in dev+prod.
+
+
+
+#### WU93. BannerLearner — auto-apprendimento banner non catalogati ✅
+
+**Obiettivo**: sistema di riconoscimento automatico (no-AI) di X di chiusura
+in alto a destra di popup non catalogati. Quando il bot incontra un dialog
+sconosciuto, deve:
+1. Catturare la X di chiusura via heuristic OpenCV (color masks + edge density)
+2. Validare il tap con visual_diff_score + classify HOME/MAP
+3. Aggiornare catalog dinamico in `data/learned_banners.json`
+4. Riconoscere il dialog ai prossimi incontri tramite catalog runtime
+
+**Componenti** (3 nuovi moduli + 2 hook + 1 pannello dashboard):
+
+1. **`shared/banner_learner.py`** (NEW) — Detection heuristic OpenCV:
+   - `detect_x_candidates(img, roi)` → lista `XCandidate` ordinate per score
+   - Maschere colore per classi tipiche X (rosso/bordeaux + giallo/oro + magenta)
+   - Filtro shape (40-65px lato, aspect 0.7-1.4) + edge density (X interna)
+   - `crop_template_x()` + `crop_title_zone()` + `visual_diff_score()` + `template_similarity()`
+
+2. **`shared/learned_banners.py`** (NEW) — Storage JSON persistente:
+   - `LearnedBanner` dataclass (name, paths, coords, hit/success/fail counts)
+   - Schema `data/learned_banners.json` versionato
+   - `register_new()`, `record_outcome()`, `set_enabled()`, `delete()`
+   - `find_duplicate()` con similarity threshold 0.85 (dedup)
+   - LRU eviction quando supera MAX_ENTRIES=25
+   - Auto-disable dopo 3 fail streak consecutivi
+   - `load_learned_as_specs()` → `list[BannerSpec]` per inclusione runtime
+     in `BANNER_CATALOG` con priority 4
+
+3. **Hook in `shared/ui_helpers.dismiss_banners_loop`**:
+   - Nuovo parametro `enable_learner=False`
+   - Step LEARNER prima del break Step C: detect + tap top-3 candidate +
+     valida con (a) visual_diff >= 0.10 AND (b) score_home/map >= 0.70
+   - Tracking `_last_dismissed_learned` per record_outcome success/fail
+     a seconda dell'esito iter successivo
+
+4. **Hook in `core/launcher.attendi_home`**:
+   - `_enable_learner = unknown_streak >= 4` (= ~14s di blocco persistente)
+   - Passato a `dismiss_banners_loop()` solo dopo soglia per evitare tap
+     aggressivi durante transizioni normali
+
+5. **Dashboard "🧠 banner appresi (auto)"**:
+   - Toggle ON/OFF globale del processo learner in cima al pannello
+     (riflette `globali.auto_learn_banner` in runtime_overrides.json)
+   - Endpoint `/ui/partial/learned-banners` — tabella con preview X +
+     coord + hit/success rate + fail streak + last_used + stato + azioni
+   - Endpoint `/learned-template/{name}/{x|title}` — serve PNG anteprima
+   - Endpoint `POST /api/learned-banners/{name}/{enable|disable|delete}`
+   - Endpoint `POST /api/banner-learner/{enable|disable}` — toggle globale
+   - HTMX refresh 30s + bottoni inline per gestione
+   - Inserito in `index.html` dopo "📊 storico truppe"
+
+6. **Configurazione statica (`globali.auto_learn_banner`)**:
+   - Default `True` in `runtime_overrides.json`, `dashboard/models.py::GlobaliOverride`,
+     `config/config_loader.py::GlobalConfig`
+   - Hook in `core/launcher.py::attendi_home`: `_enable_learner = unknown_streak >= 4
+     and ctx.config.auto_learn_banner` — flag spegne il processo runtime senza
+     modificare codice
+   - Persistenza via dashboard toggle: rilettura immediata al prossimo tick
+
+**Validazione heuristic** su screenshot reale Equipment Report:
+- Ground truth X tag: cx=825, cy=54
+- Detection: cx=824, cy=53 (errore 1px), score 0.649
+- Falsi positivi su HOME pulita: 0/100% accurate
+
+**Effetto runtime atteso**:
+- Primo encounter di un nuovo dialog → ~5s extra per detection+validazione
+  (3 tap × 1.5s wait), ma sblocca al primo tap valido invece di 57s freeze
+- Encounter successivi → riconoscimento istantaneo via catalog dinamico
+- Cap dataset 25 entry, dedup automatico, auto-disable degli entry
+  patologici
+
+#### WU92. Banner catalog — Equipment Report popup IAP ✅
+
+**Discovery**: bot prod 02/05 mattina osservato pattern UNKNOWN persistente
+~57s su FAU_02 (09:04 UTC) e FAU_03 (09:10 UTC). Banner-loop "nessun banner
+riconosciuto" → fallback `_unmatched_tap_x` cerchio dorato (WU66) sblocca
+con 2 tap a (870,97). Cattura via `_save_discovery_snapshot` esistente
+(streak 3/4 → `debug_task/boot_unknown/FAU_02_*streak4_20260502_094902.png`).
+
+**Diagnosi visiva**: popup IAP gioco "Equipment Report" — titolo arancione
+su carta beige, lista 6 icone equipment, CTA "€19,99 / instantly receive
+1750x". Chiusura via piccolo cartellino bordeaux a forma di diamante con X
+bianca/oro in alto-destra del popup (zona ~800-855 × 25-80) + graffetta
+metallica adiacente. NON è la stessa X cerchio dorato di `pin_btn_x_close`
+(forma diversa, sfondo rosso, dimensione diversa).
+
+**File aggiunti**:
+- `templates/pin/pin_equipment_report_title.png` (34×340) — titolo
+- `templates/pin/pin_btn_x_tag_diamond.png` (51×55) — X tag chiusura
+
+**Modifica**: `shared/banner_catalog.py` — entry `equipment_report` priority 2:
+```python
+BannerSpec(
+    name="equipment_report",
+    template="pin/pin_equipment_report_title.png",
+    roi=(40, 20, 410, 70),
+    threshold=0.80,
+    dismiss_action="tap_template",
+    dismiss_template="pin/pin_btn_x_tag_diamond.png",
+    dismiss_template_roi=(780, 15, 880, 90),
+    dismiss_template_soglia=0.75,
+    wait_after_s=1.5,
+    priority=2,
+)
+```
+
+**Effetto atteso**: al prossimo popup, log `[BANNER-LOOP] equipment_report
+chiuso (score=0.XX) tap_template@(cx,cy)` invece di 57s di freeze.
+
+**Saving stimato**: ~55s per istanza × N occorrenze al giorno. Il pattern
+era ricorrente su FAU_02/03 al boot.
+
+#### WU90. DonazioneTask — periodic 8h invece di always ✅
+
+**Motivazione**: il task girava ad ogni tick (avg 23 donate/run × 7 cicli/notte
+× 11 istanze = ~58 min/notte di tempo bot). I dati mostrano 100% efficacy ma
+il throughput è bound dal rate di rigenero del gioco (cap pool 30, 1 donate
+ogni 20 min = 3 donate/h). Eseguire più frequente del necessario non aumenta
+il throughput totale, sprega solo tempo bot.
+
+**Calcolo finestra ottima**: target pickup 20-25 donate/run.
+- 20 donate × 20 min = 400 min = 6h 40min
+- 25 donate × 20 min = 500 min = 8h 20min
+- 30 (cap) × 20 min = 600 min = 10h (saturazione → no donate persi finché non
+  passa altro tempo)
+
+**Scelta**: `interval_hours: 8.0` → pickup atteso ~24 donate/run,
+range reale 8-10h (perché orchestrator scatta al primo tick disponibile dopo
+soglia, non in tempo reale) → 24-30 donate/run.
+
+**Saving stimato**: ~47 min/giorno di tempo bot, throughput donate invariato.
+
+**Validazione post-restart**: osservare `donate_count` nei log:
+- 24-30 consistente → tuning OK
+- Spesso 30 + log "cap raggiunto" → scendi a 7h
+- Sotto 22 spesso → sali a 9h
+
+#### WU91. MainMissionTask — daily con guard 20:00 UTC ✅
+
+**Motivazione**: il task girava ogni 12h, ma le ricompense mission si
+accumulano durante la giornata e vanno raccolte una sola volta (no benefit
+nel raccoglierle a metà giornata vs fine). Inoltre molte ricompense hanno
+senso a fine-giornata quando il count milestone è massimizzato (es.
+chest milestone con AP elevato).
+
+**Modifiche**:
+
+1. `config/task_setup.json:7` — schedule `periodic 12h` → `daily 24h`
+2. `tasks/main_mission.py:222-231` — `should_run()` ora include guard:
+   ```python
+   if datetime.now(timezone.utc).hour < 20:
+       return False
+   ```
+
+**Effetto combinato**:
+- Schedule `daily` con reset 01:00 UTC = max 1×/die
+- Guard `hour < 20 UTC` = blocca esecuzioni prima delle 20:00 UTC
+- Finestra utile: 20:00 UTC → 01:00 UTC = **5 ore** per scattare 1 volta
+- Se bot fermo nella finestra → salta quel giorno (accettato dall'utente)
+
+**Comportamento atteso**: 1 esecuzione per istanza tra le 20:00 e le 01:00
+UTC, con tutte le ricompense accumulate del giorno (Chapter + Main + Daily +
+chest milestone).
+
+#### Bonus: tabella `_TASK_SETUP` riallineata
+Aggiunto `MainMissionTask` (era stato dimenticato in WU88 nella tabella
+ROADMAP), aggiornati DonazioneTask e MainMissionTask con i nuovi valori.
+
+---
+
+### Issue chiuse — Sessione 01/05 sera (WU86-89 — dashboard cicli + storico fix + metriche per-istanza)
+
+#### WU90. DonazioneTask — periodic 8h invece di always ✅
+
+**Motivazione**: il task girava ad ogni tick (avg 23 donate/run × 7 cicli/notte
+× 11 istanze = ~58 min/notte di tempo bot). I dati mostrano 100% efficacy ma
+il throughput è bound dal rate di rigenero del gioco (cap pool 30, 1 donate
+ogni 20 min = 3 donate/h). Eseguire più frequente del necessario non aumenta
+il throughput totale, sprega solo tempo bot.
+
+**Calcolo finestra ottima**: target pickup 20-25 donate/run.
+- 20 donate × 20 min = 400 min = 6h 40min
+- 25 donate × 20 min = 500 min = 8h 20min
+- 30 (cap) × 20 min = 600 min = 10h (saturazione → no donate persi finché non
+  passa altro tempo)
+
+**Scelta**: `interval_hours: 8.0` → pickup atteso ~24 donate/run,
+range reale 8-10h (perché orchestrator scatta al primo tick disponibile dopo
+soglia, non in tempo reale) → 24-30 donate/run.
+
+**Saving stimato**: ~47 min/giorno di tempo bot, throughput donate invariato.
+
+**Validazione post-restart**: osservare `donate_count` nei log:
+- 24-30 consistente → tuning OK
+- Spesso 30 + log "cap raggiunto" → scendi a 7h
+- Sotto 22 spesso → sali a 9h
+
+#### WU91. MainMissionTask — daily con guard 20:00 UTC ✅
+
+**Motivazione**: il task girava ogni 12h, ma le ricompense mission si
+accumulano durante la giornata e vanno raccolte una sola volta (no benefit
+nel raccoglierle a metà giornata vs fine). Inoltre molte ricompense hanno
+senso a fine-giornata quando il count milestone è massimizzato (es.
+chest milestone con AP elevato).
+
+**Modifiche**:
+
+1. `config/task_setup.json:7` — schedule `periodic 12h` → `daily 24h`
+2. `tasks/main_mission.py:222-231` — `should_run()` ora include guard:
+   ```python
+   if datetime.now(timezone.utc).hour < 20:
+       return False
+   ```
+
+**Effetto combinato**:
+- Schedule `daily` con reset 01:00 UTC = max 1×/die
+- Guard `hour < 20 UTC` = blocca esecuzioni prima delle 20:00 UTC
+- Finestra utile: 20:00 UTC → 01:00 UTC = **5 ore** per scattare 1 volta
+- Se bot fermo nella finestra → salta quel giorno (accettato dall'utente)
+
+**Comportamento atteso**: 1 esecuzione per istanza tra le 20:00 e le 01:00
+UTC, con tutte le ricompense accumulate del giorno (Chapter + Main + Daily +
+chest milestone).
+
+#### Bonus: tabella `_TASK_SETUP` riallineata
+Aggiunto `MainMissionTask` (era stato dimenticato in WU88 nella tabella
+ROADMAP), aggiornati DonazioneTask e MainMissionTask con i nuovi valori.
+
+---
+
+### Issue chiuse — Sessione 01/05 sera (WU86-89 — dashboard cicli + storico fix + metriche per-istanza)
+
+#### WU86. Pannello dashboard "ultimi 5 cicli" per istanza ✅
+
+In card produzione istanze nuova sezione che mostra gli ultimi 5 tick completi
+della singola istanza (avvio→chiusura, durata, outcome ok/cascade/abort).
+Dato letto da `data/telemetry/cicli.json` filtrato per istanza + ordinamento
+desc per timestamp avvio. HTMX refresh 60s.
+
+#### WU87. Storico eventi dashboard — durata 0 + filtro non persistente ✅
+
+3 bug nel pannello storico eventi:
+
+1. **Durata sempre 0** — `main.py:840` usava `max(orc._entries)` che restituiva
+   sempre l'ultimo task ordinato (raccolta_chiusura priority 200) quindi solo
+   quello veniva loggato e con durata 0 perché non tracciata. Fix: itera tutte
+   le entry con `last_run >= _tick_start_ts` e ne logga la durata.
+
+2. **Campo durata mancante** — `_TaskEntry` non aveva il tracking della durata.
+   Fix in `core/orchestrator.py`: aggiunto `last_duration_s: float = 0.0`,
+   wrappato `task.run()` con `_run_start = time.time()` + `entry.last_duration_s
+   = time.time() - _run_start` (anche su exception).
+
+3. **Filtro non persistente** — HTMX refresh 30s azzerava i select istanza/task.
+   Fix nei template: aggiunto `name="istanza"` e `name="task"` ai select +
+   `hx-include="#f-istanza, #f-task"` sulla sezione hx-trigger. Dropdown task
+   esteso con `main_mission`.
+
+**Storico truppe**: parallelo, mancava FauMorfeus perché `get_truppe_storico_aggregato`
+iterava solo le chiavi presenti in storico. Fix: itera da `load_instances()` per
+includere tutte le istanze configurate (anche disabilitate / senza dati) +
+dedup con keys storico.
+
+#### WU89. Persistenza metriche per-istanza per-ciclo (foundation skip predictor) ✅
+
+**Obiettivo**: accumulare dataset analitico per istanza × ciclo che permetta in
+futuro di stimare se un'istanza ha ancora raccoglitori in marcia/raccolta e
+quindi se conviene saltarla per accorciare il ciclo globale.
+
+**Modulo**: `core/istanza_metrics.py`. Buffer in-memory thread-safe per istanza,
+flush atomic JSONL su `chiudi_tick`. Best-effort: errori I/O silenziati per
+non rompere il bot.
+
+**Schema record JSONL** (`data/istanza_metrics.jsonl`):
+```json
+{
+  "ts": "ISO UTC fine ciclo",
+  "instance": "FAU_07",
+  "cycle_id": 123,
+  "boot_home_s": 142.3,
+  "tick_total_s": 487.2,
+  "raccolta": {
+    "attive_pre": 0, "attive_post": 4, "totali": 4,
+    "invii": [{"tipo": "campo", "livello": 6, "cap_nodo": 1200000, "eta_marcia_s": 95}]
+  },
+  "task_durations_s": {"raccolta": 95.3, "donazione": 21.5, ...},
+  "outcome": "ok" | "cascade" | "abort"
+}
+```
+
+**Hook** (5 punti minimal):
+- `main.py::_thread_istanza` start → `inizia_tick(nome, cycle_id)`
+- `main.py::_thread_istanza` end → `chiudi_tick(nome, outcome, tick_total_s)` +
+  propagazione `last_duration_s` di ogni entry orchestrator a `imposta_task_duration`
+- `core/launcher.py` post-HOME raggiunto → `imposta_boot_home(nome, secondi)`
+- `tasks/raccolta.py` post-`_esegui_marcia` OK → `aggiungi_invio_raccolta(...)`
+- `tasks/raccolta.py` end `RaccoltaTask.run()` → `imposta_raccolta_slot(...)`
+
+**Tool analisi**: `tools/analisi_istanza_metrics.py [--prod] [--days N]` con
+5 sezioni statistiche (Boot HOME, Tick totale, Task durata, Raccolta n_invii/sat,
+ETA marcia per tipo). Avg/std/min/max/count per ogni metrica.
+
+**Validazione first records** (3 record in 5 minuti):
+- FAU_03 c0 340s 2 invii pomodoro+legno
+- FAU_04 c0 491s 3 invii
+- FAU_05 c0 290s 0 invii (slot già pieni — utile signal)
+
+**Step proposti (NON implementati, attendere accumulo dati ~5-10 cicli)**:
+- Step 3: `core/skip_predictor.py` — modulo con pesi configurabili. Input:
+  storico per istanza × tipo, ETA medi marcia, durata media raccolta, ts ultimo
+  invio. Output: `skip_probability ∈ [0, 1]` + reason string.
+- Step 4: hook `main.py::main_loop` pre-`_thread_istanza` → consultazione
+  predittore, log decisione (skip/proceed) anche se sotto soglia per audit.
+- Step 5: pannello dashboard predizioni vs realtà (precision/recall, falsi
+  positivi/negativi).
+
+**Memoria**: `project_skip_predictor.md` con spec completa.
+
+---
+
 ### Issue chiuse — Sessione 01/05 mezzogiorno (nuovo task Main Mission + dashboard fix)
 
 #### WU88. Nuovo task `main_mission` — Main + Daily + chest milestone ✅
@@ -3142,7 +4493,7 @@ state.rifornimento.provviste_esaurite→ bool (TODO: da aggiungere)
 
 ### Scheduling task (`config/task_setup.json` ↔ `main.py::_TASK_SETUP`)
 
-> Fonte di verità: `config/task_setup.json`. Aggiornato 29/04/2026 (WU62 + audit).
+> Fonte di verità: `config/task_setup.json`. Aggiornato 02/05/2026 (WU90+WU91).
 > I primi 3 task sono **sempre** Boost → Rifornimento → Raccolta (logica:
 > incrementa produzione, verifica slot, occupa slot). Gli altri seguono.
 
@@ -3151,19 +4502,20 @@ state.rifornimento.provviste_esaurite→ bool (TODO: da aggiungere)
 | 1 | BoostTask | 5 | — | periodic | always-run con BoostState guard (incrementa produzione) |
 | 2 | RifornimentoTask | 10 | — | always | guard pre-condizioni (soglie risorse, slot disponibili) |
 | 3 | RaccoltaTask | 15 | — | always | always-run se slot liberi (occupa slot squadre) |
-| 4 | **TruppeTask** | **18** | **4h** | **periodic** | **NUOVO 29/04 — addestra 4 caserme libere (skip se 4/4)** |
-| 5 | DonazioneTask | 20 | — | always | |
-| 6 | ZainoTask | 25 | 168h | periodic | |
-| 7 | VipTask | 30 | 24h | daily | |
-| 8 | AlleanzaTask | 35 | 4h | periodic | |
-| 9 | MessaggiTask | 40 | 4h | periodic | |
-| 10 | ArenaTask | 50 | 24h | daily | |
-| 11 | ArenaMercatoTask | 60 | 24h | daily | |
-| 12 | DistrictShowdownTask | 70 | — | always | guard finestre evento |
-| 13 | StoreTask | 80 | 8h | periodic | |
-| 14 | RadarTask | 90 | 12h | periodic | |
-| 15 | RadarCensusTask | 100 | 12h | periodic | disabilitato default |
-| 16 | RaccoltaChiusuraTask | 200 | — | always | chiusura tick (Issue #62) |
+| 4 | TruppeTask | 18 | 4h | periodic | addestra 4 caserme libere (skip se 4/4) |
+| 5 | **DonazioneTask** | **20** | **8h** | **periodic** | **02/05 WU90: era always; pickup atteso 24-30 donate/run (cap 30, rigenero 1/20min)** |
+| 6 | **MainMissionTask** | **22** | **24h** | **daily** | **02/05 WU91: era periodic 12h; guard `should_run` ora UTC < 20 = skip; recupero ricompense fine-giornata** |
+| 7 | ZainoTask | 25 | 168h | periodic | |
+| 8 | VipTask | 30 | 24h | daily | |
+| 9 | AlleanzaTask | 35 | 4h | periodic | |
+| 10 | MessaggiTask | 40 | 4h | periodic | |
+| 11 | ArenaTask | 50 | 24h | daily | |
+| 12 | ArenaMercatoTask | 60 | 24h | daily | |
+| 13 | DistrictShowdownTask | 70 | — | always | guard finestre evento |
+| 14 | StoreTask | 80 | 8h | periodic | |
+| 15 | RadarTask | 90 | 12h | periodic | |
+| 16 | RadarCensusTask | 100 | 12h | periodic | disabilitato default |
+| 17 | RaccoltaChiusuraTask | 200 | — | always | chiusura tick (Issue #62) |
 
 **Runtime swap RaccoltaFastTask** (WU57): se `tipologia == "raccolta_fast"`,
 `main.py::_thread_istanza` sostituisce `RaccoltaTask` con `RaccoltaFastTask`

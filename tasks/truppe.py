@@ -108,15 +108,23 @@ class TruppeTask(Task):
                 ctx.log_msg("[TRUPPE] vai_in_home errore: %s", exc)
                 return TaskResult.fail("vai_in_home fallito")
 
+        # WU115 — debug buffer (hot-reload via globali.debug_tasks.truppe)
+        from shared.debug_buffer import DebugBuffer
+        debug = DebugBuffer.for_task("truppe", getattr(ctx, "instance_name", "_unknown"))
+        debug.snap("00_pre_counter_read", ctx.device.screenshot())
+
         # Lettura counter iniziale
         x = self._leggi_counter(ctx)
         if x is None:
             ctx.log_msg("[TRUPPE] counter X/4 non leggibile — skip")
+            # Anomalia: counter non leggibile
+            debug.flush(success=True, force=True, log_fn=ctx.log_msg)
             return TaskResult.skip("counter non leggibile")
 
         ctx.log_msg("[TRUPPE] counter iniziale = %d/%d", x, _MAX_CASERME)
 
         if x >= _MAX_CASERME:
+            debug.clear()  # tutte impegnate, no anomalia
             return TaskResult.skip(f"tutte le caserme già impegnate ({x}/{_MAX_CASERME})")
 
         iterazioni = _MAX_CASERME - x
@@ -126,8 +134,11 @@ class TruppeTask(Task):
             esito = self._esegui_ciclo(ctx)
             if not esito:
                 ctx.log_msg("[TRUPPE] ciclo %d FALLITO — interrompo", i + 1)
+                debug.snap(f"99_ciclo{i+1}_fail", ctx.device.screenshot())
                 break
             ok += 1
+
+        debug.snap("01_post_loop", ctx.device.screenshot())
 
         # Lettura counter finale (best effort, no fail se OCR perde)
         x_final = self._leggi_counter(ctx)
@@ -144,7 +155,11 @@ class TruppeTask(Task):
                 pass
 
         if ok == 0:
+            debug.flush(success=False, log_fn=ctx.log_msg)
             return TaskResult.fail("nessuna caserma avviata")
+        # Anomalia: avviate < target (interruzione mid-loop)
+        anomalia = (ok < iterazioni)
+        debug.flush(success=True, force=anomalia, log_fn=ctx.log_msg)
         return TaskResult.ok(f"avviate {ok}/{iterazioni} caserme",
                              avviate=ok, target=iterazioni)
 

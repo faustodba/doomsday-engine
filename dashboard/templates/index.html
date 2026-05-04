@@ -40,10 +40,11 @@
                      min="1" max="12" style="width:50px">
             </div>
             <div class="p-row">
-              <span class="p-lbl">tick sleep (s)</span>
+              <span class="p-lbl">tick sleep (min)</span>
               <input class="p-inp" id="g-sleep" type="number"
-                     value="{{ cfg.get('sistema',{}).get('tick_sleep', 300) }}"
-                     min="0" step="30" style="width:60px">
+                     value="{{ ((cfg.get('sistema',{}).get('tick_sleep', 300)|int) // 60) }}"
+                     min="1" max="1440" step="1" style="width:60px"
+                     title="intervallo tra cicli bot in minuti (1-1440)">
             </div>
             <div class="col-sep"></div>
             <div class="col-sub">task flags</div>
@@ -53,6 +54,57 @@
                  hx-swap="innerHTML"
                  style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px">
             </div>
+            <div class="col-sep"></div>
+            <div class="col-sub" title="WU89 Skip Predictor — taglia cicli inefficaci">predictor (WU89)</div>
+            <label class="p-row" style="font-size:11px;cursor:pointer">
+              <input type="checkbox" id="g-pred-enabled"
+                     {% if cfg.get('skip_predictor_enabled') %}checked{% endif %}
+                     style="accent-color:var(--accent);margin-right:6px">
+              <span class="p-lbl" style="flex:1">abilitato</span>
+            </label>
+            <label class="p-row" style="font-size:11px;cursor:pointer"
+                   title="se attivo: predict + log + telemetria, MA NON skippa cicli (modalità di test sicura)">
+              <input type="checkbox" id="g-pred-shadow"
+                     {% if cfg.get('skip_predictor_shadow_only', True) %}checked{% endif %}
+                     style="accent-color:var(--accent);margin-right:6px">
+              <span class="p-lbl" style="flex:1">solo shadow (log no skip)</span>
+            </label>
+            <details style="font-size:9px;color:var(--text-dim);margin-top:6px;line-height:1.4">
+              <summary style="cursor:pointer;color:var(--accent);font-size:10px">guida utilizzo</summary>
+              <div style="padding:4px 0 0 8px">
+                <b style="color:var(--text)">cosa fa</b>: prima di avviare ogni istanza,
+                analizza la cronologia ultimi 20 cicli e decide se skippare (saving
+                stimato ~600s per skip applicato). Esegue 5 regole:
+                <i>squadre_fuori, trend_magro, low_total_invii, recovery, low_prod</i>.
+                <br>
+                <br>
+                <b style="color:var(--text)">3 stati</b>:
+                <ul style="margin:2px 0 4px 16px;padding:0">
+                  <li><code style="color:var(--text)">abilitato=OFF</code> →
+                  no-op, bot identico (default deploy)</li>
+                  <li><code style="color:var(--text)">abilitato=ON, shadow=ON</code> →
+                  predict + log + telemetria, <b>nessuno skip applicato</b>
+                  (test sicuro)</li>
+                  <li><code style="color:var(--text)">abilitato=ON, shadow=OFF</code> →
+                  attivo: skippa realmente cicli inefficaci</li>
+                </ul>
+                <b style="color:var(--text)">workflow consigliato</b>:
+                <ol style="margin:2px 0 4px 16px;padding:0">
+                  <li>attiva <i>shadow</i> → osserva log
+                  <code>[PREDICTOR-SHADOW]</code> per 6-12 cicli</li>
+                  <li>analizza <code>data/predictor_decisions.jsonl</code>
+                  per precision/recall</li>
+                  <li>se OK → disattiva shadow per applicare skip live</li>
+                </ol>
+                <b style="color:var(--text)">guardrail</b>: max 3 skip
+                consecutivi → forza retry; cooldown 2 cicli post-retry; istanze
+                master e in growth phase mai skippate.
+                <br>
+                <br>
+                <b style="color:var(--text)">hot-reload</b>: cambio attivo al
+                prossimo tick istanza, no restart bot.
+              </div>
+            </details>
           </div>
           <div class="col-foot">
             <button class="btn btn-primary btn-full" onclick="salvaGlobals()">⬡ salva sistema</button>
@@ -88,7 +140,7 @@
             </div>
             <div class="col-sep"></div>
             <div class="col-sub">soglie invio (M)</div>
-            {% for r,ico,default in [('campo','🍅',5.0),('legno','🪵',5.0),('petrolio','🛢',2.5),('acciaio','⚙',3.5)] %}
+            {% for r,ico,default in [('campo','🍅',5.0),('legno','🪵',5.0),('acciaio','⚙',3.5),('petrolio','🛢',2.5)] %}
             <div class="rr {% if not cfg.get('rifornimento_comune',{}).get(r+'_abilitato',True) %}flagoff{% endif %}"
                  id="rr-{{ r }}">
               <span class="rr-ico">{{ ico }}</span>
@@ -105,27 +157,30 @@
             {% endfor %}
             <div class="col-sep"></div>
             <div class="col-sub">modalità</div>
+            {# WU111 (03/05): migrato schema legacy rifornimento_mappa/membri #}
+            {# allo schema unificato rifornimento.mappa_abilitata/membri_abilitati #}
+            {# (post WU40/WU94). Coord rifugio in sezione `rifugio` top-level. #}
             <div class="mode-row">
-              <div class="mode-btn {% if cfg.get('rifornimento_mappa',{}).get('abilitato') %}active{% endif %}"
+              <div class="mode-btn {% if cfg.get('rifornimento',{}).get('mappa_abilitata') %}active{% endif %}"
                    id="mode-mappa" onclick="setMode('mappa')">🗺 mappa</div>
-              <div class="mode-btn {% if cfg.get('rifornimento_membri',{}).get('abilitato') %}active{% endif %}"
+              <div class="mode-btn {% if cfg.get('rifornimento',{}).get('membri_abilitati') %}active{% endif %}"
                    id="mode-membri" onclick="setMode('membri')">👥 membri</div>
             </div>
             <div id="mappa-cfg"
-                 style="display:{{ 'block' if cfg.get('rifornimento_mappa',{}).get('abilitato') else 'none' }}">
+                 style="display:{{ 'block' if cfg.get('rifornimento',{}).get('mappa_abilitata') else 'none' }}">
               <div class="p-row" style="margin-top:6px">
                 <span class="p-lbl">rifugio X</span>
                 <input class="p-inp" id="r-rifx" type="number"
-                       value="{{ cfg.get('rifornimento_mappa',{}).get('rifugio_x',687) }}"
+                       value="{{ cfg.get('rifugio',{}).get('coord_x',687) }}"
                        style="width:60px">
                 <span class="p-lbl">Y</span>
                 <input class="p-inp" id="r-rify" type="number"
-                       value="{{ cfg.get('rifornimento_mappa',{}).get('rifugio_y',532) }}"
+                       value="{{ cfg.get('rifugio',{}).get('coord_y',529) }}"
                        style="width:60px">
               </div>
             </div>
             <div id="membri-cfg"
-                 style="display:{{ 'block' if cfg.get('rifornimento_membri',{}).get('abilitato') else 'none' }}">
+                 style="display:{{ 'block' if cfg.get('rifornimento',{}).get('membri_abilitati') else 'none' }}">
               <div class="member-card" style="margin-top:6px">
                 <div class="avatar">👤</div>
                 <div class="member-info">
@@ -165,7 +220,7 @@
             </div>
             <div class="col-sep"></div>
             <div class="col-sub">soglie deposito (M)</div>
-            {% for r,ico,default in [('pomodoro','🍅',20.0),('legno','🪵',20.0),('petrolio','🛢',5.0),('acciaio','⚙',10.0)] %}
+            {% for r,ico,default in [('pomodoro','🍅',20.0),('legno','🪵',20.0),('acciaio','⚙',10.0),('petrolio','🛢',5.0)] %}
             <div class="rr {% if not cfg.get('zaino',{}).get('usa_'+r,True) %}flagoff{% endif %}"
                  id="zr-{{ r }}">
               <span class="rr-ico">{{ ico }}</span>
@@ -243,7 +298,7 @@
                  hx-get="/ui/partial/ist-table"
                  hx-trigger="load"
                  hx-swap="innerHTML">
-            <tr><td colspan="7" style="color:var(--text-dim);font-size:9px;padding:8px">caricamento...</td></tr>
+            <tr><td colspan="8" style="color:var(--text-dim);font-size:9px;padding:8px">caricamento...</td></tr>
           </tbody>
         </table>
       </div>
@@ -252,128 +307,6 @@
         <span class="save-note">modifiche attive al prossimo avvio istanza</span>
         <span class="save-ok" id="ist-ok">✓ salvato</span>
         <span class="save-err" id="ist-err"></span>
-      </div>
-    </div>
-
-    <div class="divider"></div>
-
-    <!-- ── TELEMETRIA (WU37 — Issue #53 MVP) ──────────────── -->
-    <div class="section">
-      <div class="sec-label">telemetria</div>
-      <div class="tel-grid">
-
-        <div class="tel-card">
-          <div class="tel-head">📊 telemetria task</div>
-          <div id="tel-task"
-               hx-get="/ui/partial/telemetria-task"
-               hx-trigger="load, every 30s"
-               hx-swap="innerHTML">
-            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
-          </div>
-          <div class="tel-foot">scan rolling 24h logs/FAU_*.jsonl · refresh 30s</div>
-        </div>
-
-        <div class="tel-card">
-          <div class="tel-head">📚 storico cicli</div>
-          <div id="tel-storico-cicli"
-               hx-get="/ui/partial/telemetria-storico-cicli"
-               hx-trigger="load, every 60s"
-               hx-swap="innerHTML">
-            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
-          </div>
-          <div class="tel-foot">data/telemetry/cicli.json · ultimi 15 cicli</div>
-        </div>
-
-        <div class="tel-card">
-          <div class="tel-head">⚠️ health 24h</div>
-          <div id="tel-health"
-               hx-get="/ui/partial/telemetria-health"
-               hx-trigger="load, every 30s"
-               hx-swap="innerHTML">
-            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
-          </div>
-          <div class="tel-foot">pattern noti su 24h (memoria progetto)</div>
-        </div>
-
-        <div class="tel-card">
-          <div class="tel-head">🔄 ciclo corrente</div>
-          <div id="tel-ciclo"
-               hx-get="/ui/partial/telemetria-ciclo"
-               hx-trigger="load, every 10s"
-               hx-swap="innerHTML">
-            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
-          </div>
-          <div class="tel-foot">engine_status.json · refresh 10s</div>
-        </div>
-
-        <div class="tel-card tel-full">
-          <div class="tel-head">⏱ tempi medi task — 7gg (filtro IQR, escluso district)</div>
-          <div id="tel-tempi-medi"
-               hx-get="/ui/partial/telemetria-tempi-medi"
-               hx-trigger="load, every 120s"
-               hx-swap="innerHTML">
-            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
-          </div>
-          <div class="tel-foot">events 7gg · outlier rimossi via Tukey fences IQR×1.5 · cv = std/media</div>
-        </div>
-
-        <div class="tel-card">
-          <div class="tel-head">📈 trend 7gg</div>
-          <div id="tel-trend"
-               hx-get="/ui/partial/telemetria-trend"
-               hx-trigger="load, every 300s"
-               hx-swap="innerHTML">
-            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
-          </div>
-          <div class="tel-foot">data/storico_farm.json (90gg retention)</div>
-        </div>
-
-        <div class="tel-card">
-          <div class="tel-head">📊 storico truppe (8 giorni)</div>
-          <div id="truppe-storico"
-               hx-get="/ui/partial/truppe-storico"
-               hx-trigger="load, every 60s"
-               hx-swap="innerHTML">
-            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
-          </div>
-          <div class="tel-foot">data/storico_truppe.json · 8 giorni</div>
-        </div>
-
-      </div>
-    </div>
-
-    <div class="divider"></div>
-
-    <!-- ── STORICO EVENTI ─────────────────────────────────── -->
-    <div class="section">
-      <div class="sec-label">storico eventi</div>
-      <div class="filter-row">
-        <span class="filter-lbl">istanza</span>
-        <select class="filter-sel" id="f-istanza" name="istanza" onchange="aggiornaStorico()">
-          <option value="">tutte</option>
-          {% for ist in istanze %}
-          <option value="{{ ist.nome }}">{{ ist.nome }}</option>
-          {% endfor %}
-        </select>
-        <span class="filter-lbl">task</span>
-        <select class="filter-sel" id="f-task" name="task" onchange="aggiornaStorico()">
-          <option value="">tutti</option>
-          {% for t in ['raccolta','raccolta_chiusura','rifornimento','arena','vip','boost','store','alleanza','messaggi','donazione','truppe','main_mission','district_showdown','zaino','radar','arena_mercato','radar_census'] %}
-          <option value="{{ t }}">{{ t }}</option>
-          {% endfor %}
-        </select>
-      </div>
-      <div style="overflow-x:auto">
-        <table class="st-tbl">
-          <thead><tr><th>ts</th><th>istanza</th><th>task</th><th>esito</th><th>durata</th><th>msg</th></tr></thead>
-          <tbody id="storico-body"
-                 hx-get="/ui/partial/storico"
-                 hx-trigger="load, every 30s"
-                 hx-include="#f-istanza, #f-task"
-                 hx-swap="innerHTML">
-            <tr><td colspan="6" style="color:var(--text-dim);font-size:9px;padding:8px">caricamento...</td></tr>
-          </tbody>
-        </table>
       </div>
     </div>
 
@@ -388,12 +321,21 @@
       <div class="res-panel">
         <div class="res-panel-head">risorse farm</div>
 
+        {# WU119 — Trend 7gg in top della sezione farm (semantica produzione storica) #}
+        <div class="res-block" id="res-trend7gg"
+             hx-get="/ui/partial/telemetria-trend"
+             hx-trigger="load, every 300s"
+             hx-swap="innerHTML">
+          <div class="res-sub">trend 7gg (sparkline · current · Δ)</div>
+          <div style="color:var(--text-dim);text-align:center;padding:6px;font-size:10px">caricamento...</div>
+        </div>
+
         <div class="res-block" id="res-totali"
              hx-get="/ui/partial/res-totali"
              hx-trigger="load, every 30s"
              hx-swap="innerHTML">
           <div class="res-sub">totale raccolto (ultime 5h)</div>
-          {% for r,ico in [('campo','🍅'),('legno','🪵'),('petrolio','🛢'),('acciaio','⚙')] %}
+          {% for r,ico in [('campo','🍅'),('legno','🪵'),('acciaio','⚙'),('petrolio','🛢')] %}
           <div class="res-row">
             <span class="res-ico">{{ ico }}</span><span class="res-name">{{ r }}</span>
             <div class="res-bar-wrap"><div class="res-bar" style="width:0%"></div></div>
@@ -401,7 +343,7 @@
           </div>
           {% endfor %}
           <div class="res-sub" style="margin-top:10px">nodi in campo ora</div>
-          {% for r,ico in [('campo','🍅'),('legno','🪵'),('petrolio','🛢'),('acciaio','⚙')] %}
+          {% for r,ico in [('campo','🍅'),('legno','🪵'),('acciaio','⚙'),('petrolio','🛢')] %}
           <div class="res-row">
             <span class="res-ico">{{ ico }}</span><span class="res-name">{{ r }}</span>
             <div class="res-bar-wrap"><div class="res-bar green" style="width:0%"></div></div>
@@ -421,7 +363,7 @@
              hx-swap="innerHTML">
           <div class="res-sub">produzione/ora (ultime 5h)</div>
           <table class="ora-tbl">
-            <thead><tr><th>ora</th><th>🍅</th><th>🪵</th><th>🛢</th><th>⚙</th></tr></thead>
+            <thead><tr><th>ora</th><th>🍅</th><th>🪵</th><th>⚙</th><th>🛢</th></tr></thead>
             <tbody>
               <tr><td colspan="5" style="text-align:center;color:var(--text-dim);padding:6px">—</td></tr>
             </tbody>
@@ -534,7 +476,7 @@ async function setModeRemote(taskName, sub) {
 
 function updateAllocTotal() {
   let tot = 0;
-  ['pomodoro','legno','petrolio','acciaio'].forEach(r => {
+  ['pomodoro','legno','acciaio','petrolio'].forEach(r => {
     tot += gn('a-'+r);
   });
   tot = Math.round(tot);
@@ -547,7 +489,10 @@ function updateAllocTotal() {
 
 async function salvaGlobals() {
   const {ok,data} = await apiPut('/api/config/globals', {
-    sistema: {max_parallel: gi('g-parallel'), tick_sleep_min: gi('g-sleep')}, task: {}
+    sistema: {max_parallel: gi('g-parallel'), tick_sleep_min: gi('g-sleep')},
+    task: {},
+    skip_predictor_enabled:     gb('g-pred-enabled'),
+    skip_predictor_shadow_only: gb('g-pred-shadow'),
   });
   showMsg('g-ok','g-err', ok, data.detail||'');
 }
@@ -614,13 +559,6 @@ async function salvaIstanze() {
   });
   const {ok,data} = await apiPut('/api/config/istanze', {istanze});
   showMsg('ist-ok','ist-err', ok, data.detail||'');
-}
-
-function aggiornaStorico() {
-  const params = new URLSearchParams();
-  const ist = gv('f-istanza'); if (ist) params.set('istanza', ist);
-  const tsk = gv('f-task');    if (tsk) params.set('task', tsk);
-  htmx.ajax('GET', '/ui/partial/storico?'+params, {target:'#storico-body', swap:'innerHTML'});
 }
 
 document.addEventListener('DOMContentLoaded', () => { updateAllocTotal(); });

@@ -646,6 +646,46 @@ class _TaskWrapper:
 _contatori: dict[str, dict[str, int]] = {}
 _contatori_lock = threading.Lock()
 
+# WU89-Step4 — Skip Predictor: state per-istanza in-memory (guardrail tracking).
+# Persiste finché il bot è vivo, reset su restart (accettabile). Vedi
+# core.skip_predictor.IstanzaSkipState per i campi.
+_predictor_states: dict = {}
+_predictor_decisions_lock = threading.Lock()
+
+
+def _append_predictor_decision(nome: str, decision, mode: str, applied: bool) -> None:
+    """Append decisione predictor a data/predictor_decisions.jsonl (best-effort).
+
+    Schema:
+      {ts, instance, mode (LIVE|SHADOW), should_skip, reason, score, signals,
+       growth_phase, guardrail, applied}
+
+    `applied=True` solo se decisione `should_skip=True` AND mode=LIVE AND
+    guardrail non ha bloccato. Alimenta Step 5 (dashboard precision/recall).
+    Errore I/O = silent skip — il predictor non rompe il bot.
+    """
+    try:
+        from datetime import datetime, timezone
+        path = os.path.join(ROOT, "data", "predictor_decisions.jsonl")
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        record = {
+            "ts":           datetime.now(timezone.utc).isoformat(),
+            "instance":     nome,
+            "mode":         mode,
+            "should_skip":  bool(decision.should_skip),
+            "reason":       decision.reason,
+            "score":        round(float(decision.score), 3),
+            "signals":      decision.signals or {},
+            "growth_phase": bool(decision.growth_phase),
+            "guardrail":    decision.guardrail_triggered,
+            "applied":      bool(applied),
+        }
+        with _predictor_decisions_lock:
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
 
 def _thread_istanza(ist, tasks_cls, dry_run):
     nome  = ist["nome"]
@@ -723,6 +763,62 @@ def _thread_istanza(ist, tasks_cls, dry_run):
 
     _log_fn = lambda msg: _log(nome, msg)
 
+    # ── WU89-Step4 — Skip Predictor hook (flag-driven) ────────────────────
+    # Eseguito DOPO setup orchestrator e PRIMA dell'avvio MuMu (massimo saving:
+    # evita boot+settings+attendi_home se l'istanza viene skippata).
+    # Stati controllati da 2 flag in `globali`:
+    #   - skip_predictor_enabled (default False) → no-op, bot invariato
+    #   - skip_predictor_shadow_only (default True) → predict+log, no skip
+    # Failsafe try/except: errore predictor non rompe il bot.
+    if getattr(gcfg, "skip_predictor_enabled", False) and not dry_run:
+        try:
+            from core.skip_predictor import (
+                predict, IstanzaSkipState, load_metrics_history,
+            )
+            history    = load_metrics_history(nome, last_n=20)
+            skip_state = _predictor_states.setdefault(nome, IstanzaSkipState())
+            decision   = predict(nome, history, state=skip_state)
+            shadow     = bool(getattr(gcfg, "skip_predictor_shadow_only", True))
+            mode       = "SHADOW" if shadow else "LIVE"
+            applied    = bool(decision.should_skip) and not shadow
+
+            _log(nome,
+                 f"[PREDICTOR-{mode}] should_skip={decision.should_skip} "
+                 f"reason={decision.reason} score={decision.score:.2f}"
+                 + (f" guardrail={decision.guardrail_triggered}"
+                    if decision.guardrail_triggered else "")
+                 + (f" growth_phase=True" if decision.growth_phase else ""))
+            _append_predictor_decision(nome, decision, mode, applied)
+
+            if applied:
+                # Skip ciclo reale: aggiorna state, chiudi metriche, early return
+                skip_state.last_skip_count_consec += 1
+                skip_state.cicli_totali           += 1
+                _log(nome,
+                     f"[PREDICTOR-LIVE] SKIP CICLO — saving stimato boot+task "
+                     f"~600s (consec={skip_state.last_skip_count_consec})")
+                try:
+                    from core.istanza_metrics import chiudi_tick
+                    chiudi_tick(nome, outcome="skipped_by_predictor")
+                except Exception:
+                    pass
+                _aggiorna_stato_istanza(nome, {
+                    "stato": "idle",
+                    "ultimo_task": {
+                        "nome": "predictor_skip", "esito": "skipped",
+                        "msg": f"reason={decision.reason}",
+                        "ts": time.strftime("%H:%M:%S"), "durata_s": 0.0,
+                    },
+                })
+                return
+            else:
+                # No skip: reset counter consecutivi, incrementa totali
+                skip_state.last_skip_count_consec = 0
+                skip_state.cicli_totali           += 1
+        except Exception as exc:
+            _log(nome, f"[PREDICTOR] errore best-effort: {exc}")
+            # Procede con flow normale anche su errore predictor
+
     # ── 1. Avvio istanza MuMu + attesa HOME ─────────────────────────
     if not dry_run:
         if not _launcher.avvia_istanza(ist, _log_fn):
@@ -787,7 +883,9 @@ def _thread_istanza(ist, tasks_cls, dry_run):
                  f"pet={risorse_now['petrolio']/1e6:.1f}M dia={rd.diamanti}")
 
             # Chiudi sessione precedente (se esiste) calcolando produzione
-            chiusa = ctx.state.chiudi_sessione_e_calcola(risorse_now, ts_now)
+            # Issue #25 fix: passa rd.diamanti per calcolare delta diamanti
+            chiusa = ctx.state.chiudi_sessione_e_calcola(risorse_now, ts_now,
+                                                        diamanti_finali=rd.diamanti)
             if chiusa is not None:
                 po = chiusa.produzione_oraria or {}
                 _log(nome,
@@ -947,8 +1045,10 @@ def _parse_args():
                                 formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     p.add_argument("--istanze", default=None)
     p.add_argument("--dry-run", action="store_true", default=False)
-    p.add_argument("--tick-sleep", type=int, default=300,
-                   help="Secondi di pausa tra un ciclo completo di istanze e il successivo")
+    p.add_argument("--tick-sleep", type=int, default=-1,
+                   help="Secondi di pausa tra un ciclo completo di istanze e il successivo. "
+                        "Default -1 = leggi da config (globali.sistema.tick_sleep_min × 60). "
+                        "Override esplicito da CLI per test/debug.")
     p.add_argument("--no-dashboard", action="store_true", default=False)
     p.add_argument("--status-interval", type=int, default=5)
     p.add_argument("--reset-config", action="store_true", default=False,
@@ -980,6 +1080,30 @@ def main():
 
     _log("MAIN", "=" * 55)
     _log("MAIN", "DOOMSDAY ENGINE V6")
+
+    # Risolve tick_sleep: priorità CLI esplicito > config (sistema.tick_sleep_min × 60)
+    # > default 300s. Bug storico (03/05): il bot ignorava il config e usava
+    # solo CLI, causando dashboard tick=5min vs bot reale 60s.
+    if args.tick_sleep < 0:
+        try:
+            with open(_GLOBAL_CONFIG_PATH, encoding="utf-8") as _f:
+                _gcfg_raw = json.load(_f)
+            _ov_raw_main = load_overrides(_OVERRIDES_PATH)
+            _merged_main = merge_config(_gcfg_raw, _ov_raw_main)
+            _tick_cfg = (_merged_main.get("sistema") or {}).get("tick_sleep")
+            if isinstance(_tick_cfg, int) and _tick_cfg >= 0:
+                args.tick_sleep = _tick_cfg
+                _log("MAIN", f"tick_sleep da config: {args.tick_sleep}s "
+                             f"(={args.tick_sleep/60:.1f}min)")
+            else:
+                args.tick_sleep = 300
+                _log("MAIN", f"tick_sleep da default: {args.tick_sleep}s (config mancante)")
+        except Exception as _e:
+            args.tick_sleep = 300
+            _log("MAIN", f"tick_sleep da default: 300s (errore lettura config: {_e})")
+    else:
+        _log("MAIN", f"tick_sleep CLI esplicito: {args.tick_sleep}s")
+
     _log("MAIN", f"Root: {ROOT}  dry-run: {args.dry_run}  tick-sleep: {args.tick_sleep}s")
     _log("MAIN", f"Task setup: {len(_TASK_SETUP)} task da {_TASK_SETUP_PATH}")
     if usa_runtime:

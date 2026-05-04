@@ -53,7 +53,7 @@ _MORFEUS_STATE = _PROD_ROOT / "data" / "morfeus_state.json"
 _MAX_QTA_SPEDIZIONE = 100_000_000  # 100M
 
 # Risorse gestite — garantisce presenza nel dict anche se non inviate
-_RISORSE_STANDARD = ("pomodoro", "legno", "petrolio", "acciaio")
+_RISORSE_STANDARD = ("pomodoro", "legno", "acciaio", "petrolio")
 
 
 # ==============================================================================
@@ -162,12 +162,15 @@ def get_produzione_storico_24h(hours: int = 12) -> dict:
         bins[key] = {r: 0.0 for r in _RISORSE_STANDARD}
         bin_count[key] = 0
 
+    from shared.instance_meta import is_master_instance
     samples_total = 0
     insts = get_instances() if callable(get_instances) else []
     for ist in insts:
         nome = ist.get("nome", "")
         if not nome:
             continue
+        if is_master_instance(nome):
+            continue   # Master fuori dagli aggregati ordinari
         state = _load_state(nome)
         if not state:
             continue
@@ -342,7 +345,10 @@ def get_truppe_storico_aggregato(days: int = 8) -> dict:
         for d in range(days - 1, -1, -1)
     ]
 
+    from shared.instance_meta import is_master_instance
+
     per_istanza: list[dict] = []
+    master_row:  Optional[dict] = None
     sum_serie:   list[Optional[int]] = [None] * days
 
     # Iter su tutte le istanze configurate (anche disabilitate / senza storico)
@@ -374,21 +380,29 @@ def get_truppe_storico_aggregato(days: int = 8) -> dict:
         )
         serie = [by_date.get(iso) for iso in iso_seq]
 
-        per_istanza.append({
+        row = {
             "nome":        nome,
             "oggi":        oggi,
             "sette_gg_fa": sette_gg_fa,
             "delta":       delta,
             "delta_pct":   delta_pct,
             "serie":       serie,
-        })
+        }
+
+        # Master istanze (FauMorfeus): fuori dagli aggregati ordinari,
+        # esposte in campo dedicato per la sezione "Master" della dashboard.
+        if is_master_instance(nome):
+            master_row = row
+            continue
+
+        per_istanza.append(row)
 
         for i, v in enumerate(serie):
             if v is None:
                 continue
             sum_serie[i] = (sum_serie[i] or 0) + v
 
-    # Sort: per nome istanza alfabetico (FAU_00..FAU_10, FauMorfeus in fondo)
+    # Sort: per nome istanza alfabetico (FAU_00..FAU_10)
     # Cambio richiesto utente 30/04: prima era delta_pct desc, ora indice naturale.
     per_istanza.sort(key=lambda r: r["nome"])
 
@@ -410,6 +424,7 @@ def get_truppe_storico_aggregato(days: int = 8) -> dict:
             "delta_pct":   tot_pct,
             "serie":       sum_serie,
         },
+        "master":    master_row,   # FauMorfeus, fuori dagli aggregati ordinari
         "days":      days,
         "data_oggi": today_utc.isoformat(),
     }
@@ -527,6 +542,7 @@ def get_engine_status() -> EngineStatus:
 
 
 def get_instance_stats(nome: str) -> InstanceStats:
+    from shared.instance_meta import is_master_instance
     try:
         es          = _load_engine_status()
         ist_status  = es.istanze.get(nome)
@@ -537,6 +553,7 @@ def get_instance_stats(nome: str) -> InstanceStats:
             nome        = nome,
             tipologia   = _tipologia_istanza(nome),
             abilitata   = _abilitata(nome),
+            master      = is_master_instance(nome),
             stato_live  = stato_live,
             ultimo_tick = ultimo_tick,
         )
@@ -544,12 +561,14 @@ def get_instance_stats(nome: str) -> InstanceStats:
         return InstanceStats(nome=nome, stato_live="unknown")
 
 
-def get_all_stats() -> list[InstanceStats]:
+def get_all_stats(include_master: bool = False) -> list[InstanceStats]:
     """
-    Ritorna InstanceStats per TUTTE le istanze in instances.json.
-    Nessun filtro per nome o per flag abilitata — la dashboard decide
-    eventualmente come visualizzare gli stati inattivi.
+    Ritorna InstanceStats per le istanze ordinarie in instances.json.
+    Le istanze master (FauMorfeus) sono escluse di default — la dashboard
+    le gestisce in una sezione dedicata. Pass `include_master=True` per
+    includerle (utile per la sezione Master).
     """
+    from shared.instance_meta import is_master_instance
     try:
         es     = _load_engine_status()
         insts  = get_instances()
@@ -557,6 +576,8 @@ def get_all_stats() -> list[InstanceStats]:
         for ist in insts:
             nome = ist.get("nome", "")
             if not nome:
+                continue
+            if not include_master and is_master_instance(nome):
                 continue
             ist_status  = es.istanze.get(nome)
             state       = _load_state(nome)
@@ -566,6 +587,7 @@ def get_all_stats() -> list[InstanceStats]:
                 nome        = nome,
                 tipologia   = _tipologia_istanza(nome),
                 abilitata   = _abilitata(nome),
+                master      = is_master_instance(nome),
                 stato_live  = stato_live,
                 ultimo_tick = ultimo_tick,
             ))
@@ -582,7 +604,7 @@ def get_storico(n: int = 50) -> list[StoricoEntry]:
         return []
 
 
-def get_produzione_istanze() -> list[dict]:
+def get_produzione_istanze(include_master: bool = False, only_master: bool = False) -> list[dict]:
     """
     Auto-WU14 step3: ritorna dati produzione per ogni istanza.
 
@@ -608,6 +630,7 @@ def get_produzione_istanze() -> list[dict]:
       "n_storico_24h": int,
     }, ...]
     """
+    from shared.instance_meta import is_master_instance
     try:
         insts = get_instances()
         engine = get_engine_status()
@@ -615,6 +638,11 @@ def get_produzione_istanze() -> list[dict]:
         for ist in insts:
             nome = ist.get("nome", "")
             if not nome:
+                continue
+            is_m = is_master_instance(nome)
+            if only_master and not is_m:
+                continue
+            if not only_master and not include_master and is_m:
                 continue
             state = _load_state(nome)
             corrente = state.get("produzione_corrente")
@@ -683,7 +711,7 @@ def get_produzione_istanze() -> list[dict]:
                         spedizioni_oggi = int(sf.get("spedizioni", 0))
                         sf_inviato = {
                             r: int(sf.get(r, 0))
-                            for r in ("pomodoro", "legno", "petrolio", "acciaio")
+                            for r in ("pomodoro", "legno", "acciaio", "petrolio")
                         }
                         if any(v > 0 for v in sf_inviato.values()):
                             inviato_oggi    = sf_inviato
@@ -724,6 +752,7 @@ def get_produzione_istanze() -> list[dict]:
                 "corrente":          corrente,
                 "precedente":        precedente,
                 "n_storico_24h":     len(storico),
+                "master":            is_m,
             })
         return result
     except Exception:
@@ -750,6 +779,7 @@ def get_risorse_farm() -> RisorseFarm:
 
     Failsafe: RisorseFarm() vuoto su errore.
     """
+    from shared.instance_meta import is_master_instance
     try:
         insts = get_instances()
 
@@ -766,6 +796,8 @@ def get_risorse_farm() -> RisorseFarm:
             nome = ist.get("nome", "")
             if not nome:
                 continue
+            if is_master_instance(nome):
+                continue   # Master: non somma ai totali farm ordinari
 
             state = _load_state(nome)
             if not state:
@@ -844,3 +876,207 @@ def get_risorse_farm() -> RisorseFarm:
 
     except Exception:
         return RisorseFarm()
+
+
+# ==============================================================================
+# WU118 — Copertura squadre ultimi N cicli per istanza
+# Aggrega da data/istanza_metrics.jsonl raggruppando per (instance, cycle).
+# Ordine tipi nodi UI fisso: pomodoro/legno/acciaio/petrolio (matching nomi
+# interni: campo→pomodoro, segheria→legno).
+# ==============================================================================
+
+# Mappa tipo interno (raccolta) → label UI ordinata
+_TIPO_TO_LABEL = {
+    "campo":    "pomodoro",
+    "segheria": "legno",
+    "acciaio":  "acciaio",
+    "petrolio": "petrolio",
+}
+_LABEL_ORDINE = ("pomodoro", "legno", "acciaio", "petrolio")
+_LABEL_ICONA  = {
+    "pomodoro": "🍅",
+    "legno":    "🪵",
+    "acciaio":  "⚙",
+    "petrolio": "🛢",
+}
+# Soglia OCR noise (cf tools/report_copertura_ciclo.py)
+_SOGLIA_SATURA = 0.95
+
+
+def get_copertura_ultimi_cicli(n_cicli: int = 5) -> List[dict]:
+    """
+    Aggrega copertura squadre ultimi N cicli per ogni istanza
+    (esclude master).
+
+    Per ogni istanza ritorna:
+        {
+          "istanza": "FAU_00",
+          "cicli": [   # lista N cicli più recenti, sort desc per ts
+            {
+              "cycle_id": 142,
+              "ts":       "04/05 13:11",   # locale HH:MM DD/MM
+              "outcome":  "ok",
+              "n_invii":  3,
+              "n_satura": 3,
+              "n_unknown": 0,    # invii con load_squadra=-1
+              "per_tipo": {
+                "pomodoro": {"n":2, "sat":2, "unk":0},
+                "legno":    {"n":0, "sat":0, "unk":0},
+                "acciaio":  {"n":1, "sat":1, "unk":0},
+                "petrolio": {"n":0, "sat":0, "unk":0},
+              },
+            }, ...
+          ],
+          "totali": {  # aggregato su gli N cicli mostrati
+            "pomodoro": {"n":..., "sat":..., "unk":...},
+            ...
+          },
+        }
+
+    Sort istanze: ordine alfabetico (compatibile con altre tabelle UI).
+
+    Failsafe: lista vuota se file non esiste / errore parsing.
+    """
+    from shared.instance_meta import is_master_instance
+    metrics_path = _PROD_ROOT / "data" / "istanza_metrics.jsonl"
+    if not metrics_path.exists():
+        return []
+
+    # Read jsonl raggruppando per istanza
+    by_inst: Dict[str, List[dict]] = {}
+    try:
+        with metrics_path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                inst = r.get("instance", "")
+                if not inst or is_master_instance(inst):
+                    continue
+                # Solo cicli con almeno un invio raccolta
+                rac = r.get("raccolta", {}) or {}
+                if not rac.get("invii"):
+                    continue
+                by_inst.setdefault(inst, []).append(r)
+    except Exception:
+        return []
+
+    out: List[dict] = []
+    for inst in sorted(by_inst.keys()):
+        cicli = by_inst[inst]
+        # Sort desc per ts → ultimi N
+        cicli.sort(key=lambda r: r.get("ts", ""), reverse=True)
+        cicli = cicli[:n_cicli]
+        # Riordina asc per visualizzazione cronologica (vecchio→nuovo)
+        cicli_asc = list(reversed(cicli))
+
+        cicli_out: List[dict] = []
+        # Aggregato totali su gli N cicli mostrati
+        tot_per_tipo: Dict[str, Dict[str, int]] = {
+            lbl: {"n": 0, "sat": 0, "unk": 0} for lbl in _LABEL_ORDINE
+        }
+
+        for c in cicli_asc:
+            invii = c.get("raccolta", {}).get("invii", []) or []
+            per_tipo: Dict[str, Dict[str, int]] = {
+                lbl: {"n": 0, "sat": 0, "unk": 0} for lbl in _LABEL_ORDINE
+            }
+            n_satura  = 0
+            n_unknown = 0
+            for inv in invii:
+                tipo_int = inv.get("tipo", "")
+                lbl = _TIPO_TO_LABEL.get(tipo_int)
+                if lbl is None:
+                    continue
+                cap  = int(inv.get("cap_nodo", -1))
+                load = int(inv.get("load_squadra", -1))
+                per_tipo[lbl]["n"] += 1
+                tot_per_tipo[lbl]["n"] += 1
+                if load < 0 or cap <= 0:
+                    per_tipo[lbl]["unk"] += 1
+                    tot_per_tipo[lbl]["unk"] += 1
+                    n_unknown += 1
+                elif load >= cap * _SOGLIA_SATURA:
+                    per_tipo[lbl]["sat"] += 1
+                    tot_per_tipo[lbl]["sat"] += 1
+                    n_satura += 1
+            # Format ts locale HH:MM DD/MM
+            ts_str = "?"
+            ts_iso = c.get("ts", "")
+            if ts_iso:
+                try:
+                    from datetime import datetime as _dt
+                    dt = _dt.fromisoformat(ts_iso).astimezone()
+                    ts_str = dt.strftime("%d/%m %H:%M")
+                except Exception:
+                    ts_str = ts_iso[:16]
+            cicli_out.append({
+                "cycle_id": c.get("cycle_id", 0),
+                "ts":       ts_str,
+                "outcome":  c.get("outcome", "?"),
+                "n_invii":  len(invii),
+                "n_satura": n_satura,
+                "n_unknown": n_unknown,
+                "per_tipo": per_tipo,
+            })
+
+        out.append({
+            "istanza": inst,
+            "cicli":   cicli_out,
+            "totali":  tot_per_tipo,
+        })
+
+    return out
+
+
+# ==============================================================================
+# WU89-Step4 — Live decisions del Skip Predictor
+# Legge data/predictor_decisions.jsonl (append-only, scritto da
+# main.py::_append_predictor_decision al passaggio del hook).
+# Ritorna le ultime N decisioni in ordine cronologico inverso (più recenti
+# prime). Schema record: vedi main.py.
+# ==============================================================================
+
+def get_predictor_decisions(n: int = 20) -> List[dict]:
+    """Ritorna le ultime N decisioni del predictor (desc per ts).
+
+    Schema output per riga:
+        {ts_local, istanza, mode, should_skip, reason, score, signals,
+         growth_phase, guardrail, applied}
+
+    `ts_local` = HH:MM:SS DD/MM (locale, comodo per dashboard).
+    """
+    path = _PROD_ROOT / "data" / "predictor_decisions.jsonl"
+    if not path.exists():
+        return []
+    rows: List[dict] = []
+    try:
+        with path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                rows.append(r)
+    except Exception:
+        return []
+    # Sort desc per ts (lex su ISO8601 funziona)
+    rows.sort(key=lambda r: r.get("ts", ""), reverse=True)
+    rows = rows[:n]
+    # Format ts locale
+    from datetime import datetime as _dt
+    for r in rows:
+        ts_iso = r.get("ts", "")
+        try:
+            dt = _dt.fromisoformat(ts_iso).astimezone()
+            r["ts_local"] = dt.strftime("%H:%M:%S %d/%m")
+        except Exception:
+            r["ts_local"] = ts_iso[:16]
+    return rows

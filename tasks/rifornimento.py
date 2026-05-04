@@ -996,6 +996,18 @@ def _esegui_via_membri(ctx: TaskContext, risorse_config: dict,
         coda_volo.append((ts_invio, eta_ar))
 
         if ctx.state is not None:
+            # WU106: cap individuale alla prima spedizione del giorno
+            if ctx.state.rifornimento.spedizioni_oggi == 0 and provviste_lette >= 0:
+                ctx.state.rifornimento.registra_cap_giornaliero(
+                    cap_invio=int(provviste_lette),
+                    qta_max_lordo=int(qta_lordo),
+                )
+                ctx.log_msg(
+                    f"Rifornimento membri: [WU106] cap istanza giornaliero="
+                    f"{provviste_lette/1e6:.1f}M netti | "
+                    f"qta max singolo invio={qta_lordo/1e6:.2f}M lordo"
+                )
+
             # auto-WU34 (27/04): registra anche LORDO + TASSA daily
             tassa_amt = max(0, qta_lordo - qta_effettiva)
             ctx.state.rifornimento.registra_spedizione(
@@ -1005,6 +1017,16 @@ def _esegui_via_membri(ctx: TaskContext, risorse_config: dict,
                 qta_lorda=qta_lordo,
                 tassa_amount=tassa_amt,
             )
+
+        # Hook istanza_metrics — predictor 5-invii
+        try:
+            from core.istanza_metrics import aggiungi_invio_rifornimento
+            aggiungi_invio_rifornimento(
+                ctx.config.nome, risorsa_scelta,
+                int(qta_effettiva), int(eta_ar),
+            )
+        except Exception:
+            pass
 
         tassa_pct = ((qta_lordo - qta_effettiva) / qta_lordo * 100) if qta_lordo > 0 else 0.0
         provv_str = f" | provviste={provviste_lette:,}" if provviste_lette >= 0 else ""
@@ -1188,6 +1210,12 @@ class RifornimentoTask(Task):
         coda_volo: deque = deque()
         in_mappa = False
 
+        # WU115 — debug buffer (hot-reload via globali.debug_tasks.rifornimento)
+        from shared.debug_buffer import DebugBuffer
+        _dbg = DebugBuffer.for_task("rifornimento", getattr(ctx, "instance_name", "_unknown"))
+        if _dbg.enabled:
+            _dbg.snap("00_pre_rifornimento", ctx.device.screenshot() if ctx.device else None)
+
         ctx.log_msg(f"Rifornimento: start — risorse={risorse_l} max_sped={max_sped}")
 
         # --- Selezione modalità di esecuzione ---
@@ -1268,6 +1296,12 @@ class RifornimentoTask(Task):
         except Exception:
             pass
 
+        # WU115 — flush debug. Anomalia: max_sped>0 ma 0 spedizioni effettive
+        if _dbg.enabled:
+            _dbg.snap("99_post_rifornimento", ctx.device.screenshot() if ctx.device else None)
+        anomalia = (max_sped > 0 and spedizioni == 0)
+        _dbg.flush(success=True, force=anomalia, log_fn=ctx.log_msg)
+
         return TaskResult(
             success=True,
             message=f"{spedizioni} spedizioni",
@@ -1316,15 +1350,17 @@ class RifornimentoTask(Task):
                 ctx.log_msg(f"Rifornimento: slot liberi={slot}")
 
                 if slot == 0:
+                    # Caso A: coda nostra non vuota → aspetta rientro nostre spedizioni
+                    # e RIPROVA (lo slot si libera, possiamo inviare la prossima).
+                    # Caso B: coda vuota → tutte le squadre sono fuori per altri task
+                    # (raccolta ciclo precedente), tempi ignoti → stop.
                     attesa = _attesa_prima_spedizione(coda_volo, margine)
                     if attesa > 0:
-                        ctx.log_msg(f"Rifornimento: slot 0 — attendo {attesa:.0f}s")
+                        ctx.log_msg(f"Rifornimento: slot 0 — attendo {attesa:.0f}s e ritento")
                         time.sleep(attesa)
                         _aggiorna_coda(coda_volo)
-                    else:
-                        ctx.log_msg("Rifornimento: slot 0, coda vuota — attendo 30s")
-                        time.sleep(30)
-                    ctx.log_msg("Rifornimento: nessun slot libero dopo attesa — stop")
+                        continue   # rilegge slot al prossimo giro del loop
+                    ctx.log_msg("Rifornimento: slot 0, coda vuota — squadre fuori per altri task → stop")
                     break
 
                 # ── 2. Vai in mappa (solo prima volta) ──────────────────────
@@ -1397,6 +1433,20 @@ class RifornimentoTask(Task):
                 coda_volo.append((ts_invio, eta_ar))
 
                 if ctx.state is not None:
+                    # WU106: alla PRIMA spedizione del giorno, cristallizza il cap
+                    # individuale dell'istanza (provviste_residue letto = cap netto
+                    # iniziale, qta_lordo = max per singolo invio).
+                    if ctx.state.rifornimento.spedizioni_oggi == 0 and provviste_lette >= 0:
+                        ctx.state.rifornimento.registra_cap_giornaliero(
+                            cap_invio=int(provviste_lette),
+                            qta_max_lordo=int(qta_lordo),
+                        )
+                        ctx.log_msg(
+                            f"Rifornimento: [WU106] cap istanza giornaliero="
+                            f"{provviste_lette/1e6:.1f}M netti | "
+                            f"qta max singolo invio={qta_lordo/1e6:.2f}M lordo"
+                        )
+
                     # auto-WU34 (27/04): registra anche LORDO + TASSA daily
                     tassa_amt = max(0, qta_lordo - qta_effettiva)
                     ctx.state.rifornimento.registra_spedizione(
@@ -1406,6 +1456,16 @@ class RifornimentoTask(Task):
                         qta_lorda=qta_lordo,
                         tassa_amount=tassa_amt,
                     )
+
+                # Hook istanza_metrics — predictor 5-invii
+                try:
+                    from core.istanza_metrics import aggiungi_invio_rifornimento
+                    aggiungi_invio_rifornimento(
+                        ctx.config.nome, risorsa_scelta,
+                        int(qta_effettiva), int(eta_ar),
+                    )
+                except Exception:
+                    pass
 
                 tassa_pct = ((qta_lordo - qta_effettiva) / qta_lordo * 100) if qta_lordo > 0 else 0.0
                 provv_str = f" | provviste={provviste_lette:,}" if provviste_lette >= 0 else ""

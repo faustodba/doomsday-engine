@@ -62,6 +62,9 @@
         "petrolio": 20.0,
         "acciaio": 10.0
       }
+    },
+    "debug_tasks": {
+      "zaino": false
     }
   },
   "istanze": {
@@ -162,7 +165,8 @@
       "fascia_oraria": null,
       "max_squadre": 5,
       "layout": null,
-      "livello": 7
+      "livello": 7,
+      "master": true
     },
     "FAU_10": {
       "abilitata": true,

@@ -48,51 +48,10 @@ if TYPE_CHECKING:
 
 
 # ==============================================================================
-# Debug buffer — su fail/skip dumpa tutti gli screenshot accumulati
-# Toggle: _DEBUG_STORE_FAIL_DUMP (True = attiva).
-# Su success: discard buffer (nessun disco).
-# Su fail/skip: salva in data/store_debug/{istanza}_{ts}_{step:02d}_{label}.png.
+# Debug buffer — WU115 migrato a shared/debug_buffer (hot-reload via config).
+# Toggle: globali.debug_tasks.store (default False) in runtime_overrides.json.
+# Sostituisce WU85 _DEBUG_STORE_FAIL_DUMP modulo-level con architettura unificata.
 # ==============================================================================
-_DEBUG_STORE_FAIL_DUMP = True
-
-
-class _StoreDebugBuf:
-    """Buffer in-memory di screenshot durante esecuzione store."""
-
-    def __init__(self, instance: str) -> None:
-        self.instance = instance
-        self.shots: list[tuple[str, object]] = []  # [(label, screen)]
-
-    def snap(self, device, label: str) -> None:
-        """Cattura screenshot e accumula con label."""
-        try:
-            shot = device.screenshot()
-            if shot is not None:
-                self.shots.append((label, shot))
-        except Exception:
-            pass
-
-    def flush(self, log) -> None:
-        """Salva tutti gli screenshot accumulati su disco."""
-        if not self.shots:
-            return
-        try:
-            import cv2
-            root = Path(__file__).resolve().parents[1]
-            out_dir = root / "data" / "store_debug"
-            out_dir.mkdir(parents=True, exist_ok=True)
-            ts = _dt.now().strftime("%Y%m%d_%H%M%S")
-            saved = 0
-            for idx, (label, screen) in enumerate(self.shots):
-                frame = getattr(screen, "frame", None)
-                if frame is None:
-                    continue
-                fn = f"{self.instance}_{ts}_{idx:02d}_{label}.png"
-                cv2.imwrite(str(out_dir / fn), frame)
-                saved += 1
-            log(f"[DEBUG] dump store: {saved}/{len(self.shots)} shot in data/store_debug/")
-        except Exception as exc:
-            log(f"[DEBUG] flush fallito: {exc}")
 
 
 # ==============================================================================
@@ -239,10 +198,11 @@ class StoreTask(Task):
             # log
                 ctx.log_msg(f"[STORE] {msg}")
 
-        # Buffer debug screenshot (flush solo on fail/skip)
-        self._debug_buf = (
-            _StoreDebugBuf(getattr(ctx, "instance_name", "?"))
-            if _DEBUG_STORE_FAIL_DUMP else None
+        # WU115 — debug buffer (hot-reload via globali.debug_tasks.store)
+        from shared.debug_buffer import DebugBuffer
+        self._debug_buf = DebugBuffer.for_task(
+            "store",
+            getattr(ctx, "instance_name", "_unknown"),
         )
 
         # ── Step 0: assicura HOME ─────────────────────────────────────────────
@@ -257,21 +217,20 @@ class StoreTask(Task):
                 device, matcher, log, cfg
             )
         except Exception as exc:
-            if self._debug_buf is not None:
-                self._debug_buf.snap(device, "exception")
-                self._debug_buf.flush(log)
+            self._debug_buf.snap("exception", device.screenshot())
+            self._debug_buf.flush(success=False, log_fn=log)
             return TaskResult.fail(f"Eccezione non gestita: {exc}", step="esegui_store")
 
-        # Flush debug buffer solo se NON completato OK
-        if self._debug_buf is not None and esito != _Esito.COMPLETATO:
-            self._debug_buf.flush(log)
+        # WU115 — flush condizionale: anomalia = esito != COMPLETATO
+        successo  = (esito == _Esito.COMPLETATO)
+        anomalia  = not successo
+        self._debug_buf.flush(success=True, force=anomalia, log_fn=log)
 
         return self._mappa_esito(esito, acquistati, refreshed, log)
 
     def _snap(self, device, label: str) -> None:
         """Cattura screenshot in buffer debug (no-op se debug disabilitato)."""
-        if self._debug_buf is not None:
-            self._debug_buf.snap(device, label)
+        self._debug_buf.snap(label, device.screenshot())
 
     # ── Flusso principale ─────────────────────────────────────────────────────
 

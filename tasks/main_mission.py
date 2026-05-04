@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from typing import Optional
 
 import cv2
@@ -223,7 +224,12 @@ class MainMissionTask(BaseTask):
         if ctx.device is None or ctx.matcher is None:
             return False
         if hasattr(ctx.config, "task_abilitato"):
-            return ctx.config.task_abilitato("main_mission")
+            if not ctx.config.task_abilitato("main_mission"):
+                return False
+        # Gate orario: esegui solo dopo le 20:00 UTC (recupero ricompense fine-giornata,
+        # prima del reset daily 01:00 UTC). Combinato con schedule="daily": 1x/die.
+        if datetime.now(timezone.utc).hour < 20:
+            return False
         return True
 
     # ------------------------------------------------------------------
@@ -241,16 +247,24 @@ class MainMissionTask(BaseTask):
 
         log("[MAIN_MISSION] avvio")
 
+        # WU115 — debug buffer (hot-reload via globali.debug_tasks.main_mission)
+        from shared.debug_buffer import DebugBuffer
+        debug = DebugBuffer.for_task("main_mission", getattr(ctx, "instance_name", "_unknown"))
+
         try:
             # Step 0: assicura HOME
             if ctx.navigator is not None:
                 if not ctx.navigator.vai_in_home():
+                    debug.flush(success=False, log_fn=log)
                     return TaskResult.fail("Navigator non ha raggiunto HOME",
                                            step="vai_in_home")
+
+            debug.snap("00_pre_open_panel", ctx.device.screenshot())
 
             # Step 1: apri pannello mission
             ctx.device.tap(*cfg.tap_apri_pannello)
             time.sleep(cfg.wait_apri_pannello)
+            debug.snap("01_post_open_panel", ctx.device.screenshot())
 
             # Step 2: detect layout 2-tab vs 3-tab via OCR top tab.
             # Default all'apertura: Daily attivo (tab in fondo). Se Chapter
@@ -312,6 +326,10 @@ class MainMissionTask(BaseTask):
 
             log(f"[MAIN_MISSION] completato — chapter={n_chapter} main={n_main} "
                 f"daily={n_daily} chest={n_chest}")
+            debug.snap("02_post_claim_complete", ctx.device.screenshot())
+            # Anomalia: 0 claim totali (tutto già fatto in precedenza? OCR fail?)
+            anomalia = (n_chapter == 0 and n_main == 0 and n_daily == 0 and n_chest == 0)
+            debug.flush(success=True, force=anomalia, log_fn=log)
             return TaskResult.ok(
                 f"Main Mission completata — chapter={n_chapter} main={n_main} "
                 f"daily={n_daily} chest={n_chest}",
@@ -321,6 +339,8 @@ class MainMissionTask(BaseTask):
 
         except Exception as exc:
             log(f"[MAIN_MISSION] eccezione: {exc}")
+            debug.snap("99_exception", ctx.device.screenshot())
+            debug.flush(success=False, log_fn=log)
             return TaskResult.fail(f"Eccezione: {exc}", step="run")
 
     # ------------------------------------------------------------------

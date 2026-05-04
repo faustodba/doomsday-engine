@@ -57,13 +57,29 @@ REM ============================================================================
 
 cd /d C:\doomsday-engine-prod
 set PYTHONIOENCODING=utf-8
+set PYTHONUNBUFFERED=1
 set DOOMSDAY_ROOT=C:\doomsday-engine-prod
+
+
+REM --- PRE-KILL: bot main.py orfani da lanci precedenti ---------------------
+REM   Killa python.exe con "main.py" nel command line. Eseguito PRIMA del
+REM   lancio nuovo bot per evitare sovrapposizioni su engine_status.json,
+REM   state/, logs/. Il nuovo python.exe non e' ancora stato spawnato quindi
+REM   l'inclusione di tutti i match e' safe (no PID corrente da escludere).
+REM   Esclude esplicitamente "-m uvicorn" per non killare la dashboard.
+REM   Doppia rete: main.py contiene anche _cleanup_orfani_processi_startup
+REM   che killa cmd.exe + python.exe orfani al primo tick (preserva PID corrente).
+echo [run_prod] Pre-kill bot main.py orfani...
+powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -like '*main.py*' -and $_.CommandLine -notlike '*-m uvicorn*' } | ForEach-Object { Write-Host ('  kill PID=' + $_.ProcessId); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+timeout /t 2 /nobreak >nul
 
 
 REM --- MODALITA' 1: PRODUZIONE AUTO (default) -------------------------------
 REM Nessun prompt. Riprende ultimo checkpoint. Usa runtime config corrente.
 REM Tipico per cron/avvio automatico.
-py -3.14 main.py --tick-sleep 60 --no-dashboard --use-runtime --resume
+REM tick-sleep: NON specificato → letto da config (sistema.tick_sleep_min × 60).
+REM Override esplicito per test/debug: aggiungi --tick-sleep N (in secondi).
+py -3.14 main.py --no-dashboard --use-runtime --resume
 
 
 REM --- MODALITA' 2: PRODUZIONE INTERATTIVA ---------------------------------

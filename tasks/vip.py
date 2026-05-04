@@ -173,11 +173,18 @@ class VipTask(Task):
             # log
                 ctx.log_msg(f"[VIP] {msg}")
 
+        # WU115 — debug buffer (hot-reload via globali.debug_tasks.vip)
+        from shared.debug_buffer import DebugBuffer
+        debug = DebugBuffer.for_task("vip", getattr(ctx, "instance_name", "_unknown"))
+        self._dbg = debug   # accessibile da _esegui_vip
+
         try:
             esito, cass_ok, free_ok = self._esegui_vip(
                 device, matcher, ctx.navigator, log, cfg
             )
         except Exception as exc:
+            debug.snap("99_exception", device.screenshot())
+            debug.flush(success=False, log_fn=log)
             return TaskResult.fail(f"Eccezione non gestita: {exc}", step="esegui_vip")
 
         # Aggiorna VipState
@@ -187,6 +194,16 @@ class VipTask(Task):
             ctx.state.vip.segna_free()
         if cass_ok and free_ok:
             ctx.log_msg(f"[VIP] VipState aggiornato → {ctx.state.vip.log_stato()}")
+
+        # Anomalia: maschera aperta OK ma 0 claim ricevuti (entrambi non disponibili
+        # OCR-wise nonostante state dica "disponibili" → drift template/UI)
+        anomalia_zero_claim = (esito != _Esito.ERRORE and
+                                not cass_ok and not free_ok)
+        debug.flush(
+            success=(esito != _Esito.ERRORE),
+            force=anomalia_zero_claim,
+            log_fn=log,
+        )
 
         return self._mappa_esito(esito, cass_ok, free_ok, log)
 
@@ -215,6 +232,11 @@ class VipTask(Task):
             else:
                 log("Navigator non disponibile — assumo HOME corrente")
 
+            # WU115 — debug buffer (passato via self._dbg dal run())
+            _dbg = getattr(self, "_dbg", None)
+            if _dbg is not None:
+                _dbg.snap("00_pre_open_vip", device.screenshot())
+
             # ── STEP 2: apri maschera VIP ─────────────────────────────────────
             log(f"Tap badge VIP {cfg.tap_badge}")
             device.tap(*cfg.tap_badge)
@@ -227,6 +249,8 @@ class VipTask(Task):
                 retry=cfg.retry_screen, retry_sleep=cfg.retry_sleep,
                 log=log, label="PRE-VIP"
             )
+            if _dbg is not None:
+                _dbg.snap("01_post_open_mask", device.screenshot())
             if not ok_store:
                 log("[PRE-VIP] maschera non aperta → 3×BACK + retry")
                 for _ in range(cfg.n_back_chiudi):
@@ -240,11 +264,15 @@ class VipTask(Task):
             cass_ok = self._gestisci_cassaforte(
                 device, matcher, log, cfg
             )
+            if _dbg is not None:
+                _dbg.snap("02_post_cass_claim", device.screenshot())
 
             # ── STEP 4: CLAIM FREE ────────────────────────────────────────────
             free_ok = self._gestisci_claim_free(
                 device, matcher, log, cfg
             )
+            if _dbg is not None:
+                _dbg.snap("03_post_free_claim", device.screenshot())
 
             # ── STEP 5: verifica successo ─────────────────────────────────────
             log(f"Stato finale → cass={'OK' if cass_ok else 'KO'} "

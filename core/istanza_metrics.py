@@ -17,7 +17,19 @@
 #        "attive_post":  4,                           slot occupati post-tick
 #        "totali":       4,                           max squadre istanza
 #        "invii": [                                   dettaglio per squadra inviata
-#          {"tipo": "campo", "livello": 6, "cap_nodo": 1200000, "eta_marcia_s": 95}
+#          {"tipo": "campo", "livello": 6, "cap_nodo": 1200000,
+#           "eta_marcia_s": 95, "ts_invio": "2026-05-01T22:07:15+00:00"}
+#          # NOTE: cap_nodo = capacità RESIDUA letta da popup gather (non nominale).
+#          #       livello = ground truth da LENTE (CERCA filter), -1 solo se anomalia.
+#          #       eta_marcia_s = sola ANDATA (OCR pre-marcia).
+#          #       ts_invio = momento partenza marcia (post-_esegui_marcia OK).
+#          #       Per predictor: ts_libero ≈ ts_invio + 2*eta + tempo_raccolta.
+#          #       Cap nominale derivabile da (tipo, livello) — vedi shared/ocr_helpers.
+#        ]
+#      },
+#      "rifornimento": {                              03/05 — esteso per predictor 5-invii
+#        "invii": [
+#          {"risorsa": "pomodoro", "qta_netta": 1199999, "eta_residua_s": 90}
 #        ]
 #      },
 #      "task_durations_s": {                          per ogni task eseguito nel tick
@@ -96,8 +108,21 @@ def imposta_raccolta_slot(instance: str, attive_pre: int = -1,
 
 
 def aggiungi_invio_raccolta(instance: str, tipo: str, livello: int,
-                            cap_nodo: int, eta_marcia_s: int) -> None:
-    """Hook raccolta: aggiunge dettaglio invio singolo."""
+                            cap_nodo: int, eta_marcia_s: int,
+                            ts_invio_iso: str | None = None,
+                            load_squadra: int = -1) -> None:
+    """Hook raccolta: aggiunge dettaglio invio singolo.
+
+    ts_invio_iso: timestamp ISO UTC del momento in cui la marcia è partita
+    (post `_esegui_marcia` OK). Permette al predictor di stimare ts_libero
+    empiricamente correlando con `attive_post` dei tick successivi.
+
+    load_squadra: WU116 — carico effettivo della squadra (OCR maschera invio),
+    -1 se non disponibile. Permette analisi copertura squadra (load < cap →
+    underprovisioned, nodo non chiuso non rigenera al max).
+    """
+    if ts_invio_iso is None:
+        ts_invio_iso = datetime.now(timezone.utc).isoformat()
     with _lock:
         buf = _BUFFER_PER_INSTANCE.get(instance)
         if buf is None:
@@ -106,7 +131,28 @@ def aggiungi_invio_raccolta(instance: str, tipo: str, livello: int,
             "tipo": tipo,
             "livello": int(livello),
             "cap_nodo": int(cap_nodo),
+            "load_squadra": int(load_squadra),
             "eta_marcia_s": int(eta_marcia_s),
+            "ts_invio": str(ts_invio_iso),
+        })
+
+
+def aggiungi_invio_rifornimento(instance: str, risorsa: str,
+                                 qta_netta: int, eta_residua_s: int = 0) -> None:
+    """Hook rifornimento: aggiunge dettaglio spedizione singola.
+
+    Permette al predictor di valutare se il ciclo ha raggiunto la soglia
+    "5 invii" combinando raccolta.invii + rifornimento.invii.
+    """
+    with _lock:
+        buf = _BUFFER_PER_INSTANCE.get(instance)
+        if buf is None:
+            return
+        rif = buf.setdefault("rifornimento", {"invii": []})
+        rif.setdefault("invii", []).append({
+            "risorsa": str(risorsa),
+            "qta_netta": int(qta_netta),
+            "eta_residua_s": int(eta_residua_s),
         })
 
 
@@ -132,7 +178,7 @@ def chiudi_tick(instance: str, outcome: str = "ok",
         "cycle_id": buf.get("cycle_id", 0),
         "outcome": str(outcome),
     }
-    for k in ("boot_home_s", "raccolta", "task_durations_s"):
+    for k in ("boot_home_s", "raccolta", "rifornimento", "task_durations_s"):
         if k in buf:
             record[k] = buf[k]
     if tick_total_s is not None:

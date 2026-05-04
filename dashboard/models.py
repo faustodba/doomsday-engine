@@ -38,11 +38,19 @@ from pydantic import BaseModel, Field, field_validator
 # ==============================================================================
 
 class TaskFlags(BaseModel):
-    """Flag on/off per tutti i task. raccolta non è controllabile (gira sempre).
+    """Flag on/off per tutti i task.
 
     Nota: la sub-mode del rifornimento (mappa vs membri) NON è qui — è in
     `RifornimentoOverride.mappa_abilitata / membri_abilitati` (mutuamente esclusive).
     Il flag `rifornimento` è solo il master on/off del task.
+
+    Bug storico (03/05): `raccolta` non era nel modello con il rationale "gira
+    sempre" → ogni `_save_ov(ov)` serializzava il dict perdendo la chiave →
+    `task_abilitato("raccolta")` cadeva sul default di global_config (False
+    dopo il reset baseline WU94) → tutte le istanze skippavano raccolta. Fix:
+    raccolta presente nel modello, default True. UI dashboard non la espone
+    come toggle (resta sempre ON di fatto), ma la chiave viene preservata
+    nel JSON al ogni salvataggio.
     """
     alleanza:           bool = True
     messaggi:           bool = True
@@ -50,6 +58,7 @@ class TaskFlags(BaseModel):
     radar:              bool = True
     radar_census:       bool = False
     rifornimento:       bool = False
+    raccolta:           bool = True      # sempre ON, NON esposta in UI come toggle
     donazione:          bool = True
     main_mission:       bool = True
     zaino:              bool = True
@@ -186,6 +195,15 @@ class GlobaliOverride(BaseModel):
     raccolta:             RaccoltaOverride            = Field(default_factory=RaccoltaOverride)
     # WU55 — Data collection OCR slot HOME vs MAPPA
     raccolta_ocr_debug:   bool                       = False
+    # WU93 — BannerLearner auto-apprendimento banner non catalogati
+    auto_learn_banner:    bool                       = False  # WU110: deprecato, default disable
+    # WU89 Step 3 — Skip Predictor (default OFF, shadow first)
+    skip_predictor_enabled:     bool                 = False
+    skip_predictor_shadow_only: bool                 = True
+    # WU115 — Debug screenshot per task (hot-reload via dashboard).
+    # Dict {task_name: bool}, default empty (= tutti False).
+    # Vedi shared/debug_buffer.py per architettura completa.
+    debug_tasks:          Dict[str, bool]            = Field(default_factory=dict)
 
 
 # ==============================================================================
@@ -214,6 +232,9 @@ class IstanzaOverride(BaseModel):
     livello:      Optional[int]           = None   # scritto su instances.json
     # WU50 — raccolta fuori territorio (per istanza)
     raccolta_fuori_territorio: bool       = False
+    # Master istanza (rifugio destinatario): esclusa dagli aggregati ordinari
+    # (telemetria, predictor, ranking dashboard). Esposta in sezione UI dedicata.
+    master:       bool                    = False
 
 
 # ==============================================================================
@@ -354,6 +375,7 @@ class InstanceStats(BaseModel):
     nome:        str
     tipologia:   TipologiaIstanza = TipologiaIstanza.full
     abilitata:   bool             = True
+    master:      bool             = False  # rifugio destinatario (esclusa aggregati)
     stato_live:  str              = "unknown"
     ultimo_tick: TickStats        = Field(default_factory=TickStats)
 
@@ -363,9 +385,15 @@ class InstanceStats(BaseModel):
 # ==============================================================================
 
 class PayloadGlobals(BaseModel):
-    """PUT /api/config/globals — task flags + parametri sistema."""
+    """PUT /api/config/globals — task flags + parametri sistema + predictor.
+
+    WU89-Step4 (04/05): aggiunti `skip_predictor_*` opzionali (None = no
+    update). Permette di toggleare il predictor da dashboard senza restart.
+    """
     task:    TaskFlags      = Field(default_factory=TaskFlags)
     sistema: SistemaOverride = Field(default_factory=SistemaOverride)
+    skip_predictor_enabled:     Optional[bool] = None
+    skip_predictor_shadow_only: Optional[bool] = None
 
 
 class PayloadRifornimento(BaseModel):

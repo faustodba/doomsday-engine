@@ -1,0 +1,127 @@
+{% extends "base.html" %}
+{% block title %}Doomsday V6 — Predictor{% endblock %}
+{% block content %}
+
+<div class="page-layout">
+  <div class="main-col" style="width:100%">
+
+    <!-- ──────────────────────────────────────────────────────
+         SEZIONE 1 — CYCLE DURATION PREDICTOR
+         ────────────────────────────────────────────────────── -->
+    <div class="section">
+      <div class="sec-label">⏱ cycle predictor — stima durata ciclo bot</div>
+      <div class="tel-grid">
+
+        <div class="tel-card tel-full">
+          <div class="tel-head">stima corrente (schedule-aware)</div>
+          <div id="cycle-prediction"
+               hx-get="/ui/partial/cycle-prediction"
+               hx-trigger="load, every 60s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">
+            T_ciclo = Σ_istanza(boot + Σ task_due) + tick_sleep · rolling stats ultimi 20 record · refresh 60s
+          </div>
+        </div>
+
+        <div class="tel-card tel-full">
+          <div class="tel-head">🔍 drilldown — input context + what-if (skip istanza)</div>
+          <div id="cycle-snapshot-detail"
+               hx-get="/ui/partial/cycle-snapshot-detail"
+               hx-trigger="load, every 60s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">
+            input context dell'ultimo snapshot · per ogni istanza: T_s + task dovuti + T_ciclo se skippata · permette analisi reproducible + planning skip
+          </div>
+        </div>
+
+        <div class="tel-card tel-full">
+          <div class="tel-head">📊 accuracy storica (snapshot ogni 15 min × ciclo)</div>
+          <div id="cycle-accuracy"
+               hx-get="/ui/partial/cycle-accuracy"
+               hx-trigger="load, every 120s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">
+            ad ogni snapshot: error% = |predicted - actual| / actual × 100 · 🟢 &lt;10% · 🟠 10-25% · 🔴 &gt;25%
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ──────────────────────────────────────────────────────
+         SEZIONE 2 — SKIP PREDICTOR (squadre fuori)
+         ────────────────────────────────────────────────────── -->
+    <div class="section">
+      <div class="sec-label">🛡 skip predictor — squadre fuori</div>
+      <div class="tel-grid">
+
+        <div class="tel-card tel-full">
+          <div class="tel-head">🤖 ultime 30 decisioni (live, refresh 15s)</div>
+          <div id="predictor-decisions"
+               hx-get="/ui/partial/predictor-decisions"
+               hx-trigger="load, every 15s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">
+            data/predictor_decisions.jsonl · 🔴 SKIP LIVE · 🟠 SKIP SHADOW · 🟣 guardrail · grigio PROCEED · 🟢 GROWTH
+          </div>
+        </div>
+
+        {# Placeholder per accuracy skip predictor (futuro, richiede tracking ground truth slot) #}
+        <div class="tel-card tel-full" style="opacity:0.6">
+          <div class="tel-head">📈 accuracy skip predictor (in sviluppo)</div>
+          <div style="color:var(--text-dim);padding:8px;font-size:11px;line-height:1.5">
+            Confronterà le decisioni predictor con il ground truth osservato:<br>
+            <ul style="margin:6px 0 0 18px">
+              <li><b>TP</b>: predicted_skip=True AND attive_pre[next_tick] = totali (skip giusto)</li>
+              <li><b>FP</b>: predicted_skip=True AND attive_pre[next_tick] &lt; totali (skip non necessario)</li>
+              <li><b>FN</b>: predicted_skip=False AND attive_pre[next_tick] = totali (skip mancato)</li>
+              <li><b>TN</b>: predicted_skip=False AND attive_pre[next_tick] &lt; totali (proceed giusto)</li>
+            </ul>
+            Disponibile dopo accumulo 50+ decisioni shadow per istanza.
+          </div>
+          <div class="tel-foot">precision/recall + matrice di confusione per istanza</div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ──────────────────────────────────────────────────────
+         SEZIONE 3 — CONFIGURAZIONE
+         ────────────────────────────────────────────────────── -->
+    <div class="section">
+      <div class="sec-label">⚙ configurazione</div>
+      <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:6px;padding:12px;font-size:11px;line-height:1.6;color:var(--text-dim)">
+        <div><b style="color:var(--text)">Toggle predictor</b> da <a href="/ui" style="color:var(--accent)">home → sistema → predictor (WU89)</a>:</div>
+        <ul style="margin:6px 0 8px 18px">
+          <li><code>abilitato=☐</code> → no-op, bot identico</li>
+          <li><code>abilitato=☑ shadow=☑</code> → predict + log + telemetria, no skip applicato</li>
+          <li><code>abilitato=☑ shadow=☐</code> → skip realmente applicato (saving ~600s × skip)</li>
+        </ul>
+        <div><b style="color:var(--text)">Modifica T_L_max per istanza/livello</b>:
+          <code>config/predictor_t_l_max.json</code> (multiplier per istanza, base per livello)
+        </div>
+        <div><b style="color:var(--text)">Backtest empirico storico</b>:
+          <code>python tools/predictor_backtest.py --prod --days 7</code>
+        </div>
+        <div><b style="color:var(--text)">CLI cycle predict standalone</b>:
+          <code>python tools/predict_cycle.py --prod [--verbose]</code>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+{% endblock %}

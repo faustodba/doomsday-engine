@@ -182,10 +182,29 @@ class BoostTask(Task):
             if not ctx.navigator.vai_in_home():
                 return TaskResult.fail("Navigator non ha raggiunto HOME", step="assicura_home")
 
+        # WU115 — debug buffer (hot-reload via globali.debug_tasks.boost)
+        from shared.debug_buffer import DebugBuffer
+        debug = DebugBuffer.for_task("boost", getattr(ctx, "instance_name", "_unknown"))
+        self._dbg = debug
+
         try:
             outcome, tipo_attivato = self._esegui_boost(ctx.device, ctx.matcher, log, self._cfg)
         except Exception as exc:
+            debug.snap("99_exception", ctx.device.screenshot())
+            debug.flush(success=False, log_fn=log)
             return TaskResult.fail(f"Eccezione: {exc}", step="esegui_boost")
+
+        # Anomalie boost: popup non aperto, speed non trovato, errore generico
+        anomalia = outcome in (
+            _Outcome.POPUP_NON_APERTO,
+            _Outcome.SPEED_NON_TROVATO,
+            _Outcome.ERRORE,
+        )
+        debug.flush(
+            success=(outcome != _Outcome.ERRORE),
+            force=anomalia,
+            log_fn=log,
+        )
 
         # ── Aggiorna BoostState ───────────────────────────────────────────────
         now = datetime.now(timezone.utc)
@@ -218,9 +237,13 @@ class BoostTask(Task):
         Ritorna (outcome, tipo) dove tipo è "8h" | "1d" | None.
         """
 
+        _dbg = getattr(self, "_dbg", None)
+
         # STEP 1 — tap boost
         shot    = device.screenshot()
         score_b = matcher.score(shot, cfg.tmpl_boost)
+        if _dbg is not None:
+            _dbg.snap_array("00_pre_tap_boost", getattr(shot, "frame", None))
         log(f"pin_boost score={score_b:.3f} → tap {cfg.tap_boost}")
         device.tap(*cfg.tap_boost)
 
@@ -237,6 +260,8 @@ class BoostTask(Task):
             timeout=6.0, poll=0.5
         )
         log(f"pin_manage score={score_m:.3f}")
+        if _dbg is not None:
+            _dbg.snap("01_popup_manage", device.screenshot())
         if score_m < cfg.soglia_manage:
             log("Popup non aperto — abort")
             self._chiudi_popup(device, cfg)
@@ -273,6 +298,8 @@ class BoostTask(Task):
             if swipe_n < cfg.max_swipe:
                 self._swipe_su(device, cfg)
 
+        if _dbg is not None:
+            _dbg.snap("02_post_scroll_speed", device.screenshot())
         if not speed_trovato:
             log(f"pin_speed non trovato dopo {cfg.max_swipe} swipe — abort")
             self._chiudi_popup(device, cfg)
@@ -317,6 +344,8 @@ class BoostTask(Task):
         # if shot is not None:
         #     _salva_debug_shot(shot, "post_tap", log)
 
+        if _dbg is not None and shot is not None:
+            _dbg.snap_array("03_frame_use", getattr(shot, "frame", None))
         if shot is None:
             log("Screenshot fallito dopo tap speed — abort")
             self._chiudi_popup(device, cfg)
