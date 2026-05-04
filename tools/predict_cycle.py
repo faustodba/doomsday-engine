@@ -41,6 +41,11 @@ def main() -> int:
     parser.add_argument("--istanza", type=str, default="", help="Filtra solo istanza X")
     parser.add_argument("--tasks", type=str, default="",
                         help="Lista comma-separated task per override (es. boost,raccolta)")
+    parser.add_argument("--percentile", choices=("median", "p75", "p90"),
+                        default="median",
+                        help="median (default, stima centrale) | p75 (conservativa) | p90 (worst-case)")
+    parser.add_argument("--compare", action="store_true",
+                        help="Stampa confronto median/p75/p90 in tabella sintetica")
     args = parser.parse_args()
 
     root = Path("C:/doomsday-engine-prod") if args.prod else Path("C:/doomsday-engine")
@@ -53,10 +58,29 @@ def main() -> int:
 
     refresh_stats()
 
+    # Modalità confronto: 1 chiamata per ogni percentile, output sintetico
+    if args.compare:
+        print("=" * 60)
+        print(f"PREDICT CYCLE COMPARE — {root.name}")
+        print("=" * 60)
+        print(f'{"percentile":<10} {"T_ciclo":>10} {"Σ istanze":>12} {"semantica":<28}')
+        print("-" * 60)
+        labels = {
+            "median": "stima centrale realistica",
+            "p75":    "conservativa, cicli pieni",
+            "p90":    "worst-case ragionevole",
+        }
+        for pct in ("median", "p75", "p90"):
+            r = predict_cycle_from_config(percentile=pct)
+            sum_s = r['T_ciclo_s'] - r['tick_sleep_s']
+            print(f'{pct:<10} {fmt_min(r["T_ciclo_s"]):>10} '
+                  f'{fmt_min(sum_s):>12} {labels[pct]:<28}')
+        return 0
+
     # Singola istanza
     if args.istanza:
         tasks = args.tasks.split(",") if args.tasks else []
-        p = predict_istanza_duration(args.istanza, tasks)
+        p = predict_istanza_duration(args.istanza, tasks, percentile=args.percentile)
         print(f"Istanza: {p['istanza']}")
         print(f"T_istanza:  {fmt_min(p['T_s'])} ({p['T_s']:.0f}s)")
         print(f"  boot_home: {p['boot_home_s']:.1f}s")
@@ -69,13 +93,13 @@ def main() -> int:
         return 0
 
     # Ciclo intero da config
-    res = predict_cycle_from_config()
+    res = predict_cycle_from_config(percentile=args.percentile)
     if "error" in res:
         print(f"ERRORE: {res['error']}")
         return 1
 
     print("=" * 70)
-    print(f"PREDICT CYCLE — {root.name}")
+    print(f"PREDICT CYCLE — {root.name} — percentile={args.percentile}")
     print("=" * 70)
     print(f"T_ciclo totale:   {fmt_min(res['T_ciclo_s'])} = {res['T_ciclo_min']:.1f} min")
     print(f"  Σ istanze:      {fmt_min(res['T_ciclo_s'] - res['tick_sleep_s'])}")

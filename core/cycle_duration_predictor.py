@@ -67,8 +67,17 @@ _cache: dict = {"computed_at": 0.0, "stats": {}}
 @dataclass
 class TaskStats:
     median:    float = 0.0
-    p90:       float = 0.0
+    p75:       float = 0.0   # 75° percentile: stima conservativa (cattura cicli pieni)
+    p90:       float = 0.0   # 90° percentile: worst-case ragionevole
     n_samples: int   = 0
+
+    def value(self, percentile: str = "median") -> float:
+        """Restituisce il valore al percentile richiesto. Default median."""
+        if percentile == "p75":
+            return self.p75
+        if percentile == "p90":
+            return self.p90
+        return self.median
 
 
 @dataclass
@@ -90,7 +99,7 @@ def _percentile(sorted_vals: list, pct: float) -> float:
 
 
 def _stats_from_values(values: list[float]) -> TaskStats:
-    """Calcola median + p90 da lista valori."""
+    """Calcola median + p75 + p90 da lista valori."""
     if not values:
         return TaskStats()
     vals_clean = [v for v in values if v is not None and v > 0]
@@ -99,6 +108,7 @@ def _stats_from_values(values: list[float]) -> TaskStats:
     vals_sorted = sorted(vals_clean)
     return TaskStats(
         median    = float(statistics.median(vals_clean)),
+        p75       = float(_percentile(vals_sorted, 75)),
         p90       = float(_percentile(vals_sorted, 90)),
         n_samples = len(vals_clean),
     )
@@ -177,6 +187,7 @@ def _get_stats() -> dict[str, IstanzaStats]:
 def predict_istanza_duration(
     istanza: str,
     scheduled_tasks: list[str],
+    percentile: str = "median",
 ) -> dict:
     """
     Stima durata tick istanza in secondi.
@@ -186,6 +197,8 @@ def predict_istanza_duration(
         scheduled_tasks: lista task che verranno schedulati nel ciclo
                          (es. ["boost", "rifornimento", "raccolta"]).
                          Se [], usa "tutti i task con stat" come fallback.
+        percentile: "median" (default, stima centrale) | "p75" (conservativa,
+                    cattura cicli "lavoro pieno") | "p90" (worst-case).
 
     Returns:
         {
@@ -194,7 +207,8 @@ def predict_istanza_duration(
             "boot_home_s": float,
             "tasks": {task: T_s},
             "confidence": "alta" | "media" | "bassa",
-            "missing_stats": [task list]   # task senza dati storici
+            "missing_stats": [task list],  # task senza dati storici
+            "percentile": str,             # echo del percentile usato
         }
     """
     stats = _get_stats().get(istanza)
@@ -207,9 +221,11 @@ def predict_istanza_duration(
             "tasks":       {t: 60.0 for t in scheduled_tasks},
             "confidence":  "bassa",
             "missing_stats": list(scheduled_tasks),
+            "percentile":  percentile,
         }
 
-    boot_s = stats.boot_home.median if stats.boot_home.n_samples > 0 else 90.0
+    boot_s = (stats.boot_home.value(percentile)
+              if stats.boot_home.n_samples > 0 else 90.0)
 
     if not scheduled_tasks:
         scheduled_tasks = list(stats.tasks.keys())
@@ -223,7 +239,7 @@ def predict_istanza_duration(
             tasks_breakdown[tname] = 60.0   # fallback statico
             missing.append(tname)
         else:
-            tasks_breakdown[tname] = ts.median
+            tasks_breakdown[tname] = ts.value(percentile)
             n_with_stats += 1
 
     total = boot_s + sum(tasks_breakdown.values())
@@ -247,6 +263,7 @@ def predict_istanza_duration(
         "tasks":         {k: round(v, 1) for k, v in tasks_breakdown.items()},
         "confidence":    conf,
         "missing_stats": missing,
+        "percentile":    percentile,
     }
 
 
@@ -254,6 +271,7 @@ def predict_cycle_duration(
     istanze_attive: list[str],
     tasks_per_istanza: Optional[dict[str, list[str]]] = None,
     tick_sleep_s: float = 300.0,
+    percentile: str = "median",
 ) -> dict:
     """
     Stima durata ciclo bot completo.
@@ -280,7 +298,7 @@ def predict_cycle_duration(
     confidences = []
     for inst in istanze_attive:
         scheduled = tpi.get(inst, [])
-        pred = predict_istanza_duration(inst, scheduled)
+        pred = predict_istanza_duration(inst, scheduled, percentile=percentile)
         breakdown[inst] = pred
         total_s += pred["T_s"]
         confidences.append(pred["confidence"])
@@ -295,6 +313,7 @@ def predict_cycle_duration(
         "T_ciclo_s":    round(total_with_sleep, 1),
         "T_ciclo_min":  round(total_with_sleep / 60, 1),
         "per_istanza":  breakdown,
+        "percentile":   percentile,
         "tick_sleep_s": tick_sleep_s,
         "confidence":   worst,
         "n_istanze":    len(istanze_attive),
@@ -508,7 +527,8 @@ def _is_task_due(task_name: str,
 # Helper opzionale: stima da config + storia + schedule (no input esplicito)
 # ──────────────────────────────────────────────────────────────────────────────
 
-def predict_cycle_from_config(strict_schedule: bool = True) -> dict:
+def predict_cycle_from_config(strict_schedule: bool = True,
+                              percentile: str = "median") -> dict:
     """
     Stima ciclo usando config attuale + schedule per task.
 
@@ -516,6 +536,8 @@ def predict_cycle_from_config(strict_schedule: bool = True) -> dict:
         strict_schedule: se True (default), filtra task per ogni istanza in base
             a `state[istanza].schedule[task]` + `interval_hours`. Se False, conta
             tutti i task abilitati per ogni istanza (vecchio comportamento, sovrastima).
+        percentile: "median" (default) | "p75" (conservativo) | "p90" (worst-case)
+            per la stima durate task/boot_home.
 
     Workflow:
       1. Legge istanze abilitate da `instances.json` + `runtime_overrides.json`
@@ -623,7 +645,8 @@ def predict_cycle_from_config(strict_schedule: bool = True) -> dict:
             tpi[inst] = tasks_consid
             # Avanza offset usando predict_istanza_duration (best-effort)
             try:
-                pred = predict_istanza_duration(inst, tasks_consid)
+                pred = predict_istanza_duration(inst, tasks_consid,
+                                                percentile=percentile)
                 offset_s += float(pred.get("T_s", 0.0))
             except Exception:
                 offset_s += 600.0   # fallback statico se predict fallisce
@@ -654,12 +677,14 @@ def predict_cycle_from_config(strict_schedule: bool = True) -> dict:
 
         # Avanza offset cumulativo per la PROSSIMA istanza
         try:
-            pred = predict_istanza_duration(inst, due_tasks)
+            pred = predict_istanza_duration(inst, due_tasks,
+                                            percentile=percentile)
             offset_s += float(pred.get("T_s", 0.0))
         except Exception:
             offset_s += 600.0
 
-    res = predict_cycle_duration(abilitate, tpi, tick_sleep_s=tick_sleep_s)
+    res = predict_cycle_duration(abilitate, tpi, tick_sleep_s=tick_sleep_s,
+                                 percentile=percentile)
     res["schedule_debug"] = schedule_debug
     res["strict_schedule"] = strict_schedule
     return res

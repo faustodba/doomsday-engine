@@ -1468,7 +1468,8 @@ def partial_cycle_prediction(request: Request):
     """
     try:
         from core.cycle_duration_predictor import predict_cycle_from_config
-        res = predict_cycle_from_config(strict_schedule=True)
+        res     = predict_cycle_from_config(strict_schedule=True, percentile="median")
+        res_p75 = predict_cycle_from_config(strict_schedule=True, percentile="p75")
     except Exception as exc:
         return HTMLResponse(
             f'<div style="color:var(--text-dim);text-align:center;padding:8px">'
@@ -1488,13 +1489,21 @@ def partial_cycle_prediction(request: Request):
     per_ist = res.get("per_istanza", {})
     sched_dbg = res.get("schedule_debug", {})
 
+    # P75 (stima conservativa): solo top number, no breakdown duplicato
+    t_min_p75 = res_p75.get("T_ciclo_min", 0)
+    per_ist_p75 = res_p75.get("per_istanza", {})
+
     conf_color = {"alta": "#4caf50", "media": "#ff9800", "bassa": "#f44336"}.get(conf, "var(--text-dim)")
 
-    # Header
+    # Header con doppia stima median (centrale) + p75 (conservativa)
     head = (
-        f'<div style="display:flex;align-items:baseline;gap:18px;margin-bottom:10px">'
-        f'<div><span style="font-size:22px;font-weight:700;color:var(--accent)">{t_min:.1f}</span>'
-        f'<span style="font-size:11px;color:var(--text-dim);margin-left:4px">min</span></div>'
+        f'<div style="display:flex;align-items:baseline;gap:24px;margin-bottom:10px;flex-wrap:wrap">'
+        f'<div title="stima centrale (median ultimi 20 record per task)">'
+        f'<span style="font-size:22px;font-weight:700;color:var(--accent)">{t_min:.1f}</span>'
+        f'<span style="font-size:11px;color:var(--text-dim);margin-left:4px">min · centrale</span></div>'
+        f'<div title="stima conservativa (p75 ultimi 20 record): cattura cicli con lavoro pieno">'
+        f'<span style="font-size:18px;font-weight:600;color:var(--text)">{t_min_p75:.1f}</span>'
+        f'<span style="font-size:11px;color:var(--text-dim);margin-left:4px">min · p75 conservativa</span></div>'
         f'<div style="color:var(--text-dim);font-size:11px">'
         f'{n_ist} istanze · sleep {tick:.0f}s · confidence '
         f'<span style="color:{conf_color};font-weight:600">{conf}</span></div></div>'
@@ -1505,6 +1514,7 @@ def partial_cycle_prediction(request: Request):
     rows = []
     for inst, p in sorted_inst:
         t_inst_s = p.get("T_s", 0)
+        t_p75_s  = (per_ist_p75.get(inst) or {}).get("T_s", 0)
         boot_s   = p.get("boot_home_s", 0)
         c_inst   = p.get("confidence", "?")
         c_color  = {"alta": "#4caf50", "media": "#ff9800", "bassa": "#f44336"}.get(c_inst, "var(--text-dim)")
@@ -1518,6 +1528,7 @@ def partial_cycle_prediction(request: Request):
             f'<tr>'
             f'<td style="font-weight:600">{inst}</td>'
             f'<td style="text-align:right;font-family:monospace">{t_inst_s/60:.1f}m</td>'
+            f'<td style="text-align:right;font-family:monospace;color:var(--text-dim);font-size:10px">{t_p75_s/60:.1f}m</td>'
             f'<td style="text-align:right;color:var(--text-dim);font-size:10px">{boot_s:.0f}s</td>'
             f'<td style="text-align:center"><span style="color:#4caf50;font-weight:600">{n_due}</span>'
             f'<span style="color:var(--text-dim)">/{n_due+n_skip}</span></td>'
@@ -1530,7 +1541,8 @@ def partial_cycle_prediction(request: Request):
     table = (
         '<table class="tel-table"><thead><tr>'
         '<th>istanza</th>'
-        '<th style="text-align:right">T</th>'
+        '<th style="text-align:right" title="median ultimi 20 record">T</th>'
+        '<th style="text-align:right" title="p75 ultimi 20 record (conservativa)">T p75</th>'
         '<th style="text-align:right">boot</th>'
         '<th style="text-align:center">due/tot</th>'
         '<th>task pianificati</th>'
