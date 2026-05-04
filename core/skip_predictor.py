@@ -297,8 +297,20 @@ def _rule_squadre_fuori(history: list[dict],
         # Tutti pre-WU116 / dati insufficienti → no skip da questa regola
         return None
 
-    t_min_rientro = min(t_marce_min)
-    t_max_rientro = max(t_marce_min)
+    # Tempo trascorso dal record (le marce si stanno già consumando)
+    elapsed_min = 0.0
+    try:
+        last_ts_str = last.get("ts")
+        if last_ts_str:
+            last_ts = datetime.fromisoformat(last_ts_str)
+            elapsed_min = max(0.0, (datetime.now(timezone.utc) - last_ts).total_seconds() / 60.0)
+    except Exception:
+        elapsed_min = 0.0
+
+    # T_residuo[i] = max(0, T_marcia[i] - elapsed): tempo che manca da ADESSO
+    t_marce_residue = [max(0.0, t - elapsed_min) for t in t_marce_min]
+    t_min_rientro = min(t_marce_residue)
+    t_max_rientro = max(t_marce_residue)
     gap_atteso_min = _predict_gap_minutes()
 
     if t_min_rientro <= gap_atteso_min:
@@ -314,6 +326,8 @@ def _rule_squadre_fuori(history: list[dict],
             "invii_ultimo":     invii_n,
             "T_min_rientro_min": round(t_min_rientro, 1),
             "T_max_rientro_min": round(t_max_rientro, 1),
+            "T_marcia_totale_min": round(min(t_marce_min), 1),  # debug: pre-elapsed
+            "elapsed_dal_record_min": round(elapsed_min, 1),
             "gap_atteso_min":    round(gap_atteso_min, 1),
             "delta_min":         round(t_min_rientro - gap_atteso_min, 1),
         },

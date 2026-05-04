@@ -332,28 +332,116 @@ def _load_schedule_state(istanza: str) -> dict:
         return {}
 
 
+def _boost_will_skip(istanza: str, tick_sleep_s: float) -> bool:
+    """
+    True se al prossimo tick BoostTask gira come NOOP rapido (boost ancora attivo).
+
+    Coerente con BoostState.is_attivo (core/state.py): boost attivo se
+    `scadenza > now + ANTICIPO (5min)`. Aggiungiamo `tick_sleep_s` perché
+    valutiamo il PROSSIMO tick, non quello attuale.
+
+    Returns False (= task girerà) se:
+      - state file mancante
+      - boost.disponibile=False (nessun boost trovato → riprova sempre)
+      - boost.scadenza None (mai attivato)
+      - scadenza <= now + tick_sleep + buffer (boost in scadenza al prossimo tick)
+    """
+    try:
+        path = _root() / "state" / f"{istanza}.json"
+        if not path.exists():
+            return False
+        s = json.loads(path.read_text(encoding="utf-8"))
+        boost = s.get("boost") or {}
+        if not boost.get("disponibile", True):
+            return False
+        scad_iso = boost.get("scadenza")
+        if not scad_iso:
+            return False
+        from datetime import datetime as _dt, timezone as _tz, timedelta as _td
+        scad = _dt.fromisoformat(scad_iso)
+        now  = _dt.now(_tz.utc)
+        BOOST_ANTICIPO_S = 300.0   # coerente con _BOOST_ANTICIPO_S in core/state.py
+        return scad > now + _td(seconds=tick_sleep_s + BOOST_ANTICIPO_S)
+    except Exception:
+        return False
+
+
+def _rifornimento_will_skip(istanza: str) -> bool:
+    """
+    True se RifornimentoTask gira come NOOP (no-send).
+
+    Condizioni (in OR):
+      - Master saturo: morfeus_state.daily_recv_limit == 0
+      - Provviste istanza esaurite (guard giornaliero persistente)
+      - Quota istanza esaurita: spedizioni_oggi >= quota_max
+    """
+    try:
+        # Master saturo: blocca tutte le istanze ordinarie
+        morfeus_path = _root() / "data" / "morfeus_state.json"
+        if morfeus_path.exists():
+            ms = json.loads(morfeus_path.read_text(encoding="utf-8"))
+            drl = ms.get("daily_recv_limit", -1)
+            if drl == 0:
+                return True
+        # Per-istanza: provviste esaurite o quota raggiunta
+        path = _root() / "state" / f"{istanza}.json"
+        if not path.exists():
+            return False
+        s = json.loads(path.read_text(encoding="utf-8"))
+        rif = s.get("rifornimento") or {}
+        if rif.get("provviste_esaurite", False):
+            return True
+        if int(rif.get("spedizioni_oggi", 0)) >= int(rif.get("quota_max", 5)):
+            return True
+        return False
+    except Exception:
+        return False
+
+
+def _task_will_be_noop(task_name: str,
+                       istanza: Optional[str],
+                       tick_sleep_s: float) -> bool:
+    """
+    Guard di stato per task con `interval_hours == 0` (always-due) ma che
+    in pratica girano come NOOP frequentemente. Estensibile a zaino,
+    donazione, arena, truppe, ecc. nei prossimi step.
+    """
+    if not istanza:
+        return False
+    if task_name == "boost":
+        return _boost_will_skip(istanza, tick_sleep_s)
+    if task_name == "rifornimento":
+        return _rifornimento_will_skip(istanza)
+    return False
+
+
 def _is_task_due(task_name: str,
                  task_setup_entry: dict,
                  last_run_iso: Optional[str],
-                 now_utc) -> bool:
+                 now_utc,
+                 istanza: Optional[str] = None,
+                 tick_sleep_s: float = 300.0) -> bool:
     """
     True se il task girerà al prossimo tick di questa istanza.
 
     Logica:
-      - schedule == "always" → sempre
-      - interval_hours == 0 → sempre (alias di always)
+      - schedule == "always" / interval_hours == 0 → sempre, MA con guard di
+        stato `_task_will_be_noop` per boost/rifornimento (e futuri)
       - last_run None → primo run, gira
       - elapsed >= interval_hours → gira
       - main_mission edge: hour gate UTC ≥ 20 (WU91)
-      - district_showdown: window VEN-LUN UTC (semplificato: sempre False fuori
-        finestra; in finestra dipende dal flag task — già controllato a monte)
+
+    Args:
+        istanza, tick_sleep_s: opzionali. Se forniti, abilitano i guard di
+        stato per task con interval=0 (boost active / rifornimento bloccato).
     """
     schedule    = task_setup_entry.get("schedule", "periodic")
     interval_h  = float(task_setup_entry.get("interval_hours", 0) or 0)
 
     if schedule == "always" or interval_h == 0:
-        # raccolta_chiusura/raccolta/rifornimento/boost/district_showdown
-        # → sempre (boost ha interval=0 ma schedule=periodic)
+        # Guard di stato: alcuni task always-due saranno NOOP per stato interno
+        if _task_will_be_noop(task_name, istanza, tick_sleep_s):
+            return False
         return True
 
     if last_run_iso is None:
@@ -452,6 +540,11 @@ def predict_cycle_from_config(strict_schedule: bool = True) -> dict:
     if "raccolta" not in task_globali and task_flags.get("raccolta", True):
         task_globali.insert(0, "raccolta")
 
+    # tick_sleep va calcolato PRIMA del filtro (serve a _is_task_due per guard boost)
+    sis = ov.get("globali", {}).get("sistema", {}) or {}
+    tick_sleep_min = sis.get("tick_sleep_min", 5)
+    tick_sleep_s = float(tick_sleep_min) * 60
+
     # Per ogni istanza, filtra task dovuti a girare al prossimo tick
     tpi: dict[str, list[str]] = {}
     schedule_debug: dict[str, dict] = {}
@@ -492,17 +585,13 @@ def predict_cycle_from_config(strict_schedule: bool = True) -> dict:
                 due_tasks.append(tn)
                 continue
             last_run = sch_state.get(tn)
-            if _is_task_due(tn, entry, last_run, now_utc):
+            if _is_task_due(tn, entry, last_run, now_utc,
+                            istanza=inst, tick_sleep_s=tick_sleep_s):
                 due_tasks.append(tn)
             else:
                 skipped.append(tn)
         tpi[inst] = due_tasks
         schedule_debug[inst] = {"due": due_tasks, "skipped": skipped}
-
-    # tick_sleep
-    sis = ov.get("globali", {}).get("sistema", {}) or {}
-    tick_sleep_min = sis.get("tick_sleep_min", 5)
-    tick_sleep_s = float(tick_sleep_min) * 60
 
     res = predict_cycle_duration(abilitate, tpi, tick_sleep_s=tick_sleep_s)
     res["schedule_debug"] = schedule_debug
