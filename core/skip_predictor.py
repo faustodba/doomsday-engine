@@ -258,6 +258,27 @@ def _predict_gap_minutes() -> float:
     return 120.0   # fallback ragionevole
 
 
+def _saving_estimato(istanza: str) -> tuple[float, float, float]:
+    """
+    Stima saving per skip di una istanza:
+      saving_s = boot_home_s + Σ task_durations_s (al netto NOOP guards)
+
+    Returns:
+        (saving_s, boot_home_s, tasks_s). Tutti 0.0 se predictor non disponibile.
+    """
+    try:
+        from core.cycle_duration_predictor import predict_cycle_from_config
+        res = predict_cycle_from_config(strict_schedule=True)
+        per_ist = (res.get("per_istanza") or {}).get(istanza)
+        if not per_ist:
+            return 0.0, 0.0, 0.0
+        T_s    = float(per_ist.get("T_s", 0.0))
+        boot_s = float(per_ist.get("boot_home_s", 0.0))
+        return T_s, boot_s, max(0.0, T_s - boot_s)
+    except Exception:
+        return 0.0, 0.0, 0.0
+
+
 # ==============================================================================
 # Regole predittive
 # ==============================================================================
@@ -569,10 +590,23 @@ def predict(istanza: str,
     if growth_phase and decision.signals is not None:
         decision.signals["growth_phase_active"] = True
 
+    # Saving estimato per skip: rende esplicita la motivazione fondamentale
+    # del predictor — risparmiare boot+task per istanze "improduttive" date
+    # le condizioni correnti.
+    if decision.should_skip:
+        s_total, s_boot, s_tasks = _saving_estimato(istanza)
+        if decision.signals is None:
+            decision.signals = {}
+        decision.signals["saving_estimato_s"]     = round(s_total, 1)
+        decision.signals["saving_estimato_min"]   = round(s_total / 60, 1)
+        decision.signals["saving_boot_home_s"]    = round(s_boot, 1)
+        decision.signals["saving_tasks_s"]        = round(s_tasks, 1)
+
     # Guardrail check
     gr_block = _check_guardrail(state, decision)
     if gr_block and decision.should_skip:
-        # Skip era previsto ma guardrail blocca: forza retry
+        # Skip era previsto ma guardrail blocca: forza retry. Preserva
+        # saving_estimato_* nei signals per visibilità "saving non realizzato".
         return SkipDecision(
             should_skip=False,
             reason=f"proceed_guardrail",

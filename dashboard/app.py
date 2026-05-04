@@ -1574,7 +1574,13 @@ def partial_cycle_snapshot_detail(request: Request):
     cn          = snap.get("cycle_numero", "?")
     elapsed_min = snap.get("elapsed_min", 0)
     pred        = snap.get("predicted_min", 0)
-    ts          = snap.get("ts", "")[:19]
+    # Conversione UTC → locale per visualizzazione coerente
+    ts_iso = snap.get("ts", "")
+    try:
+        from datetime import datetime as _dt
+        ts = _dt.fromisoformat(ts_iso).astimezone().strftime("%d/%m %H:%M:%S")
+    except Exception:
+        ts = ts_iso[:19]
     ic          = snap.get("input_context", {}) or {}
     istanze_ab  = ic.get("istanze_abilitate", []) or []
     task_glob   = ic.get("task_globali_abilitati", []) or []
@@ -1765,8 +1771,23 @@ def partial_predictor_decisions(request: Request):
         else:
             row_color = "var(--text-dim)"
             badge = "PROCEED"
-        # Signals compact
-        sig_str = " ".join(f"{k}={v}" for k, v in list(sig.items())[:5])
+        # Saving estimato (solo per skip o guardrail su skip predetto)
+        saving_min  = sig.get("saving_estimato_min")
+        saving_boot = sig.get("saving_boot_home_s")
+        saving_task = sig.get("saving_tasks_s")
+        if saving_min is not None and (skip or gr):
+            saving_str = (
+                f'<b style="color:var(--text)">{saving_min:.1f}min</b>'
+                f'<span style="color:var(--text-dim);font-size:9px"> '
+                f'(boot {saving_boot:.0f}s + task {saving_task:.0f}s)</span>'
+            )
+        else:
+            saving_str = '<span style="color:var(--text-dim);font-size:9px">—</span>'
+        # Signals compact (escluse keys saving — già in colonna dedicata)
+        SAVING_KEYS = {"saving_estimato_s", "saving_estimato_min",
+                       "saving_boot_home_s", "saving_tasks_s"}
+        sig_short = {k: v for k, v in sig.items() if k not in SAVING_KEYS}
+        sig_str = " ".join(f"{k}={v}" for k, v in list(sig_short.items())[:5])
         if len(sig_str) > 80:
             sig_str = sig_str[:77] + "..."
         gp_marker = ' <span style="color:#4caf50;font-size:9px">GROWTH</span>' if gp else ""
@@ -1777,13 +1798,25 @@ def partial_predictor_decisions(request: Request):
             f'<td style="color:{row_color};font-weight:600;font-size:10px">{badge}</td>'
             f'<td style="color:var(--accent);font-size:10px">{reas}</td>'
             f'<td style="text-align:right;font-family:monospace;font-size:10px">{score:.2f}</td>'
+            f'<td style="font-size:10px;text-align:right;white-space:nowrap">{saving_str}</td>'
             f'<td style="color:var(--text-dim);font-size:9px;font-family:monospace">{sig_str}{gp_marker}</td>'
             f'</tr>'
         )
     return HTMLResponse(
+        '<div style="color:var(--text-dim);font-size:10px;padding:4px 8px;'
+        'background:rgba(255,255,255,0.02);border-left:2px solid var(--accent);'
+        'margin-bottom:6px">'
+        '<b style="color:var(--text)">ℹ semantica:</b> il timestamp è il momento '
+        'della <b>decisione predictor</b> (inizio thread istanza), <i>prima</i> del '
+        'boot MuMu+attendi_home (~6-9 min). Le azioni effettive su quella istanza '
+        'appaiono nei log task ~6-9 min dopo la decisione, salvo SKIP-LIVE applicato '
+        '(early return, no boot).'
+        '</div>'
         '<table class="tel-table"><thead><tr>'
-        '<th>ts</th><th>ist</th><th>esito</th><th>regola</th>'
-        '<th style="text-align:right">score</th><th>signals</th>'
+        '<th>decisione</th><th>ist</th><th>esito</th><th>regola</th>'
+        '<th style="text-align:right">score</th>'
+        '<th style="text-align:right">saving</th>'
+        '<th>signals</th>'
         '</tr></thead>'
         f'<tbody>{"".join(body)}</tbody></table>'
     )

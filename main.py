@@ -795,9 +795,14 @@ def _thread_istanza(ist, tasks_cls, dry_run):
                 # Skip ciclo reale: aggiorna state, chiudi metriche, early return
                 skip_state.last_skip_count_consec += 1
                 skip_state.cicli_totali           += 1
+                sig = decision.signals or {}
+                saving_min = sig.get("saving_estimato_min", 0.0)
+                saving_boot = sig.get("saving_boot_home_s", 0.0)
+                saving_tasks = sig.get("saving_tasks_s", 0.0)
                 _log(nome,
-                     f"[PREDICTOR-LIVE] SKIP CICLO — saving stimato boot+task "
-                     f"~600s (consec={skip_state.last_skip_count_consec})")
+                     f"[PREDICTOR-LIVE] SKIP CICLO — saving={saving_min:.1f}min "
+                     f"(boot {saving_boot:.0f}s + task {saving_tasks:.0f}s) "
+                     f"consec={skip_state.last_skip_count_consec}")
                 try:
                     from core.istanza_metrics import chiudi_tick
                     chiudi_tick(nome, outcome="skipped_by_predictor")
