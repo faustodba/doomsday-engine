@@ -197,8 +197,13 @@ class Orchestrator:
 
         Ogni task viene avvolto in try/except: un errore non interrompe gli altri.
         Ritorna la lista dei TaskResult prodotti in questo tick.
+
+        WU122-OptC (04/05): misura wait inter-task = (start_run task_{i+1}) -
+        (end_run task_i). Comprende gate HOME, save state, should_run check,
+        dismiss banners, telemetry. Accumulato in metrics per predictor accuracy.
         """
         results: list[TaskResult] = []
+        _last_task_end_ts: float | None = None   # WU122-OptC
 
         for entry in self._entries:
             if not e_dovuto(entry):
@@ -285,6 +290,15 @@ class Orchestrator:
             )
 
             _run_start = time.time()
+            # WU122-OptC: wait inter-task = (start prossimo) - (end precedente)
+            if _last_task_end_ts is not None:
+                _wait_s = _run_start - _last_task_end_ts
+                if _wait_s > 0:
+                    try:
+                        from core.istanza_metrics import aggiungi_wait_inter_task
+                        aggiungi_wait_inter_task(self._ctx.instance_name, _wait_s)
+                    except Exception:
+                        pass
             try:
                 result = entry.task.run(self._ctx)
             except ADBUnhealthyError as exc:
@@ -324,9 +338,11 @@ class Orchestrator:
             # (skip = condizione gestita correttamente, non un fail).
             # Su fail/eccezione → last_run resta invariato → al prossimo
             # tick il task viene riprovato.
-            entry.last_duration_s = time.time() - _run_start
+            _run_end = time.time()
+            entry.last_duration_s = _run_end - _run_start
+            _last_task_end_ts = _run_end   # WU122-OptC: timestamp per next wait
             if result.success or result.skipped:
-                entry.last_run = time.time()
+                entry.last_run = _run_end
             entry.last_result = result
             results.append(result)
 

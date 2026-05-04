@@ -87,6 +87,10 @@ def main() -> int:
         for tname, ts in sorted(p['tasks'].items(), key=lambda x: -x[1]):
             marker = " ⚠" if tname in p['missing_stats'] else ""
             print(f"  {tname:22s}  {ts:>6.1f}s{marker}")
+        wait_s   = p.get('wait_inter_task_s', 0)
+        wait_src = p.get('wait_inter_task_src', '?')
+        marker_wait = " (fallback)" if wait_src == "fallback" else " (rolling)"
+        print(f"  {'wait_inter_task':22s}  {wait_s:>6.1f}s{marker_wait}")
         print(f"Confidence: {p['confidence']}")
         if p['missing_stats']:
             print(f"⚠ Task senza dati storici: {', '.join(p['missing_stats'])}")

@@ -40,6 +40,12 @@ CACHE_TTL_S      = 1800    # 30 min: refresh stats lazy on demand
 MIN_SAMPLES_HI   = 10      # >=10 samples → confidence "alta"
 MIN_SAMPLES_MID  = 3       # >=3 samples → "media"; <3 → "bassa"
 
+# WU122-OptC: fallback costante per wait inter-task quando dati storici < N
+# (bootstrap finché istanza non accumula 3+ cicli con wait_inter_task_s).
+# Stima empirica: ~80s/transizione × N task, mediato a 8s/task come default.
+INTER_TASK_FALLBACK_S = 8.0
+INTER_TASK_MIN_SAMPLES = 3
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers path / cache
@@ -82,8 +88,9 @@ class TaskStats:
 
 @dataclass
 class IstanzaStats:
-    boot_home: TaskStats = field(default_factory=TaskStats)
-    tasks:     dict      = field(default_factory=dict)   # task_name -> TaskStats
+    boot_home:       TaskStats = field(default_factory=TaskStats)
+    tasks:           dict      = field(default_factory=dict)   # task_name -> TaskStats
+    wait_inter_task: TaskStats = field(default_factory=TaskStats)   # WU122-OptC
 
 
 def _percentile(sorted_vals: list, pct: float) -> float:
@@ -150,6 +157,7 @@ def refresh_stats() -> None:
 
         boot_vals: list[float] = []
         task_vals: dict[str, list[float]] = {}
+        wait_vals: list[float] = []   # WU122-OptC
         for r in recent:
             bh = r.get("boot_home_s")
             if bh is not None and bh > 0:
@@ -159,8 +167,15 @@ def refresh_stats() -> None:
                 if sec is None or sec <= 0:
                     continue
                 task_vals.setdefault(tname, []).append(float(sec))
+            # WU122-OptC: wait inter-task TOTALE per ciclo (sum di tutte le transizioni)
+            wt = r.get("wait_inter_task_s")
+            if wt is not None and wt > 0:
+                wait_vals.append(float(wt))
 
-        ist_stats = IstanzaStats(boot_home=_stats_from_values(boot_vals))
+        ist_stats = IstanzaStats(
+            boot_home       = _stats_from_values(boot_vals),
+            wait_inter_task = _stats_from_values(wait_vals),
+        )
         for tname, vals in task_vals.items():
             ist_stats.tasks[tname] = _stats_from_values(vals)
         new_stats[inst] = ist_stats
@@ -242,7 +257,17 @@ def predict_istanza_duration(
             tasks_breakdown[tname] = ts.value(percentile)
             n_with_stats += 1
 
-    total = boot_s + sum(tasks_breakdown.values())
+    # WU122-OptC: wait inter-task. Usa stat reali se 3+ samples, altrimenti
+    # fallback costante (bootstrap). N_task usato è len(scheduled_tasks).
+    if stats.wait_inter_task.n_samples >= INTER_TASK_MIN_SAMPLES:
+        wait_s = stats.wait_inter_task.value(percentile)
+        wait_source = "rolling"
+    else:
+        n_tasks = max(0, len(scheduled_tasks) - 1)   # N-1 transizioni tra N task
+        wait_s = float(n_tasks) * INTER_TASK_FALLBACK_S
+        wait_source = "fallback"
+
+    total = boot_s + sum(tasks_breakdown.values()) + wait_s
 
     # Confidence
     avg_samples = (
@@ -261,6 +286,8 @@ def predict_istanza_duration(
         "T_s":           round(total, 1),
         "boot_home_s":   round(boot_s, 1),
         "tasks":         {k: round(v, 1) for k, v in tasks_breakdown.items()},
+        "wait_inter_task_s":  round(wait_s, 1),
+        "wait_inter_task_src": wait_source,
         "confidence":    conf,
         "missing_stats": missing,
         "percentile":    percentile,

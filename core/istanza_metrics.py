@@ -165,6 +165,28 @@ def imposta_task_duration(instance: str, task_name: str, secondi: float) -> None
         buf.setdefault("task_durations_s", {})[task_name] = round(float(secondi), 1)
 
 
+def aggiungi_wait_inter_task(instance: str, wait_s: float) -> None:
+    """
+    WU122-OptC: traccia il wait tra fine task_i e inizio task_{i+1}.
+
+    Comprende: gate HOME (vai_in_home), save state post-task, should_run
+    check del prossimo task, dismiss banners, telemetry overhead. Mancante
+    nelle `task_durations_s` che misurano solo `task.run()` interno.
+
+    Accumula somma + count per il tick. predict_istanza_duration usa la
+    somma come componente extra di T_s per ridurre la sotto-stima.
+    """
+    if wait_s <= 0:
+        return
+    with _lock:
+        buf = _BUFFER_PER_INSTANCE.get(instance)
+        if buf is None:
+            return
+        buf["wait_inter_task_s"] = round(float(buf.get("wait_inter_task_s", 0.0))
+                                          + float(wait_s), 1)
+        buf["wait_inter_task_n"] = int(buf.get("wait_inter_task_n", 0)) + 1
+
+
 def chiudi_tick(instance: str, outcome: str = "ok",
                 tick_total_s: float | None = None) -> None:
     """Hook main: flush record su disco a fine tick istanza."""
@@ -178,7 +200,8 @@ def chiudi_tick(instance: str, outcome: str = "ok",
         "cycle_id": buf.get("cycle_id", 0),
         "outcome": str(outcome),
     }
-    for k in ("boot_home_s", "raccolta", "rifornimento", "task_durations_s"):
+    for k in ("boot_home_s", "raccolta", "rifornimento", "task_durations_s",
+              "wait_inter_task_s", "wait_inter_task_n"):
         if k in buf:
             record[k] = buf[k]
     if tick_total_s is not None:

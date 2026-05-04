@@ -1493,9 +1493,20 @@ def partial_cycle_prediction(request: Request):
     t_min_p75 = res_p75.get("T_ciclo_min", 0)
     per_ist_p75 = res_p75.get("per_istanza", {})
 
+    # WU122-OptC: wait inter-task aggregato (somma per istanze) + source
+    total_wait_s = sum(p.get("wait_inter_task_s", 0) for p in per_ist.values())
+    wait_sources = [p.get("wait_inter_task_src", "?") for p in per_ist.values()]
+    n_rolling  = sum(1 for s in wait_sources if s == "rolling")
+    n_fallback = sum(1 for s in wait_sources if s == "fallback")
+
     conf_color = {"alta": "#4caf50", "media": "#ff9800", "bassa": "#f44336"}.get(conf, "var(--text-dim)")
 
     # Header con doppia stima median (centrale) + p75 (conservativa)
+    wait_label = (
+        f'wait inter-task: <b>{total_wait_s:.0f}s</b> '
+        f'(<span style="color:#4caf50">{n_rolling}</span> rolling, '
+        f'<span style="color:#ff9800">{n_fallback}</span> fallback)'
+    )
     head = (
         f'<div style="display:flex;align-items:baseline;gap:24px;margin-bottom:10px;flex-wrap:wrap">'
         f'<div title="stima centrale (median ultimi 20 record per task)">'
@@ -1506,7 +1517,8 @@ def partial_cycle_prediction(request: Request):
         f'<span style="font-size:11px;color:var(--text-dim);margin-left:4px">min · p75 conservativa</span></div>'
         f'<div style="color:var(--text-dim);font-size:11px">'
         f'{n_ist} istanze · sleep {tick:.0f}s · confidence '
-        f'<span style="color:{conf_color};font-weight:600">{conf}</span></div></div>'
+        f'<span style="color:{conf_color};font-weight:600">{conf}</span></div>'
+        f'<div style="color:var(--text-dim);font-size:10px">{wait_label}</div></div>'
     )
 
     # Tabella per istanza (sorted by T_s desc)
