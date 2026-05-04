@@ -83,10 +83,19 @@ class SkipDecision:
 
 @dataclass
 class IstanzaSkipState:
-    """State per-istanza per guardrail (opzionale, in-memory dal caller)."""
+    """
+    State per-istanza per guardrail (opzionale, in-memory dal caller).
+
+    `cicli_dall_ultimo_retry` parte da COOLDOWN_POST_RETRY_CICLI per indicare
+    "nessun retry forzato recente": altrimenti il primo skip di un'istanza
+    fresh sarebbe sempre bloccato dalla regola cooldown_post_retry. Va
+    azzerato dal caller quando guardrail forza un retry (max_skip_consec
+    o re_eval_periodic) e incrementato di 1 ad ogni altro ciclo (clamp a
+    COOLDOWN_POST_RETRY_CICLI).
+    """
     last_skip_count_consec: int = 0
     last_skip_ts: Optional[float] = None
-    cicli_dall_ultimo_retry: int = 0
+    cicli_dall_ultimo_retry: int = COOLDOWN_POST_RETRY_CICLI
     cicli_totali: int = 0
 
 

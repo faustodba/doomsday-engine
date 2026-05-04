@@ -774,6 +774,7 @@ def _thread_istanza(ist, tasks_cls, dry_run):
         try:
             from core.skip_predictor import (
                 predict, IstanzaSkipState, load_metrics_history,
+                COOLDOWN_POST_RETRY_CICLI,
             )
             history    = load_metrics_history(nome, last_n=20)
             skip_state = _predictor_states.setdefault(nome, IstanzaSkipState())
@@ -815,6 +816,14 @@ def _thread_istanza(ist, tasks_cls, dry_run):
                 # No skip: reset counter consecutivi, incrementa totali
                 skip_state.last_skip_count_consec = 0
                 skip_state.cicli_totali           += 1
+                # Cooldown post-retry: reset se guardrail ha forzato un retry
+                # (max_skip_consec o re_eval_periodic); altrimenti incrementa
+                # con clamp a COOLDOWN per uscire dal blocco.
+                gr = decision.guardrail_triggered or ""
+                if "max_skip_consec" in gr or "re_eval_periodic" in gr:
+                    skip_state.cicli_dall_ultimo_retry = 0
+                elif skip_state.cicli_dall_ultimo_retry < COOLDOWN_POST_RETRY_CICLI:
+                    skip_state.cicli_dall_ultimo_retry += 1
         except Exception as exc:
             _log(nome, f"[PREDICTOR] errore best-effort: {exc}")
             # Procede con flow normale anche su errore predictor
