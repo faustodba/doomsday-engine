@@ -584,10 +584,20 @@ def predict_cycle_from_config(strict_schedule: bool = True) -> dict:
     tick_sleep_min = sis.get("tick_sleep_min", 5)
     tick_sleep_s = float(tick_sleep_min) * 60
 
+    # Offset cumulativo: la N-esima istanza nel ciclo viene processata a
+    # `now_utc + Σ(j<N) T_j_predicted`. Necessario per gate temporali (es.
+    # main_mission UTC≥20 WU91, district_showdown window VEN-LUN): un ciclo
+    # che inizia 19:35 UTC e dura 30min porta le ultime istanze a girare
+    # alle 20:00+ UTC → main_mission diventa due → durata extra non prevista
+    # se valutiamo tutte le istanze con now_utc=t0.
+    from datetime import timedelta as _timedelta
+
     # Per ogni istanza, filtra task dovuti a girare al prossimo tick
     tpi: dict[str, list[str]] = {}
     schedule_debug: dict[str, dict] = {}
+    offset_s: float = 0.0   # cumulativo durata istanze precedenti
     for inst in abilitate:
+        now_for_inst = now_utc + _timedelta(seconds=offset_s)
         # Tipologia istanza per filtro raccolta_only / raccolta_fast
         ist_o = ist_ov_all.get(inst, {})
         tipologia = ist_o.get("tipologia") or next(
@@ -611,9 +621,15 @@ def predict_cycle_from_config(strict_schedule: bool = True) -> dict:
 
         if not strict_schedule:
             tpi[inst] = tasks_consid
+            # Avanza offset usando predict_istanza_duration (best-effort)
+            try:
+                pred = predict_istanza_duration(inst, tasks_consid)
+                offset_s += float(pred.get("T_s", 0.0))
+            except Exception:
+                offset_s += 600.0   # fallback statico se predict fallisce
             continue
 
-        # Strict: filtra per schedule
+        # Strict: filtra per schedule USANDO now_for_inst (non now_utc t0)
         sch_state = _load_schedule_state(inst)
         due_tasks: list[str] = []
         skipped:   list[str] = []
@@ -624,13 +640,24 @@ def predict_cycle_from_config(strict_schedule: bool = True) -> dict:
                 due_tasks.append(tn)
                 continue
             last_run = sch_state.get(tn)
-            if _is_task_due(tn, entry, last_run, now_utc,
+            if _is_task_due(tn, entry, last_run, now_for_inst,
                             istanza=inst, tick_sleep_s=tick_sleep_s):
                 due_tasks.append(tn)
             else:
                 skipped.append(tn)
         tpi[inst] = due_tasks
-        schedule_debug[inst] = {"due": due_tasks, "skipped": skipped}
+        schedule_debug[inst] = {
+            "due": due_tasks, "skipped": skipped,
+            "now_at_start": now_for_inst.strftime("%H:%M"),
+            "offset_min": round(offset_s / 60, 1),
+        }
+
+        # Avanza offset cumulativo per la PROSSIMA istanza
+        try:
+            pred = predict_istanza_duration(inst, due_tasks)
+            offset_s += float(pred.get("T_s", 0.0))
+        except Exception:
+            offset_s += 600.0
 
     res = predict_cycle_duration(abilitate, tpi, tick_sleep_s=tick_sleep_s)
     res["schedule_debug"] = schedule_debug
