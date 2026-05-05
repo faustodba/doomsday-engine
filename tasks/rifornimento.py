@@ -882,6 +882,9 @@ def _esegui_via_membri(ctx: TaskContext, risorse_config: dict,
     spedizioni = 0
     idx_risorsa = 0
     coda_volo: deque = deque()
+    # 05/05: copia mutabile per skip risorse falliti questo tick (vedi
+    # rationale in _esegui_mappa). Pre-fix: break cieco al primo fail.
+    risorse_attive = dict(risorse_config)
 
     # Leggi deposito OCR dalla HOME prima di navigare
     ctx.log_msg("Rifornimento membri: lettura deposito OCR da HOME")
@@ -908,15 +911,18 @@ def _esegui_via_membri(ctx: TaskContext, risorse_config: dict,
             break
 
         # ── Seleziona risorsa ────────────────────────────────────────────────
+        if not risorse_attive:
+            ctx.log_msg("Rifornimento membri: tutte le risorse hanno fallito invio — stop")
+            break
         risorsa_scelta, idx_risorsa = _seleziona_risorsa(
-            deposito, risorse_config, soglie, idx_risorsa
+            deposito, risorse_attive, soglie, idx_risorsa
         )
         if risorsa_scelta is None:
             ctx.log_msg("Rifornimento membri: tutte le risorse sotto soglia — stop")
             break
 
         ctx.log_msg(f"Rifornimento membri: risorsa selezionata={risorsa_scelta}")
-        qta = risorse_config[risorsa_scelta]
+        qta = risorse_attive[risorsa_scelta]
 
         # ── Naviga HOME → Alleanza → Membri → avatar ─────────────────────────
         # Standard V6: usa tap_barra("alliance") come arena/arena_mercato
@@ -978,8 +984,13 @@ def _esegui_via_membri(ctx: TaskContext, risorse_config: dict,
             break
 
         if not ok:
-            ctx.log_msg("Rifornimento membri: invio fallito — stop")
-            break
+            # 05/05: vedi rationale in _esegui_mappa
+            ctx.log_msg(
+                f"Rifornimento membri: invio {risorsa_scelta} fallito — escludo "
+                f"da questo tick e proseguo con altre risorse"
+            )
+            risorse_attive.pop(risorsa_scelta, None)
+            continue
 
         # ── Snapshot POST-VAI (per aggiornare deposito tracking) ────────────
         time.sleep(1.5)
@@ -1352,6 +1363,12 @@ class RifornimentoTask(Task):
         idx_risorsa = 0
         coda_volo: deque = deque()
         in_mappa    = False
+        # 05/05: copia mutabile delle risorse abilitate. Se _compila_e_invia
+        # fallisce per una risorsa (campo greyed-out, coord errata, ecc.),
+        # la rimuoviamo da questo set per non ritentarla nello stesso tick.
+        # Reset al prossimo tick. Pre-fix: break al primo fail → 0 invii
+        # acciaio/petrolio per giorni perché 1 fail bloccava tutto il loop.
+        risorse_attive = dict(risorse_config)
 
         try:
             while True:
@@ -1421,15 +1438,20 @@ class RifornimentoTask(Task):
                     ))
 
                 # ── 4. Seleziona risorsa ────────────────────────────────────
+                # 05/05: usa risorse_attive (copia escludibile su fail) invece
+                # di risorse_config. Se rimaste 0 → break, altrimenti round-robin.
+                if not risorse_attive:
+                    ctx.log_msg("Rifornimento: tutte le risorse hanno fallito invio — stop")
+                    break
                 risorsa_scelta, idx_risorsa = _seleziona_risorsa(
-                    deposito, risorse_config, soglie, idx_risorsa
+                    deposito, risorse_attive, soglie, idx_risorsa
                 )
                 if risorsa_scelta is None:
                     ctx.log_msg("Rifornimento: tutte le risorse sotto soglia — stop")
                     break
 
                 ctx.log_msg(f"Rifornimento: risorsa selezionata={risorsa_scelta}")
-                qta = risorse_config[risorsa_scelta]
+                qta = risorse_attive[risorsa_scelta]
 
                 # ── 5. Centra mappa + apri RESOURCE SUPPLY ──────────────────
                 _centra_mappa(ctx)
@@ -1454,8 +1476,16 @@ class RifornimentoTask(Task):
                         ctx.log_msg("Rifornimento: RifornimentoState.provviste_esaurite=True")
                     break
                 if not ok:
-                    ctx.log_msg("Rifornimento: invio fallito — stop")
-                    break
+                    # 05/05: pre-fix `break` cieco bloccava tutto il loop al primo
+                    # fail (es. acciaio campo greyed-out → 0 invii pet anche se OK).
+                    # Post-fix: rimuovi la risorsa da risorse_attive e prosegui.
+                    # Se rimaste 0 risorse → la prossima iterazione hardcoded break.
+                    ctx.log_msg(
+                        f"Rifornimento: invio {risorsa_scelta} fallito — escludo "
+                        f"da questo tick e proseguo con altre risorse"
+                    )
+                    risorse_attive.pop(risorsa_scelta, None)
+                    continue
 
                 # ── 7. Snapshot POST-VAI (per aggiornare deposito tracking) ─
                 time.sleep(1.5)
