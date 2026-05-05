@@ -70,50 +70,93 @@ _predictor_recorder_task = None
 
 
 async def _predictor_recorder_loop():
-    """Background task: ogni 15 min snapshot cycle predictor + evaluate completed cycles."""
+    """Background task: snapshot cycle predictor + evaluate completed cycles.
+
+    Cadenza:
+      - Snapshot OGNI 15 min (SNAPSHOT_INTERVAL_MIN)
+      - PIÙ snapshot IMMEDIATO ad ogni nuovo ciclo bot rilevato (reset
+        del timer 15min). Permette al drilldown di mostrare la stima
+        del ciclo CORRENTE invece dell'ultimo snapshot del ciclo
+        precedente (utile dopo restart o tick_sleep lungo).
+
+    Implementazione: sleep granulare 30s; snapshot triggered se:
+      - elapsed dall'ultimo snap >= SNAPSHOT_INTERVAL_MIN * 60 OR
+      - cycle_numero del ciclo bot in corso != cycle_numero ultimo snap
+    """
     import asyncio
+    from datetime import datetime, timezone
     from core.cycle_duration_predictor import predict_cycle_from_config
     from core.cycle_predictor_recorder import (
         record_snapshot, evaluate_cycles, SNAPSHOT_INTERVAL_MIN,
+        _read_cicli_in_corso, read_recent_snapshots,
     )
-    print(f"[DASHBOARD] predictor recorder avviato (snapshot ogni {SNAPSHOT_INTERVAL_MIN}min)")
+    print(f"[DASHBOARD] predictor recorder avviato (snapshot ogni {SNAPSHOT_INTERVAL_MIN}min + reset on new cycle)")
+    POLL_GRANULAR_S = 30
     while True:
         try:
-            res = predict_cycle_from_config(strict_schedule=True)
-            if "error" not in res:
-                # Costruisci input_context per analisi reproducibile
-                per_ist = res.get("per_istanza", {}) or {}
-                sched_dbg = res.get("schedule_debug", {}) or {}
-                input_context = {
-                    "istanze_abilitate": list(per_ist.keys()),
-                    "task_globali_abilitati": sorted({
-                        t for tasks in (
-                            (info.get("due", []) + info.get("skipped", []))
-                            for info in sched_dbg.values()
-                        )
-                        for t in tasks
-                    }),
-                    "tasks_per_istanza_due": {
-                        inst: info.get("due", []) for inst, info in sched_dbg.items()
-                    },
-                    "per_istanza_predicted_s": {
-                        inst: round(p.get("T_s", 0), 1)
-                        for inst, p in per_ist.items()
-                    },
-                    "tick_sleep_s": float(res.get("tick_sleep_s", 0)),
-                }
-                record_snapshot(
-                    predicted_min=float(res.get("T_ciclo_min", 0)),
-                    n_istanze=int(res.get("n_istanze", 0)),
-                    confidence=str(res.get("confidence", "?")),
-                    input_context=input_context,
-                )
-            n_eval = evaluate_cycles()
-            if n_eval > 0:
-                print(f"[DASHBOARD] cycle accuracy evaluated: {n_eval} cicli")
+            # Detection nuovo ciclo bot
+            ciclo_corrente = _read_cicli_in_corso()
+            cycle_now = ciclo_corrente.get("numero") if ciclo_corrente else None
+            last_snaps = read_recent_snapshots(1)
+            last_snap = last_snaps[0] if last_snaps else None
+            last_cycle_snap = last_snap.get("cycle_numero") if last_snap else None
+
+            elapsed_s = float("inf")
+            if last_snap and last_snap.get("ts"):
+                try:
+                    last_ts = datetime.fromisoformat(last_snap["ts"])
+                    elapsed_s = (datetime.now(timezone.utc) - last_ts).total_seconds()
+                except Exception:
+                    pass
+
+            is_new_cycle = (
+                cycle_now is not None
+                and last_cycle_snap is not None
+                and int(cycle_now) != int(last_cycle_snap)
+            )
+            interval_due = elapsed_s >= SNAPSHOT_INTERVAL_MIN * 60
+
+            should_snap = is_new_cycle or interval_due or last_snap is None
+
+            if should_snap:
+                res = predict_cycle_from_config(strict_schedule=True)
+                if "error" not in res:
+                    per_ist = res.get("per_istanza", {}) or {}
+                    sched_dbg = res.get("schedule_debug", {}) or {}
+                    input_context = {
+                        "istanze_abilitate": list(per_ist.keys()),
+                        "task_globali_abilitati": sorted({
+                            t for tasks in (
+                                (info.get("due", []) + info.get("skipped", []))
+                                for info in sched_dbg.values()
+                            )
+                            for t in tasks
+                        }),
+                        "tasks_per_istanza_due": {
+                            inst: info.get("due", []) for inst, info in sched_dbg.items()
+                        },
+                        "per_istanza_predicted_s": {
+                            inst: round(p.get("T_s", 0), 1)
+                            for inst, p in per_ist.items()
+                        },
+                        "tick_sleep_s": float(res.get("tick_sleep_s", 0)),
+                    }
+                    extra = {"trigger": "new_cycle"} if is_new_cycle else None
+                    record_snapshot(
+                        predicted_min=float(res.get("T_ciclo_min", 0)),
+                        n_istanze=int(res.get("n_istanze", 0)),
+                        confidence=str(res.get("confidence", "?")),
+                        input_context=input_context,
+                        extra=extra,
+                    )
+                    if is_new_cycle:
+                        print(f"[DASHBOARD] new cycle #{cycle_now} → forced immediate snapshot (reset 15min timer)")
+                n_eval = evaluate_cycles()
+                if n_eval > 0:
+                    print(f"[DASHBOARD] cycle accuracy evaluated: {n_eval} cicli")
         except Exception as exc:
             print(f"[DASHBOARD] predictor recorder errore: {exc}")
-        await asyncio.sleep(SNAPSHOT_INTERVAL_MIN * 60)
+        await asyncio.sleep(POLL_GRANULAR_S)
 
 
 @asynccontextmanager
