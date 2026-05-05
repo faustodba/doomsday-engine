@@ -92,9 +92,9 @@ class MessaggiTask(Task):
             return TaskResult.fail(f"Eccezione: {exc}", step="esegui_messaggi")
 
         # Anomalia: schermata aperta ma 0 claim su entrambe le tab
-        anomalia = (esito == _Esito.OK and not alliance_ok and not system_ok)
+        anomalia = (esito == _Esito.COMPLETATO and not alliance_ok and not system_ok)
         debug.flush(
-            success=(esito == _Esito.OK),
+            success=(esito == _Esito.COMPLETATO),
             force=anomalia,
             log_fn=log,
         )
