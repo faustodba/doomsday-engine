@@ -53,7 +53,13 @@
     "qta_pomodoro": 999000000,
     "qta_legno": 999000000,
     "qta_petrolio": 999000000,
-    "qta_acciaio": 999000000
+    "qta_acciaio": 999000000,
+    "allocazione": {
+      "pomodoro": 0.25,
+      "legno": 0.25,
+      "petrolio": 0.25,
+      "acciaio": 0.25
+    }
   },
   "rifornimento": {
     "_note": "Modalità rifornimento — Issue #40: unica fonte mappa_abilitata + membri_abilitati (legacy rifornimento_mappa/rifornimento_membri rimosse)",

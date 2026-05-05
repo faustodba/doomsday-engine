@@ -93,6 +93,19 @@ class RifugioOverride(BaseModel):
 # Rifornimento comune  [NUOVO — sostituisce RifornimentoOverride parziale]
 # ==============================================================================
 
+class RifornimentoAllocazioneOverride(BaseModel):
+    """
+    05/05: target proporzioni invio (analoga raccolta.allocazione).
+    Default uniforme 25/25/25/25. Frazioni 0-1.
+    L'algoritmo `_seleziona_risorsa` weighted-deficit normalizza
+    automaticamente sia frazioni (somma~1) che percentuali (somma~100).
+    """
+    pomodoro: float = Field(default=0.25, ge=0, le=1.0)
+    legno:    float = Field(default=0.25, ge=0, le=1.0)
+    petrolio: float = Field(default=0.25, ge=0, le=1.0)
+    acciaio:  float = Field(default=0.25, ge=0, le=1.0)
+
+
 class RifornimentoComuneOverride(BaseModel):
     """
     Parametri comuni a entrambe le modalità rifornimento.
@@ -108,6 +121,9 @@ class RifornimentoComuneOverride(BaseModel):
     legno_abilitato:        bool  = True
     petrolio_abilitato:     bool  = True
     acciaio_abilitato:      bool  = False
+    allocazione:            RifornimentoAllocazioneOverride = Field(
+        default_factory=RifornimentoAllocazioneOverride
+    )
 
 
 class RifornimentoOverride(BaseModel):

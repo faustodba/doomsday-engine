@@ -156,6 +156,24 @@
             </div>
             {% endfor %}
             <div class="col-sep"></div>
+            <div class="col-sub">allocazione % invio</div>
+            {% set ralloc = cfg.get('rifornimento_comune',{}).get('allocazione',{}) %}
+            {% for r,ico,default in [('pomodoro','🍅',25),('legno','🪵',25),('acciaio','⚙',25),('petrolio','🛢',25)] %}
+            <div class="rr" id="ra-{{ r }}">
+              <span class="rr-ico">{{ ico }}</span>
+              <span class="rr-name">{{ r }}</span>
+              <input class="rr-inp" id="ralloc-{{ r }}" type="number" step="5" min="0" max="100"
+                     value="{{ (ralloc.get(r, default/100) * 100) | round | int if ralloc.get(r, default/100) <= 1 else ralloc.get(r, default) | round | int }}"
+                     oninput="updateRallocTotal()">
+              <span class="rr-unit">%</span>
+            </div>
+            {% endfor %}
+            <div class="alloc-total">
+              <span class="alloc-lbl">totale</span>
+              <span class="alloc-val ok" id="ralloc-total">100%</span>
+            </div>
+            <div class="alloc-bar"><div class="alloc-fill" id="ralloc-bar" style="width:100%"></div></div>
+            <div class="col-sep"></div>
             <div class="col-sub">modalità</div>
             {# WU111 (03/05): migrato schema legacy rifornimento_mappa/membri #}
             {# allo schema unificato rifornimento.mappa_abilitata/membri_abilitati #}
@@ -500,6 +518,11 @@ async function salvaGlobals() {
 async function salvaRifornimento() {
   const mappaOn = g('mode-mappa')?.classList.contains('active')||false;
   const memOn   = g('mode-membri')?.classList.contains('active')||false;
+  // 05/05: include allocazione % invio (analoga raccolta). Frazioni 0-1.
+  const ralloc = {
+    pomodoro: gn('ralloc-pomodoro')/100, legno: gn('ralloc-legno')/100,
+    acciaio:  gn('ralloc-acciaio')/100,  petrolio: gn('ralloc-petrolio')/100,
+  };
   const {ok,data} = await apiPut('/api/config/rifornimento', {
     rifornimento_comune: {
       dooms_account: gv('r-account'), max_spedizioni_ciclo: gi('r-maxsped'),
@@ -507,11 +530,30 @@ async function salvaRifornimento() {
       soglia_petrolio_m: gn('r-soglia-petrolio'), soglia_acciaio_m: gn('r-soglia-acciaio'),
       campo_abilitato: gb('r-flag-campo'), legno_abilitato: gb('r-flag-legno'),
       petrolio_abilitato: gb('r-flag-petrolio'), acciaio_abilitato: gb('r-flag-acciaio'),
+      allocazione: ralloc,
     },
     rifugio: {coord_x: gi('r-rifx'), coord_y: gi('r-rify')},
     mappa_abilitata: mappaOn, membri_abilitati: memOn,
   });
   showMsg('rif-ok','rif-err', ok, data.detail||'');
+}
+
+function updateRallocTotal() {
+  let tot = 0;
+  ['pomodoro','legno','acciaio','petrolio'].forEach(r => {
+    tot += gn('ralloc-'+r);
+  });
+  tot = Math.round(tot);
+  const el = g('ralloc-total');
+  if (el) {
+    el.textContent = tot + '%';
+    el.className = 'alloc-val ' + (tot===100 ? 'ok' : 'warn');
+  }
+  const bar = g('ralloc-bar');
+  if (bar) {
+    bar.style.width = Math.min(tot,100) + '%';
+    bar.className = 'alloc-fill' + (tot>100 ? ' over' : '');
+  }
 }
 
 async function salvaZaino() {
@@ -561,7 +603,7 @@ async function salvaIstanze() {
   showMsg('ist-ok','ist-err', ok, data.detail||'');
 }
 
-document.addEventListener('DOMContentLoaded', () => { updateAllocTotal(); });
+document.addEventListener('DOMContentLoaded', () => { updateAllocTotal(); updateRallocTotal(); });
 </script>
 
 {% endblock %}

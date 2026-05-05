@@ -134,6 +134,12 @@ _DEFAULTS: dict = {
     "RIFORNIMENTO_QTA_ACCIAIO":         0,
     "RIFORNIMENTO_QTA_PETROLIO":        0,
     "RIFORNIMENTO_MAX_SPEDIZIONI_CICLO": 5,
+    # 05/05: target proporzioni per risorsa (analoga raccolta.allocazione).
+    # Default uniforme 25/25/25/25. Se utente configura via dashboard
+    # (rifornimento.allocazione = {pomodoro:30, legno:30, acciaio:20, petrolio:20}),
+    # il bot fa selezione weighted-deficit: gap = ratio_target - perc_att(inviato_oggi).
+    # Soglie minime invariate (rispettate da check valore >= soglia).
+    "RIFORNIMENTO_ALLOCAZIONE":         None,   # None -> uniforme 25/25/25/25
     "RIFUGIO_X":                        684,
     "RIFUGIO_Y":                        532,
     "DOOMS_ACCOUNT":                    "",
@@ -252,25 +258,33 @@ def _seleziona_risorsa(risorse_reali: dict[str, float],
                         risorse_config: dict[str, int],
                         soglie: dict[str, float],
                         idx_risorsa: int,
-                        inviato_oggi: Optional[dict[str, float]] = None
+                        inviato_oggi: Optional[dict[str, float]] = None,
+                        ratio_target: Optional[dict[str, float]] = None,
                         ) -> tuple[Optional[str], int]:
     """
     Selezione risorsa per spedizione rifornimento.
 
-    Modalita' WEIGHTED (05/05 - default se `inviato_oggi` fornito):
-      Sceglie la risorsa con MENO `inviato_oggi` sopra soglia. Garantisce
-      distribuzione equa 25/25/25/25 indipendentemente da:
-        - numero cicli/giorno
-        - max_spedizioni_ciclo
-        - restart bot a meta' giornata
-        - provviste residue mittente
-      A parita' di inviato_oggi (es. inizio giornata, tutti=0) il sort stabile
-      conserva l'ordine di `risorse_config.keys()` -> primo invio parte da
-      pomodoro (config order).
+    Modalita' WEIGHTED-DEFICIT (05/05 - default se `inviato_oggi` fornito):
+      Algoritmo analogo a raccolta._calcola_sequenza_allocation:
+        perc_att[r] = inviato_oggi[r] / sum(inviato_oggi)
+        gap[r]      = ratio_target[r] - perc_att[r]
+      Sort gap DESC -> priorita' a risorse sotto target. Sceglie la prima
+      sopra soglia.
+
+      `ratio_target` (configurabile da dashboard, key `rifornimento.allocazione`):
+        - default 25/25/25/25 se non fornito (equita' uniforme)
+        - es. 30/30/20/20 se l'utente vuole piu' acciaio/petrolio
+        - somma deve essere = 1.0 (frazioni) o 100 (percentuali)
+
+      A inizio giornata (inviato_oggi tutti=0) il gap e' uguale per tutti
+      con ratio uniforme, oppure proporzionale alle percentuali config con
+      ratio non-uniforme. Stable sort conserva ordine config.
+
+      Soglia minima rispettata: solo risorse con `valore >= soglia_M*1e6`
+      sono candidabili. Il deficit-weighting opera SU TOP delle soglie.
 
     Modalita' ROUND-ROBIN classica (fallback se `inviato_oggi=None`):
-      Parte da `idx_risorsa` e itera ciclico. Bug: con max_spedizioni_ciclo=2
-      restava sempre su pomodoro+legno, non raggiungeva mai acciaio/petrolio.
+      Parte da `idx_risorsa` e itera ciclico. Mantenuto per compat back.
 
     Ritorna: (risorsa_scelta, nuovo_idx).
     nuovo_idx: in modalita' weighted non e' usato (ritorna 0). Mantenuto per
@@ -279,12 +293,34 @@ def _seleziona_risorsa(risorse_reali: dict[str, float],
     risorse_lista = list(risorse_config.keys())
     n = len(risorse_lista)
 
-    # ── Modalita' WEIGHTED (preferita) ─────────────────────────────────────
+    # ── Modalita' WEIGHTED-DEFICIT (preferita) ─────────────────────────────
     if inviato_oggi is not None:
-        # Sort ASC per inviato_oggi cumulato. Stable sort -> a parita' conserva
-        # ordine config (es. inizio giornata: tutti 0 -> primo = pomodoro).
-        ordinate = sorted(risorse_lista,
-                          key=lambda r: inviato_oggi.get(r, 0))
+        # Default ratio: equita' 25/25/25/25 se non fornito
+        if ratio_target is None:
+            ratio_target = {r: 1.0 / n for r in risorse_lista}
+        else:
+            # Normalizza: accetta sia frazioni (somma~1) che percentuali (somma~100)
+            tot_ratio = sum(ratio_target.get(r, 0) for r in risorse_lista)
+            if tot_ratio > 1.5:   # probabilmente percentuali (es. 35+35+20+10=100)
+                ratio_target = {r: ratio_target.get(r, 0) / 100.0
+                                for r in risorse_lista}
+            elif tot_ratio < 0.01:   # tutti zero, fallback uniforme
+                ratio_target = {r: 1.0 / n for r in risorse_lista}
+
+        # Calcola gap = ratio_target - perc_att
+        totale_inviato = sum(inviato_oggi.get(r, 0) for r in risorse_lista)
+        if totale_inviato <= 0:
+            # Nessun invio oggi: gap = ratio_target (sort DESC = ordine ratio)
+            # A parita' (es. uniforme) stable sort conserva ordine config -> pom first
+            gap = {r: ratio_target.get(r, 0.0) for r in risorse_lista}
+        else:
+            gap = {}
+            for r in risorse_lista:
+                perc_att = inviato_oggi.get(r, 0) / totale_inviato
+                gap[r] = ratio_target.get(r, 0.0) - perc_att
+
+        # Sort gap DESC: priorita' a risorse sotto target
+        ordinate = sorted(risorse_lista, key=lambda r: gap[r], reverse=True)
         for r in ordinate:
             valore = risorse_reali.get(r, -1.0)
             soglia_abs = soglie.get(r, float("inf")) * 1e6
@@ -945,7 +981,7 @@ def _esegui_via_membri(ctx: TaskContext, risorse_config: dict,
             ctx.log_msg("Rifornimento membri: nessun slot — stop")
             break
 
-        # ── Seleziona risorsa (weighted by inviato_oggi 05/05) ───────────────
+        # ── Seleziona risorsa (weighted-deficit 05/05) ───────────────────────
         if not risorse_attive:
             ctx.log_msg("Rifornimento membri: tutte le risorse hanno fallito invio — stop")
             break
@@ -954,9 +990,11 @@ def _esegui_via_membri(ctx: TaskContext, risorse_config: dict,
             inviato_oggi = dict(ctx.state.rifornimento.inviato_oggi or {})
         except Exception:
             pass
+        ratio_target = _cfg(ctx, "RIFORNIMENTO_ALLOCAZIONE")
         risorsa_scelta, idx_risorsa = _seleziona_risorsa(
             deposito, risorse_attive, soglie, idx_risorsa,
             inviato_oggi=inviato_oggi,
+            ratio_target=ratio_target,
         )
         if risorsa_scelta is None:
             ctx.log_msg("Rifornimento membri: tutte le risorse sotto soglia — stop")
@@ -1479,13 +1517,12 @@ class RifornimentoTask(Task):
                         for r in risorse_l if deposito.get(r, -1) >= 0
                     ))
 
-                # ── 4. Seleziona risorsa (weighted by inviato_oggi 05/05) ───
-                # 05/05: usa risorse_attive (copia escludibile su fail) invece
-                # di risorse_config. Selezione weighted by inviato_oggi:
-                # garantisce distribuzione 25/25/25/25 indipendente da
-                # max_spedizioni_ciclo. A inizio giornata (tutti=0) parte
-                # da pomodoro (config order), poi ad ogni invio sceglie la
-                # risorsa con MENO inviato_oggi sopra soglia.
+                # ── 4. Seleziona risorsa (weighted-deficit 05/05) ───────────
+                # Selezione weighted-deficit (analoga a raccolta): usa
+                # ratio_target da config (rifornimento.allocazione, default
+                # uniforme 25/25/25/25 se non configurato) e inviato_oggi
+                # cumulato. Sort DESC per gap = ratio_target - perc_att, primo
+                # sopra soglia.
                 if not risorse_attive:
                     ctx.log_msg("Rifornimento: tutte le risorse hanno fallito invio — stop")
                     break
@@ -1494,9 +1531,11 @@ class RifornimentoTask(Task):
                     inviato_oggi = dict(ctx.state.rifornimento.inviato_oggi or {})
                 except Exception:
                     pass
+                ratio_target = _cfg(ctx, "RIFORNIMENTO_ALLOCAZIONE")
                 risorsa_scelta, idx_risorsa = _seleziona_risorsa(
                     deposito, risorse_attive, soglie, idx_risorsa,
                     inviato_oggi=inviato_oggi,
+                    ratio_target=ratio_target,
                 )
                 if risorsa_scelta is None:
                     ctx.log_msg("Rifornimento: tutte le risorse sotto soglia — stop")

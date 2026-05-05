@@ -95,6 +95,10 @@ _DEFAULTS: dict[str, Any] = {
     "RIFORNIMENTO_QTA_LEGNO":           999_000_000,
     "RIFORNIMENTO_QTA_PETROLIO":        999_000_000,
     "RIFORNIMENTO_QTA_ACCIAIO":         999_000_000,
+    # 05/05: target proporzioni invio (analoga raccolta.allocazione).
+    # None -> uniforme 25/25/25/25 (default). Configurabile da dashboard:
+    # rifornimento.allocazione = {pomodoro: 30, legno: 30, acciaio: 20, petrolio: 20}.
+    "RIFORNIMENTO_ALLOCAZIONE":         None,
 
     # Rifornimento — modalità mappa (coordinate fisse)
     "RIFORNIMENTO_ABILITATO":       False,
@@ -466,6 +470,12 @@ class GlobalConfig:
     rifornimento_qta_legno:           int   = 999_000_000
     rifornimento_qta_petrolio:        int   = 999_000_000
     rifornimento_qta_acciaio:         int   = 999_000_000
+    # 05/05: target proporzioni invio (analoga raccolta.allocazione).
+    # Default uniforme 25/25/25/25 (frazioni 0-1). Sum != 1 viene normalizzato.
+    rifornimento_allocazione_pomodoro: float = 0.25
+    rifornimento_allocazione_legno:    float = 0.25
+    rifornimento_allocazione_petrolio: float = 0.25
+    rifornimento_allocazione_acciaio:  float = 0.25
 
     # Rifornimento — modalità mappa
     rifornimento_abilitato:       bool = False
@@ -591,6 +601,13 @@ class GlobalConfig:
             rifornimento_qta_legno           = int(rc.get("qta_legno",            1_000_000)),
             rifornimento_qta_petrolio        = int(rc.get("qta_petrolio",         0)),
             rifornimento_qta_acciaio         = int(rc.get("qta_acciaio",          0)),
+            # Allocazione proporzioni invio (05/05). Letto da rifornimento_comune.allocazione
+            # se presente, altrimenti default uniforme 25/25/25/25. Normalizzazione
+            # automatica gestita in _seleziona_risorsa (somma 1 o 100 o anche zero).
+            rifornimento_allocazione_pomodoro = float((rc.get("allocazione") or {}).get("pomodoro", 0.25)),
+            rifornimento_allocazione_legno    = float((rc.get("allocazione") or {}).get("legno",    0.25)),
+            rifornimento_allocazione_petrolio = float((rc.get("allocazione") or {}).get("petrolio", 0.25)),
+            rifornimento_allocazione_acciaio  = float((rc.get("allocazione") or {}).get("acciaio",  0.25)),
 
             # Rifornimento — mappa
             rifornimento_abilitato       = bool(rm.get("abilitato", False)),
@@ -669,6 +686,12 @@ class GlobalConfig:
                 "qta_legno":            self.rifornimento_qta_legno,
                 "qta_petrolio":         self.rifornimento_qta_petrolio,
                 "qta_acciaio":          self.rifornimento_qta_acciaio,
+                "allocazione": {
+                    "pomodoro": self.rifornimento_allocazione_pomodoro,
+                    "legno":    self.rifornimento_allocazione_legno,
+                    "petrolio": self.rifornimento_allocazione_petrolio,
+                    "acciaio":  self.rifornimento_allocazione_acciaio,
+                },
             },
             "rifornimento_mappa": {
                 "abilitato": self.rifornimento_mappa_abilitato,
@@ -764,6 +787,13 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         RIFORNIMENTO_QTA_LEGNO           = gcfg.rifornimento_qta_legno
         RIFORNIMENTO_QTA_PETROLIO        = gcfg.rifornimento_qta_petrolio
         RIFORNIMENTO_QTA_ACCIAIO         = gcfg.rifornimento_qta_acciaio
+        # 05/05: dict di allocazione per _seleziona_risorsa weighted-deficit
+        RIFORNIMENTO_ALLOCAZIONE         = {
+            "pomodoro": gcfg.rifornimento_allocazione_pomodoro,
+            "legno":    gcfg.rifornimento_allocazione_legno,
+            "petrolio": gcfg.rifornimento_allocazione_petrolio,
+            "acciaio":  gcfg.rifornimento_allocazione_acciaio,
+        }
 
         # ── Rifornimento — modalità mappa ────────────────────────────────────
         RIFORNIMENTO_ABILITATO       = gcfg.rifornimento_mappa_abilitato
