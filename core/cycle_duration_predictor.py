@@ -434,7 +434,17 @@ def _rifornimento_will_skip(istanza: str) -> bool:
     Condizioni (in OR):
       - Master saturo: morfeus_state.daily_recv_limit == 0
       - Provviste istanza esaurite (guard giornaliero persistente)
-      - Quota istanza esaurita: spedizioni_oggi >= quota_max
+
+    05/05 fix: rimosso il check `spedizioni_oggi >= quota_max`. Il bot
+    NON usa quel guard in `RifornimentoState.should_run()` (vedi commento
+    "NON considera quota_max — quella è un limite di sessione gestito in
+    run()"). Il task gira finché `provviste_esaurite=False`, e ogni
+    esecuzione fa max `max_spedizioni_ciclo` invii (limite per ciclo,
+    non giornaliero). Il counter `spedizioni_oggi` è puramente
+    informativo, non blocca task.
+    Pre-fix: predictor escludeva rifornimento dopo 5 invii cumulativi
+    nel giorno → falsi `EXTRA` nel drilldown (rifornimento eseguito
+    ma non pianificato).
     """
     try:
         # Master saturo: blocca tutte le istanze ordinarie
@@ -444,15 +454,13 @@ def _rifornimento_will_skip(istanza: str) -> bool:
             drl = ms.get("daily_recv_limit", -1)
             if drl == 0:
                 return True
-        # Per-istanza: provviste esaurite o quota raggiunta
+        # Per-istanza: provviste esaurite (guard giornaliero persistente)
         path = _root() / "state" / f"{istanza}.json"
         if not path.exists():
             return False
         s = json.loads(path.read_text(encoding="utf-8"))
         rif = s.get("rifornimento") or {}
         if rif.get("provviste_esaurite", False):
-            return True
-        if int(rif.get("spedizioni_oggi", 0)) >= int(rif.get("quota_max", 5)):
             return True
         return False
     except Exception:
