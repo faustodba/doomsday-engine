@@ -251,13 +251,48 @@ def _attesa_ultima_spedizione(coda_volo: deque, margine: int = 8) -> float:
 def _seleziona_risorsa(risorse_reali: dict[str, float],
                         risorse_config: dict[str, int],
                         soglie: dict[str, float],
-                        idx_risorsa: int) -> tuple[Optional[str], int]:
+                        idx_risorsa: int,
+                        inviato_oggi: Optional[dict[str, float]] = None
+                        ) -> tuple[Optional[str], int]:
     """
-    Round-robin sulle risorse configurate: seleziona la prima sopra soglia
-    partendo da idx_risorsa. Ritorna (risorsa_scelta, nuovo_idx).
+    Selezione risorsa per spedizione rifornimento.
+
+    Modalita' WEIGHTED (05/05 - default se `inviato_oggi` fornito):
+      Sceglie la risorsa con MENO `inviato_oggi` sopra soglia. Garantisce
+      distribuzione equa 25/25/25/25 indipendentemente da:
+        - numero cicli/giorno
+        - max_spedizioni_ciclo
+        - restart bot a meta' giornata
+        - provviste residue mittente
+      A parita' di inviato_oggi (es. inizio giornata, tutti=0) il sort stabile
+      conserva l'ordine di `risorse_config.keys()` -> primo invio parte da
+      pomodoro (config order).
+
+    Modalita' ROUND-ROBIN classica (fallback se `inviato_oggi=None`):
+      Parte da `idx_risorsa` e itera ciclico. Bug: con max_spedizioni_ciclo=2
+      restava sempre su pomodoro+legno, non raggiungeva mai acciaio/petrolio.
+
+    Ritorna: (risorsa_scelta, nuovo_idx).
+    nuovo_idx: in modalita' weighted non e' usato (ritorna 0). Mantenuto per
+    compat con call site esistenti.
     """
     risorse_lista = list(risorse_config.keys())
     n = len(risorse_lista)
+
+    # ── Modalita' WEIGHTED (preferita) ─────────────────────────────────────
+    if inviato_oggi is not None:
+        # Sort ASC per inviato_oggi cumulato. Stable sort -> a parita' conserva
+        # ordine config (es. inizio giornata: tutti 0 -> primo = pomodoro).
+        ordinate = sorted(risorse_lista,
+                          key=lambda r: inviato_oggi.get(r, 0))
+        for r in ordinate:
+            valore = risorse_reali.get(r, -1.0)
+            soglia_abs = soglie.get(r, float("inf")) * 1e6
+            if valore >= soglia_abs:
+                return r, 0   # idx non rilevante in modalita' weighted
+        return None, 0
+
+    # ── Modalita' round-robin classica (fallback) ──────────────────────────
     for i in range(n):
         r = risorse_lista[(idx_risorsa + i) % n]
         valore = risorse_reali.get(r, -1.0)
@@ -910,18 +945,25 @@ def _esegui_via_membri(ctx: TaskContext, risorse_config: dict,
             ctx.log_msg("Rifornimento membri: nessun slot — stop")
             break
 
-        # ── Seleziona risorsa ────────────────────────────────────────────────
+        # ── Seleziona risorsa (weighted by inviato_oggi 05/05) ───────────────
         if not risorse_attive:
             ctx.log_msg("Rifornimento membri: tutte le risorse hanno fallito invio — stop")
             break
+        inviato_oggi = {}
+        try:
+            inviato_oggi = dict(ctx.state.rifornimento.inviato_oggi or {})
+        except Exception:
+            pass
         risorsa_scelta, idx_risorsa = _seleziona_risorsa(
-            deposito, risorse_attive, soglie, idx_risorsa
+            deposito, risorse_attive, soglie, idx_risorsa,
+            inviato_oggi=inviato_oggi,
         )
         if risorsa_scelta is None:
             ctx.log_msg("Rifornimento membri: tutte le risorse sotto soglia — stop")
             break
 
-        ctx.log_msg(f"Rifornimento membri: risorsa selezionata={risorsa_scelta}")
+        ctx.log_msg(f"Rifornimento membri: risorsa selezionata={risorsa_scelta} "
+                    f"(inviato_oggi={inviato_oggi.get(risorsa_scelta, 0):,})")
         qta = risorse_attive[risorsa_scelta]
 
         # ── Naviga HOME → Alleanza → Membri → avatar ─────────────────────────
@@ -1437,18 +1479,32 @@ class RifornimentoTask(Task):
                         for r in risorse_l if deposito.get(r, -1) >= 0
                     ))
 
-                # ── 4. Seleziona risorsa ────────────────────────────────────
+                # ── 4. Seleziona risorsa (weighted by inviato_oggi 05/05) ───
                 # 05/05: usa risorse_attive (copia escludibile su fail) invece
-                # di risorse_config. Se rimaste 0 → break, altrimenti round-robin.
+                # di risorse_config. Selezione weighted by inviato_oggi:
+                # garantisce distribuzione 25/25/25/25 indipendente da
+                # max_spedizioni_ciclo. A inizio giornata (tutti=0) parte
+                # da pomodoro (config order), poi ad ogni invio sceglie la
+                # risorsa con MENO inviato_oggi sopra soglia.
                 if not risorse_attive:
                     ctx.log_msg("Rifornimento: tutte le risorse hanno fallito invio — stop")
                     break
+                inviato_oggi = {}
+                try:
+                    inviato_oggi = dict(ctx.state.rifornimento.inviato_oggi or {})
+                except Exception:
+                    pass
                 risorsa_scelta, idx_risorsa = _seleziona_risorsa(
-                    deposito, risorse_attive, soglie, idx_risorsa
+                    deposito, risorse_attive, soglie, idx_risorsa,
+                    inviato_oggi=inviato_oggi,
                 )
                 if risorsa_scelta is None:
                     ctx.log_msg("Rifornimento: tutte le risorse sotto soglia — stop")
                     break
+                ctx.log_msg(
+                    f"Rifornimento: risorsa selezionata={risorsa_scelta} "
+                    f"(inviato_oggi={inviato_oggi.get(risorsa_scelta, 0):,})"
+                )
 
                 ctx.log_msg(f"Rifornimento: risorsa selezionata={risorsa_scelta}")
                 qta = risorse_attive[risorsa_scelta]
