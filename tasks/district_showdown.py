@@ -167,8 +167,9 @@ class DistrictShowdownTask(Task):
         if hasattr(ctx.config, "task_abilitato"):
             if not ctx.config.task_abilitato("district_showdown"):
                 return False
-        # Window temporale evento DS (Ven 00:00 → Lun 01:00 UTC). Sub-step 5
-        # (Fund Raid) ha gate proprio `_is_in_fund_raid_window` (Dom 20:00 → Lun 00:00).
+        # Window temporale evento DS (Ven 00:00 → Lun 00:00 UTC, 3gg esatti).
+        # Sub-step 5 (Fund Raid) ha gate proprio `_is_in_fund_raid_window`
+        # (Dom 20:00 → Lun 00:00 UTC).
         return self._is_in_event_window()
 
     def e_dovuto(self, ctx: TaskContext) -> bool:  # noqa: ARG002
@@ -181,10 +182,11 @@ class DistrictShowdownTask(Task):
     def _is_in_event_window(self) -> bool:
         """
         True se l'ora UTC corrente è nella finestra evento District Showdown:
-            Venerdi' 00:00 UTC  →  Lunedì 01:00 UTC
+            Venerdi' 00:00 UTC  →  Lunedì 00:00 UTC  (3 giorni esatti)
 
-        Fuori (lun 01:00 → ven 00:00) → False.
+        Fuori (lun 00:00 → ven 00:00) → False.
         Configurabile via DistrictShowdownConfig.ds_start_*/ds_end_*.
+        Default: ds_end_hour=0 → lunedì sempre fuori window (h < 0 sempre False).
         """
         cfg = self._cfg
         now = datetime.now(timezone.utc)
@@ -206,7 +208,7 @@ class DistrictShowdownTask(Task):
     def _is_in_fund_raid_window(self) -> bool:
         """
         True se l'ora UTC corrente è nella finestra Fund Raid:
-            Domenica 22:00 UTC  →  Lunedì 01:00 UTC
+            Domenica 20:00 UTC  →  Lunedì 00:00 UTC  (ultime 4h evento DS)
         """
         cfg = self._cfg
         now = datetime.now(timezone.utc)
@@ -1216,11 +1218,11 @@ class DistrictShowdownTask(Task):
         Avvia Fund Raid sulla prima alleanza della lista "Last Raided".
 
         Finestra temporale (UTC):
-            Domenica 22:00 UTC  →  Lunedì 01:00 UTC
+            Domenica 20:00 UTC  →  Lunedì 00:00 UTC  (ultime 4h evento DS)
         Fuori da questa finestra → skip (raid non attivo in-game).
 
         Flusso:
-          T0. Gate temporale (dom 22:00 → lun 01:00 UTC).
+          T0. Gate temporale (dom 20:00 → lun 00:00 UTC).
           0. Gate readiness — _torna_a_mappa_ds (rientra se uscito).
           1. Tap tap_fund_raid_icon=(837,39) → apre popup "Alliance List".
           2. Tap tap_fund_raid_select=(802,161) → Select prima alleanza.

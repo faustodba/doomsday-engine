@@ -512,7 +512,7 @@ def _district_showdown_will_skip(now=None) -> bool:
     """
     True se DistrictShowdownTask gira come NOOP per:
       - flag `task.district_showdown` disabilitato (WU108: veto esplicito)
-      - fuori window evento (Ven 00:00 UTC → Lun 01:00 UTC, vedi
+      - fuori window evento (Ven 00:00 UTC → Lun 00:00 UTC, vedi
         tasks/district_showdown.py::_is_in_event_window)
 
     Args:
@@ -528,15 +528,17 @@ def _district_showdown_will_skip(now=None) -> bool:
             flags = (ov.get("globali") or {}).get("task") or {}
             if not flags.get("district_showdown", False):
                 return True
-        # Window check (replica logica DS task)
+        # Window check (replica logica DS task con default config)
+        # Default DistrictShowdownConfig: ds_end_hour=0 → lunedì sempre fuori
+        # window (h < 0 e' sempre False).
         if now is None:
             now = _dt.now(_tz.utc)
         wd  = now.weekday()   # 0=lun … 6=dom
         h   = now.hour
-        # Lunedì: in window se h < 1 (default ds_end_hour=1)
-        if wd == 0:   return not (h < 1)
-        # Venerdì: in window se h >= 0 (default ds_start_hour=0)
-        if wd == 4:   return not (h >= 0)
+        # Lunedì: SEMPRE fuori window (default ds_end_hour=0)
+        if wd == 0:   return True
+        # Venerdì: in window se h >= 0 (default ds_start_hour=0) → sempre True
+        if wd == 4:   return False
         # Sabato/Domenica: sempre in window
         if wd in (5, 6): return False
         # Mar/Mer/Gio: fuori window
