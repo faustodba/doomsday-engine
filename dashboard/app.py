@@ -1713,6 +1713,8 @@ def partial_cycle_snapshot_detail(request: Request):
         pass
 
     metrics_path = _P("C:/doomsday-engine-prod") / "data" / "istanza_metrics.jsonl"
+    # NEW 05/05: tick_total_per_inst = durata reale tick istanza nel ciclo corrente
+    tick_total_per_inst: dict[str, float] = {}
     try:
         if metrics_path.exists():
             with metrics_path.open(encoding="utf-8") as f:
@@ -1733,12 +1735,9 @@ def partial_cycle_snapshot_detail(request: Request):
                     try:
                         rec_dt = _dt.fromisoformat(r.get("ts", ""))
                         if rec_dt < cycle_start_dt:
-                            # Record precede l'inizio del ciclo corrente:
-                            # marca istanza come "non ancora girata" e SALTA.
-                            # Non eseguiti_per_inst[inst] = [] perché serve
-                            # distinguere "filtrato" da "no record assoluto".
                             eseguiti_per_inst[inst] = []
                             eseguiti_ts_per_inst[inst] = ""
+                            tick_total_per_inst[inst] = 0.0
                             continue
                     except Exception:
                         pass
@@ -1746,6 +1745,7 @@ def partial_cycle_snapshot_detail(request: Request):
                 tasks_done = sorted(durs.keys(), key=lambda k: -float(durs.get(k, 0)))
                 eseguiti_per_inst[inst] = tasks_done
                 eseguiti_ts_per_inst[inst] = r.get("ts", "")
+                tick_total_per_inst[inst] = float(r.get("tick_total_s", 0) or 0)
                 if len(eseguiti_per_inst) >= len(istanze_ab):
                     break
     except Exception:
@@ -1846,6 +1846,10 @@ def partial_cycle_snapshot_detail(request: Request):
             f' <span style="color:#f44336;font-weight:600" title="{n_diff} task discordanti">⚠{n_diff}</span>'
             if n_diff > 0 else ''
         )
+        # T_s reale (ciclo corrente) — solo se istanza ha già girato.
+        # Definito qui (prima del bd_rows) per essere accessibile sia nel
+        # breakdown expand che nella cella main.
+        t_real = tick_total_per_inst.get(inst, 0)
         # Riga main + riga expand (breakdown stima): toggle via onclick JS
         row_id = f"snap-detail-{inst}"
         bd = breakdown_per_inst.get(inst, {})
@@ -1876,10 +1880,37 @@ def partial_cycle_snapshot_detail(request: Request):
             f'<span style="color:var(--accent);font-weight:600">TOT predicted</span>'
             f'<span style="color:var(--accent);font-weight:600">{t_s:.1f}s = {t_s/60:.1f}min</span></div>'
         )
+        # Reale (se eseguito) — confronto con predicted
+        if is_done and t_real > 0:
+            err_real_pct = abs(t_real - t_s) / t_s * 100 if t_s > 0 else 0
+            real_color = "#4caf50" if err_real_pct < 10 else ("#fbbf24" if err_real_pct < 25 else "#f44336")
+            sign = "+" if t_real >= t_s else "-"
+            bd_rows.append(
+                f'<div style="display:flex;justify-content:space-between;font-family:monospace;font-size:11px;padding:3px 0">'
+                f'<span style="color:{real_color};font-weight:600">TOT REALE (ciclo corrente)</span>'
+                f'<span style="color:{real_color};font-weight:600">{t_real:.1f}s = {t_real/60:.1f}min '
+                f'<span style="font-size:9px">(Δ {sign}{err_real_pct:.0f}%)</span></span></div>'
+            )
+        # Stringa T_s reale per cella main (t_real già calcolato sopra)
+        if is_done and t_real > 0:
+            err_real_pct = abs(t_real - t_s) / t_s * 100 if t_s > 0 else 0
+            real_color = "#4caf50" if err_real_pct < 10 else ("#fbbf24" if err_real_pct < 25 else "#f44336")
+            sign = "+" if t_real >= t_s else "-"
+            real_str = (
+                f' <span style="color:var(--text-dim)">/</span> '
+                f'<span style="color:{real_color}" title="T_s reale = tick_total_s del record ciclo corrente. Δ rispetto pred">'
+                f'{t_real/60:.1f}m'
+                f'<span style="font-size:9px;color:{real_color};margin-left:2px">'
+                f'({sign}{err_real_pct:.0f}%)</span>'
+                f'</span>'
+            )
+        else:
+            real_str = ' <span style="color:var(--text-dim)">/ —</span>'
         rows.append(
             f'<tr style="cursor:pointer" onclick="(function(r){{var d=document.getElementById(\'{row_id}\');d.style.display=d.style.display===\'none\'?\'\':\'none\';}})(this)" title="click per espandere/comprimere il breakdown">'
             f'<td style="font-weight:600">▸ {inst}</td>'
-            f'<td style="text-align:right;font-family:monospace" title="T_s predicted istanza in minuti = boot_home + task durations + wait inter-task">{t_s/60:.1f}m</td>'
+            f'<td style="text-align:right;font-family:monospace;white-space:nowrap" title="T_s predicted / reale (se eseguito). Δ% in colore">'
+            f'{t_s/60:.1f}m{real_str}</td>'
             f'<td style="text-align:center">'
             f'<span style="color:#4caf50">{len(due_tasks)}</span>'
             f'<span style="color:var(--text-dim)"> / </span>'
@@ -1913,7 +1944,7 @@ def partial_cycle_snapshot_detail(request: Request):
     table = (
         '<table class="tel-table"><thead><tr>'
         '<th title="click su una riga per espandere il breakdown">istanza</th>'
-        '<th style="text-align:right" title="T_s = tempo predicted dell&#39;istanza (min) = boot_home + Σ task durations + wait inter-task. Click sulla riga per breakdown dettagliato.">T_s</th>'
+        '<th style="text-align:right" title="T_s predicted / reale (se istanza ha già girato nel ciclo). Δ% colorato: verde<10%, giallo<25%, rosso>25%">T_s pred/real</th>'
         '<th style="text-align:center" title="N pianificati / N eseguiti (ultimo ciclo)">N pred/exec</th>'
         '<th>task pianificati</th>'
         '<th title="task effettivamente eseguiti nell&#39;ultimo ciclo (data/istanza_metrics.jsonl)">task eseguiti (ultimo)</th>'
