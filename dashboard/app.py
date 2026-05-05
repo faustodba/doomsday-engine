@@ -109,10 +109,15 @@ async def _predictor_recorder_loop():
                 except Exception:
                     pass
 
+            # Bug 05/05: pre-fix, se l'ultimo snap era stato fatto fra due cicli
+            # (cycle_numero=None), `last_cycle_snap is not None` falliva → quando
+            # il nuovo ciclo iniziava il rilevamento veniva saltato e lo snapshot
+            # arrivava solo al timer interval 15min, con state.schedule gia'
+            # parzialmente aggiornato dalle prime istanze. Risultato: drilldown
+            # mostrava task "non pianificati" che il bot aveva eseguito.
             is_new_cycle = (
                 cycle_now is not None
-                and last_cycle_snap is not None
-                and int(cycle_now) != int(last_cycle_snap)
+                and (last_cycle_snap is None or int(cycle_now) != int(last_cycle_snap))
             )
             interval_due = elapsed_s >= SNAPSHOT_INTERVAL_MIN * 60
 

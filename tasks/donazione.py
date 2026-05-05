@@ -73,8 +73,10 @@ class DonazioneConfig:
 class DonazioneTask(BaseTask):
     """
     Dona risorse alla tecnologia dell'alleanza con badge Marked!.
-    Scheduling: always — e_dovuto() restituisce True ad ogni tick.
-    Il gate reale è la presenza del bottone Donate nella UI.
+    Scheduling: governato da task_setup.json (periodic 8h post-WU90).
+    Il metodo e_dovuto() ritorna sempre True ma e' V5 legacy, non usato
+    dall'orchestrator V6 (che dispatch su task.schedule_type).
+    Il gate reale e' la presenza del bottone Donate nella UI durante run().
     """
 
     def __init__(self) -> None:
