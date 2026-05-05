@@ -48,6 +48,16 @@ MIN_SAMPLES_MID  = 3       # >=3 samples → "media"; <3 → "bassa"
 INTER_TASK_FALLBACK_S = 1.5
 INTER_TASK_MIN_SAMPLES = 3
 
+# 05/05: override percentile per task con distribuzione bimodale nota.
+# Validazione ciclo #159: raccolta_chiusura avg Δ +756% (skip mode 3s
+# vs work mode 100-200s, median perde info). p75 cattura meglio il
+# "lavoro reale" pesando i casi work mode. Per gli altri task il default
+# (median) è ben centrato. boot_home Δ +30% sistematico è artefatto
+# rolling pre-fix `1d0ab34` (post-HOME overhead) che converge in 10 cicli.
+PER_TASK_PERCENTILE_OVERRIDE: dict[str, str] = {
+    "raccolta_chiusura": "p75",
+}
+
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Helpers path / cache
@@ -252,11 +262,14 @@ def predict_istanza_duration(
     n_with_stats = 0
     for tname in scheduled_tasks:
         ts = stats.tasks.get(tname)
+        # 05/05: applica percentile override per task con bimodalità nota
+        # (raccolta_chiusura → p75). Default percentile altrove.
+        eff_percentile = PER_TASK_PERCENTILE_OVERRIDE.get(tname, percentile)
         if ts is None or ts.n_samples == 0:
             tasks_breakdown[tname] = 60.0   # fallback statico
             missing.append(tname)
         else:
-            tasks_breakdown[tname] = ts.value(percentile)
+            tasks_breakdown[tname] = ts.value(eff_percentile)
             n_with_stats += 1
 
     # WU122-OptC: wait inter-task. Usa stat reali se 3+ samples, altrimenti
