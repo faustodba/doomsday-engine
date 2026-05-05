@@ -1033,7 +1033,7 @@ def _esegui_via_membri(ctx: TaskContext, risorse_config: dict,
         try:
             from core.istanza_metrics import aggiungi_invio_rifornimento
             aggiungi_invio_rifornimento(
-                ctx.config.nome, risorsa_scelta,
+                ctx.instance_name, risorsa_scelta,
                 int(qta_effettiva), int(eta_ar),
             )
         except Exception:
@@ -1527,7 +1527,7 @@ class RifornimentoTask(Task):
                 try:
                     from core.istanza_metrics import aggiungi_invio_rifornimento
                     aggiungi_invio_rifornimento(
-                        ctx.config.nome, risorsa_scelta,
+                        ctx.instance_name, risorsa_scelta,
                         int(qta_effettiva), int(eta_ar),
                     )
                 except Exception:
