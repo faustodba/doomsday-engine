@@ -433,13 +433,22 @@ def _boost_will_skip(istanza: str, tick_sleep_s: float, now=None) -> bool:
         return False
 
 
-def _rifornimento_will_skip(istanza: str) -> bool:
+def _rifornimento_will_skip(istanza: str, now=None) -> bool:
     """
     True se RifornimentoTask gira come NOOP (no-send).
 
     Condizioni (in OR):
-      - Master saturo: morfeus_state.daily_recv_limit == 0
-      - Provviste istanza esaurite (guard giornaliero persistente)
+      - Master saturo: morfeus_state.daily_recv_limit == 0 con freshness
+      - Provviste istanza esaurite (guard giornaliero) con freshness
+
+    Args:
+        now: datetime UTC di riferimento per la valutazione (offset cumulativo).
+             Se None usa `datetime.now(utc)`. Per istanze in coda nel ciclo
+             passare `now_for_inst = t0 + Σ T_j` per coprire cicli a cavallo
+             00:00 UTC: i flag stantii (ts/data antecedente al midnight UTC
+             del giorno di now) saranno considerati invalidati dal reset
+             giornaliero (sia gioco-side per DRL, sia bot-side via
+             _controlla_reset per provviste_esaurite).
 
     05/05 fix: rimosso il check `spedizioni_oggi >= quota_max`. Il bot
     NON usa quel guard in `RifornimentoState.should_run()` (vedi commento
@@ -453,21 +462,47 @@ def _rifornimento_will_skip(istanza: str) -> bool:
     ma non pianificato).
     """
     try:
-        # Master saturo: blocca tutte le istanze ordinarie
+        from datetime import datetime as _dt, timezone as _tz
+        if now is None:
+            now = _dt.now(_tz.utc)
+        # Mezzanotte UTC del giorno di `now` — soglia di freshness
+        midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        oggi_utc = now.strftime("%Y-%m-%d")
+
+        # Master saturo: blocca tutte le istanze ordinarie (coerente con
+        # tasks/rifornimento.py::should_run — DRL=0 + ts >= midnight UTC del
+        # giorno valutato. Se ts antecedente → flag stantio post-reset gioco
+        # 00:00 UTC → predictor non skippa).
         morfeus_path = _root() / "data" / "morfeus_state.json"
         if morfeus_path.exists():
             ms = json.loads(morfeus_path.read_text(encoding="utf-8"))
             drl = ms.get("daily_recv_limit", -1)
             if drl == 0:
-                return True
-        # Per-istanza: provviste esaurite (guard giornaliero persistente)
+                ts_iso = ms.get("ts", "")
+                ts_dt = None
+                try:
+                    ts_dt = _dt.fromisoformat(ts_iso) if ts_iso else None
+                except Exception:
+                    pass
+                if ts_dt is not None and ts_dt >= midnight:
+                    return True
+                # ts stale (pre-reset 00:00 UTC del giorno valutato) →
+                # bot tenterà per refresh → predictor non skippa
+        # Per-istanza: provviste esaurite (guard giornaliero) con freshness
+        # confrontando data_riferimento con la data UTC del momento valutato.
+        # Pre-fix: cicli a cavallo 00:00 UTC con flag=True ereditato da ieri
+        # → predictor skippava → bot resettava al primo accesso → EXTRA.
         path = _root() / "state" / f"{istanza}.json"
         if not path.exists():
             return False
         s = json.loads(path.read_text(encoding="utf-8"))
         rif = s.get("rifornimento") or {}
         if rif.get("provviste_esaurite", False):
-            return True
+            data_rif = rif.get("data_riferimento", "")
+            if data_rif == oggi_utc:
+                return True
+            # data_riferimento di ieri → flag stantio, sarà resettato dal
+            # bot al primo _controlla_reset → predictor non skippa
         return False
     except Exception:
         return False
@@ -533,7 +568,7 @@ def _task_will_be_noop(task_name: str,
     if task_name == "boost":
         return _boost_will_skip(istanza, tick_sleep_s, now=now)
     if task_name == "rifornimento":
-        return _rifornimento_will_skip(istanza)
+        return _rifornimento_will_skip(istanza, now=now)
     if task_name == "district_showdown":
         return _district_showdown_will_skip(now=now)
     return False
