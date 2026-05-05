@@ -84,6 +84,50 @@ def _ts_after(iso: str, cutoff: datetime) -> bool:
         return False
 
 
+def _calcola_ricevuto_da_alleati(master_name: str, t0_iso: str, t1_iso: str) -> dict:
+    """
+    Per istanza master: somma risorse ricevute (NETTO) nella finestra [t0, t1]
+    leggendo `state/*.json::rifornimento.dettaglio_oggi` di tutte le altre
+    istanze (escluso il master stesso).
+
+    Schema dettaglio_oggi: [{ts, risorsa, qta_inviata (NETTO), qta_lorda,
+    tassa_amount, provviste_residue}].
+
+    Best-effort: errori di lettura producono ricevuto=0 per quell'istanza.
+    Necessario per produzione/ora corretta del master (vedi
+    `chiudi_sessione_e_calcola` per il rationale).
+    """
+    out = {"pomodoro": 0, "legno": 0, "acciaio": 0, "petrolio": 0}
+    try:
+        t0 = datetime.fromisoformat(t0_iso)
+        t1 = datetime.fromisoformat(t1_iso)
+    except Exception:
+        return out
+    state_dir = Path(os.environ.get("DOOMSDAY_ROOT", os.getcwd())) / "state"
+    if not state_dir.exists():
+        return out
+    for f in state_dir.glob("*.json"):
+        if f.stem == master_name or f.stem.endswith("_timing"):
+            continue
+        try:
+            with f.open(encoding="utf-8") as fh:
+                s = json.load(fh)
+            for d in (s.get("rifornimento") or {}).get("dettaglio_oggi", []) or []:
+                ts = d.get("ts", "")
+                try:
+                    dt = datetime.fromisoformat(ts)
+                except Exception:
+                    continue
+                if t0 <= dt <= t1:
+                    risorsa = d.get("risorsa", "")
+                    qta = int(d.get("qta_inviata", 0))
+                    if risorsa in out:
+                        out[risorsa] += qta
+        except Exception:
+            continue
+    return out
+
+
 # ==============================================================================
 # RifornimentoState — quota giornaliera spedizioni
 # ==============================================================================
@@ -1122,26 +1166,33 @@ class InstanceState:
         elif diamanti_finali >= 0:
             sess.diamanti_finali = int(diamanti_finali)
 
+        # 05/05: per istanze master (FauMorfeus), sottrai dal delta_castle le
+        # risorse RICEVUTE dalle altre istanze nella finestra [ts_inizio,
+        # ts_fine]. Fonte: state/{altra_istanza}.json::rifornimento.dettaglio_oggi
+        # (filtrato per ts e risorsa, NETTO `qta_inviata` post-tassa). Senza
+        # questa sottrazione prod_ora del master sarebbe gonfiato dal traffico
+        # rifornimento (es. produzione interna 1M/h ma misurato 50M/h se 11
+        # istanze inviano 50M nel periodo). Best-effort: errori di lettura
+        # delle altre state files producono ricevuto=0 per quelle istanze.
+        from shared.instance_meta import is_master_instance
+        is_master = is_master_instance(self.instance_name)
+        if is_master:
+            ricevuto = _calcola_ricevuto_da_alleati(self.instance_name, sess.ts_inizio, ts_fine)
+            for r in ("pomodoro", "legno", "acciaio", "petrolio"):
+                qta_ricevuta = int(ricevuto.get(r, 0))
+                prod_qty[r] = prod_qty[r] - qta_ricevuta
+                prod_ora[r] = (prod_qty[r] / durata * 3600.0) if durata > 0 else 0.0
+            sess.produzione_qty = prod_qty
+            sess.produzione_oraria = prod_ora
+
         # WU47 — propaga produzione_oraria a metrics.*_per_ora.
         # La dashboard "produzione/ora — farm aggregata" somma questi valori
         # tra tutte le istanze. Senza propagazione metrics restano 0.0 e il
         # pannello mostra "in attesa del primo ciclo raccolta" perpetuo.
         # Filtro: solo sessioni con durata >= 300s (5 min) per evitare swing
         # spurious da tick brevissimi.
-        #
-        # 05/05: skip propagazione per istanze master (FauMorfeus). Il master
-        # è destinatario rifornimento → delta_castle include risorse RICEVUTE
-        # dalle altre istanze (non sottratte dalla formula sopra), che
-        # gonfiano artificialmente prod_ora. Esempio: master riceve 100M
-        # pomodoro/h dalle 11 ordinarie → prod_ora pomodoro = 100M+ even
-        # though produzione interna è ~1M/h. La metrica diventa fuorviante
-        # nel pannello "produzione/ora farm aggregata". Per il master prod_ora
-        # viene calcolato e archiviato in produzione_storico (per debug) ma
-        # NON propagato a metrics → la dashboard userà 0 e il valore non
-        # contribuisce all'aggregazione.
-        from shared.instance_meta import is_master_instance
-        is_master = is_master_instance(self.instance_name)
-        if durata >= 300 and not is_master:
+        # 05/05: master ora usa prod_ora corretto (post-sottrazione ricevuto).
+        if durata >= 300:
             try:
                 self.metrics.aggiorna_risorse(
                     pomodoro = float(prod_ora.get("pomodoro", 0.0)),
