@@ -52,6 +52,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Literal
 
+import cv2
 import numpy as np
 
 from core.task import Task, TaskContext, TaskResult
@@ -97,6 +98,45 @@ _TAP_OPEN_CELLA    = [(42, 100), (42, 170), (42, 240), (42, 310), (42, 380)]
 
 _TAP_READY_DEPLOY  = (723, 482)
 _DELAY_REBUILD_S   = 0.8
+
+# 05/05 — discriminator "cella popolata vs vuota" per rebuild WU83.
+# ROI bbox per cella i (0-indexed): (0, y-32, 110, y+35) — coverage avatar
+# truppa nel pannello sx pre-battle. Edge density Canny ≥ 18% = popolata
+# (validato 6 casi: piene 20-24%, vuote 10.5-13.8%).
+_CELLA_Y_CENTERS    = [80, 148, 216, 283, 351]
+_CELLA_EDGE_PCT_MIN = 18.0
+
+
+def _cella_popolata(frame: "np.ndarray", idx: int) -> bool:
+    """
+    True se la cella idx (0..4) ha truppa schierata, False se vuota.
+
+    Discriminator: edge density Canny sul crop avatar. Validato 6 casi:
+      pieno: 20-24% edge density
+      vuoto: 10.5-13.8% edge density
+    Soglia 18% ben centrata nel gap.
+
+    Args:
+        frame: BGR ndarray dello screenshot pre-rebuild
+        idx: 0..4 indice cella
+    Returns:
+        bool. False su errore (best-effort, NO fallback aggressivo qui;
+        il caller decide cosa fare).
+    """
+    try:
+        if idx < 0 or idx >= len(_CELLA_Y_CENTERS):
+            return False
+        y = _CELLA_Y_CENTERS[idx]
+        crop = frame[y - 32 : y + 35, 0:110]
+        if crop is None or crop.size == 0:
+            return False
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        edges = cv2.Canny(gray, 50, 150)
+        edge_pct = float((edges > 0).sum()) / float(edges.size) * 100.0
+        return edge_pct >= _CELLA_EDGE_PCT_MIN
+    except Exception:
+        return False
+
 
 # Parametri pixel per popup Congratulations generico
 _CONGRATS_CHECK_XY  = (480, 300)
@@ -690,6 +730,8 @@ class ArenaTask(Task):
 
         Sequenza:
           1. Tap N pulsanti "−" rimozione (colonna sx coord 80,y_remove[i])
+             05/05: tap SOLO su celle effettivamente popolate (edge density
+             check), evita side-effect su celle vuote pre-esistenti.
           2. Per ogni cella vuota:
              - Tap centro cella (apre selettore truppe)
              - Tap READY (723,482) → auto-deploy migliore composizione
@@ -703,6 +745,10 @@ class ArenaTask(Task):
         WU114 (04/05): debug screenshot buffer per analisi rebuild non completo.
         Snap a punti chiave (pre/post rimozione, per ogni cella pre/post tap+READY,
         post-rebuild). Flush in `data/arena_debug/{ist}_{ts}_{idx}_{label}.png`.
+
+        05/05: fix "FAU_05 non schiera 4 squadre" — verifica pre-rimozione
+        celle popolate (issue: tap rimozione cieco su cella vuota causava
+        side-effect e shift posizionale, FAU_06 cell1↔cell4).
         """
         ctx.log_msg(f"[ARENA] [WU83] rebuild truppe — {n_celle} celle")
         n = max(1, min(5, int(n_celle)))
@@ -710,10 +756,30 @@ class ArenaTask(Task):
         # WU115 — debug buffer via shared/debug_buffer (hot-reload via config)
         from shared.debug_buffer import DebugBuffer
         debug = DebugBuffer.for_task("arena", getattr(ctx, "instance_name", "_unknown"))
-        debug.snap("00_pre_rebuild", ctx.device.screenshot())
+        screen_pre = ctx.device.screenshot()
+        debug.snap("00_pre_rebuild", screen_pre)
 
-        # Step 1: rimuovi N truppe correnti
-        for i in range(n):
+        # 05/05 — verifica pre-rimozione: tap SOLO su celle popolate
+        # Discriminator: edge density Canny ≥ 18% (validato 6 casi: piene 20-24%,
+        # vuote 10.5-13.8%). Side-effect noto su tap cieco di cella vuota:
+        # apertura selettore + auto-deploy non desiderato → shift posizione.
+        celle_popolate: list[int] = []
+        if screen_pre is not None and getattr(screen_pre, "frame", None) is not None:
+            frame = screen_pre.frame
+            for i in range(n):
+                if _cella_popolata(frame, i):
+                    celle_popolate.append(i)
+            ctx.log_msg(
+                f"[ARENA] [WU83] celle popolate pre-rebuild: "
+                f"{[c+1 for c in celle_popolate]}/{n}"
+            )
+        else:
+            # Fallback conservativo: assumi tutte popolate (comportamento pre-fix)
+            celle_popolate = list(range(n))
+            ctx.log_msg("[ARENA] [WU83] screenshot pre-rebuild non disponibile — fallback rimozione completa")
+
+        # Step 1: rimuovi solo le truppe effettivamente schierate
+        for i in celle_popolate:
             x, y = _TAP_REMOVE_TRUPPA[i]
             ctx.device.tap(x, y)
             time.sleep(_DELAY_REBUILD_S)
