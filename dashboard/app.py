@@ -1935,9 +1935,61 @@ def partial_cycle_accuracy(request: Request):
     Mostra ultimi N=10 cicli completati con: actual_min, snapshots presi durante
     il ciclo (elapsed_min, predicted_min, error_pct).
     """
-    from core.cycle_predictor_recorder import read_recent_accuracy
+    from core.cycle_predictor_recorder import (
+        read_recent_accuracy, _read_cicli_in_corso, get_all_snapshots_for_cycle,
+    )
+    from datetime import datetime as _dt, timezone as _tz
     rows = read_recent_accuracy(n_cycles=10)
-    if not rows:
+
+    # 05/05: aggiungi ciclo CORRENTE in cima (in_corso, no actual_min finale)
+    # con elapsed parziale + snapshot già fatti. Confronto pred-vs-elapsed
+    # solo informativo (errore vero noto solo a fine ciclo).
+    in_corso_row_html = ""
+    try:
+        ciclo_now = _read_cicli_in_corso()
+        if ciclo_now:
+            cn_now = ciclo_now.get("numero")
+            start_ts = ciclo_now.get("start_ts", "")
+            try:
+                start_dt = _dt.fromisoformat(start_ts)
+                elapsed_min = (_dt.now(_tz.utc) - start_dt).total_seconds() / 60.0
+            except Exception:
+                elapsed_min = 0.0
+            snaps_now = get_all_snapshots_for_cycle(int(cn_now)) if cn_now else []
+            n_snaps_now = len(snaps_now)
+            # Errore parziale: |predicted - elapsed| / elapsed × 100
+            # NB: solo informativo — actual finale può essere maggiore
+            errs_partial = []
+            for s in snaps_now:
+                pred = float(s.get("predicted_min", 0))
+                if elapsed_min > 0:
+                    err_p = abs(pred - elapsed_min) / elapsed_min * 100
+                    errs_partial.append(err_p)
+            if errs_partial:
+                avg_err = sum(errs_partial) / len(errs_partial)
+                err_color = "#4caf50" if avg_err < 10 else ("#ff9800" if avg_err < 25 else "#f44336")
+                err_summary = f"vs elapsed: avg {avg_err:.1f}%"
+            else:
+                avg_err = 0.0
+                err_color = "var(--text-dim)"
+                err_summary = "no snapshots ancora"
+            snaps_str = " · ".join(
+                f'+{s.get("elapsed_min",0):.0f}m={s.get("predicted_min",0):.0f}m'
+                for s in snaps_now[:5]
+            )
+            in_corso_row_html = (
+                f'<tr style="background:rgba(76,175,80,0.06)">'
+                f'<td style="font-weight:600;color:#4caf50">#{cn_now} ▶</td>'
+                f'<td style="text-align:right;font-family:monospace;color:var(--text-dim)" title="elapsed dal start_ts del ciclo (in corso, actual finale TBD)">{elapsed_min:.1f}m...</td>'
+                f'<td style="text-align:center;font-size:10px">{n_snaps_now}</td>'
+                f'<td style="color:{err_color};font-weight:500" title="error_pct calcolato vs elapsed corrente — solo informativo, actual finale può essere maggiore">{err_summary}</td>'
+                f'<td style="color:var(--text-dim);font-size:10px;font-family:monospace">{snaps_str}</td>'
+                f'</tr>'
+            )
+    except Exception:
+        pass
+
+    if not rows and not in_corso_row_html:
         return HTMLResponse(
             '<div style="color:var(--text-dim);text-align:center;padding:8px;font-size:11px">'
             'nessun ciclo valutato — il primo snapshot è preso ad avvio dashboard,<br>'
@@ -1946,6 +1998,8 @@ def partial_cycle_accuracy(request: Request):
         )
 
     body = []
+    if in_corso_row_html:
+        body.append(in_corso_row_html)
     for r in rows:
         cn = r.get("cycle_numero", "?")
         actual = r.get("actual_min", 0)
