@@ -588,8 +588,13 @@ def _is_task_due(task_name: str,
     Logica:
       - schedule == "always" / interval_hours == 0 → sempre, MA con guard di
         stato `_task_will_be_noop` per boost/rifornimento (e futuri)
+      - schedule == "daily" → coerente con orchestrator `_e_dovuto_daily`:
+        last_run < reset_daily_corrente (00:00 UTC del giorno di now_utc).
+        Risolve mismatch nei cicli a cavallo della mezzanotte UTC dove il
+        bot eseguiva (last_run < reset) ma il predictor escludeva (elapsed
+        < 24h). Tipici task daily: vip, arena, arena_mercato, main_mission.
+      - schedule == "periodic" → elapsed_h >= interval_hours
       - last_run None → primo run, gira
-      - elapsed >= interval_hours → gira
       - main_mission edge: hour gate UTC ≥ 20 (WU91)
 
     Args:
@@ -612,15 +617,31 @@ def _is_task_due(task_name: str,
     try:
         from datetime import datetime as _dt
         last_dt  = _dt.fromisoformat(last_run_iso)
-        elapsed_h = (now_utc - last_dt).total_seconds() / 3600.0
     except Exception:
         return True   # parse fail: conservativo, conta il task
 
-    if elapsed_h < interval_h:
-        return False
+    # Branch schedule "daily" → confronto vs reset 00:00 UTC del giorno di now_utc
+    # (replica core/orchestrator.py::_e_dovuto_daily + _reset_daily_corrente).
+    if schedule == "daily":
+        reset_oggi = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        # Se now < midnight di "oggi" calcolato, usiamo midnight di ieri
+        # (caso edge: now_utc cade prima del reset_oggi calcolato → impossibile,
+        # now.replace(hour=0) <= now sempre, quindi reset_oggi è sempre <= now).
+        # Garantiamo coerenza con orchestrator:
+        if now_utc < reset_oggi:
+            from datetime import timedelta as _timedelta
+            reset_oggi = reset_oggi - _timedelta(days=1)
+        is_due = last_dt < reset_oggi
+        if not is_due:
+            return False
+        # Edge case main_mission: gate UTC >= 20 (WU91)
+        if task_name == "main_mission" and now_utc.hour < 20:
+            return False
+        return True
 
-    # Edge case main_mission: gate UTC >= 20 (WU91)
-    if task_name == "main_mission" and now_utc.hour < 20:
+    # Branch schedule "periodic"
+    elapsed_h = (now_utc - last_dt).total_seconds() / 3600.0
+    if elapsed_h < interval_h:
         return False
 
     return True
