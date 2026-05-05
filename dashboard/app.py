@@ -1675,6 +1675,19 @@ def partial_cycle_snapshot_detail(request: Request):
         f'</div></div>'
     )
 
+    # 05/05: per ogni istanza calcola il breakdown della stima (boot_home +
+    # task individuali + wait inter-task). Permette espandere la riga e vedere
+    # COME è composto il T_s. Necessario per analizzare scostamenti predictor.
+    from core.cycle_duration_predictor import predict_istanza_duration
+    breakdown_per_inst: dict[str, dict] = {}
+    for inst in istanze_ab:
+        try:
+            due = task_per.get(inst, [])
+            pred_data = predict_istanza_duration(inst, due, percentile="median")
+            breakdown_per_inst[inst] = pred_data
+        except Exception:
+            breakdown_per_inst[inst] = {}
+
     # Tabella per istanza con what-if + confronto eseguiti
     rows = []
     for inst in sorted(istanze_ab):
@@ -1713,10 +1726,40 @@ def partial_cycle_snapshot_detail(request: Request):
             f' <span style="color:#f44336;font-weight:600" title="{n_diff} task discordanti">⚠{n_diff}</span>'
             if n_diff > 0 else ''
         )
+        # Riga main + riga expand (breakdown stima): toggle via onclick JS
+        row_id = f"snap-detail-{inst}"
+        bd = breakdown_per_inst.get(inst, {})
+        boot_s = bd.get("boot_home_s", 0)
+        tasks_bd = bd.get("tasks", {}) or {}
+        wait_s = bd.get("wait_inter_task_s", 0)
+        wait_src = bd.get("wait_inter_task_src", "?")
+        # Render breakdown cell-by-cell, sorted desc by T_s
+        bd_rows = []
+        bd_rows.append(
+            f'<div style="display:flex;justify-content:space-between;font-family:monospace;font-size:10px;padding:1px 0">'
+            f'<span style="color:var(--text-dim)">└─ boot_home (avvio→pronto)</span>'
+            f'<span style="color:var(--text)">{boot_s:.1f}s</span></div>'
+        )
+        for tname, tval in sorted(tasks_bd.items(), key=lambda kv: -kv[1]):
+            bd_rows.append(
+                f'<div style="display:flex;justify-content:space-between;font-family:monospace;font-size:10px;padding:1px 0">'
+                f'<span style="color:var(--text-dim)">└─ task: {tname}</span>'
+                f'<span style="color:var(--text)">{tval:.1f}s</span></div>'
+            )
+        bd_rows.append(
+            f'<div style="display:flex;justify-content:space-between;font-family:monospace;font-size:10px;padding:1px 0">'
+            f'<span style="color:var(--text-dim)">└─ wait inter-task ({wait_src})</span>'
+            f'<span style="color:var(--text)">{wait_s:.1f}s</span></div>'
+        )
+        bd_rows.append(
+            f'<div style="display:flex;justify-content:space-between;font-family:monospace;font-size:11px;padding:3px 0;border-top:1px solid var(--border);margin-top:3px">'
+            f'<span style="color:var(--accent);font-weight:600">TOT predicted</span>'
+            f'<span style="color:var(--accent);font-weight:600">{t_s:.1f}s = {t_s/60:.1f}min</span></div>'
+        )
         rows.append(
-            f'<tr>'
-            f'<td style="font-weight:600">{inst}</td>'
-            f'<td style="text-align:right;font-family:monospace">{t_s/60:.1f}m</td>'
+            f'<tr style="cursor:pointer" onclick="(function(r){{var d=document.getElementById(\'{row_id}\');d.style.display=d.style.display===\'none\'?\'\':\'none\';}})(this)" title="click per espandere/comprimere il breakdown">'
+            f'<td style="font-weight:600">▸ {inst}</td>'
+            f'<td style="text-align:right;font-family:monospace" title="T_s predicted istanza in minuti = boot_home + task durations + wait inter-task">{t_s/60:.1f}m</td>'
             f'<td style="text-align:center">'
             f'<span style="color:#4caf50">{len(due_tasks)}</span>'
             f'<span style="color:var(--text-dim)"> / </span>'
@@ -1731,13 +1774,19 @@ def partial_cycle_snapshot_detail(request: Request):
             f'<td style="text-align:right;color:#ff9800;font-size:10px">'
             f'-{savings/60:.1f}m ({savings_pct:.0f}%)</td>'
             f'</tr>'
+            f'<tr id="{row_id}" style="display:none;background:rgba(255,255,255,0.03)">'
+            f'<td colspan="7" style="padding:6px 12px">'
+            f'<div style="font-size:9px;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">'
+            f'breakdown stima {inst}</div>'
+            + "".join(bd_rows) +
+            f'</td></tr>'
         )
 
     tot_pred = sum(per_ist.values()) + tick_sleep
     table = (
         '<table class="tel-table"><thead><tr>'
-        '<th>istanza</th>'
-        '<th style="text-align:right">T_s</th>'
+        '<th title="click su una riga per espandere il breakdown">istanza</th>'
+        '<th style="text-align:right" title="T_s = tempo predicted dell&#39;istanza (min) = boot_home + Σ task durations + wait inter-task. Click sulla riga per breakdown dettagliato.">T_s</th>'
         '<th style="text-align:center" title="N pianificati / N eseguiti (ultimo ciclo)">N pred/exec</th>'
         '<th>task pianificati</th>'
         '<th title="task effettivamente eseguiti nell&#39;ultimo ciclo (data/istanza_metrics.jsonl)">task eseguiti (ultimo)</th>'
@@ -1755,9 +1804,11 @@ def partial_cycle_snapshot_detail(request: Request):
         f'<td></td></tr></tfoot></table>'
         '<div style="margin-top:6px;font-size:10px;color:var(--text-dim)">'
         '<b>legenda</b>: '
-        '<span style="color:#f44336">rosso</span> = eseguito ma non pianificato dal predictor · '
+        '<span style="color:#f44336">rosso</span> = eseguito ma non pianificato · '
         '<span style="color:#ff9800;text-decoration:line-through">arancione barrato</span> = pianificato ma non eseguito · '
-        'normale = match. ⚠ N = task discordanti per istanza.'
+        'normale = match. ⚠N = task discordanti. '
+        '<b>Click sulla riga</b> per espandere il breakdown della stima '
+        '(boot_home + ogni task + wait inter-task).'
         '</div>'
     )
 
