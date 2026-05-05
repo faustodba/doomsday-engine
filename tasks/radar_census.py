@@ -236,7 +236,8 @@ def _annota_mappa(map_full_path: str,
 
 class RadarCensusTask(Task):
     """
-    Radar Census — periodic, intervallo=24h.
+    Radar Census — periodic 12h (governato da config/task_setup.json).
+    Priority 100 (dopo radar=90, prima raccolta_chiusura=200).
 
     Cataloga le icone visibili nella schermata radar aperta.
     Richiede che la schermata radar sia già aperta (chiamato da RadarTask
@@ -250,13 +251,16 @@ class RadarCensusTask(Task):
         return "radar_census"
 
     def schedule_type(self) -> Literal["daily", "periodic"]:
+        # V5 legacy non usato dall'orchestrator V6 (dispatcha su task_setup.json).
         return "periodic"
 
     def interval_hours(self) -> float:
-        return 24.0
+        # V5 legacy non usato dall'orchestrator V6 (dispatcha su task_setup.json).
+        return 12.0
 
     def priority(self) -> int:
-        return 110
+        # V5 legacy non usato dall'orchestrator V6 (dispatcha su task_setup.json).
+        return 100
 
     def should_run(self, ctx: TaskContext) -> bool:
         if ctx.device is None:
