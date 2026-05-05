@@ -108,7 +108,7 @@ _MERCATO_PIN: dict[str, _PinSpec] = {
 
 class ArenaMercatoTask(Task):
     """
-    Arena Mercato — periodic, intervallo=12h.
+    Arena Mercato — daily, 24h (governato da config/task_setup.json).
 
     Acquista pack 360 (Intermediate Resource Pack) e pack 15
     (Random Resource Pack III) usando le monete arena accumulate.
@@ -138,7 +138,9 @@ class ArenaMercatoTask(Task):
         return True
 
     def interval_hours(self) -> float:
-        return 12.0
+        # V5 legacy non usato dall'orchestrator V6 (che dispatcha su
+        # task_setup.json::interval_hours = 24.0). Mantenuto per compat ABC.
+        return 24.0
 
     def run(self, ctx: TaskContext) -> TaskResult:
         acquisti_360 = 0
