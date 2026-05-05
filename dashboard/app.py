@@ -1501,7 +1501,10 @@ def partial_cycle_prediction(request: Request):
 
     conf_color = {"alta": "#4caf50", "media": "#ff9800", "bassa": "#f44336"}.get(conf, "var(--text-dim)")
 
-    # Header con doppia stima median (centrale) + p75 (conservativa)
+    # Header — p75 prominente (stima realistica, cattura cicli pieni)
+    # median resta visibile come confronto. Validazione 05/05 con
+    # cycle_accuracy.jsonl: median sotto-stima cicli pieni del 25-43%,
+    # p75 li cattura entro 5-15%.
     wait_label = (
         f'wait inter-task: <b>{total_wait_s:.0f}s</b> '
         f'(<span style="color:#4caf50">{n_rolling}</span> rolling, '
@@ -1509,12 +1512,12 @@ def partial_cycle_prediction(request: Request):
     )
     head = (
         f'<div style="display:flex;align-items:baseline;gap:24px;margin-bottom:10px;flex-wrap:wrap">'
-        f'<div title="stima centrale (median ultimi 20 record per task)">'
-        f'<span style="font-size:22px;font-weight:700;color:var(--accent)">{t_min:.1f}</span>'
-        f'<span style="font-size:11px;color:var(--text-dim);margin-left:4px">min · centrale</span></div>'
-        f'<div title="stima conservativa (p75 ultimi 20 record): cattura cicli con lavoro pieno">'
-        f'<span style="font-size:18px;font-weight:600;color:var(--text)">{t_min_p75:.1f}</span>'
-        f'<span style="font-size:11px;color:var(--text-dim);margin-left:4px">min · p75 conservativa</span></div>'
+        f'<div title="stima realistica p75 ultimi 20 record per task — cattura cicli con lavoro pieno (validato cycle_accuracy.jsonl: errore 5-15% sui cicli reali)">'
+        f'<span style="font-size:22px;font-weight:700;color:var(--accent)">{t_min_p75:.1f}</span>'
+        f'<span style="font-size:11px;color:var(--text-dim);margin-left:4px">min · realistica (p75)</span></div>'
+        f'<div title="stima centrale median — sotto-stima cicli pieni del 25-43% (riferimento)">'
+        f'<span style="font-size:16px;font-weight:500;color:var(--text-dim)">{t_min:.1f}</span>'
+        f'<span style="font-size:11px;color:var(--text-dim);margin-left:4px">min · centrale (median)</span></div>'
         f'<div style="color:var(--text-dim);font-size:11px">'
         f'{n_ist} istanze · sleep {tick:.0f}s · confidence '
         f'<span style="color:{conf_color};font-weight:600">{conf}</span></div>'
