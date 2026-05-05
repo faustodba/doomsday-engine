@@ -121,7 +121,8 @@ def _frame_from_screenshot(screen) -> np.ndarray | None:
 
 class RadarTask(Task):
     """
-    Radar Station — periodic, intervallo=12h.
+    Radar Station — periodic 12h (governato da config/task_setup.json).
+    Priority 90 (dopo store=80, prima radar_census=100).
 
     Raccoglie i pallini rossi dalla mappa Radar Station e,
     opzionalmente, esegue il censimento icone (RadarCensusTask).
@@ -133,13 +134,16 @@ class RadarTask(Task):
         return "radar"
 
     def schedule_type(self) -> Literal["daily", "periodic"]:
+        # V5 legacy non usato dall'orchestrator V6 (dispatcha su task_setup.json).
         return "periodic"
 
     def interval_hours(self) -> float:
+        # V5 legacy non usato dall'orchestrator V6 (dispatcha su task_setup.json).
         return 12.0
 
     def priority(self) -> int:
-        return 30
+        # V5 legacy non usato dall'orchestrator V6 (dispatcha su task_setup.json).
+        return 90
 
     def should_run(self, ctx) -> bool:
         if ctx.device is None or ctx.matcher is None:
