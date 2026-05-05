@@ -162,9 +162,8 @@ class StoreTask(Task):
     """
     Acquista automaticamente gli oggetti del Mysterious Merchant Store.
 
-    Scheduling: periodic, interval_h=4, priority=20.
-    Registrato in scheduler come:
-        scheduler.register("store", kind="periodic", interval_h=4, priority=20)
+    Scheduling: periodic 8h (governato da config/task_setup.json).
+    Priority: 80 (dopo district_showdown=70, prima radar=90).
 
     Il task è non-bloccante: store non trovato → skip() (non fail).
     Solo errori strutturali producono fail().
