@@ -111,10 +111,22 @@ class RifornimentoComuneOverride(BaseModel):
 
 
 class RifornimentoOverride(BaseModel):
-    """Modalità e coordinate rifugio. Retrocompatibile con versione precedente."""
+    """Modalità e coordinate rifugio. Retrocompatibile con versione precedente.
+
+    05/05: default `mappa_abilitata=True, membri_abilitati=False` per
+    riflettere modalità operativa standard del bot (mappa è la modalità
+    default). Pre-fix: default mappa=False/membri=True → ad ogni save
+    dashboard PATCH parziale (es. modifica soglia), Pydantic
+    ricostruiva il modello con default → mappa_abilitata resettata a
+    False → task_abilitato('rifornimento') ritornava False perché
+    `task_rifornimento AND (mappa OR membri) = True AND (False OR False)
+    = False` (membri=True nel default ma le condizioni mode-mutex
+    nell'altro endpoint forzano membri=False quando mappa attiva).
+    Pattern identico a WU102 (TaskFlags.raccolta).
+    """
     soglia_campo_m:   float = 50.0   # legacy — mantenuto per retrocompat.
-    mappa_abilitata:  bool  = False
-    membri_abilitati: bool  = True
+    mappa_abilitata:  bool  = True
+    membri_abilitati: bool  = False
     provviste_max:    int   = 100
 
 
