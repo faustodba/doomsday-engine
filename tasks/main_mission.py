@@ -199,15 +199,23 @@ def _leggi_current_ap(screen, roi: tuple[int, int, int, int]) -> int:
 
 class MainMissionTask(BaseTask):
     """
-    Recupera ricompense Main Mission + Daily Mission.
+    Recupera ricompense Main Mission + Daily Mission + chest milestone.
 
-    Scheduling: periodic 12h interval (registrato in task_setup.json).
+    Scheduling: daily, interval_hours=24.0 (task_setup.json) + gate orario WU91:
+    should_run ritorna True solo se now_utc.hour >= 20.
     Priority: 22 (dopo donazione=20, prima zaino=25).
+
+    Finestra utile esecuzione: 20:00 -> 00:00 UTC (4h).
+    Reset missioni gioco: 00:00 UTC (le daily si azzerano, va claim entro).
+    Reset daily orchestrator (`_reset_daily_corrente`): 01:00 UTC (margine
+    safety bot per evitare race col reset gioco). Risultato pratico: il task
+    gira al massimo 1 volta nella finestra reset-to-reset, e solo nelle 4h
+    20:00-00:00 UTC.
 
     Output data:
       - main_claim:  numero CLAIM Main Mission tappati
       - daily_claim: numero CLAIM Daily Mission tappati
-      - chest_claim: numero chest milestone tappati (incl. eventuali già claimati)
+      - chest_claim: numero chest milestone tappati (incl. eventuali gia' claimati)
     """
 
     def __init__(self) -> None:
@@ -226,8 +234,11 @@ class MainMissionTask(BaseTask):
         if hasattr(ctx.config, "task_abilitato"):
             if not ctx.config.task_abilitato("main_mission"):
                 return False
-        # Gate orario: esegui solo dopo le 20:00 UTC (recupero ricompense fine-giornata,
-        # prima del reset daily 01:00 UTC). Combinato con schedule="daily": 1x/die.
+        # Gate orario WU91: esegui solo dopo le 20:00 UTC. Razionale: le ricompense
+        # missioni si accumulano durante il giorno, raccoglierle a fine giornata
+        # massimizza i chest milestone (piu' AP accumulati -> piu' chest). Reset
+        # missioni gioco: 00:00 UTC (le daily si azzerano). Finestra utile bot:
+        # 20:00 -> 00:00 UTC (4h, ~2-3 tick disponibili).
         if datetime.now(timezone.utc).hour < 20:
             return False
         return True
