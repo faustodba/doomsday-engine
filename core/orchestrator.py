@@ -12,7 +12,7 @@
 #
 #  SCHEDULING:
 #    periodic  → eseguito ogni `interval_hours` ore dall'ultimo run
-#    daily     → eseguito una volta al giorno (reset alle 01:00 UTC)
+#    daily     → eseguito una volta al giorno (reset alle 00:00 UTC)
 #
 #  CATENA DI COMANDO (in ordine):
 #    1. e_dovuto()      → interval/daily scaduto? (scheduling temporale)
@@ -88,11 +88,13 @@ class _TaskEntry:
 
 def _reset_daily_corrente() -> datetime:
     """
-    Ritorna il datetime del reset giornaliero in vigore (01:00 UTC di oggi o ieri).
-    Coerente con il pattern già usato in rifornimento_base.py V5.
+    Ritorna il datetime del reset giornaliero in vigore (00:00 UTC di oggi o ieri).
+    Coerente con il reset gioco (missioni, daily quest, daily recv limit master)
+    e con tutti i task che usano `data_riferimento` UTC (VipState, RifornimentoState,
+    ArenaState, MorfeusState).
     """
     now = datetime.now(timezone.utc)
-    reset_oggi = now.replace(hour=1, minute=0, second=0, microsecond=0)
+    reset_oggi = now.replace(hour=0, minute=0, second=0, microsecond=0)
     return reset_oggi if now >= reset_oggi else reset_oggi - timedelta(days=1)
 
 

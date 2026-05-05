@@ -143,10 +143,10 @@ class TestEDovutoDaily:
         assert _e_dovuto_daily(entry) is False
 
     def test_reset_daily_corrente_e_utc(self):
-        """Il reset deve essere alle 01:00 UTC."""
+        """Il reset deve essere alle 00:00 UTC (allineato al reset gioco)."""
         reset = _reset_daily_corrente()
         assert reset.tzinfo == timezone.utc
-        assert reset.hour == 1
+        assert reset.hour == 0
         assert reset.minute == 0
         assert reset.second == 0
 

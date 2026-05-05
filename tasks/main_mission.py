@@ -207,10 +207,9 @@ class MainMissionTask(BaseTask):
 
     Finestra utile esecuzione: 20:00 -> 00:00 UTC (4h).
     Reset missioni gioco: 00:00 UTC (le daily si azzerano, va claim entro).
-    Reset daily orchestrator (`_reset_daily_corrente`): 01:00 UTC (margine
-    safety bot per evitare race col reset gioco). Risultato pratico: il task
-    gira al massimo 1 volta nella finestra reset-to-reset, e solo nelle 4h
-    20:00-00:00 UTC.
+    Reset daily orchestrator (`_reset_daily_corrente`): 00:00 UTC (allineato
+    al reset gioco). Risultato pratico: il task gira al massimo 1 volta nella
+    finestra reset-to-reset, e solo nelle 4h 20:00-00:00 UTC.
 
     Output data:
       - main_claim:  numero CLAIM Main Mission tappati
