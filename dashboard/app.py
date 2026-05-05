@@ -1792,24 +1792,30 @@ def partial_cycle_snapshot_detail(request: Request):
         t_s = per_ist.get(inst, 0)
         due_tasks = task_per.get(inst, [])
         eseguiti = eseguiti_per_inst.get(inst, [])
-        # Diff: task eseguiti ma NON pianificati = sorpresa (predictor non li sapeva)
-        # Diff: task pianificati ma NON eseguiti = previsti ma non avvenuti
+        # 05/05: distinzione "istanza non ancora girata" vs "girata":
+        # se exec è vuoto → tutti i task pianificati senza barratura
+        # (è solo previsione, non c'è ancora confronto possibile).
+        # Solo per istanze già girate calcoliamo missing/extra/diff.
+        is_done = bool(eseguiti)
         due_set = set(due_tasks)
         ese_set = set(eseguiti)
-        extra   = ese_set - due_set   # eseguiti senza essere pianificati
-        missing = due_set - ese_set   # pianificati ma non eseguiti
-        # Render eseguiti con highlight: rosso = extra (non previsti),
-        # normale = match, grigio mancante = visualizzato in 'pianificati'
+        if is_done:
+            extra   = ese_set - due_set   # eseguiti senza essere pianificati
+            missing = due_set - ese_set   # pianificati ma non eseguiti
+        else:
+            extra   = set()
+            missing = set()
+        # Render eseguiti con highlight: rosso = extra (non previsti)
         eseguiti_render = []
         for t in eseguiti:
             if t in extra:
                 eseguiti_render.append(f'<span style="color:#f44336" title="non pianificato">{t}</span>')
             else:
                 eseguiti_render.append(t)
-        # Render pianificati: grigio se mancante (non eseguito)
+        # Render pianificati: barrato SOLO se istanza ha già girato e task missing
         due_render = []
         for t in due_tasks:
-            if t in missing:
+            if is_done and t in missing:
                 due_render.append(f'<span style="color:#ff9800;text-decoration:line-through" title="pianificato ma non eseguito">{t}</span>')
             else:
                 due_render.append(t)
@@ -1818,8 +1824,8 @@ def partial_cycle_snapshot_detail(request: Request):
         t_skip_s  = t_ciclo_s - t_s
         savings   = t_s
         savings_pct = 100 * t_s / t_ciclo_s if t_ciclo_s > 0 else 0
-        # Indicatore differenza |extra|+|missing|
-        n_diff = len(extra) + len(missing)
+        # Indicatore differenza solo per istanze già girate
+        n_diff = len(extra) + len(missing) if is_done else 0
         diff_marker = (
             f' <span style="color:#f44336;font-weight:600" title="{n_diff} task discordanti">⚠{n_diff}</span>'
             if n_diff > 0 else ''
