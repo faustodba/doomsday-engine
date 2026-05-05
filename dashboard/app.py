@@ -1713,8 +1713,10 @@ def partial_cycle_snapshot_detail(request: Request):
         pass
 
     metrics_path = _P("C:/doomsday-engine-prod") / "data" / "istanza_metrics.jsonl"
-    # NEW 05/05: tick_total_per_inst = durata reale tick istanza nel ciclo corrente
+    # NEW 05/05: record_per_inst = record completo per breakdown side-by-side
+    # (boot_home_s, task_durations_s, wait_inter_task_s, tick_total_s)
     tick_total_per_inst: dict[str, float] = {}
+    record_per_inst: dict[str, dict] = {}
     try:
         if metrics_path.exists():
             with metrics_path.open(encoding="utf-8") as f:
@@ -1738,6 +1740,7 @@ def partial_cycle_snapshot_detail(request: Request):
                             eseguiti_per_inst[inst] = []
                             eseguiti_ts_per_inst[inst] = ""
                             tick_total_per_inst[inst] = 0.0
+                            record_per_inst[inst] = {}
                             continue
                     except Exception:
                         pass
@@ -1746,6 +1749,7 @@ def partial_cycle_snapshot_detail(request: Request):
                 eseguiti_per_inst[inst] = tasks_done
                 eseguiti_ts_per_inst[inst] = r.get("ts", "")
                 tick_total_per_inst[inst] = float(r.get("tick_total_s", 0) or 0)
+                record_per_inst[inst] = r
                 if len(eseguiti_per_inst) >= len(istanze_ab):
                     break
     except Exception:
@@ -1857,24 +1861,41 @@ def partial_cycle_snapshot_detail(request: Request):
         tasks_bd = bd.get("tasks", {}) or {}
         wait_s = bd.get("wait_inter_task_s", 0)
         wait_src = bd.get("wait_inter_task_src", "?")
-        # Render breakdown cell-by-cell, sorted desc by T_s
-        bd_rows = []
-        bd_rows.append(
-            f'<div style="display:flex;justify-content:space-between;font-family:monospace;font-size:10px;padding:1px 0">'
-            f'<span style="color:var(--text-dim)">└─ boot_home (avvio→pronto)</span>'
-            f'<span style="color:var(--text)">{boot_s:.1f}s</span></div>'
-        )
-        for tname, tval in sorted(tasks_bd.items(), key=lambda kv: -kv[1]):
-            bd_rows.append(
+        # NEW 05/05: breakdown side-by-side pred | real per ogni componente.
+        # Permette analisi puntuale dove il predictor sotto/sovra-stima
+        # (boot_home, task individuali, wait_inter_task) per migliorare modello.
+        rec = record_per_inst.get(inst, {}) or {}
+        boot_real = float(rec.get("boot_home_s", 0) or 0)
+        durs_real = rec.get("task_durations_s") or {}
+        wait_real = float(rec.get("wait_inter_task_s", 0) or 0)
+
+        def _row_compare(label: str, pred_val: float, real_val: float, has_real: bool) -> str:
+            """Render riga breakdown con pred | real | Δ%."""
+            if has_real and real_val > 0:
+                err_pct = abs(real_val - pred_val) / pred_val * 100 if pred_val > 0 else 0
+                color = "#4caf50" if err_pct < 10 else ("#fbbf24" if err_pct < 25 else "#f44336")
+                sign = "+" if real_val >= pred_val else "-"
+                real_html = (
+                    f'<span style="color:{color};margin-left:8px">'
+                    f'real {real_val:.1f}s '
+                    f'<span style="font-size:9px">(Δ {sign}{err_pct:.0f}%)</span>'
+                    f'</span>'
+                )
+            else:
+                real_html = '<span style="color:var(--text-dim);margin-left:8px">real —</span>'
+            return (
                 f'<div style="display:flex;justify-content:space-between;font-family:monospace;font-size:10px;padding:1px 0">'
-                f'<span style="color:var(--text-dim)">└─ task: {tname}</span>'
-                f'<span style="color:var(--text)">{tval:.1f}s</span></div>'
+                f'<span style="color:var(--text-dim)">{label}</span>'
+                f'<span style="color:var(--text)">pred {pred_val:.1f}s{real_html}</span>'
+                f'</div>'
             )
-        bd_rows.append(
-            f'<div style="display:flex;justify-content:space-between;font-family:monospace;font-size:10px;padding:1px 0">'
-            f'<span style="color:var(--text-dim)">└─ wait inter-task ({wait_src})</span>'
-            f'<span style="color:var(--text)">{wait_s:.1f}s</span></div>'
-        )
+
+        bd_rows = []
+        bd_rows.append(_row_compare("└─ boot_home (avvio→pronto)", boot_s, boot_real, is_done))
+        for tname, tval in sorted(tasks_bd.items(), key=lambda kv: -kv[1]):
+            real_t = float(durs_real.get(tname, 0) or 0)
+            bd_rows.append(_row_compare(f"└─ task: {tname}", tval, real_t, is_done))
+        bd_rows.append(_row_compare(f"└─ wait inter-task ({wait_src})", wait_s, wait_real, is_done))
         bd_rows.append(
             f'<div style="display:flex;justify-content:space-between;font-family:monospace;font-size:11px;padding:3px 0;border-top:1px solid var(--border);margin-top:3px">'
             f'<span style="color:var(--accent);font-weight:600">TOT predicted</span>'
