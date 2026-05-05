@@ -1615,6 +1615,39 @@ def partial_cycle_snapshot_detail(request: Request):
     per_ist     = ic.get("per_istanza_predicted_s", {}) or {}
     tick_sleep  = ic.get("tick_sleep_s", 0)
 
+    # 05/05: task EFFETTIVAMENTE eseguiti nell'ultimo ciclo per istanza
+    # (da data/istanza_metrics.jsonl). Permette confronto pianificati vs reali
+    # per analizzare scostamenti predictor (es. task non previsti perché
+    # interval scaduto durante il ciclo, gate temporali attraversati, ecc.).
+    import json as _json
+    from pathlib import Path as _P
+    eseguiti_per_inst: dict[str, list[str]] = {}
+    metrics_path = _P("C:/doomsday-engine-prod") / "data" / "istanza_metrics.jsonl"
+    try:
+        if metrics_path.exists():
+            # Scan reverse: prendi ultimo record per ogni istanza
+            with metrics_path.open(encoding="utf-8") as f:
+                lines = f.readlines()
+            for line in reversed(lines):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = _json.loads(line)
+                except Exception:
+                    continue
+                inst = r.get("instance")
+                if not inst or inst in eseguiti_per_inst:
+                    continue
+                durs = r.get("task_durations_s") or {}
+                # Ordina per durata desc per leggibilità
+                tasks_done = sorted(durs.keys(), key=lambda k: -float(durs.get(k, 0)))
+                eseguiti_per_inst[inst] = tasks_done
+                if len(eseguiti_per_inst) >= len(istanze_ab):
+                    break
+    except Exception:
+        pass
+
     # Header info ciclo
     header = (
         f'<div style="display:flex;gap:16px;font-size:11px;margin-bottom:10px">'
@@ -1642,23 +1675,57 @@ def partial_cycle_snapshot_detail(request: Request):
         f'</div></div>'
     )
 
-    # Tabella per istanza con what-if
+    # Tabella per istanza con what-if + confronto eseguiti
     rows = []
     for inst in sorted(istanze_ab):
         t_s = per_ist.get(inst, 0)
         due_tasks = task_per.get(inst, [])
+        eseguiti = eseguiti_per_inst.get(inst, [])
+        # Diff: task eseguiti ma NON pianificati = sorpresa (predictor non li sapeva)
+        # Diff: task pianificati ma NON eseguiti = previsti ma non avvenuti
+        due_set = set(due_tasks)
+        ese_set = set(eseguiti)
+        extra   = ese_set - due_set   # eseguiti senza essere pianificati
+        missing = due_set - ese_set   # pianificati ma non eseguiti
+        # Render eseguiti con highlight: rosso = extra (non previsti),
+        # normale = match, grigio mancante = visualizzato in 'pianificati'
+        eseguiti_render = []
+        for t in eseguiti:
+            if t in extra:
+                eseguiti_render.append(f'<span style="color:#f44336" title="non pianificato">{t}</span>')
+            else:
+                eseguiti_render.append(t)
+        # Render pianificati: grigio se mancante (non eseguito)
+        due_render = []
+        for t in due_tasks:
+            if t in missing:
+                due_render.append(f'<span style="color:#ff9800;text-decoration:line-through" title="pianificato ma non eseguito">{t}</span>')
+            else:
+                due_render.append(t)
         # What-if: T_ciclo SE skippo questa istanza
         t_ciclo_s = sum(per_ist.values()) + tick_sleep
         t_skip_s  = t_ciclo_s - t_s
         savings   = t_s
         savings_pct = 100 * t_s / t_ciclo_s if t_ciclo_s > 0 else 0
+        # Indicatore differenza |extra|+|missing|
+        n_diff = len(extra) + len(missing)
+        diff_marker = (
+            f' <span style="color:#f44336;font-weight:600" title="{n_diff} task discordanti">⚠{n_diff}</span>'
+            if n_diff > 0 else ''
+        )
         rows.append(
             f'<tr>'
             f'<td style="font-weight:600">{inst}</td>'
             f'<td style="text-align:right;font-family:monospace">{t_s/60:.1f}m</td>'
-            f'<td style="text-align:center"><span style="color:#4caf50">{len(due_tasks)}</span></td>'
+            f'<td style="text-align:center">'
+            f'<span style="color:#4caf50">{len(due_tasks)}</span>'
+            f'<span style="color:var(--text-dim)"> / </span>'
+            f'<span style="color:var(--accent)">{len(eseguiti)}</span>'
+            f'{diff_marker}</td>'
             f'<td style="color:var(--text-dim);font-size:10px;font-family:monospace">'
-            f'{", ".join(due_tasks) or "<i>—</i>"}</td>'
+            f'{", ".join(due_render) or "<i>—</i>"}</td>'
+            f'<td style="color:var(--text-dim);font-size:10px;font-family:monospace">'
+            f'{", ".join(eseguiti_render) or "<i>—</i>"}</td>'
             f'<td style="text-align:right;color:var(--accent);font-family:monospace">'
             f'{t_skip_s/60:.1f}m</td>'
             f'<td style="text-align:right;color:#ff9800;font-size:10px">'
@@ -1671,8 +1738,9 @@ def partial_cycle_snapshot_detail(request: Request):
         '<table class="tel-table"><thead><tr>'
         '<th>istanza</th>'
         '<th style="text-align:right">T_s</th>'
-        '<th style="text-align:center">N task</th>'
+        '<th style="text-align:center" title="N pianificati / N eseguiti (ultimo ciclo)">N pred/exec</th>'
         '<th>task pianificati</th>'
+        '<th title="task effettivamente eseguiti nell&#39;ultimo ciclo (data/istanza_metrics.jsonl)">task eseguiti (ultimo)</th>'
         '<th style="text-align:right" title="T_ciclo se skippo questa istanza">'
         'T_ciclo skip</th>'
         '<th style="text-align:right">saving</th>'
@@ -1680,11 +1748,17 @@ def partial_cycle_snapshot_detail(request: Request):
         f'<tbody>{"".join(rows)}</tbody>'
         f'<tfoot><tr style="border-top:1px solid var(--border)">'
         f'<td colspan="2" style="font-weight:600">TOTALE</td>'
-        f'<td colspan="2" style="text-align:right;color:var(--text-dim);font-size:10px">'
+        f'<td colspan="3" style="text-align:right;color:var(--text-dim);font-size:10px">'
         f'+ tick_sleep {tick_sleep:.0f}s</td>'
         f'<td style="text-align:right;font-family:monospace;font-weight:600;color:var(--accent)">'
         f'{tot_pred/60:.1f}m</td>'
         f'<td></td></tr></tfoot></table>'
+        '<div style="margin-top:6px;font-size:10px;color:var(--text-dim)">'
+        '<b>legenda</b>: '
+        '<span style="color:#f44336">rosso</span> = eseguito ma non pianificato dal predictor · '
+        '<span style="color:#ff9800;text-decoration:line-through">arancione barrato</span> = pianificato ma non eseguito · '
+        'normale = match. ⚠ N = task discordanti per istanza.'
+        '</div>'
     )
 
     return HTMLResponse(header + tasks_section + table)
