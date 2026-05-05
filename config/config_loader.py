@@ -317,12 +317,33 @@ def merge_config(gcfg: dict, overrides: dict) -> dict:
     # globali.rifornimento.mappa_abilitata (mutuamente esclusiva con membri_abilitati).
     # Il flag master task.rifornimento decide se il task gira; la sub-mode
     # decide COME gira (via mappa o via membri).
+    #
+    # 05/05: aggiunto mirror nel merged["rifornimento"] (top-level) per
+    # consumo della dashboard. Pre-fix: template index.html legge
+    # `cfg.rifornimento.mappa_abilitata` ma il merge esponeva solo
+    # `rifornimento_mappa.abilitato` → cfg.rifornimento=None → toggle UI
+    # sempre OFF al refresh. Ora rifornimento dict copia mappa_abilitata e
+    # membri_abilitati per coerenza con schema runtime_overrides.
     try:
-        ov_mappa = globali.get("rifornimento", {}).get("mappa_abilitata")
-        if ov_mappa is not None:
+        ov_rif = globali.get("rifornimento", {}) or {}
+        ov_mappa = ov_rif.get("mappa_abilitata")
+        ov_membri = ov_rif.get("membri_abilitati")
+        if ov_mappa is not None or ov_membri is not None:
             if "rifornimento_mappa" not in merged:
                 merged["rifornimento_mappa"] = {}
-            merged["rifornimento_mappa"]["abilitato"] = bool(ov_mappa)
+            if ov_mappa is not None:
+                merged["rifornimento_mappa"]["abilitato"] = bool(ov_mappa)
+            # Mirror top-level per dashboard
+            if "rifornimento" not in merged:
+                merged["rifornimento"] = {}
+            if ov_mappa is not None:
+                merged["rifornimento"]["mappa_abilitata"] = bool(ov_mappa)
+            if ov_membri is not None:
+                merged["rifornimento"]["membri_abilitati"] = bool(ov_membri)
+            # Copia anche soglia_campo_m + provviste_max se presenti
+            for k in ("soglia_campo_m", "provviste_max"):
+                if k in ov_rif:
+                    merged["rifornimento"][k] = ov_rif[k]
     except Exception:
         pass
 
