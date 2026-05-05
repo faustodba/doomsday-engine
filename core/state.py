@@ -1128,7 +1128,20 @@ class InstanceState:
         # pannello mostra "in attesa del primo ciclo raccolta" perpetuo.
         # Filtro: solo sessioni con durata >= 300s (5 min) per evitare swing
         # spurious da tick brevissimi.
-        if durata >= 300:
+        #
+        # 05/05: skip propagazione per istanze master (FauMorfeus). Il master
+        # è destinatario rifornimento → delta_castle include risorse RICEVUTE
+        # dalle altre istanze (non sottratte dalla formula sopra), che
+        # gonfiano artificialmente prod_ora. Esempio: master riceve 100M
+        # pomodoro/h dalle 11 ordinarie → prod_ora pomodoro = 100M+ even
+        # though produzione interna è ~1M/h. La metrica diventa fuorviante
+        # nel pannello "produzione/ora farm aggregata". Per il master prod_ora
+        # viene calcolato e archiviato in produzione_storico (per debug) ma
+        # NON propagato a metrics → la dashboard userà 0 e il valore non
+        # contribuisce all'aggregazione.
+        from shared.instance_meta import is_master_instance
+        is_master = is_master_instance(self.instance_name)
+        if durata >= 300 and not is_master:
             try:
                 self.metrics.aggiorna_risorse(
                     pomodoro = float(prod_ora.get("pomodoro", 0.0)),
