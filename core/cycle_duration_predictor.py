@@ -629,6 +629,12 @@ def predict_cycle_from_config(strict_schedule: bool = True,
     # raccolta sempre on (override flag, vedi WU102)
     if "raccolta" not in task_globali and task_flags.get("raccolta", True):
         task_globali.insert(0, "raccolta")
+    # raccolta_chiusura sempre eseguito (subclass di RaccoltaTask, priority
+    # 200, schedule=always interval=0). Non ha mai un flag dashboard separato
+    # ma viene SEMPRE chiamato a fine tick. Pre-fix: predictor lo escludeva
+    # → ~3-5s × 12 istanze = ~50s/ciclo sotto-stima.
+    if "raccolta_chiusura" not in task_globali:
+        task_globali.append("raccolta_chiusura")
 
     # tick_sleep va calcolato PRIMA del filtro (serve a _is_task_due per guard boost)
     sis = ov.get("globali", {}).get("sistema", {}) or {}
