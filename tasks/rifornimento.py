@@ -1148,6 +1148,21 @@ class RifornimentoTask(Task):
         if ctx.state is not None and not ctx.state.rifornimento.should_run():
             ctx.log_msg("Rifornimento: provviste esaurite oggi → skip")
             return False
+        # 05/05: master saturo (Daily Receiving Limit del rifugio destinatario
+        # = 0). Inutile aprire mappa+rifugio se master non può ricevere altro.
+        # Saving: ~80s × N istanze ad ogni tick post-saturazione master.
+        # Pattern detector telemetria: risultato no più "skip chain" fuorviante.
+        try:
+            from shared import morfeus_state
+            ms = morfeus_state.load() or {}
+            drl = int(ms.get("daily_recv_limit", -1))
+            if drl == 0:
+                ctx.log_msg(
+                    "Rifornimento: Daily Receiving Limit master=0 (saturo) → skip"
+                )
+                return False
+        except Exception:
+            pass   # best-effort, su errore non blocca
         return True
 
     def run(self, ctx: TaskContext,
