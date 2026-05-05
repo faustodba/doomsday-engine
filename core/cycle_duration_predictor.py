@@ -393,13 +393,18 @@ def _load_schedule_state(istanza: str) -> dict:
         return {}
 
 
-def _boost_will_skip(istanza: str, tick_sleep_s: float) -> bool:
+def _boost_will_skip(istanza: str, tick_sleep_s: float, now=None) -> bool:
     """
     True se al prossimo tick BoostTask gira come NOOP rapido (boost ancora attivo).
 
     Coerente con BoostState.is_attivo (core/state.py): boost attivo se
     `scadenza > now + ANTICIPO (5min)`. Aggiungiamo `tick_sleep_s` perché
     valutiamo il PROSSIMO tick, non quello attuale.
+
+    Args:
+        now: datetime UTC di riferimento per la valutazione. Se None usa
+             `datetime.now(utc)`. Per istanze in coda nel ciclo passare
+             `now_for_inst = t0 + Σ T_j_predicted` (offset cumulativo).
 
     Returns False (= task girerà) se:
       - state file mancante
@@ -420,7 +425,8 @@ def _boost_will_skip(istanza: str, tick_sleep_s: float) -> bool:
             return False
         from datetime import datetime as _dt, timezone as _tz, timedelta as _td
         scad = _dt.fromisoformat(scad_iso)
-        now  = _dt.now(_tz.utc)
+        if now is None:
+            now = _dt.now(_tz.utc)
         BOOST_ANTICIPO_S = 300.0   # coerente con _BOOST_ANTICIPO_S in core/state.py
         return scad > now + _td(seconds=tick_sleep_s + BOOST_ANTICIPO_S)
     except Exception:
@@ -467,12 +473,16 @@ def _rifornimento_will_skip(istanza: str) -> bool:
         return False
 
 
-def _district_showdown_will_skip() -> bool:
+def _district_showdown_will_skip(now=None) -> bool:
     """
     True se DistrictShowdownTask gira come NOOP per:
       - flag `task.district_showdown` disabilitato (WU108: veto esplicito)
       - fuori window evento (Ven 00:00 UTC → Lun 01:00 UTC, vedi
         tasks/district_showdown.py::_is_in_event_window)
+
+    Args:
+        now: datetime UTC di riferimento. Se None usa `datetime.now(utc)`.
+             Per istanze in coda nel ciclo passare offset cumulativo.
     """
     try:
         from datetime import datetime as _dt, timezone as _tz
@@ -484,7 +494,8 @@ def _district_showdown_will_skip() -> bool:
             if not flags.get("district_showdown", False):
                 return True
         # Window check (replica logica DS task)
-        now = _dt.now(_tz.utc)
+        if now is None:
+            now = _dt.now(_tz.utc)
         wd  = now.weekday()   # 0=lun … 6=dom
         h   = now.hour
         # Lunedì: in window se h < 1 (default ds_end_hour=1)
@@ -501,11 +512,16 @@ def _district_showdown_will_skip() -> bool:
 
 def _task_will_be_noop(task_name: str,
                        istanza: Optional[str],
-                       tick_sleep_s: float) -> bool:
+                       tick_sleep_s: float,
+                       now=None) -> bool:
     """
     Guard di stato per task con `interval_hours == 0` (always-due) ma che
     in pratica girano come NOOP frequentemente. Estensibile ad altri task
     nei prossimi step.
+
+    Args:
+        now: datetime UTC di riferimento per la valutazione (offset cumulativo).
+             Se None i guard usano `datetime.now(utc)` reale.
 
     Coperti:
       - boost              → boost.scadenza > now+tick+anticipo
@@ -515,11 +531,11 @@ def _task_will_be_noop(task_name: str,
     if not istanza:
         return False
     if task_name == "boost":
-        return _boost_will_skip(istanza, tick_sleep_s)
+        return _boost_will_skip(istanza, tick_sleep_s, now=now)
     if task_name == "rifornimento":
         return _rifornimento_will_skip(istanza)
     if task_name == "district_showdown":
-        return _district_showdown_will_skip()
+        return _district_showdown_will_skip(now=now)
     return False
 
 
@@ -548,7 +564,7 @@ def _is_task_due(task_name: str,
 
     if schedule == "always" or interval_h == 0:
         # Guard di stato: alcuni task always-due saranno NOOP per stato interno
-        if _task_will_be_noop(task_name, istanza, tick_sleep_s):
+        if _task_will_be_noop(task_name, istanza, tick_sleep_s, now=now_utc):
             return False
         return True
 
