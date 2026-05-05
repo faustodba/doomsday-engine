@@ -1152,15 +1152,36 @@ class RifornimentoTask(Task):
         # = 0). Inutile aprire mappa+rifugio se master non può ricevere altro.
         # Saving: ~80s × N istanze ad ogni tick post-saturazione master.
         # Pattern detector telemetria: risultato no più "skip chain" fuorviante.
+        #
+        # Freshness: il valore DRL si azzera in giornata e si resetta alle
+        # 00:00 UTC dal gioco. Se accettassimo DRL=0 senza guardare ts, dopo
+        # il reset nessuna istanza tenterebbe più → OCR mai più aggiornato →
+        # guard eterno. Fix: skip solo se DRL=0 AND ts >= mezzanotte UTC odierna.
         try:
             from shared import morfeus_state
+            from datetime import datetime, timezone
             ms = morfeus_state.load() or {}
             drl = int(ms.get("daily_recv_limit", -1))
             if drl == 0:
+                ts_iso = ms.get("ts", "")
+                ts_dt = None
+                try:
+                    ts_dt = datetime.fromisoformat(ts_iso) if ts_iso else None
+                except Exception:
+                    pass
+                now = datetime.now(timezone.utc)
+                midnight_utc = now.replace(hour=0, minute=0, second=0, microsecond=0)
+                if ts_dt is not None and ts_dt >= midnight_utc:
+                    ctx.log_msg(
+                        f"Rifornimento: Daily Receiving Limit master=0 (saturo, "
+                        f"ts={ts_dt.strftime('%H:%M')} UTC) → skip"
+                    )
+                    return False
+                # ts stale (pre-reset 00:00 UTC) → tenta per refresh OCR
                 ctx.log_msg(
-                    "Rifornimento: Daily Receiving Limit master=0 (saturo) → skip"
+                    f"Rifornimento: DRL=0 ma ts={ts_iso} antecedente reset 00:00 UTC "
+                    f"— tenta per refresh OCR"
                 )
-                return False
         except Exception:
             pass   # best-effort, su errore non blocca
         return True
