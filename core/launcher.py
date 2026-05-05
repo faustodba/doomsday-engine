@@ -998,12 +998,11 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
             except Exception:
                 pass
             _log(f"[{nome}] HOME raggiunto in {home_total_s:.0f}s", log_fn)
-            # Hook metriche per-istanza (best-effort)
-            try:
-                from core.istanza_metrics import imposta_boot_home
-                imposta_boot_home(nome, home_total_s)
-            except Exception:
-                pass
+            # 05/05: hook metriche spostato a FINE attendi_home (post settings
+            # + troops_reader) per includere ~30-40s di overhead post-HOME nel
+            # boot_home_s. Pre-fix: stima T_ciclo sotto-stimava di ~7min/ciclo
+            # (12 istanze × ~37s di settings/troops/banner non tracciato).
+            # Predictor auto-converge in ~10 cicli via rolling stats.
 
             # WU60 (Issue #85 prereq) — applica settings lightweight client gioco
             # ad ogni avvio istanza dopo HOME confermata. Idempotente: Optimize
@@ -1050,6 +1049,16 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
                 _log(f"[{nome}] truppe reader ok={_ok_tr} ({_dt_tr:.1f}s)", log_fn)
             except Exception as exc:
                 _log(f"[{nome}] truppe reader errore: {exc}", log_fn)
+
+            # 05/05: boot_home_s ora include settings + troops_reader (post-HOME
+            # overhead). Vedi commento sopra. Misurato qui = "tempo da avvio
+            # istanza fino a 'pronto-per-tick' (orchestrator può eseguire task)".
+            try:
+                from core.istanza_metrics import imposta_boot_home
+                ready_total_s = time.time() - _t_attesa_home_start
+                imposta_boot_home(nome, ready_total_s)
+            except Exception:
+                pass
         else:
             _log(f"[{nome}] vai_in_home() FALLITO", log_fn)
         return ok
