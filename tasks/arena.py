@@ -108,9 +108,9 @@ MAX_SFIDE = 5
 # Timing battaglia
 _DELAY_BATTAGLIA_S = 5.0    # sleep iniziale fisso post-tap START (8.0 → 5.0 WU82)
 _POLL_BATTAGLIA_S  = 3.0    # intervallo polling (legacy, non usato post-WU75)
-_MAX_BATTAGLIA_S   = 10.0   # WU82 (30/04 11:30): 52→10. Battaglie con
-                            # skip ON + driver DirectX durano <10s in pratica.
-                            # Totale wait WU75 ora 15s (era 60s).
+_MAX_BATTAGLIA_S   = 5.0    # 05/05: 10→5. Validazione: arena con skip ON +
+                            # DirectX completa in <5s. Totale wait ora 10s
+                            # (era 15s WU82, 60s pre-WU75).
 
 MAX_TENTATIVI         = 3
 MAX_ERRORI_CONSEC     = 2
