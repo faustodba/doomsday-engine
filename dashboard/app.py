@@ -1619,13 +1619,20 @@ def partial_cycle_snapshot_detail(request: Request):
     # (da data/istanza_metrics.jsonl). Permette confronto pianificati vs reali
     # per analizzare scostamenti predictor (es. task non previsti perché
     # interval scaduto durante il ciclo, gate temporali attraversati, ecc.).
+    #
+    # ATTENZIONE timing: lo snapshot è preso a INIZIO ciclo, il record
+    # istanza_metrics è scritto a FINE tick istanza. Se l'istanza non ha
+    # ancora girato nel ciclo corrente, l'ultimo record è di un ciclo
+    # PRECEDENTE → confronto pred-vs-exec misleading. Calcoliamo delta
+    # temporale + label "(ciclo prec.)" se gap > 1 tick_sleep.
     import json as _json
     from pathlib import Path as _P
+    from datetime import datetime as _dt
     eseguiti_per_inst: dict[str, list[str]] = {}
+    eseguiti_ts_per_inst: dict[str, str] = {}   # ts ISO del record
     metrics_path = _P("C:/doomsday-engine-prod") / "data" / "istanza_metrics.jsonl"
     try:
         if metrics_path.exists():
-            # Scan reverse: prendi ultimo record per ogni istanza
             with metrics_path.open(encoding="utf-8") as f:
                 lines = f.readlines()
             for line in reversed(lines):
@@ -1640,13 +1647,35 @@ def partial_cycle_snapshot_detail(request: Request):
                 if not inst or inst in eseguiti_per_inst:
                     continue
                 durs = r.get("task_durations_s") or {}
-                # Ordina per durata desc per leggibilità
                 tasks_done = sorted(durs.keys(), key=lambda k: -float(durs.get(k, 0)))
                 eseguiti_per_inst[inst] = tasks_done
+                eseguiti_ts_per_inst[inst] = r.get("ts", "")
                 if len(eseguiti_per_inst) >= len(istanze_ab):
                     break
     except Exception:
         pass
+
+    # Calcola delta tra snapshot.ts e record.ts → label "ciclo prec." se gap
+    # > tick_sleep (l'istanza non ha ancora girato nel ciclo corrente)
+    snap_dt = None
+    try:
+        snap_dt = _dt.fromisoformat(ts_iso)
+    except Exception:
+        pass
+    eseguiti_ciclo_prec: dict[str, bool] = {}
+    eseguiti_ts_local: dict[str, str] = {}
+    for inst, ts_str in eseguiti_ts_per_inst.items():
+        try:
+            rec_dt = _dt.fromisoformat(ts_str)
+            local = rec_dt.astimezone().strftime("%H:%M %d/%m")
+            eseguiti_ts_local[inst] = local
+            if snap_dt is not None:
+                delta_s = (snap_dt - rec_dt).total_seconds()
+                # Se record precede snapshot di > 1 minuto → ciclo precedente
+                eseguiti_ciclo_prec[inst] = delta_s > 60
+        except Exception:
+            eseguiti_ts_local[inst] = ""
+            eseguiti_ciclo_prec[inst] = False
 
     # Header info ciclo
     header = (
@@ -1768,7 +1797,17 @@ def partial_cycle_snapshot_detail(request: Request):
             f'<td style="color:var(--text-dim);font-size:10px;font-family:monospace">'
             f'{", ".join(due_render) or "<i>—</i>"}</td>'
             f'<td style="color:var(--text-dim);font-size:10px;font-family:monospace">'
-            f'{", ".join(eseguiti_render) or "<i>—</i>"}</td>'
+            f'{", ".join(eseguiti_render) or "<i>—</i>"}'
+            + (
+                '<div style="font-size:9px;color:#fbbf24;margin-top:2px" '
+                'title="record precede lo snapshot — ciclo diverso, confronto solo informativo">'
+                f'⏪ ciclo prec. ({eseguiti_ts_local.get(inst) or ""})</div>'
+                if eseguiti_ciclo_prec.get(inst, False) else
+                (f'<div style="font-size:9px;color:var(--text-dim);margin-top:2px">'
+                 f'@ {eseguiti_ts_local.get(inst) or ""}</div>'
+                 if eseguiti_ts_local.get(inst) else '')
+            )
+            + '</td>'
             f'<td style="text-align:right;color:var(--accent);font-family:monospace">'
             f'{t_skip_s/60:.1f}m</td>'
             f'<td style="text-align:right;color:#ff9800;font-size:10px">'
@@ -1806,6 +1845,7 @@ def partial_cycle_snapshot_detail(request: Request):
         '<b>legenda</b>: '
         '<span style="color:#f44336">rosso</span> = eseguito ma non pianificato · '
         '<span style="color:#ff9800;text-decoration:line-through">arancione barrato</span> = pianificato ma non eseguito · '
+        '<span style="color:#fbbf24">⏪ ciclo prec.</span> = record è di un ciclo diverso (istanza non ancora girata nel ciclo corrente, confronto informativo) · '
         'normale = match. ⚠N = task discordanti. '
         '<b>Click sulla riga</b> per espandere il breakdown della stima '
         '(boot_home + ogni task + wait inter-task).'
