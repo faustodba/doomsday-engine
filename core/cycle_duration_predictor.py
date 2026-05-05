@@ -42,8 +42,10 @@ MIN_SAMPLES_MID  = 3       # >=3 samples → "media"; <3 → "bassa"
 
 # WU122-OptC: fallback costante per wait inter-task quando dati storici < N
 # (bootstrap finché istanza non accumula 3+ cicli con wait_inter_task_s).
-# Stima empirica: ~80s/transizione × N task, mediato a 8s/task come default.
-INTER_TASK_FALLBACK_S = 8.0
+# Validato 05/05 con dati reali rolling: wait reale ≈ 1.1s/transizione
+# (gate HOME, save state, should_run check sono molto rapidi). Era 8s, ora
+# allineato al valore reale + piccolo margine (1.5s).
+INTER_TASK_FALLBACK_S = 1.5
 INTER_TASK_MIN_SAMPLES = 3
 
 

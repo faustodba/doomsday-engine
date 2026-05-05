@@ -246,11 +246,20 @@ def _calc_t_marcia_min(invio: dict, istanza: str) -> Optional[float]:
 def _predict_gap_minutes() -> float:
     """
     Stima durata ciclo bot in minuti tramite cycle_duration_predictor.
+
+    USA p75 (stima conservativa) invece di median: la regola "squadre fuori
+    per > gap" deve confrontare T_residuo col tempo REALE del prossimo
+    ciclo. Validazione 05/05 con dati reali (cycle_accuracy.jsonl):
+      - median 69min sotto-stima i cicli pieni del 25-43%
+      - p75 89min cattura meglio i cicli "lavoro pieno"
+    Sotto-stimare il gap → falsi positivi skip (squadre che sarebbero
+    rientrate in tempo).
+
     Fallback a 120min se modulo non disponibile.
     """
     try:
         from core.cycle_duration_predictor import predict_cycle_from_config
-        res = predict_cycle_from_config()
+        res = predict_cycle_from_config(percentile="p75")
         if "T_ciclo_min" in res:
             return float(res["T_ciclo_min"])
     except Exception:
