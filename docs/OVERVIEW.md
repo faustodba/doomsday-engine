@@ -686,6 +686,64 @@ Modalità shadow (log+telemetria, no apply) o LIVE (skip applicato).
 in corso. A fine ciclo: error% per ogni snapshot vs actual_min.
 Pannello `/ui/predictor` mostra storia.
 
+### 8.1 Allineamento bot ↔ predictor (sweep 05/05/2026)
+
+Il bot e il predictor devono concordare su 4 livelli per ogni task:
+
+1. **Flag dashboard** — letto da `runtime_overrides.json::globali.task.<nome>`. Filtrato a monte in `task_globali` per il predictor; controllato in `should_run` dal bot.
+2. **Schedule + reset** — `always` / `periodic Nh` / `daily 24h` da `config/task_setup.json`. Reset daily allineato a **00:00 UTC** (post-`951df2a`).
+3. **Guard di stato persistente** — letto da `state/{ist}.json` o `data/morfeus_state.json` quando applicabile. Modellato dal predictor in `_task_will_be_noop`.
+4. **Offset cumulativo** — `now_for_inst = t0 + Σ T_j_predicted` per gate temporali delle istanze in coda nel ciclo (post-`133ba86`).
+
+**Tabella sinottica** (17 task, esito sweep 05/05):
+
+| # | Task | Schedule | Guard state | Allineato | Note |
+|---|------|----------|-------------|-----------|------|
+| 1 | boost | always | BoostState (scadenza) | ✅ | offset cumulativo applicato; predictor esclude se boost attivo a `now+tick+5min` |
+| 2 | rifornimento | always | DRL master + provviste istanza | ✅ | freshness check 00:00 UTC (post-`0fb1c77`) |
+| 3 | raccolta | always | — | ✅ | sempre eseguita; mediana cattura bimodalità skip/work |
+| 4 | truppe | periodic 4h | counter X/4 (runtime) | ✅ | guard runtime non modellato (impatto trascurabile) |
+| 5 | donazione | periodic 8h | — | ✅ | post-`b7f9634` snapshot timing |
+| 6 | main_mission | daily 24h | — | ✅ | gate hour ≥ 20 UTC + reset 00:00 UTC |
+| 7 | zaino | periodic 168h | — | ✅ | thundering herd settimanale, no fix |
+| 8 | vip | daily 24h | VipState (cass+free) | ✅ | post-`680b475` daily branch |
+| 9 | alleanza | periodic 4h | — | ✅ | task semplice |
+| 10 | messaggi | periodic 4h | — | ✅ | post-WU124 fix `_Esito.OK→COMPLETATO` |
+| 11 | arena | daily 24h | ArenaState (esaurite) | ✅ | post-`680b475` daily branch + ArenaState |
+| 12 | arena_mercato | daily 24h | — | ✅ | post-`680b475` daily branch |
+| 13 | district_showdown | always (window) | window UTC weekday/hour | ✅ | Ven 00:00 → Lun 00:00 UTC (post-`c710f34`) |
+| 14 | store | periodic 8h | — | ✅ | task probabilistico (mercante itinerante) |
+| 15 | radar | periodic 12h | — | ✅ | task semplice |
+| 16 | radar_census | periodic 12h | — | ✅ | task analytics, flag OFF in prod |
+| 17 | raccolta_chiusura | always | — | ✅ | sub-classe Raccolta, override percentile p75 (bimodalità) |
+
+**Pattern di allineamento per schedule type**:
+
+- **always** (interval_h=0): `task_globali` filter a monte + opzionale `_task_will_be_noop(name, istanza, tick_sleep_s, now)` per task con stato persistente. Coperti: `boost`, `rifornimento`, `district_showdown`.
+- **periodic Nh**: predictor `elapsed_h >= N` confrontato con `last_run` da `state[ist].schedule.<nome>`. Allineato a `_e_dovuto_periodic` dell'orchestrator.
+- **daily 24h** (post-`680b475`): predictor `last_dt < reset_oggi` con `reset_oggi = now_for_inst.replace(hour=0,...)`. Allineato a `_e_dovuto_daily` + `_reset_daily_corrente` dell'orchestrator (post-`951df2a` reset 00:00 UTC).
+
+**Commit chiave sweep 05/05**:
+
+| Commit | Fix |
+|--------|-----|
+| `133ba86` | Offset cumulativo applicato ai guard di stato (boost / DS) |
+| `0fb1c77` | Rifornimento freshness check (DRL + provviste) a cavallo 00:00 UTC |
+| `b7f9634` | Snapshot recorder "new_cycle" anche post-gap (was: `last_cycle_snap is not None`) |
+| `951df2a` | Orchestrator reset daily 01:00 → 00:00 UTC + 3 test files |
+| `c710f34` | District Showdown lunedì sempre fuori window (allineato config bot) |
+| `680b475` | `_is_task_due` daily branch (allineato `_e_dovuto_daily`) |
+| `fa45c7c` `841eac4` `5853b95` `87aa119` `96e849b` | Docstring/docs fix (main_mission/arena_mercato/store/radar/radar_census) |
+
+**Convenzioni vincolanti**:
+
+- Reset daily uniforme **00:00 UTC** in tutto il sistema: orchestrator (`_reset_daily_corrente`), stati persistenti (`_today_utc()`), reset gioco (missioni daily, DRL master, cassaforte VIP).
+- Offset cumulativo `now_for_inst` propagato ai guard temporali (`_boost_will_skip`, `_district_showdown_will_skip`, `_rifornimento_will_skip`, `_is_task_due` daily branch).
+- Esclusione FauMorfeus (master) hardcoded via `shared/instance_meta.is_master_instance` (frozenset).
+- Window evento DS: caratteristica del gioco (3 giorni esatti Ven 00:00 → Lun 00:00 UTC), invariata.
+
+**Guard di stato non modellati** (BoostState a parte): VipState, ArenaState, MainMissionState. Sono **ridondanti** post-WU79 perché `last_run` viene aggiornato anche su skip → schedule daily basta. Fix non necessario ma valutabile in futuro per maggiore precisione drilldown.
+
 ---
 
 ## 9. Dashboard FastAPI
