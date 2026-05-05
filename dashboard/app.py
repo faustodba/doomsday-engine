@@ -1623,18 +1623,34 @@ def partial_cycle_snapshot_detail(request: Request):
     """
     from core.cycle_predictor_recorder import (
         get_snapshot_for_cycle, read_recent_snapshots,
+        get_all_snapshots_for_cycle,
     )
     cycle_str = request.query_params.get("cycle", "")
     snap = None
     if cycle_str:
         try:
-            snap = get_snapshot_for_cycle(int(cycle_str))
+            # Per ciclo specifico: usa il PRIMO snapshot (pred originale a
+            # inizio ciclo, prima che le istanze modifichino last_run).
+            # 05/05: fix bug 'truppe/alleanza falsi extra' — il pred fluido
+            # post-esecuzioni dimenticava task con interval scaduto al momento
+            # dell'esecuzione ma con last_run recente al momento dello snap.
+            snaps_cycle = get_all_snapshots_for_cycle(int(cycle_str))
+            if snaps_cycle:
+                snap = snaps_cycle[0]   # ordinati asc per elapsed_min
         except Exception:
             pass
     if snap is None:
-        # Ultimo snapshot disponibile
+        # Default: snapshot più recente del CICLO IN CORSO (no completato).
+        # Per cicli completati usa il primo del ciclo.
         recent = read_recent_snapshots(1)
-        snap = recent[0] if recent else None
+        if recent:
+            cur_cycle = recent[0].get("cycle_numero")
+            if cur_cycle is not None:
+                snaps_cycle = get_all_snapshots_for_cycle(int(cur_cycle))
+                if snaps_cycle:
+                    snap = snaps_cycle[0]   # PRIMO snap del ciclo (pred originale)
+        if snap is None:
+            snap = recent[0] if recent else None
     if snap is None:
         return HTMLResponse(
             '<div style="color:var(--text-dim);text-align:center;padding:8px;font-size:11px">'
