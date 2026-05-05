@@ -2224,6 +2224,105 @@ def partial_predictor_decisions(request: Request):
     )
 
 
+@app.get("/ui/partial/predictor-distribuzione", include_in_schema=False)
+def partial_predictor_distribuzione(request: Request):
+    """
+    Distribuzione empirica slot-pieni-al-ritorno per istanza.
+
+    Per ogni istanza, valuta ultime 30 transizioni (record, record+1) di
+    `data/istanza_metrics.jsonl`:
+      - n_post_pieni: tick chiusi con slot saturi
+      - P(squadre_fuori): P(slot ancora pieni al tick successivo | post_pieni)
+      - Δt p25/p50/p75: tempo trascorso fra tick consecutivi (solo post_pieni)
+
+    Senza modello empirico T_marcia: lookup diretto sullo storico osservato.
+    Per validare/correlare con il modello puntuale di skip_predictor.
+
+    Refresh 60s via HTMX. Restart dashboard richiesto al primo deploy.
+    """
+    from dashboard.services.stats_reader import get_distribuzione_slot_per_istanza
+    rows = get_distribuzione_slot_per_istanza(window_records=30)
+    if not rows:
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:12px;font-size:11px">'
+            'nessun dato disponibile.<br>'
+            '<span style="font-size:10px">richiede record in <code>data/istanza_metrics.jsonl</code></span>'
+            '</div>'
+        )
+
+    body = []
+    for r in rows:
+        inst   = r["istanza"]
+        ntrans = r["n_transizioni"]
+        npost  = r["n_post_pieni"]
+        p_sf   = r["P_squadre_fuori"]
+        p25    = r["delta_t_min_p25"]
+        p50    = r["delta_t_min_p50"]
+        p75    = r["delta_t_min_p75"]
+
+        # Color coding P_squadre_fuori
+        if p_sf is None:
+            p_str   = '<span style="color:var(--text-dim);font-size:10px">n/a</span>'
+            verdict = '<span style="color:var(--text-dim);font-size:10px">campione&lt;5</span>'
+        else:
+            pct = p_sf * 100
+            if pct >= 70:
+                pcol = "#f44336"   # rosso: skip frequente raccomandato
+                verdict = '<span style="color:#f44336;font-size:10px">SKIP frequente</span>'
+            elif pct >= 30:
+                pcol = "#ff9800"   # arancione: caso limite
+                verdict = '<span style="color:#ff9800;font-size:10px">borderline</span>'
+            else:
+                pcol = "#4caf50"   # verde: NO skip raccomandato
+                verdict = '<span style="color:#4caf50;font-size:10px">NO skip</span>'
+            p_str = f'<b style="color:{pcol}">{pct:.0f}%</b>'
+
+        # Tabellina ultime 5 (inline su singola cella)
+        ult_html = []
+        for u in r["ultime"]:
+            esito = u["esito"]
+            if "fuori" in esito:
+                ecol = "#f44336"
+            elif "rientrate" in esito:
+                ecol = "#4caf50"
+            else:
+                ecol = "var(--text-dim)"
+            ult_html.append(
+                f'<div style="font-size:9px;color:var(--text-dim);white-space:nowrap">'
+                f'{u["ts_local"]} Δ{u["delta_t_min"]:.0f}min '
+                f'<span style="color:var(--text)">{u["post"]}/{u["totali"]}→{u["pre"]}/{u["totali"]}</span> '
+                f'<span style="color:{ecol}">{esito}</span>'
+                f'</div>'
+            )
+
+        body.append(
+            f'<tr>'
+            f'<td style="font-weight:600">{inst}</td>'
+            f'<td style="text-align:right;font-size:10px">{ntrans}</td>'
+            f'<td style="text-align:right;font-size:10px">{npost}</td>'
+            f'<td style="text-align:right">{p_str}</td>'
+            f'<td style="text-align:right;font-size:10px">{p25:.0f}</td>'
+            f'<td style="text-align:right;font-size:10px">{p50:.0f}</td>'
+            f'<td style="text-align:right;font-size:10px">{p75:.0f}</td>'
+            f'<td>{verdict}</td>'
+            f'<td style="line-height:1.2">{"".join(ult_html)}</td>'
+            f'</tr>'
+        )
+
+    return HTMLResponse(
+        '<table class="tel-table"><thead><tr>'
+        '<th>istanza</th>'
+        '<th style="text-align:right">n.trans</th>'
+        '<th style="text-align:right">n.saturi</th>'
+        '<th style="text-align:right">P sq fuori</th>'
+        '<th style="text-align:right" colspan="3">Δt p25/p50/p75 (min)</th>'
+        '<th>raccom.</th>'
+        '<th>ultime 5 transizioni</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table>'
+    )
+
+
 @app.get("/ui/partial/copertura-cicli", include_in_schema=False)
 def partial_copertura_cicli(request: Request):
     """

@@ -1080,3 +1080,188 @@ def get_predictor_decisions(n: int = 20) -> List[dict]:
         except Exception:
             r["ts_local"] = ts_iso[:16]
     return rows
+
+
+# ==============================================================================
+# Distribuzione slot per istanza — analisi empirica ciclo-su-ciclo
+#
+# Per ogni istanza, considera ogni coppia consecutiva di record:
+#   (record N, record N+1)  con stesso `instance`, ordinati per ts.
+#
+# Eventi misurati:
+#   - post_pieni[N]   = (attive_post[N] == totali[N])
+#   - pre_pieni[N+1]  = (attive_pre[N+1] == totali[N+1])
+#   - delta_t[N→N+1]  = ts[N+1] - ts[N]  (secondi)
+#
+# Aggregati:
+#   - n_transizioni totali (dove sia N che N+1 hanno raccolta valorizzata)
+#   - n_post_pieni (situazioni dove tick N esce con slot saturi)
+#   - n_post_pieni_pre_pieni (delle precedenti, quante hanno N+1 ancora saturo)
+#   - P_squadre_fuori = n_post_pieni_pre_pieni / n_post_pieni
+#   - delta_t p25, p50, p75
+#   - tabellina ultime 5 transizioni
+# ==============================================================================
+
+def _percentile(values: list[float], p: float) -> float:
+    """Percentile p (0..1) su lista già float. Ritorna 0 se vuota."""
+    if not values:
+        return 0.0
+    sv = sorted(values)
+    if len(sv) == 1:
+        return float(sv[0])
+    k = (len(sv) - 1) * p
+    f = int(k)
+    c = min(f + 1, len(sv) - 1)
+    if f == c:
+        return float(sv[f])
+    return float(sv[f] + (sv[c] - sv[f]) * (k - f))
+
+
+def get_distribuzione_slot_per_istanza(window_records: int = 30) -> list[dict]:
+    """
+    Per ogni istanza, calcola la distribuzione empirica di P(slot pieni
+    al ritorno del bot | erano pieni alla chiusura precedente) usando le
+    ultime `window_records` transizioni consecutive disponibili nel file
+    `data/istanza_metrics.jsonl`.
+
+    Schema output per riga (istanza):
+        {
+          "istanza": "FAU_05",
+          "totali": 4,
+          "n_transizioni": 12,
+          "n_post_pieni": 10,
+          "P_squadre_fuori": 0.70,        # 0..1, None se n_post_pieni < 5
+          "delta_t_min_p25": 65.3,
+          "delta_t_min_p50": 70.1,
+          "delta_t_min_p75": 75.8,
+          "ultime": [
+              {ts_local, delta_t_min, post, pre, totali, esito}
+              ...max 5 records...
+          ]
+        }
+
+    Solo lettura. No side-effect.
+    """
+    path = _PROD_ROOT / "data" / "istanza_metrics.jsonl"
+    if not path.exists():
+        return []
+
+    # Raccogli per istanza, mantenendo ts e raccolta
+    by_inst: dict[str, list[dict]] = {}
+    try:
+        with path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                inst = r.get("instance")
+                if not inst:
+                    continue
+                rac = r.get("raccolta") or {}
+                # Salta record senza raccolta valorizzata (cycle_id=0 a volte)
+                if rac.get("attive_post") is None or rac.get("totali") is None:
+                    continue
+                by_inst.setdefault(inst, []).append(r)
+    except Exception:
+        return []
+
+    from datetime import datetime as _dt
+
+    out: list[dict] = []
+    for inst, recs in by_inst.items():
+        # Ordina per ts crescente
+        recs.sort(key=lambda r: r.get("ts", ""))
+        # Tieni solo le ultime window_records+1 entry (per N+1 transizioni)
+        recs = recs[-(window_records + 1):]
+
+        # Costruisci coppie consecutive
+        transizioni: list[dict] = []
+        for i in range(len(recs) - 1):
+            r0 = recs[i]
+            r1 = recs[i + 1]
+            rac0 = r0.get("raccolta") or {}
+            rac1 = r1.get("raccolta") or {}
+            post0 = rac0.get("attive_post")
+            pre1  = rac1.get("attive_pre")
+            tot   = rac1.get("totali") or rac0.get("totali")
+            if post0 is None or pre1 is None or tot is None:
+                continue
+            try:
+                t0 = _dt.fromisoformat(r0.get("ts", ""))
+                t1 = _dt.fromisoformat(r1.get("ts", ""))
+                delta_s = (t1 - t0).total_seconds()
+                if delta_s <= 0:
+                    continue
+            except Exception:
+                continue
+            post_pieni = (post0 >= tot)
+            pre_pieni  = (pre1  >= tot)
+            transizioni.append({
+                "ts_local":   t1.astimezone().strftime("%H:%M %d/%m"),
+                "delta_s":    delta_s,
+                "post":       post0,
+                "pre":        pre1,
+                "totali":     tot,
+                "post_pieni": post_pieni,
+                "pre_pieni":  pre_pieni,
+            })
+
+        if not transizioni:
+            continue
+
+        # Aggregati
+        n_trans       = len(transizioni)
+        n_post_pieni  = sum(1 for t in transizioni if t["post_pieni"])
+        n_post_pre    = sum(1 for t in transizioni if t["post_pieni"] and t["pre_pieni"])
+        # P(squadre fuori | slot saturi alla chiusura)
+        p_squadre_fuori = (n_post_pre / n_post_pieni) if n_post_pieni >= 5 else None
+        # Delta t solo dalle transizioni post_pieni (rilevanti per skip)
+        deltas_min = [t["delta_s"] / 60.0 for t in transizioni if t["post_pieni"]]
+        if not deltas_min:
+            deltas_min = [t["delta_s"] / 60.0 for t in transizioni]
+        # Tabellina ultime 5 transizioni
+        ultime = []
+        for t in transizioni[-5:]:
+            esito = ""
+            if t["post_pieni"] and t["pre_pieni"]:
+                esito = "squadre fuori"
+            elif t["post_pieni"] and not t["pre_pieni"]:
+                liberate = t["post"] - t["pre"]
+                esito = f"{liberate} rientrate"
+            else:
+                esito = "slot già liberi"
+            ultime.append({
+                "ts_local":     t["ts_local"],
+                "delta_t_min":  round(t["delta_s"] / 60.0, 1),
+                "post":         t["post"],
+                "pre":          t["pre"],
+                "totali":       t["totali"],
+                "esito":        esito,
+            })
+
+        out.append({
+            "istanza":          inst,
+            "totali":           transizioni[-1]["totali"],
+            "n_transizioni":    n_trans,
+            "n_post_pieni":     n_post_pieni,
+            "P_squadre_fuori":  p_squadre_fuori,
+            "delta_t_min_p25":  round(_percentile(deltas_min, 0.25), 1),
+            "delta_t_min_p50":  round(_percentile(deltas_min, 0.50), 1),
+            "delta_t_min_p75":  round(_percentile(deltas_min, 0.75), 1),
+            "ultime":           ultime,
+        })
+
+    # Esclude master (FauMorfeus): non rilevante per skip predictor
+    try:
+        from shared.instance_meta import is_master_instance
+        out = [r for r in out if not is_master_instance(r["istanza"])]
+    except Exception:
+        pass
+
+    # Ordina alfabetico per nome istanza
+    out.sort(key=lambda r: r["istanza"])
+    return out
