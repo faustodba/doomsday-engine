@@ -1993,10 +1993,15 @@ def partial_cycle_accuracy(request: Request):
                 f'+{s.get("elapsed_min",0):.0f}m={s.get("predicted_min",0):.0f}m'
                 for s in snaps_now[:5]
             )
+            initial_pred_now = (
+                sorted(snaps_now, key=lambda s: s.get('elapsed_min', 0))[0].get('predicted_min', 0)
+                if snaps_now else 0
+            )
             in_corso_row_html = (
                 f'<tr style="background:rgba(76,175,80,0.06)">'
                 f'<td style="font-weight:600;color:#4caf50">#{cn_now} ▶</td>'
                 f'<td style="text-align:right;font-family:monospace;color:var(--text-dim)" title="elapsed dal start_ts del ciclo (in corso, actual finale TBD)">{elapsed_min:.1f}m...</td>'
+                f'<td style="text-align:right;font-family:monospace;color:#4caf50" title="stima iniziale (primo snapshot del ciclo)">{initial_pred_now:.1f}m</td>'
                 f'<td style="text-align:center;font-size:10px">{n_snaps_now}</td>'
                 f'<td style="color:{err_color};font-weight:500" title="error_pct calcolato vs elapsed corrente — solo informativo, actual finale può essere maggiore">{err_summary}</td>'
                 f'<td style="color:var(--text-dim);font-size:10px;font-family:monospace">{snaps_str}</td>'
@@ -2021,6 +2026,15 @@ def partial_cycle_accuracy(request: Request):
         actual = r.get("actual_min", 0)
         snaps = r.get("snapshots", []) or []
         n_snaps = len(snaps)
+        # 05/05: STIMA INIZIALE = predicted del PRIMO snapshot del ciclo
+        # (recorder ora forza snap immediato all'avvio nuovo ciclo).
+        # È la stima "lock-in" che il predictor aveva a inizio ciclo,
+        # prima che le esecuzioni modifichino last_run.
+        # ordering: snapshots ordinati per elapsed_min asc nel record accuracy
+        sorted_snaps = sorted(snaps, key=lambda s: s.get("elapsed_min", 0))
+        initial_pred = sorted_snaps[0].get("predicted_min", 0) if sorted_snaps else 0
+        initial_err = sorted_snaps[0].get("error_pct", 0) if sorted_snaps else 0
+        initial_color = "#4caf50" if initial_err < 10 else ("#ff9800" if initial_err < 25 else "#f44336")
         # Calcola errore medio se ci sono snapshots
         if n_snaps > 0:
             avg_err = sum(s.get("error_pct", 0) for s in snaps) / n_snaps
@@ -2040,6 +2054,7 @@ def partial_cycle_accuracy(request: Request):
             f'<tr>'
             f'<td style="font-weight:600;color:var(--accent)">#{cn}</td>'
             f'<td style="text-align:right;font-family:monospace">{actual:.1f}m</td>'
+            f'<td style="text-align:right;font-family:monospace;color:{initial_color}" title="stima iniziale (primo snapshot del ciclo) — predicted={initial_pred:.1f}min vs actual={actual:.1f}min, err={initial_err:.1f}%">{initial_pred:.1f}m</td>'
             f'<td style="text-align:center;font-size:10px">{n_snaps}</td>'
             f'<td style="color:{err_color};font-weight:500">{err_summary}</td>'
             f'<td style="color:var(--text-dim);font-size:10px;font-family:monospace">{snaps_str}</td>'
@@ -2049,6 +2064,7 @@ def partial_cycle_accuracy(request: Request):
         '<table class="tel-table"><thead><tr>'
         '<th>ciclo</th>'
         '<th style="text-align:right">actual</th>'
+        '<th style="text-align:right" title="stima iniziale = predicted del primo snapshot del ciclo (lock-in a inizio ciclo)">stima iniziale</th>'
         '<th style="text-align:center">N snap</th>'
         '<th>errore medio</th>'
         '<th>snapshots (elapsed=predicted/err%)</th>'
