@@ -1438,7 +1438,14 @@ class RifornimentoTask(Task):
     def _esegui_mappa(self, ctx, deposito, deposito_da_ocr, slot_liberi,
                       risorse_config, soglie, nome_rifugio,
                       max_sped, margine, risorse_l) -> tuple[int, float]:
-        """Loop rifornimento via coordinate mappa."""
+        """Loop rifornimento via coordinate mappa.
+
+        06/05: rimosso vai_in_home intermedio fra una spedizione e l'altra.
+        Pre-fix: ad ogni iterazione `slot = slot_liberi (-1)` -> re-OCR slot
+        in HOME -> 8-10s overhead × N spedizioni. Post-fix: lettura OCR slot
+        UNA SOLA volta all'inizio (se non passato), poi tracciamento via
+        `coda_volo`. Saving: ~30-40s per ciclo con max_sped=5.
+        """
         spedizioni  = 0
         idx_risorsa = 0
         coda_volo: deque = deque()
@@ -1450,37 +1457,37 @@ class RifornimentoTask(Task):
         # acciaio/petrolio per giorni perché 1 fail bloccava tutto il loop.
         risorse_attive = dict(risorse_config)
 
+        # 06/05: slot iniziale (letto una volta sola, poi tracciato via coda_volo)
+        max_sq         = getattr(ctx.config, "max_squadre", 4)
+        slot_iniziale  = None   # None = da leggere; int = già noto
+
         try:
+            # ── Lettura slot iniziale (una volta sola, prima del loop) ─────
+            if slot_liberi >= 0:
+                slot_iniziale = slot_liberi
+                ctx.log_msg(f"Rifornimento: slot iniziale (passato)={slot_iniziale}")
+            else:
+                try:
+                    from shared.ocr_helpers import leggi_contatore_slot
+                    screen_slot = ctx.device.screenshot()
+                    if screen_slot is not None:
+                        attive, totale = leggi_contatore_slot(screen_slot, totale_noto=max_sq)
+                        slot_iniziale = max_sq if attive == -1 else max(0, totale - attive)
+                    else:
+                        slot_iniziale = max_sq
+                except Exception:
+                    slot_iniziale = max_sq
+                ctx.log_msg(f"Rifornimento: slot iniziale (OCR)={slot_iniziale}/{max_sq}")
+
             while True:
                 if max_sped > 0 and spedizioni >= max_sped:
                     ctx.log_msg(f"Rifornimento: limite spedizioni raggiunto ({spedizioni}/{max_sped})")
                     break
 
-                # ── 1. Slot liberi ──────────────────────────────────────────
+                # ── 1. Slot liberi (tracciato via coda_volo, no re-OCR) ─────
                 _aggiorna_coda(coda_volo)
-                slot = slot_liberi
-
-                if slot == -1:
-                    try:
-                        from shared.ocr_helpers import leggi_contatore_slot
-                        max_sq = getattr(ctx.config, "max_squadre", 4)
-                        # Iterazioni successive: siamo in mappa → torna in HOME
-                        # prima della lettura slot per garantire OCR corretto.
-                        # Step 2 rientrerà in mappa perché in_mappa=False.
-                        if in_mappa and ctx.navigator is not None:
-                            ctx.navigator.vai_in_home()
-                            in_mappa = False
-                            time.sleep(1.0)
-                        screen_slot = ctx.device.screenshot()
-                        if screen_slot is not None:
-                            attive, totale = leggi_contatore_slot(screen_slot, totale_noto=max_sq)
-                            slot = max_sq if attive == -1 else max(0, totale - attive)
-                        else:
-                            slot = max_sq
-                    except Exception:
-                        slot = getattr(ctx.config, "max_squadre", 4)
-
-                ctx.log_msg(f"Rifornimento: slot liberi={slot}")
+                slot = max(0, slot_iniziale - len(coda_volo))
+                ctx.log_msg(f"Rifornimento: slot liberi={slot} (iniziale {slot_iniziale} - in_volo {len(coda_volo)})")
 
                 if slot == 0:
                     # Caso A: coda nostra non vuota → aspetta rientro nostre spedizioni
