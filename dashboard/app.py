@@ -37,15 +37,17 @@ from dashboard.routers import (
 # ==============================================================================
 
 def _fmt_m(v: int | float) -> str:
-    """Formatta valore in M/K leggibile. 91699999 → '91.7M'. 0 → '—'"""
+    """Formatta valore in M/K leggibile. 91699999 → '91.7M', -3834304 → '-3.8M', 0 → '—'"""
     v = float(v)
     if v == 0:
         return "—"
-    if v >= 1_000_000:
-        return f"{v / 1_000_000:.1f}M"
-    if v >= 1_000:
-        return f"{v / 1_000:.0f}K"
-    return str(int(v))
+    sign = "-" if v < 0 else ""
+    av = abs(v)
+    if av >= 1_000_000:
+        return f"{sign}{av / 1_000_000:.1f}M"
+    if av >= 1_000:
+        return f"{sign}{av / 1_000:.0f}K"
+    return f"{sign}{int(av)}"
 
 
 def _env_label() -> dict:
@@ -2799,18 +2801,22 @@ def partial_res_oraria(request: Request):
     if not ha_dati:
         corpo = '<tr><td colspan="5" style="text-align:center;color:var(--text-dim);padding:6px">in attesa del primo ciclo raccolta</td></tr>'
     else:
-        max_val   = max(prod.get(r, 0.0) for r, _ in RISORSE) or 1.0
+        max_val   = max(abs(prod.get(r, 0.0)) for r, _ in RISORSE) or 1.0
         riga_vals = ""
         for risorsa, ico in RISORSE:
             v   = prod.get(risorsa, 0.0)
-            pct = int(v / max_val * 100)
+            pct = int(abs(v) / max_val * 100)
             lbl = _fmt_m(v)
+            # Colore: rosso per consumo netto (v < 0), accent per produzione netta
+            bar_color = "#ef4444" if v < 0 else "var(--accent)"
+            txt_color = "#ef4444" if v < 0 else "var(--text)"
+            tooltip = f'{risorsa}: {lbl}/h' + (' (consumo netto)' if v < 0 else '')
             riga_vals += (
-                f'<td title="{risorsa}: {lbl}/h">'
+                f'<td title="{tooltip}">'
                 f'<div style="display:flex;flex-direction:column;align-items:center;gap:2px">'
-                f'<div style="width:{max(pct,2)}%;height:4px;background:var(--accent);'
+                f'<div style="width:{max(pct,2)}%;height:4px;background:{bar_color};'
                 f'border-radius:2px;min-width:2px"></div>'
-                f'<span>{lbl}</span></div></td>'
+                f'<span style="color:{txt_color}">{lbl}</span></div></td>'
             )
         corpo = f'<tr><td style="color:var(--text-dim)">farm</td>{riga_vals}</tr>'
 
