@@ -325,11 +325,33 @@ def _rule_squadre_fuori(history: list[dict],
     rac = last.get("raccolta", {}) or {}
     attive_post = rac.get("attive_post")
     totali      = rac.get("totali", 4)
-    invii       = rac.get("invii", []) or []
-    invii_n     = len(invii)
 
     # Slot non saturi a fine tick → niente da skippare
-    if attive_post is None or attive_post < totali or invii_n < 3:
+    if attive_post is None or attive_post < totali:
+        return None
+
+    # 06/05 fix: l'ultimo record può essere skip pieni con invii=[]. Per
+    # calcolare T_marcia residuo dobbiamo risalire al primo record nella
+    # storia che abbia invii REALI (ultimo invio effettivo). Da quello
+    # leggiamo gli invii ed elapsed_min cumulativo.
+    invii_record = None
+    for r in reversed(history):
+        rac_r = r.get("raccolta") or {}
+        invii_r = rac_r.get("invii") or []
+        if len(invii_r) >= 1:
+            invii_record = r
+            break
+
+    if invii_record is None:
+        # Storia troppo corta o nessun invio reale registrato → no skip
+        # (potrebbe essere OCR rotto o utente ha schierato manualmente)
+        return None
+
+    invii   = invii_record["raccolta"]["invii"]
+    invii_n = len(invii)
+    if invii_n < 3:
+        # Soglia conservativa: serve almeno 3 invii per affidabilità modello.
+        # Sotto la soglia, non scatta (potrebbe essere ciclo parziale)
         return None
 
     # Calcola T_marcia per ogni invio (richiede load_squadra valorizzato)
@@ -342,15 +364,23 @@ def _rule_squadre_fuori(history: list[dict],
         # Tutti pre-WU116 / dati insufficienti → no skip da questa regola
         return None
 
-    # Tempo trascorso dal record (le marce si stanno già consumando)
+    # Tempo trascorso dal record con invii reali (cumulativo se ultimi
+    # record erano skip — le marce si stanno comunque consumando)
     elapsed_min = 0.0
     try:
-        last_ts_str = last.get("ts")
-        if last_ts_str:
-            last_ts = datetime.fromisoformat(last_ts_str)
-            elapsed_min = max(0.0, (datetime.now(timezone.utc) - last_ts).total_seconds() / 60.0)
+        ts_str = invii_record.get("ts")
+        if ts_str:
+            ts = datetime.fromisoformat(ts_str)
+            elapsed_min = max(0.0, (datetime.now(timezone.utc) - ts).total_seconds() / 60.0)
     except Exception:
         elapsed_min = 0.0
+
+    # 06/05 sanity check: se sono passati > T_marcia_max + buffer dal record
+    # con invii reali MA attive_post è ancora saturo, qualcosa è anomalo
+    # (OCR HOME sbaglia? schieramento manuale?). NO skip — il bot deve
+    # provare comunque per rileggere lo stato reale via mappa.
+    if elapsed_min > max(t_marce_min) + 30:
+        return None
 
     # T_residuo[i] = max(0, T_marcia[i] - elapsed): tempo che manca da ADESSO
     t_marce_residue = [max(0.0, t - elapsed_min) for t in t_marce_min]

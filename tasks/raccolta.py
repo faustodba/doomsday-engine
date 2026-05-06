@@ -2251,6 +2251,39 @@ class RaccoltaTask(Task):
                                       totali=int(obiettivo))
             except Exception:
                 pass
+            # 06/05 — diagnostico anomalia slot pieni cronico (vs T_marcia)
+            try:
+                from core.skip_predictor import (
+                    load_metrics_history, _calc_t_marcia_min,
+                )
+                from datetime import datetime, timezone
+                hist = load_metrics_history(ctx.instance_name, last_n=10)
+                last_real = None
+                for r in reversed(hist):
+                    if (r.get("raccolta") or {}).get("invii"):
+                        last_real = r
+                        break
+                if last_real:
+                    invii = last_real["raccolta"]["invii"]
+                    t_marce = [_calc_t_marcia_min(i, ctx.instance_name) for i in invii]
+                    t_marce = [t for t in t_marce if t is not None]
+                    if t_marce:
+                        last_ts = datetime.fromisoformat(last_real["ts"])
+                        elapsed = (datetime.now(timezone.utc) - last_ts).total_seconds() / 60
+                        t_max = max(t_marce)
+                        if elapsed > t_max + 30:
+                            ctx.log_msg(
+                                f"[DIAG-ANOMALIA] slot pieni ({attive_inizio}/{obiettivo}) "
+                                f"da {elapsed:.0f}min ma T_marcia max stimato={t_max:.0f}min — "
+                                f"OCR HOME sospetto o squadre schierate da utente"
+                            )
+                        else:
+                            ctx.log_msg(
+                                f"[DIAG] slot pieni coerente: elapsed={elapsed:.0f}min "
+                                f"T_marcia max={t_max:.0f}min (squadre ancora in raccolta)"
+                            )
+            except Exception:
+                pass
             return TaskResult(success=True, message="nessuna squadra libera", data={"inviate": 0})
 
         # Lettura slot attivi reali via OCR barra contatore.
