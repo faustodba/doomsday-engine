@@ -209,25 +209,39 @@ class RaccoltaOverride(BaseModel):
     allocazione:        AllocazioneOverride = Field(default_factory=AllocazioneOverride)
 
 
+class TruppeCaserme(BaseModel):
+    """
+    06/05 — Flag per ognuna delle 4 caserme: addestra ON/OFF.
+
+    Il bot itera sempre tutte e 4 le caserme; per ognuna se flag=False fa skip,
+    altrimenti tap TRAIN col livello max disponibile (OCR titolo).
+    Niente count_min (gioco usa default), niente livello (sempre max disponibile).
+    """
+    infantry: bool = True
+    rider:    bool = True
+    ranged:   bool = True
+    engine:   bool = True
+
+
 class TruppeOverride(BaseModel):
+    """Default globale — applicato a tutte le istanze tranne quelle con override."""
+    caserme: TruppeCaserme = Field(default_factory=TruppeCaserme)
+
+
+class TruppeIstanzaCaserme(BaseModel):
     """
-    06/05 — Filtri TruppeTask: tipologia caserma + livello + soglia count.
-
-    tipo_solo:  "all" (default) | "infantry"|"rider"|"ranged"|"engine"
-                Quando != "all", il task addestra solo caserme del tipo specificato
-                (skip caserme di tipo diverso). OCR titolo "X Barracks" valida match.
-
-    livello:    "auto" (default, gioco decide) | "I"|"II"|"III"|"IV"|"V"|"VI"
-                Quando != "auto", il task forza il livello target prima del tap TRAIN.
-                Selettore: HSV scan + tap su coord livello target.
-
-    count_min:  soglia minima truppe disponibili nel livello scelto.
-                0 (default) = no soglia. Se livello selezionato ha count < soglia,
-                skip iterazione.
+    Override per istanza, override completo (Opzione A): per ogni caserma
+    True/False sovrascrive il default globale, None eredita.
     """
-    tipo_solo:  str = "all"
-    livello:    str = "auto"
-    count_min:  int = 0
+    infantry: Optional[bool] = None
+    rider:    Optional[bool] = None
+    ranged:   Optional[bool] = None
+    engine:   Optional[bool] = None
+
+
+class TruppeIstanzaOverride(BaseModel):
+    """Override TruppeTask per singola istanza."""
+    caserme: TruppeIstanzaCaserme = Field(default_factory=TruppeIstanzaCaserme)
 
 
 # ==============================================================================
@@ -285,6 +299,8 @@ class IstanzaOverride(BaseModel):
     # Master istanza (rifugio destinatario): esclusa dagli aggregati ordinari
     # (telemetria, predictor, ranking dashboard). Esposta in sezione UI dedicata.
     master:       bool                    = False
+    # 06/05 — override TruppeTask per istanza (caserme on/off, completo)
+    truppe_override: Optional[TruppeIstanzaOverride] = None
 
 
 # ==============================================================================

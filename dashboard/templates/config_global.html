@@ -61,30 +61,6 @@
           <span>raccolta OCR debug (WU55)</span>
         </label>
 
-        <div class="col-sep"></div>
-        <div class="col-sub">addestramento truppe (06/05)</div>
-        {% set tr_cfg = cfg.get('truppe', {}) %}
-        <div class="p-row">
-          <span class="p-lbl">tipo</span>
-          <select id="gc-truppe-tipo" style="width:100px;font-size:10px">
-            {% for v, lbl in [('all','tutte'),('infantry','Infantry'),('rider','Rider'),('ranged','Ranged'),('engine','Engine')] %}
-            <option value="{{ v }}" {% if tr_cfg.get('tipo_solo','all')==v %}selected{% endif %}>{{ lbl }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="p-row">
-          <span class="p-lbl">livello</span>
-          <select id="gc-truppe-livello" style="width:100px;font-size:10px">
-            {% for v in ['auto','I','II','III','IV','V','VI'] %}
-            <option value="{{ v }}" {% if tr_cfg.get('livello','auto')==v %}selected{% endif %}>{{ v }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        <div class="p-row">
-          <span class="p-lbl">count min</span>
-          <input class="p-inp" id="gc-truppe-count-min" type="number" min="0" step="1000"
-                 value="{{ tr_cfg.get('count_min', 0) }}" style="width:80px">
-        </div>
       </div>
       <div class="col-foot">
         <button class="btn btn-primary btn-full" onclick="gcSalvaSistema()">⬡ salva sistema</button>
@@ -388,6 +364,85 @@
 
 <div class="divider"></div>
 
+<!-- ── ADDESTRAMENTO TRUPPE (06/05) ─────────────────────────────────────── -->
+{% set tr_cfg = cfg.get('truppe', {}) %}
+{% set tr_cas = tr_cfg.get('caserme', {}) %}
+<div class="section">
+  <div class="sec-label">🪖 addestramento truppe — default globale + override per istanza</div>
+
+  <div style="background:rgba(245,197,66,0.06);border:1px solid var(--border);
+              border-radius:6px;padding:10px 14px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <span style="font-weight:600">default globale</span>
+      <span style="color:var(--text-dim);font-size:11px">applicato a tutte le istanze tranne quelle con override esplicito</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:10px">
+      {% for k, lbl, ico in [('infantry','Infantry','🪖'),('rider','Rider','🐎'),('ranged','Ranged','🏹'),('engine','Engine','⚙')] %}
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+        <input type="checkbox" id="gc-truppe-g-{{ k }}"
+               {% if tr_cas.get(k, True) %}checked{% endif %}>
+        <span>{{ ico }} {{ lbl }}</span>
+      </label>
+      {% endfor %}
+    </div>
+    <div style="margin-top:10px">
+      <button class="btn btn-primary" onclick="gcSalvaTruppeGlobali()">⬡ salva default globale</button>
+      <span class="save-ok" id="gc-truppe-ok">✓ salvato</span>
+      <span class="save-err" id="gc-truppe-err"></span>
+    </div>
+  </div>
+
+  <div class="sec-label" style="margin:14px 0 8px">override per istanza · null = eredita default</div>
+  <div style="overflow-x:auto">
+    <table class="ist-tbl">
+      <thead>
+        <tr>
+          <th>nome</th>
+          <th>🪖 Inf</th>
+          <th>🐎 Rid</th>
+          <th>🏹 Ran</th>
+          <th>⚙ Eng</th>
+          <th>azione</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ist in instances %}
+        {% set ov_full = overrides.get('istanze', {}).get(ist.nome, {}) %}
+        {% set tr_ov = (ov_full.get('truppe_override') or {}).get('caserme', {}) %}
+        {% set is_master = ist.nome in master_names %}
+        <tr data-nome="{{ ist.nome }}">
+          <td class="gc-ist-name-col">
+            <span style="font-family:var(--font-mono);font-weight:600">{{ ist.nome }}</span>
+            {% if is_master %}<span title="master" style="color:#f5c542;font-weight:700;margin-left:4px">★</span>{% endif %}
+          </td>
+          {% for k in ['infantry','rider','ranged','engine'] %}
+          <td>
+            <select class="gc-truppe-ov" data-key="{{ k }}" style="width:84px;font-size:10px">
+              <option value="" {% if tr_ov.get(k) is none %}selected{% endif %}>(default)</option>
+              <option value="true"  {% if tr_ov.get(k)==True %}selected{% endif %}>ON</option>
+              <option value="false" {% if tr_ov.get(k)==False %}selected{% endif %}>OFF</option>
+            </select>
+          </td>
+          {% endfor %}
+          <td>
+            <button class="btn" style="padding:2px 8px;font-size:10px"
+                    onclick="gcResetTruppeIstanza('{{ ist.nome }}')">↻ reset</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="save-row" style="margin-top:10px">
+    <button class="btn btn-primary" onclick="gcSalvaTruppeIstanze()">⬡ salva override istanze</button>
+    <span class="save-note">scrive su runtime_overrides.istanze.<i>nome</i>.truppe_override · hot-reload</span>
+    <span class="save-ok" id="gc-truppe-ist-ok">✓ salvato</span>
+    <span class="save-err" id="gc-truppe-ist-err"></span>
+  </div>
+</div>
+
+<div class="divider"></div>
+
 <!-- ── ISTANZE (default statici) ─────────────────── -->
 <div class="section">
   <div class="sec-label">istanze (default statici) · scrive su instances.json + runtime_overrides</div>
@@ -557,12 +612,6 @@ async function gcSalvaSistema() {
     raccolta_ocr_debug: gcGb('gc-ocr-debug'),
     restart_schedule_hh_mm: restartHHMM,   // "" = disabilitato
     restart_after_cicli:    restartCicli,  // 0 = disabilitato
-    // 06/05 — Truppe filtri (tipologia + livello + soglia count)
-    truppe: {
-      tipo_solo: gcGv('gc-truppe-tipo'),
-      livello:   gcGv('gc-truppe-livello'),
-      count_min: gcGi('gc-truppe-count-min'),
-    },
   };
   const { ok, data } = await gcApiPatch(payload);
   gcShowMsg('gc-sis-ok', 'gc-sis-err', ok, data.detail || '');
@@ -666,9 +715,14 @@ async function gcSalvaAllocazione() {
 }
 
 async function gcSalvaIstanze() {
-  const rows = document.querySelectorAll('tr[data-nome]');
+  // Limita il selettore alla sezione istanze (default statici), per non
+  // intercettare le righe della tabella truppe override (che condividono
+  // data-nome ma non hanno .gc-ist-cb).
+  const rows = document.querySelectorAll('.section .ist-tbl tr[data-nome] .gc-ist-cb');
   const istanze = {};
-  rows.forEach(tr => {
+  rows.forEach(cb => {
+    const tr = cb.closest('tr[data-nome]');
+    if (!tr) return;
     const nome = tr.dataset.nome;
     if (!nome) return;
     istanze[nome] = {
@@ -693,6 +747,71 @@ async function gcSalvaIstanze() {
   } catch (e) {
     gcShowMsg('gc-ist-ok', 'gc-ist-err', false, 'network error');
   }
+}
+
+// ── TRUPPE — default globale + override per istanza (06/05) ────────────────
+
+async function gcSalvaTruppeGlobali() {
+  const payload = {
+    truppe: {
+      caserme: {
+        infantry: gcGb('gc-truppe-g-infantry'),
+        rider:    gcGb('gc-truppe-g-rider'),
+        ranged:   gcGb('gc-truppe-g-ranged'),
+        engine:   gcGb('gc-truppe-g-engine'),
+      },
+    },
+  };
+  const { ok, data } = await gcApiPatch(payload);
+  gcShowMsg('gc-truppe-ok', 'gc-truppe-err', ok, data.detail || '');
+}
+
+async function gcSalvaTruppeIstanze() {
+  // Costruisce dict { nome: { truppe_override: { caserme: {...} } } | null }
+  // Per ogni riga: leggi i 4 select. Se TUTTI '(default)' → no override.
+  // Altrimenti override solo dei valori non '(default)' (Optional[bool] None).
+  const istanze = {};
+  document.querySelectorAll('.section .ist-tbl tr[data-nome]').forEach(tr => {
+    const sel = tr.querySelectorAll('.gc-truppe-ov');
+    if (!sel.length) return;          // riga della sez. istanze, non truppe
+    const nome = tr.dataset.nome;
+    const caserme = {};
+    let any_override = false;
+    sel.forEach(s => {
+      const v = s.value;
+      if (v === '') {
+        caserme[s.dataset.key] = null;
+      } else {
+        caserme[s.dataset.key] = (v === 'true');
+        any_override = true;
+      }
+    });
+    if (any_override) {
+      istanze[nome] = { truppe_override: { caserme } };
+    } else {
+      // Tutti default → cancella override (set null per pulizia JSON)
+      istanze[nome] = { truppe_override: null };
+    }
+  });
+  try {
+    const resp = await fetch('/api/config/istanze/truppe', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ istanze }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    gcShowMsg('gc-truppe-ist-ok', 'gc-truppe-ist-err', resp.ok, data.detail || '');
+  } catch (e) {
+    gcShowMsg('gc-truppe-ist-ok', 'gc-truppe-ist-err', false, 'network error');
+  }
+}
+
+function gcResetTruppeIstanza(nome) {
+  // UI-only: setta tutti i select dell'istanza a "(default)".
+  // Va poi cliccato "salva override istanze" per persistere.
+  const tr = document.querySelector('.section .ist-tbl tr[data-nome="'+nome+'"]');
+  if (!tr) return;
+  tr.querySelectorAll('.gc-truppe-ov').forEach(s => { s.value = ''; });
 }
 
 document.addEventListener('DOMContentLoaded', () => { gcUpdateAllocTotal(); });

@@ -230,11 +230,23 @@ def save_istanze(payload: PayloadIstanze):
       2. instances.json                 → max_squadre, layout, livello
          (solo se presenti nel payload, via save_instances_fields)
 
+    06/05: il payload non include `truppe_override` (gestito da endpoint
+    /istanze/truppe dedicato). Per non cancellarlo, leggi prima i valori
+    esistenti e fai merge campo-per-campo.
+
     Hot-reload: attivo al prossimo avvio istanza.
     """
-    ov = _load_ov()
-    ov.istanze = payload.istanze
-    _save_ov(ov)
+    raw = get_overrides() or {}
+    raw_istanze = dict(raw.get("istanze") or {})
+    for nome, ov_new in payload.istanze.items():
+        cur = raw_istanze.get(nome) or {}
+        new = ov_new.model_dump(exclude_none=True)
+        # Preserva truppe_override esistente (gestito dall'endpoint dedicato)
+        if "truppe_override" in cur and "truppe_override" not in new:
+            new["truppe_override"] = cur["truppe_override"]
+        raw_istanze[nome] = new
+    raw["istanze"] = raw_istanze
+    save_overrides(raw)
 
     # Estrai campi da scrivere su instances.json (max_squadre, layout, livello,
     # raccolta_fuori_territorio — WU50 default statico per istanza,
@@ -277,6 +289,67 @@ def save_istanze(payload: PayloadIstanze):
         "aggiornate": list(payload.istanze.keys()),
         "instances_json_updated": not bool(errors),
         "warnings": errors,
+    }
+
+
+# ==============================================================================
+# PUT /api/config/istanze/truppe — override truppe per-istanza (06/05)
+# ==============================================================================
+
+@router.put("/istanze/truppe")
+async def save_istanze_truppe(request: Request):
+    """
+    Aggiorna SOLO l'override truppe per istanza (campo `truppe_override`).
+    Preserva tutti gli altri campi dell'IstanzaOverride esistente (abilitata,
+    tipologia, max_squadre, ecc).
+
+    Payload atteso:
+      { "istanze": {
+            "FAU_00": { "truppe_override": { "caserme": {...} } | null },
+            "FAU_01": { "truppe_override": null },   // reset → eredita globale
+            ...
+        } }
+
+    Hot-reload: attivo al prossimo avvio istanza.
+    """
+    try:
+        body = await request.json()
+    except Exception:
+        raise HTTPException(400, "JSON body invalido")
+    payload_istanze = (body or {}).get("istanze") or {}
+    if not isinstance(payload_istanze, dict):
+        raise HTTPException(400, "campo 'istanze' deve essere dict")
+
+    raw = get_overrides() or {}
+    raw_istanze = raw.get("istanze") or {}
+    aggiornate: list[str] = []
+
+    for nome, patch in payload_istanze.items():
+        if not isinstance(patch, dict):
+            continue
+        cur = raw_istanze.get(nome) or {}
+        # Solo il campo truppe_override viene toccato.
+        # null/None → rimuovi la chiave (= eredita default globale)
+        new_to = patch.get("truppe_override")
+        if new_to is None:
+            cur.pop("truppe_override", None)
+        else:
+            # validate via Pydantic per coercion + check schema
+            from dashboard.models import TruppeIstanzaOverride
+            try:
+                cur["truppe_override"] = TruppeIstanzaOverride.model_validate(new_to).model_dump()
+            except Exception as exc:
+                raise HTTPException(400, f"truppe_override invalido per {nome}: {exc}")
+        raw_istanze[nome] = cur
+        aggiornate.append(nome)
+
+    raw["istanze"] = raw_istanze
+    save_overrides(raw)
+
+    return {
+        "ok": True,
+        "sezione": "istanze.truppe_override",
+        "aggiornate": aggiornate,
     }
 
 

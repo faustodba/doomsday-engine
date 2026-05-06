@@ -483,10 +483,11 @@ class GlobalConfig:
     rifornimento_qta_acciaio:         int   = 999_000_000
     # 05/05: target proporzioni invio (analoga raccolta.allocazione).
     # Default uniforme 25/25/25/25 (frazioni 0-1). Sum != 1 viene normalizzato.
-    # 06/05: truppe filtri (tipologia caserma + livello + soglia count)
-    truppe_tipo_solo:    str = "all"     # all|infantry|rider|ranged|engine
-    truppe_livello:      str = "auto"    # auto|I|II|III|IV|V|VI
-    truppe_count_min:    int = 0         # 0 = no soglia
+    # 06/05: truppe — flag per le 4 caserme (default ON globale).
+    truppe_caserme_infantry: bool = True
+    truppe_caserme_rider:    bool = True
+    truppe_caserme_ranged:   bool = True
+    truppe_caserme_engine:   bool = True
 
     rifornimento_allocazione_pomodoro: float = 0.25
     rifornimento_allocazione_legno:    float = 0.25
@@ -626,10 +627,12 @@ class GlobalConfig:
             rifornimento_allocazione_petrolio = float((rc.get("allocazione") or {}).get("petrolio", 0.25)),
             rifornimento_allocazione_acciaio  = float((rc.get("allocazione") or {}).get("acciaio",  0.25)),
 
-            # Truppe filtri (06/05): tipologia caserma + livello + soglia count
-            truppe_tipo_solo  = str(tr.get("tipo_solo", "all")),
-            truppe_livello    = str(tr.get("livello",   "auto")),
-            truppe_count_min  = int(tr.get("count_min", 0)),
+            # Truppe (06/05): flag per le 4 caserme (default ON globale).
+            # Schema: globali.truppe.caserme.{infantry,rider,ranged,engine}: bool
+            truppe_caserme_infantry = bool((tr.get("caserme") or {}).get("infantry", True)),
+            truppe_caserme_rider    = bool((tr.get("caserme") or {}).get("rider",    True)),
+            truppe_caserme_ranged   = bool((tr.get("caserme") or {}).get("ranged",   True)),
+            truppe_caserme_engine   = bool((tr.get("caserme") or {}).get("engine",   True)),
 
             # Rifornimento — mappa
             rifornimento_abilitato       = bool(rm.get("abilitato", False)),
@@ -745,9 +748,12 @@ class GlobalConfig:
                 },
             },
             "truppe": {
-                "tipo_solo": self.truppe_tipo_solo,
-                "livello":   self.truppe_livello,
-                "count_min": self.truppe_count_min,
+                "caserme": {
+                    "infantry": self.truppe_caserme_infantry,
+                    "rider":    self.truppe_caserme_rider,
+                    "ranged":   self.truppe_caserme_ranged,
+                    "engine":   self.truppe_caserme_engine,
+                },
             },
         }
 
@@ -777,6 +783,19 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
     ovr = overrides or {}
     nome = ist.get("nome", ist.get("name", "UNKNOWN"))
     _tipologia = ovr.get("tipologia") or ist.get("profilo", "full")
+
+    # Pre-calcolo flag caserme truppe (override istanza > default globale).
+    # Non si può fare nella classe (nested classdef non chiude liberi).
+    _truppe_ov_caserme = ((ovr.get("truppe_override") or {}).get("caserme") or {})
+    def _resolve_caserma(nome_c: str, gdefault: bool) -> bool:
+        v = _truppe_ov_caserme.get(nome_c)
+        return bool(v) if v is not None else bool(gdefault)
+    _truppe_caserme_resolved = {
+        "infantry": _resolve_caserma("infantry", getattr(gcfg, "truppe_caserme_infantry", True)),
+        "rider":    _resolve_caserma("rider",    getattr(gcfg, "truppe_caserme_rider",    True)),
+        "ranged":   _resolve_caserma("ranged",   getattr(gcfg, "truppe_caserme_ranged",   True)),
+        "engine":   _resolve_caserma("engine",   getattr(gcfg, "truppe_caserme_engine",   True)),
+    }
 
     def _ovr(key, fallback):
         """dict.get che tratta None come chiave mancante.
@@ -860,10 +879,17 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         # Flag globale (non per istanza) — attivato per 1 ciclo di analisi.
         RACCOLTA_OCR_DEBUG = bool(getattr(gcfg, "raccolta_ocr_debug", False))
 
-        # ── Truppe filtri (06/05) ─────────────────────────────────────────────
-        TRUPPE_TIPO_SOLO  = str(getattr(gcfg, "truppe_tipo_solo", "all")).lower()
-        TRUPPE_LIVELLO    = str(getattr(gcfg, "truppe_livello",   "auto"))
-        TRUPPE_COUNT_MIN  = int(getattr(gcfg, "truppe_count_min", 0))
+        # ── Truppe — flag caserme (06/05) ──────────────────────────────────────
+        # Schema: globali.truppe.caserme.{infantry,rider,ranged,engine}
+        # Override istanza: istanze.<nome>.truppe_override.caserme (Optional[bool])
+        # Precedenza: override istanza (se non null) > default globale.
+        # I 4 valori risolti sono pre-calcolati a livello build_instance_cfg
+        # (NON come metodo della classe — una nested classdef non chiude le
+        # variabili libere come una def, vedi nota di scope sotto).
+        TRUPPE_CASERMA_INFANTRY = _truppe_caserme_resolved["infantry"]
+        TRUPPE_CASERMA_RIDER    = _truppe_caserme_resolved["rider"]
+        TRUPPE_CASERMA_RANGED   = _truppe_caserme_resolved["ranged"]
+        TRUPPE_CASERMA_ENGINE   = _truppe_caserme_resolved["engine"]
 
         # ── Task flag (retrocompat. uppercase) ───────────────────────────────
         ALLEANZA_ABILITATO        = gcfg.task_alleanza
