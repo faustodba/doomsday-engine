@@ -771,6 +771,7 @@ Avvio: `run_dashboard_prod.bat` → uvicorn su `:8765`.
 | `/api/config/istanze` | PUT | Save istanze (instances.json + runtime_overrides) |
 | `/api/maintenance/{start\|stop}` | POST | Toggle modalità manutenzione bot |
 | `/api/debug-tasks/<task>/{enable\|disable}` | PATCH | Toggle debug screenshot per task |
+| `/api/restart-bot` | POST/DELETE | Richiedi/cancella restart bot post-cycle (§11.4) |
 | `/ui/partial/<panel>` | GET | HTMX partial per pannelli auto-refresh |
 
 ### 9.3 Pattern UI
@@ -808,9 +809,15 @@ run_prod.bat            # produzione (12 istanze, --use-runtime --resume)
 run_dev.bat             # dev locale, no MuMu boot
 ```
 
-`run_prod.bat` esegue pre-kill PowerShell per processi orfani
-(WU104), poi lancia `python main.py --no-dashboard --use-runtime
---resume`.
+`run_prod.bat` esegue:
+
+1. Pre-kill PowerShell per processi orfani (WU104)
+2. Lancio `python main.py --no-dashboard --use-runtime --resume`
+3. **Loop wrapper `:run_loop`** (06/05): se il bot esce con
+   `ERRORLEVEL=100` → timeout 5s + relaunch automatico. Per altri
+   exit code (0 normale / 1 errore) → no restart automatico.
+
+L'exit code 100 è riservato al `restart_scheduler` (vedi §11.4).
 
 ### 11.2 Avvio dashboard
 
@@ -824,12 +831,61 @@ Toggle da dashboard (banner top sempre visibile) o via
 `/api/maintenance/{start|stop}`. Bot in pausa fino a `auto_resume_ts`.
 File flag: `data/maintenance.flag`.
 
-### 11.4 Restart sicuro
+### 11.4 Restart sicuro + scheduler automatico (06/05)
 
-Bot **mai restart silente**. L'utente lancia manualmente
-`run_prod.bat`. Aspetta sempre la chiusura naturale dell'istanza
-corrente (Thread completato/chiudi_istanza) per evitare state
-corrotto.
+**Regola invariante**: bot **mai restart mid-tick**. State coerente
+solo a fine ciclo (post `chiudi_tick` di FauMorfeus, ultima istanza).
+
+**Architettura "bot decide, .bat riavvia"**:
+
+```
++----------------------+      exit_code      +-----------------+
+|  main.py             | -----  100  ------> | run_prod.bat    |
+|  loop cicli          |                     | :run_loop label |
+|  + should_restart()  | <-- relaunch ----- | timeout 5s      |
++----------------------+                     +-----------------+
+```
+
+[`core/restart_scheduler.py`](../core/restart_scheduler.py) — pure
+logic con 4 trigger valutati in OR a fine ciclo:
+
+| # | Trigger | Config | Use case |
+|---|---------|--------|----------|
+| 1 | File flag | `data/restart_requested.flag` | Bottone dashboard "🔄 restart fine ciclo" |
+| 2 | Schedule cron-like | `globali.restart_schedule_hh_mm: "03:00"` | Restart notturno automatico |
+| 3 | Cicli max | `globali.restart_after_cicli: 200` | Anti memory-leak / refresh ADB |
+| 4 | (cleanup) | `init_boot()` al startup | Cancella flag pendenti, azzera contatore |
+
+**Flusso end-to-end**:
+
+1. **Init startup** (`main.py` post args): `init_boot()` cancella
+   `data/restart_requested.flag` se presente + reset contatore
+   `cicli_da_boot=0` in `data/restart_state.json`.
+2. **Post-cycle hook** (`main.py` dopo `record_cicle_end`):
+   `mark_cycle_completed(ciclo)` incrementa contatore +
+   `should_restart_now()` valuta trigger.
+3. **Match trigger**: `sys.exit(EXIT_CODE_RESTART=100)` con log esplicativo.
+4. **Bat loop**: `if %ERRORLEVEL%==100 → timeout 5s + goto :run_loop`.
+5. **Nuovo bot**: `init_boot()` cancella flag + reset state →
+   `is_restart_requested()=False` al prossimo check.
+
+**Endpoint API**:
+
+| Endpoint | Metodo | Funzione |
+|----------|--------|----------|
+| `/api/restart-bot/status` | GET | Stato richiesta + state contatore |
+| `/api/restart-bot` | POST | Crea flag `data/restart_requested.flag` |
+| `/api/restart-bot` | DELETE | Cancella flag pendente |
+
+**Dashboard UI**: bottone `🔄 restart fine ciclo` nel banner topbar
+(accanto a `🔧 manutenzione`). Quando flag attivo → banner blu
+"RESTART BOT PENDENTE — attesa fine ciclo" con bottone annulla.
+
+**Sicurezza intrinseca**:
+- Restart MAI mid-tick (check post-`chiudi_tick` ultima istanza)
+- State coerente: tutti i task hanno chiuso, salvato su disco
+- Timer 5s tra exit e relaunch evita race con dashboard reader
+- Flag cancellato al boot del nuovo bot per evitare loop infinito
 
 ### 11.5 Debug screenshot per task
 
