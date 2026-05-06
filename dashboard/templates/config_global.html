@@ -60,27 +60,6 @@
           <input type="checkbox" id="gc-ocr-debug" {% if cfg.get('raccolta_ocr_debug') %}checked{% endif %}>
           <span>raccolta OCR debug (WU55)</span>
         </label>
-        <div class="col-sep"></div>
-        <div class="col-sub">restart bot (post-ciclo, mai mid-tick)</div>
-        <div class="p-row">
-          <span class="p-lbl" title="Restart automatico ogni giorno a quest'ora UTC. Vuoto = disabilitato.">schedule UTC (HH:MM)</span>
-          <input class="p-inp" id="gc-restart-hhmm" type="text" placeholder="—"
-                 value="{{ cfg.get('restart_schedule_hh_mm','') }}"
-                 pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" style="width:60px">
-        </div>
-        <div class="p-row">
-          <span class="p-lbl" title="Restart automatico dopo N cicli completati. 0 = disabilitato.">cicli max</span>
-          <input class="p-inp" id="gc-restart-cicli" type="number" min="0" step="50"
-                 value="{{ cfg.get('restart_after_cicli', 0) }}" style="width:60px">
-        </div>
-        <div style="display:flex;gap:6px;margin-top:6px">
-          <button class="btn" type="button" onclick="restartBotToggle(true)"
-                  style="padding:4px 8px;font-size:10px;background:transparent;
-                         color:var(--text-dim);border:1px solid var(--border);
-                         cursor:pointer;flex:1">
-            🔄 restart al prossimo fine ciclo
-          </button>
-        </div>
       </div>
       <div class="col-foot">
         <button class="btn btn-primary btn-full" onclick="gcSalvaSistema()">⬡ salva sistema</button>
@@ -237,6 +216,111 @@
       </div>
     </div>
 
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ── SCHEDULER RESTART BOT (06/05) ─────────────── -->
+<div class="section">
+  <div class="sec-label">⏰ scheduler restart bot — restart sicuro post-ciclo (mai mid-tick)</div>
+
+  <div class="tel-grid">
+    <div class="tel-card tel-full">
+      <div class="tel-head">funzionamento</div>
+      <div style="padding:8px 12px;font-size:11px;line-height:1.5;color:var(--text-dim)">
+        <div style="margin-bottom:6px">
+          Il bot esce a fine ciclo con <code>exit code 100</code>. Il
+          <code>run_prod.bat</code> ha un loop wrapper che cattura quel codice
+          e <b>riavvia automaticamente fra 5s</b>. Per altri exit code (0
+          normale / 1 errore) → no riavvio.
+        </div>
+        <div style="margin-bottom:6px">
+          Il check avviene <b>solo dopo la chiusura dell'ultima istanza
+          del ciclo</b> (qualunque sia: FauMorfeus se abilitata, FAU_10 o
+          altra altrimenti). State coerente garantito.
+        </div>
+        <div>
+          Tre modi per innescare il restart (in OR — primo che scatta):
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="tel-grid" style="grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px">
+
+    <!-- TRIGGER 1: manuale -->
+    <div class="tel-card">
+      <div class="tel-head">1. manuale</div>
+      <div style="padding:10px;font-size:11px;line-height:1.5">
+        <div style="color:var(--text-dim);margin-bottom:8px">
+          Crea flag <code>data/restart_requested.flag</code>. Il bot la
+          rileva alla fine del ciclo corrente.
+        </div>
+        <button class="btn" type="button" onclick="restartBotToggle(true)"
+                style="width:100%;padding:6px;font-size:11px;
+                       background:transparent;color:var(--text);
+                       border:1px solid var(--border);cursor:pointer">
+          🔄 restart al prossimo fine ciclo
+        </button>
+        <div style="color:var(--text-dim);font-size:10px;margin-top:6px;text-align:center">
+          stessa azione del bottone topbar
+        </div>
+      </div>
+    </div>
+
+    <!-- TRIGGER 2: schedule cron -->
+    <div class="tel-card">
+      <div class="tel-head">2. schedule giornaliero</div>
+      <div style="padding:10px;font-size:11px;line-height:1.5">
+        <div style="color:var(--text-dim);margin-bottom:8px">
+          Restart automatico ogni giorno a una specifica ora <b>UTC</b>.
+          Vuoto = disabilitato.
+        </div>
+        <div class="p-row" style="justify-content:center">
+          <span class="p-lbl">ora UTC</span>
+          <input class="p-inp" id="gc-restart-hhmm" type="text" placeholder="HH:MM"
+                 value="{{ cfg.get('restart_schedule_hh_mm','') }}"
+                 pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5"
+                 style="width:60px;text-align:center">
+        </div>
+        <div style="color:var(--text-dim);font-size:10px;margin-top:6px;text-align:center">
+          es. <code>03:00</code> = restart ogni notte alle 03:00 UTC
+          (= 04:00/05:00 ora locale)
+        </div>
+      </div>
+    </div>
+
+    <!-- TRIGGER 3: cicli max -->
+    <div class="tel-card">
+      <div class="tel-head">3. cicli max</div>
+      <div style="padding:10px;font-size:11px;line-height:1.5">
+        <div style="color:var(--text-dim);margin-bottom:8px">
+          Restart automatico dopo N cicli completati dal boot.
+          Anti memory-leak / refresh ADB. <b>0</b> = disabilitato.
+        </div>
+        <div class="p-row" style="justify-content:center">
+          <span class="p-lbl">cicli max</span>
+          <input class="p-inp" id="gc-restart-cicli" type="number" min="0" step="50"
+                 value="{{ cfg.get('restart_after_cicli', 0) }}"
+                 style="width:60px;text-align:center">
+        </div>
+        <div style="color:var(--text-dim);font-size:10px;margin-top:6px;text-align:center">
+          es. <code>200</code> = restart ogni ~200 cicli
+          (~24h con tick_sleep 1min × 12 istanze × 8min)
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <div style="display:flex;align-items:center;gap:10px;padding:8px 4px;margin-top:6px">
+    <button class="btn btn-primary" onclick="gcSalvaSistema()">⬡ salva schedule</button>
+    <span class="save-note" style="font-size:10px;color:var(--text-dim)">
+      schedule + cicli max persistono in <code>global_config.json</code>.
+      Hot-reload via <code>runtime_overrides::globali</code> per modifiche immediate.
+    </span>
+    <span class="save-ok" id="gc-restart-ok" style="display:none">✓ salvato</span>
   </div>
 </div>
 
