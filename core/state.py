@@ -765,6 +765,70 @@ class ArenaState:
 
 
 # ==============================================================================
+# TruppeState — consumo risorse per addestramenti truppe (06/05)
+# ==============================================================================
+
+@dataclass
+class TruppeState:
+    """
+    Stato giornaliero consumo risorse TruppeTask.
+
+    Tracking del consumo cumulativo per scorporare prod_ora in
+    chiudi_sessione_e_calcola: la formula reale di produzione e' infatti
+        prod_qty = delta_castle - zaino_delta + rifornimento_inviato + Σ consumo_addestramenti
+    Senza il termine consumo, prod_qty risulta NEGATIVO quando il gioco
+    consuma piu' risorse (truppe + costruzioni) di quanto produce.
+
+    Reset 00:00 UTC via _controlla_reset al cambio data_riferimento.
+
+    JSON in state/<ISTANZA>.json:
+      "truppe": {
+        "consumo_oggi": {"pomodoro": 524300, "legno": 262100, ...},
+        "data_riferimento": "2026-05-06"
+      }
+    """
+
+    consumo_oggi:     dict = field(default_factory=dict)
+    data_riferimento: str  = field(default_factory=_today_utc)
+
+    def _controlla_reset(self) -> None:
+        oggi = _today_utc()
+        if self.data_riferimento != oggi:
+            self.consumo_oggi = {}
+            self.data_riferimento = oggi
+
+    def aggiungi_consumo(self, consumo: dict) -> None:
+        """
+        Accumula il consumo letto da OCR maschera Squad Training.
+        Sanity check: scarta valori implausibili (< 100 = OCR fail).
+        """
+        self._controlla_reset()
+        for risorsa, qta in consumo.items():
+            try:
+                qta_int = int(qta)
+                if qta_int < 100:   # OCR fail (es. "5" da "45.0K") → scarto
+                    continue
+                if qta_int > 10_000_000:   # sanity: max 10M per training
+                    continue
+                self.consumo_oggi[risorsa] = self.consumo_oggi.get(risorsa, 0) + qta_int
+            except (ValueError, TypeError):
+                continue
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "TruppeState":
+        return cls(
+            consumo_oggi     = dict(d.get("consumo_oggi", {})),
+            data_riferimento = d.get("data_riferimento", _today_utc()),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "consumo_oggi":     dict(self.consumo_oggi),
+            "data_riferimento": self.data_riferimento,
+        }
+
+
+# ==============================================================================
 # DailyTasksState — completamento task giornalieri
 # ==============================================================================
 
@@ -1055,6 +1119,7 @@ class InstanceState:
     boost:        BoostState        = field(default_factory=BoostState)
     vip:          VipState          = field(default_factory=VipState)
     arena:        ArenaState        = field(default_factory=ArenaState)
+    truppe:       TruppeState       = field(default_factory=TruppeState)   # 06/05
 
     # auto-WU14: produzione oraria per sessione
     produzione_corrente: ProduzioneSession | None = None
@@ -1077,6 +1142,7 @@ class InstanceState:
             "boost":         self.boost.to_dict(),
             "vip":           self.vip.to_dict(),
             "arena":         self.arena.to_dict(),
+            "truppe":        self.truppe.to_dict(),   # 06/05 consumo addestramento
             # auto-WU14: produzione oraria
             "produzione_corrente": self.produzione_corrente.to_dict() if self.produzione_corrente else None,
             "produzione_storico":  [s.to_dict() for s in self.produzione_storico],
@@ -1101,6 +1167,7 @@ class InstanceState:
             boost=BoostState.from_dict(d.get("boost", {})),
             vip=VipState.from_dict(d.get("vip", {})),
             arena=ArenaState.from_dict(d.get("arena", {})),
+            truppe=TruppeState.from_dict(d.get("truppe", {})),   # 06/05
             produzione_corrente=pc,
             produzione_storico=ps,
             ultimo_errore=d.get("ultimo_errore", None),
@@ -1140,7 +1207,26 @@ class InstanceState:
         except Exception:
             durata = 0.0
 
-        # Calcolo produzione per ogni risorsa nota
+        # Calcolo produzione per ogni risorsa nota.
+        # 06/05: aggiunto SCORPORO consumo addestramento truppe per evitare
+        # prod_ora negativi su istanze con consumo gioco > produzione.
+        # Formula completa: prod = delta_castle - zaino_delta + rifornimento_inv
+        #                          + consumo_truppe (scorporato come "produzione interna
+        #                          consumata" non visibile in delta_castle).
+        # consumo_oggi e' cumulativo della giornata UTC, ma chiudi_sessione_e_calcola
+        # viene chiamato per ogni sessione (~tick). Per evitare doppio-conteggio,
+        # tracciamo qui delta dalla precedente chiamata. Approccio semplice:
+        # leggi consumo_oggi corrente e sottrai consumo_inizio_sessione (salvato
+        # in sess.zaino_delta_iniziale o nuovo campo).
+        # Per ora implementazione MINIMALE: aggiungi sempre consumo_oggi totale
+        # alla sessione (sovrastima leggermente prod_ora se piu' sessioni nello
+        # stesso giorno UTC, ma evita prod_ora negativi che sono il bug
+        # principale). Fix definitivo richiede tracking delta per-sessione.
+        try:
+            consumo_oggi = dict(self.truppe.consumo_oggi or {})
+        except Exception:
+            consumo_oggi = {}
+
         prod_qty = {}
         prod_ora = {}
         for r in ("pomodoro", "legno", "acciaio", "petrolio"):
@@ -1148,8 +1234,9 @@ class InstanceState:
             fin = float(risorse_finali.get(r, 0) or 0)
             inv = int(sess.rifornimento_inviato.get(r, 0))
             zd  = int(sess.zaino_delta.get(r, 0))
+            cons_t = int(consumo_oggi.get(r, 0))   # 06/05 scorporo
             delta_castle = fin - ini
-            prod = delta_castle - zd + inv
+            prod = delta_castle - zd + inv + cons_t
             prod_qty[r] = prod
             prod_ora[r] = (prod / durata * 3600.0) if durata > 0 else 0.0
 

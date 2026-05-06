@@ -333,6 +333,17 @@ class TruppeTask(Task):
         if dbg and dbg.enabled:
             dbg.snap(f"04_iter{idx}_pre_train_button", ctx.device.screenshot())
 
+        # 06/05: pre-tap TRAIN, leggi consumo risorse dalla maschera (per scorporo
+        # prod_ora). Best-effort: se OCR fallisce non blocca il training.
+        try:
+            from shared.ocr_truppe import leggi_consumo_addestramento
+            consumo = leggi_consumo_addestramento(screen_train)
+            if consumo and ctx.state is not None:
+                ctx.state.truppe.aggiungi_consumo(consumo)
+                ctx.log_msg("[TRUPPE] consumo letto: %s", consumo)
+        except Exception as exc:
+            ctx.log_msg("[TRUPPE] errore OCR consumo: %s — continuo", exc)
+
         # 4. Tap TRAIN giallo → conferma addestramento
         ctx.log_msg("[TRUPPE] tap TRAIN %s", _TAP_TRAIN_BUTTON)
         ctx.device.tap(*_TAP_TRAIN_BUTTON)
