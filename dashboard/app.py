@@ -3379,39 +3379,111 @@ def partial_maintenance_banner(request: Request):
 @app.get("/ui/partial/restart-banner", include_in_schema=False)
 def partial_restart_banner(request: Request):
     """
-    Banner restart bot — visibile solo se richiesta restart attiva (file flag
-    presente). Auto-cancella quando il bot riparte e fa init_boot().
+    Banner restart bot. 3 stati possibili (in ordine di priorità):
+
+      1. Flag manuale presente → banner blu "RESTART PENDENTE" + bottone annulla.
+      2. Schedule cron-like e/o cicli-max configurati → banner grigio info
+         con dettaglio della trigger condition (prossimo orario UTC, cicli/N).
+      3. Nessun trigger configurato → vuoto.
+
+    Auto-refresh ogni 10s via base.html.
     """
-    from core.restart_scheduler import is_restart_requested, _flag_path, _load_state
-    if not is_restart_requested():
+    from core.restart_scheduler import (
+        is_restart_requested,
+        _flag_path,
+        _load_state,
+        _read_config,
+    )
+    from datetime import datetime, timezone, timedelta
+    import json as _json
+
+    # ── Stato 1: flag manuale presente (priorità massima) ─────────────────────
+    if is_restart_requested():
+        info = {}
+        try:
+            info = _json.loads(_flag_path().read_text(encoding="utf-8"))
+        except Exception:
+            pass
+        reason = info.get("reason", "?")
+        ts = info.get("ts", "")[:19].replace("T", " ")
+
+        state = _load_state()
+        cicli = int(state.get("cicli_da_boot", 0))
+
+        body = f'''
+        <div style="background:rgba(59,130,246,0.15);border:1px solid #3b82f6;
+                    color:#60a5fa;padding:6px 12px;border-radius:4px;margin-top:6px;
+                    display:flex;align-items:center;gap:10px;font-size:12px">
+          <span style="font-weight:600">🔄 RESTART BOT PENDENTE</span>
+          <span style="color:var(--text-dim)">richiesto {ts} ({reason})
+            · cicli completati post-boot: {cicli}
+            · attesa fine ciclo per uscita pulita</span>
+          <button onclick="restartBotToggle(false)" class="btn"
+                  style="margin-left:auto;padding:3px 10px;font-size:11px;
+                         background:transparent;color:#60a5fa;
+                         border:1px solid #3b82f6;cursor:pointer">
+            ✕ annulla
+          </button>
+        </div>
+        '''
+        return HTMLResponse(body)
+
+    # ── Stato 2: trigger schedule e/o cicli-max attivi ────────────────────────
+    cfg = _read_config()
+    sched_raw = cfg.get("restart_schedule_hh_mm", "") or ""
+    cicli_max = cfg.get("restart_after_cicli", 0) or 0
+    state = _load_state()
+    cicli_correnti = int(state.get("cicli_da_boot", 0))
+
+    parts: list[str] = []
+
+    # Schedule HH:MM UTC
+    sched_valid = False
+    if isinstance(sched_raw, str) and ":" in sched_raw:
+        try:
+            hh, mm = sched_raw.split(":")
+            hh = int(hh); mm = int(mm)
+            if 0 <= hh < 24 and 0 <= mm < 60:
+                sched_valid = True
+                now = datetime.now(timezone.utc)
+                target = now.replace(hour=hh, minute=mm, second=0, microsecond=0)
+                if target <= now:
+                    target = target + timedelta(days=1)
+                delta = target - now
+                tot_min = int(delta.total_seconds() // 60)
+                h_left, m_left = divmod(tot_min, 60)
+                tlabel = f"{h_left}h{m_left:02d}m" if h_left else f"{m_left}m"
+                parts.append(
+                    f'<span>⏰ schedule giornaliero <b>{sched_raw} UTC</b> '
+                    f'<span style="color:var(--text-dim)">(prossimo fra {tlabel})</span></span>'
+                )
+        except Exception:
+            pass
+
+    # Cicli max
+    cicli_valid = isinstance(cicli_max, int) and cicli_max > 0
+    if cicli_valid:
+        rimanenti = max(0, cicli_max - cicli_correnti)
+        parts.append(
+            f'<span>♻ cicli-max <b>{cicli_correnti}/{cicli_max}</b> '
+            f'<span style="color:var(--text-dim)">(restano {rimanenti})</span></span>'
+        )
+
+    if not parts:
+        # Nessun trigger configurato → niente banner
         return HTMLResponse('')
 
-    info = {}
-    try:
-        import json as _json
-        info = _json.loads(_flag_path().read_text(encoding="utf-8"))
-    except Exception:
-        pass
-    reason = info.get("reason", "?")
-    ts = info.get("ts", "")[:19].replace("T", " ")
-
-    state = _load_state()
-    cicli = int(state.get("cicli_da_boot", 0))
-
+    sep = '<span style="color:var(--text-dim)">·</span>'
+    inner = f' {sep} '.join(parts)
     body = f'''
-    <div style="background:rgba(59,130,246,0.15);border:1px solid #3b82f6;
-                color:#60a5fa;padding:6px 12px;border-radius:4px;margin-top:6px;
-                display:flex;align-items:center;gap:10px;font-size:12px">
-      <span style="font-weight:600">🔄 RESTART BOT PENDENTE</span>
-      <span style="color:var(--text-dim)">richiesto {ts} ({reason})
-        · cicli completati post-boot: {cicli}
-        · attesa fine ciclo per uscita pulita</span>
-      <button onclick="restartBotToggle(false)" class="btn"
-              style="margin-left:auto;padding:3px 10px;font-size:11px;
-                     background:transparent;color:#60a5fa;
-                     border:1px solid #3b82f6;cursor:pointer">
-        ✕ annulla
-      </button>
+    <div style="background:rgba(148,163,184,0.10);border:1px solid var(--border);
+                color:var(--text-dim);padding:5px 12px;border-radius:4px;margin-top:6px;
+                display:flex;align-items:center;gap:10px;font-size:11px">
+      <span style="font-weight:600;color:var(--text)">🔄 restart automatico</span>
+      {inner}
+      <span style="margin-left:auto;color:var(--text-dim)">
+        configurabile in <a href="/ui/config/global" style="color:var(--text-dim);text-decoration:underline">config globale</a>
+      </span>
     </div>
     '''
     return HTMLResponse(body)
