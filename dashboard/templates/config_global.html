@@ -60,6 +60,31 @@
           <input type="checkbox" id="gc-ocr-debug" {% if cfg.get('raccolta_ocr_debug') %}checked{% endif %}>
           <span>raccolta OCR debug (WU55)</span>
         </label>
+
+        <div class="col-sep"></div>
+        <div class="col-sub">addestramento truppe (06/05)</div>
+        {% set tr_cfg = cfg.get('truppe', {}) %}
+        <div class="p-row">
+          <span class="p-lbl">tipo</span>
+          <select id="gc-truppe-tipo" style="width:100px;font-size:10px">
+            {% for v, lbl in [('all','tutte'),('infantry','Infantry'),('rider','Rider'),('ranged','Ranged'),('engine','Engine')] %}
+            <option value="{{ v }}" {% if tr_cfg.get('tipo_solo','all')==v %}selected{% endif %}>{{ lbl }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="p-row">
+          <span class="p-lbl">livello</span>
+          <select id="gc-truppe-livello" style="width:100px;font-size:10px">
+            {% for v in ['auto','I','II','III','IV','V','VI'] %}
+            <option value="{{ v }}" {% if tr_cfg.get('livello','auto')==v %}selected{% endif %}>{{ v }}</option>
+            {% endfor %}
+          </select>
+        </div>
+        <div class="p-row">
+          <span class="p-lbl">count min</span>
+          <input class="p-inp" id="gc-truppe-count-min" type="number" min="0" step="1000"
+                 value="{{ tr_cfg.get('count_min', 0) }}" style="width:80px">
+        </div>
       </div>
       <div class="col-foot">
         <button class="btn btn-primary btn-full" onclick="gcSalvaSistema()">⬡ salva sistema</button>
@@ -532,6 +557,12 @@ async function gcSalvaSistema() {
     raccolta_ocr_debug: gcGb('gc-ocr-debug'),
     restart_schedule_hh_mm: restartHHMM,   // "" = disabilitato
     restart_after_cicli:    restartCicli,  // 0 = disabilitato
+    // 06/05 — Truppe filtri (tipologia + livello + soglia count)
+    truppe: {
+      tipo_solo: gcGv('gc-truppe-tipo'),
+      livello:   gcGv('gc-truppe-livello'),
+      count_min: gcGi('gc-truppe-count-min'),
+    },
   };
   const { ok, data } = await gcApiPatch(payload);
   gcShowMsg('gc-sis-ok', 'gc-sis-err', ok, data.detail || '');

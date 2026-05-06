@@ -63,6 +63,21 @@ _TAP_CHECK_FAST       = (687, 508)
 _BOX_CHECK_FAST       = (676, 497, 699, 518)
 _ZONE_COUNTER_OCR     = (12, 264, 30, 282)
 
+# 06/05: coord 6 icone livelli nel selettore Squad Training (post tap Train)
+# Y fissa 110, spacing 62px tra centri. Misurato empiricamente da screenshot
+# debug. Vedi shared/ocr_truppe.py LIV_CENTRI.
+_TAP_LIVELLI = {
+    "I":   (556, 110),
+    "II":  (618, 110),
+    "III": (680, 110),
+    "IV":  (744, 110),
+    "V":   (810, 110),
+    "VI":  (872, 110),
+}
+
+# Mapping nomi tipologia caserma (dashboard) → titolo OCR (lower case)
+_TIPI_VALIDI = {"infantry", "rider", "ranged", "engine"}
+
 _R_MEAN_THRESHOLD_ON  = 110     # R-mean del box checkbox: > soglia ⇒ ON
 
 _DELAY_STEP_S         = 5.0     # delay tra tap calibrato in test FAU_05
@@ -216,27 +231,96 @@ class TruppeTask(Task):
         return r_mean > _R_MEAN_THRESHOLD_ON
 
     def _esegui_ciclo(self, ctx: TaskContext) -> bool:
-        """Un ciclo: tap pannello → tap cerchio Train → verifica check → tap TRAIN."""
+        """Un ciclo: tap pannello → tap cerchio Train → verifica check → tap TRAIN.
+
+        06/05 — Filtri opzionali (config globali.truppe):
+          - tipo_solo:  skip se caserma diversa dal tipo configurato
+          - livello:    forza tap su livello target prima di TRAIN
+          - count_min:  skip se truppe disponibili < soglia
+        Tutti i filtri tollerano fail OCR (procede comunque, non blocca bot).
+        """
         if ctx.device is None:
             return False
         dbg = getattr(self, "_dbg", None)
         idx = getattr(self, "_dbg_iter", 0)
 
+        # Lettura config filtri
+        tipo_solo = str(getattr(ctx.config, "TRUPPE_TIPO_SOLO", "all") or "all").lower()
+        livello_cfg = str(getattr(ctx.config, "TRUPPE_LIVELLO",   "auto") or "auto")
+        count_min   = int(getattr(ctx.config, "TRUPPE_COUNT_MIN", 0) or 0)
+
         # 1. Tap icona pannello caserme — sistema centra prossima libera
         ctx.log_msg("[TRUPPE] tap pannello caserme %s", _TAP_PANNELLO_CASERME)
         ctx.device.tap(*_TAP_PANNELLO_CASERME)
         time.sleep(_DELAY_STEP_S)
+        screen_pannello = ctx.device.screenshot()
         if dbg and dbg.enabled:
-            dbg.snap(f"02_iter{idx}_post_pannello_caserme", ctx.device.screenshot())
+            dbg.snap(f"02_iter{idx}_post_pannello_caserme", screen_pannello)
+
+        # FILTRO TIPOLOGIA: OCR titolo "X Barracks" e match con config
+        if tipo_solo != "all":
+            try:
+                from shared.ocr_truppe import leggi_tipo_caserma
+                tipo_letto = leggi_tipo_caserma(screen_pannello)
+                if tipo_letto and tipo_letto != tipo_solo:
+                    ctx.log_msg(
+                        "[TRUPPE] caserma=%s != tipo_solo=%s — skip iterazione",
+                        tipo_letto, tipo_solo,
+                    )
+                    # BACK per chiudere menu radial e non lasciare overlay aperto
+                    ctx.device.back()
+                    time.sleep(1.5)
+                    return False   # interrompe loop esterno (no caserma compatibile)
+                if not tipo_letto:
+                    ctx.log_msg("[TRUPPE] OCR tipo caserma fallito — procedo (no filtro)")
+            except Exception as exc:
+                ctx.log_msg("[TRUPPE] errore OCR tipo: %s — procedo", exc)
 
         # 2. Tap cerchio "Train" del menu mappa → apre Squad Training
         ctx.log_msg("[TRUPPE] tap cerchio Train %s", _TAP_TRAIN_CIRCLE)
         ctx.device.tap(*_TAP_TRAIN_CIRCLE)
         time.sleep(_DELAY_STEP_S)
-        # Snap maschera Squad Training: qui sono visibili le risorse consumate
-        # per l'addestramento (target del consumo per scorporo prod_ora)
+        screen_train = ctx.device.screenshot()
         if dbg and dbg.enabled:
-            dbg.snap(f"03_iter{idx}_squad_training_panel", ctx.device.screenshot())
+            dbg.snap(f"03_iter{idx}_squad_training_panel", screen_train)
+
+        # FILTRO LIVELLO: tap icona livello target se config != "auto"
+        if livello_cfg in _TAP_LIVELLI:
+            try:
+                from shared.ocr_truppe import identifica_livello_attivo, leggi_count_truppe
+                # Mappa "I" → 1, ecc.
+                liv_target_n = ["I","II","III","IV","V","VI"].index(livello_cfg) + 1
+                liv_attivo = identifica_livello_attivo(screen_train)
+                if liv_attivo and liv_attivo != liv_target_n:
+                    coord = _TAP_LIVELLI[livello_cfg]
+                    ctx.log_msg(
+                        "[TRUPPE] livello attivo=%s, target=%s — tap %s",
+                        liv_attivo, livello_cfg, coord,
+                    )
+                    ctx.device.tap(*coord)
+                    time.sleep(_DELAY_STEP_S * 0.4)   # 2s
+                    screen_train = ctx.device.screenshot()
+                elif liv_attivo == liv_target_n:
+                    ctx.log_msg("[TRUPPE] livello %s gia' attivo", livello_cfg)
+                else:
+                    ctx.log_msg("[TRUPPE] livello attivo non rilevato — procedo")
+
+                # FILTRO count_min: leggi count e skip se < soglia
+                if count_min > 0:
+                    liv_n = liv_target_n if liv_attivo else (liv_attivo or 1)
+                    count = leggi_count_truppe(screen_train, liv_n)
+                    if count is not None and count < count_min:
+                        ctx.log_msg(
+                            "[TRUPPE] count=%d < min=%d — skip iterazione",
+                            count, count_min,
+                        )
+                        ctx.device.back()
+                        time.sleep(1.5)
+                        return False
+                    if count is not None:
+                        ctx.log_msg("[TRUPPE] count truppe disponibili=%d", count)
+            except Exception as exc:
+                ctx.log_msg("[TRUPPE] errore filtro livello/count: %s — procedo", exc)
 
         # 3. Verifica checkbox Fast Training: se ON → tap per disabilitare
         if self._checkbox_fast_training_on(ctx):

@@ -264,6 +264,17 @@ def merge_config(gcfg: dict, overrides: dict) -> dict:
     except Exception:
         pass
 
+    # ── truppe (06/05): tipo_solo + livello + count_min ─────────────────────
+    try:
+        ov_truppe = globali.get("truppe", {})
+        if ov_truppe:
+            if "truppe" not in merged:
+                merged["truppe"] = {}
+            for k, v in ov_truppe.items():
+                merged["truppe"][k] = v
+    except Exception:
+        pass
+
     # ── flag globali root-level (WU55, WU93, WU89-step3, WU115) ─────────────
     # Flag a livello root di globali che non hanno una sezione dedicata.
     # Estendibile: aggiungere chiavi qui se servono nuovi flag globali.
@@ -472,6 +483,11 @@ class GlobalConfig:
     rifornimento_qta_acciaio:         int   = 999_000_000
     # 05/05: target proporzioni invio (analoga raccolta.allocazione).
     # Default uniforme 25/25/25/25 (frazioni 0-1). Sum != 1 viene normalizzato.
+    # 06/05: truppe filtri (tipologia caserma + livello + soglia count)
+    truppe_tipo_solo:    str = "all"     # all|infantry|rider|ranged|engine
+    truppe_livello:      str = "auto"    # auto|I|II|III|IV|V|VI
+    truppe_count_min:    int = 0         # 0 = no soglia
+
     rifornimento_allocazione_pomodoro: float = 0.25
     rifornimento_allocazione_legno:    float = 0.25
     rifornimento_allocazione_petrolio: float = 0.25
@@ -517,6 +533,7 @@ class GlobalConfig:
         z  = raw.get("zaino", {})
         ra = raw.get("raccolta", {})
         al = ra.get("allocazione", {})
+        tr = raw.get("truppe", {})   # 06/05 filtri TruppeTask
 
         # Normalizza percentuali → frazioni 0-1
         # AllocazioneOverride (dashboard Pydantic) salva 0-100 espliciti;
@@ -608,6 +625,11 @@ class GlobalConfig:
             rifornimento_allocazione_legno    = float((rc.get("allocazione") or {}).get("legno",    0.25)),
             rifornimento_allocazione_petrolio = float((rc.get("allocazione") or {}).get("petrolio", 0.25)),
             rifornimento_allocazione_acciaio  = float((rc.get("allocazione") or {}).get("acciaio",  0.25)),
+
+            # Truppe filtri (06/05): tipologia caserma + livello + soglia count
+            truppe_tipo_solo  = str(tr.get("tipo_solo", "all")),
+            truppe_livello    = str(tr.get("livello",   "auto")),
+            truppe_count_min  = int(tr.get("count_min", 0)),
 
             # Rifornimento — mappa
             rifornimento_abilitato       = bool(rm.get("abilitato", False)),
@@ -722,6 +744,11 @@ class GlobalConfig:
                     "acciaio":  self.allocazione_acciaio,
                 },
             },
+            "truppe": {
+                "tipo_solo": self.truppe_tipo_solo,
+                "livello":   self.truppe_livello,
+                "count_min": self.truppe_count_min,
+            },
         }
 
 
@@ -832,6 +859,11 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         # WU55 — Data collection OCR slot per analisi HOME vs MAPPA.
         # Flag globale (non per istanza) — attivato per 1 ciclo di analisi.
         RACCOLTA_OCR_DEBUG = bool(getattr(gcfg, "raccolta_ocr_debug", False))
+
+        # ── Truppe filtri (06/05) ─────────────────────────────────────────────
+        TRUPPE_TIPO_SOLO  = str(getattr(gcfg, "truppe_tipo_solo", "all")).lower()
+        TRUPPE_LIVELLO    = str(getattr(gcfg, "truppe_livello",   "auto"))
+        TRUPPE_COUNT_MIN  = int(getattr(gcfg, "truppe_count_min", 0))
 
         # ── Task flag (retrocompat. uppercase) ───────────────────────────────
         ALLEANZA_ABILITATO        = gcfg.task_alleanza

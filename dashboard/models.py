@@ -209,6 +209,27 @@ class RaccoltaOverride(BaseModel):
     allocazione:        AllocazioneOverride = Field(default_factory=AllocazioneOverride)
 
 
+class TruppeOverride(BaseModel):
+    """
+    06/05 — Filtri TruppeTask: tipologia caserma + livello + soglia count.
+
+    tipo_solo:  "all" (default) | "infantry"|"rider"|"ranged"|"engine"
+                Quando != "all", il task addestra solo caserme del tipo specificato
+                (skip caserme di tipo diverso). OCR titolo "X Barracks" valida match.
+
+    livello:    "auto" (default, gioco decide) | "I"|"II"|"III"|"IV"|"V"|"VI"
+                Quando != "auto", il task forza il livello target prima del tap TRAIN.
+                Selettore: HSV scan + tap su coord livello target.
+
+    count_min:  soglia minima truppe disponibili nel livello scelto.
+                0 (default) = no soglia. Se livello selezionato ha count < soglia,
+                skip iterazione.
+    """
+    tipo_solo:  str = "all"
+    livello:    str = "auto"
+    count_min:  int = 0
+
+
 # ==============================================================================
 # GlobaliOverride — contenuto di runtime_overrides.json.globali
 # ==============================================================================
@@ -221,6 +242,7 @@ class GlobaliOverride(BaseModel):
     rifornimento:         RifornimentoOverride        = Field(default_factory=RifornimentoOverride)
     zaino:                ZainoOverride               = Field(default_factory=ZainoOverride)
     raccolta:             RaccoltaOverride            = Field(default_factory=RaccoltaOverride)
+    truppe:               TruppeOverride              = Field(default_factory=TruppeOverride)
     # WU55 — Data collection OCR slot HOME vs MAPPA
     raccolta_ocr_debug:   bool                       = False
     # WU93 — BannerLearner auto-apprendimento banner non catalogati
