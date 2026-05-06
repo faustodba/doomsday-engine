@@ -111,6 +111,7 @@ class TruppeTask(Task):
         # WU115 — debug buffer (hot-reload via globali.debug_tasks.truppe)
         from shared.debug_buffer import DebugBuffer
         debug = DebugBuffer.for_task("truppe", getattr(ctx, "instance_name", "_unknown"))
+        self._dbg = debug   # accessibile da _esegui_ciclo per snap intermedi
         debug.snap("00_pre_counter_read", ctx.device.screenshot())
 
         # Lettura counter iniziale
@@ -131,6 +132,7 @@ class TruppeTask(Task):
         ok = 0
         for i in range(iterazioni):
             ctx.log_msg("[TRUPPE] === ciclo %d/%d ===", i + 1, iterazioni)
+            self._dbg_iter = i + 1   # passato a _esegui_ciclo via attributo
             esito = self._esegui_ciclo(ctx)
             if not esito:
                 ctx.log_msg("[TRUPPE] ciclo %d FALLITO — interrompo", i + 1)
@@ -157,9 +159,10 @@ class TruppeTask(Task):
         if ok == 0:
             debug.flush(success=False, log_fn=ctx.log_msg)
             return TaskResult.fail("nessuna caserma avviata")
-        # Anomalia: avviate < target (interruzione mid-loop)
+        # Anomalia: avviate < target (interruzione mid-loop) OR debug toggle
+        # attivato dalla dashboard (forza flush su success per analisi).
         anomalia = (ok < iterazioni)
-        debug.flush(success=True, force=anomalia, log_fn=ctx.log_msg)
+        debug.flush(success=True, force=anomalia or debug.enabled, log_fn=ctx.log_msg)
         return TaskResult.ok(f"avviate {ok}/{iterazioni} caserme",
                              avviate=ok, target=iterazioni)
 
@@ -216,16 +219,24 @@ class TruppeTask(Task):
         """Un ciclo: tap pannello → tap cerchio Train → verifica check → tap TRAIN."""
         if ctx.device is None:
             return False
+        dbg = getattr(self, "_dbg", None)
+        idx = getattr(self, "_dbg_iter", 0)
 
         # 1. Tap icona pannello caserme — sistema centra prossima libera
         ctx.log_msg("[TRUPPE] tap pannello caserme %s", _TAP_PANNELLO_CASERME)
         ctx.device.tap(*_TAP_PANNELLO_CASERME)
         time.sleep(_DELAY_STEP_S)
+        if dbg and dbg.enabled:
+            dbg.snap(f"02_iter{idx}_post_pannello_caserme", ctx.device.screenshot())
 
         # 2. Tap cerchio "Train" del menu mappa → apre Squad Training
         ctx.log_msg("[TRUPPE] tap cerchio Train %s", _TAP_TRAIN_CIRCLE)
         ctx.device.tap(*_TAP_TRAIN_CIRCLE)
         time.sleep(_DELAY_STEP_S)
+        # Snap maschera Squad Training: qui sono visibili le risorse consumate
+        # per l'addestramento (target del consumo per scorporo prod_ora)
+        if dbg and dbg.enabled:
+            dbg.snap(f"03_iter{idx}_squad_training_panel", ctx.device.screenshot())
 
         # 3. Verifica checkbox Fast Training: se ON → tap per disabilitare
         if self._checkbox_fast_training_on(ctx):
@@ -235,6 +246,8 @@ class TruppeTask(Task):
             time.sleep(_DELAY_STEP_S)
         else:
             ctx.log_msg("[TRUPPE] checkbox Fast Training OFF — ok")
+        if dbg and dbg.enabled:
+            dbg.snap(f"04_iter{idx}_pre_train_button", ctx.device.screenshot())
 
         # 4. Tap TRAIN giallo → conferma addestramento
         ctx.log_msg("[TRUPPE] tap TRAIN %s", _TAP_TRAIN_BUTTON)
