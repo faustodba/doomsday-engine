@@ -241,21 +241,30 @@
           altra altrimenti). State coerente garantito.
         </div>
         <div>
-          Tre modi per innescare il restart (in OR — primo che scatta):
+          Tre trigger valutati a fine ciclo <b>in ordine di priorità</b>
+          (1 → 2 → 3): il primo che scatta vince, gli altri non vengono
+          valutati. Trigger 1 (manuale) ha sempre la priorità massima
+          se la flag è presente.
         </div>
       </div>
     </div>
   </div>
 
+  {% set sched_enabled = cfg.get('restart_schedule_hh_mm','') != '' %}
+  {% set cicli_enabled = (cfg.get('restart_after_cicli', 0) | int) > 0 %}
+
   <div class="tel-grid" style="grid-template-columns:1fr 1fr 1fr;gap:8px;margin-top:8px">
 
-    <!-- TRIGGER 1: manuale -->
-    <div class="tel-card">
-      <div class="tel-head">1. manuale</div>
+    <!-- TRIGGER 1: manuale (sempre disponibile, priorità 1) -->
+    <div class="tel-card" style="border-left:3px solid var(--accent)">
+      <div class="tel-head" style="display:flex;justify-content:space-between;align-items:center">
+        <span>① manuale</span>
+        <span style="font-size:10px;color:var(--accent);font-weight:600">priorità 1</span>
+      </div>
       <div style="padding:10px;font-size:11px;line-height:1.5">
         <div style="color:var(--text-dim);margin-bottom:8px">
-          Crea flag <code>data/restart_requested.flag</code>. Il bot la
-          rileva alla fine del ciclo corrente.
+          On-demand: crea flag <code>data/restart_requested.flag</code>.
+          Bot rileva a fine ciclo corrente. Sempre disponibile.
         </div>
         <button class="btn" type="button" onclick="restartBotToggle(true)"
                 style="width:100%;padding:6px;font-size:11px;
@@ -269,45 +278,73 @@
       </div>
     </div>
 
-    <!-- TRIGGER 2: schedule cron -->
-    <div class="tel-card">
-      <div class="tel-head">2. schedule giornaliero</div>
+    <!-- TRIGGER 2: schedule cron + ON/OFF toggle -->
+    <div class="tel-card {% if sched_enabled %}style="border-left:3px solid #4caf50"{% else %}style="border-left:3px solid var(--text-dim);opacity:0.85"{% endif %}"
+         id="gc-restart-card-sched">
+      <div class="tel-head" style="display:flex;justify-content:space-between;align-items:center">
+        <span>② schedule giornaliero</span>
+        <span style="font-size:10px;font-weight:600">
+          <span id="gc-restart-sched-state" style="color:{{ '#4caf50' if sched_enabled else 'var(--text-dim)' }}">
+            {{ 'ON' if sched_enabled else 'OFF' }}
+          </span>
+          <span style="color:var(--text-dim)"> · priorità 2</span>
+        </span>
+      </div>
       <div style="padding:10px;font-size:11px;line-height:1.5">
         <div style="color:var(--text-dim);margin-bottom:8px">
-          Restart automatico ogni giorno a una specifica ora <b>UTC</b>.
-          Vuoto = disabilitato.
+          Restart automatico ogni giorno a un'ora <b>UTC</b> specifica.
         </div>
+        <label style="display:flex;align-items:center;gap:6px;justify-content:center;margin-bottom:6px;cursor:pointer">
+          <input type="checkbox" id="gc-restart-sched-on"
+                 {% if sched_enabled %}checked{% endif %}
+                 onchange="gcRestartToggleSched(this.checked)">
+          <span style="font-size:11px">abilita schedule</span>
+        </label>
         <div class="p-row" style="justify-content:center">
           <span class="p-lbl">ora UTC</span>
           <input class="p-inp" id="gc-restart-hhmm" type="text" placeholder="HH:MM"
                  value="{{ cfg.get('restart_schedule_hh_mm','') }}"
                  pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5"
+                 {% if not sched_enabled %}disabled{% endif %}
                  style="width:60px;text-align:center">
         </div>
         <div style="color:var(--text-dim);font-size:10px;margin-top:6px;text-align:center">
-          es. <code>03:00</code> = restart ogni notte alle 03:00 UTC
-          (= 04:00/05:00 ora locale)
+          es. <code>03:00</code> = restart 03:00 UTC (= 04:00/05:00 locale)
         </div>
       </div>
     </div>
 
-    <!-- TRIGGER 3: cicli max -->
-    <div class="tel-card">
-      <div class="tel-head">3. cicli max</div>
+    <!-- TRIGGER 3: cicli max + ON/OFF toggle -->
+    <div class="tel-card {% if cicli_enabled %}style="border-left:3px solid #4caf50"{% else %}style="border-left:3px solid var(--text-dim);opacity:0.85"{% endif %}"
+         id="gc-restart-card-cicli">
+      <div class="tel-head" style="display:flex;justify-content:space-between;align-items:center">
+        <span>③ cicli max</span>
+        <span style="font-size:10px;font-weight:600">
+          <span id="gc-restart-cicli-state" style="color:{{ '#4caf50' if cicli_enabled else 'var(--text-dim)' }}">
+            {{ 'ON' if cicli_enabled else 'OFF' }}
+          </span>
+          <span style="color:var(--text-dim)"> · priorità 3</span>
+        </span>
+      </div>
       <div style="padding:10px;font-size:11px;line-height:1.5">
         <div style="color:var(--text-dim);margin-bottom:8px">
-          Restart automatico dopo N cicli completati dal boot.
-          Anti memory-leak / refresh ADB. <b>0</b> = disabilitato.
+          Restart dopo N cicli completati dal boot. Anti memory-leak.
         </div>
+        <label style="display:flex;align-items:center;gap:6px;justify-content:center;margin-bottom:6px;cursor:pointer">
+          <input type="checkbox" id="gc-restart-cicli-on"
+                 {% if cicli_enabled %}checked{% endif %}
+                 onchange="gcRestartToggleCicli(this.checked)">
+          <span style="font-size:11px">abilita cicli max</span>
+        </label>
         <div class="p-row" style="justify-content:center">
-          <span class="p-lbl">cicli max</span>
+          <span class="p-lbl">soglia</span>
           <input class="p-inp" id="gc-restart-cicli" type="number" min="0" step="50"
                  value="{{ cfg.get('restart_after_cicli', 0) }}"
+                 {% if not cicli_enabled %}disabled{% endif %}
                  style="width:60px;text-align:center">
         </div>
         <div style="color:var(--text-dim);font-size:10px;margin-top:6px;text-align:center">
-          es. <code>200</code> = restart ogni ~200 cicli
-          (~24h con tick_sleep 1min × 12 istanze × 8min)
+          es. <code>200</code> ≈ 24h (tick 1min × 12 ist × ~8min/ist)
         </div>
       </div>
     </div>
@@ -481,11 +518,13 @@ async function gcSalvaSistema() {
   const taskList = ['raccolta','rifornimento','zaino','vip','alleanza','messaggi','arena','arena_mercato','boost','store','radar','radar_census','donazione','main_mission','district_showdown','truppe'];
   const task = {};
   taskList.forEach(t => { task[t] = gcGb('gc-task-'+t); });
-  // Restart scheduler config (06/05): HH:MM o stringa vuota = disabilitato,
-  // numero >0 abilita cicli max. Validazione client-side minima per evitare
-  // payload errato (regex HH:MM nel campo input gestisce gran parte dei casi).
-  const restartHHMM = gcGv('gc-restart-hhmm').trim();
-  const restartCicli = gcGi('gc-restart-cicli') || 0;
+  // Restart scheduler config (06/05): toggle ON/OFF esplicito per ogni
+  // trigger. Se OFF, payload va con valore "" o 0 (= disabilitato lato bot).
+  // La regex HH:MM client-side blocca input invalido; backend tollera "".
+  const schedOn  = gcGb('gc-restart-sched-on');
+  const cicliOn  = gcGb('gc-restart-cicli-on');
+  const restartHHMM  = schedOn ? gcGv('gc-restart-hhmm').trim() : '';
+  const restartCicli = cicliOn ? (gcGi('gc-restart-cicli') || 0) : 0;
   const payload = {
     sistema: { max_parallel: gcGi('gc-parallel'), tick_sleep: gcGi('gc-sleep') },
     task: task,
@@ -496,6 +535,38 @@ async function gcSalvaSistema() {
   };
   const { ok, data } = await gcApiPatch(payload);
   gcShowMsg('gc-sis-ok', 'gc-sis-err', ok, data.detail || '');
+}
+
+// Toggle ON/OFF schedule giornaliero (UI feedback + abilita/disabilita input)
+function gcRestartToggleSched(on) {
+  const inp   = gcG('gc-restart-hhmm');
+  const state = gcG('gc-restart-sched-state');
+  const card  = gcG('gc-restart-card-sched');
+  if (inp)   inp.disabled = !on;
+  if (state) {
+    state.textContent = on ? 'ON' : 'OFF';
+    state.style.color = on ? '#4caf50' : 'var(--text-dim)';
+  }
+  if (card) {
+    card.style.borderLeft = `3px solid ${on ? '#4caf50' : 'var(--text-dim)'}`;
+    card.style.opacity    = on ? '1' : '0.85';
+  }
+}
+
+// Toggle ON/OFF cicli max
+function gcRestartToggleCicli(on) {
+  const inp   = gcG('gc-restart-cicli');
+  const state = gcG('gc-restart-cicli-state');
+  const card  = gcG('gc-restart-card-cicli');
+  if (inp)   inp.disabled = !on;
+  if (state) {
+    state.textContent = on ? 'ON' : 'OFF';
+    state.style.color = on ? '#4caf50' : 'var(--text-dim)';
+  }
+  if (card) {
+    card.style.borderLeft = `3px solid ${on ? '#4caf50' : 'var(--text-dim)'}`;
+    card.style.opacity    = on ? '1' : '0.85';
+  }
 }
 
 async function gcSalvaRifornimento() {
