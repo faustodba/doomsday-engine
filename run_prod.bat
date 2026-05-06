@@ -79,7 +79,19 @@ REM Nessun prompt. Riprende ultimo checkpoint. Usa runtime config corrente.
 REM Tipico per cron/avvio automatico.
 REM tick-sleep: NON specificato → letto da config (sistema.tick_sleep_min × 60).
 REM Override esplicito per test/debug: aggiungi --tick-sleep N (in secondi).
+REM
+REM RESTART AUTOMATICO (06/05): se il bot esce con ERRORLEVEL=100 (richiesta
+REM da restart_scheduler — file flag dashboard, schedule cron-like, cicli max),
+REM il batch riavvia automaticamente fra 5s. Per uscita normale (0) o errore
+REM (1, ecc.) → no riavvio. Loop label `:run_loop`.
+:run_loop
 py -3.14 main.py --no-dashboard --use-runtime --resume
+if %ERRORLEVEL%==100 (
+    echo [run_prod] Restart richiesto dal bot ^(exit code 100^), ripartenza fra 5s...
+    timeout /t 5 /nobreak >nul
+    goto :run_loop
+)
+echo [run_prod] Bot uscito con exit code %ERRORLEVEL% — no restart automatico.
 
 
 REM --- MODALITA' 2: PRODUZIONE INTERATTIVA ---------------------------------

@@ -1132,6 +1132,14 @@ def main():
     _log("MAIN", f"Istanze: {[i['nome'] for i in istanze]}")
     _log("MAIN", f"Modalità: SEQUENZIALE — ciclo {[i['nome'] for i in istanze]} → sleep {args.tick_sleep}s → ripeti")
 
+    # Init restart scheduler: cancella eventuali flag pendenti dal restart
+    # precedente + reset contatore cicli post-boot.
+    try:
+        from core.restart_scheduler import init_boot as _restart_init_boot
+        _restart_init_boot()
+    except Exception as _exc:
+        _log("MAIN", f"[WARN] restart_scheduler init: {_exc}")
+
     tasks_cls = _import_tasks()
     _log("MAIN", f"Task: {list(tasks_cls.keys())}")
 
@@ -1307,6 +1315,25 @@ def main():
             record_cicle_end(ciclo)
         except Exception:
             pass
+
+        # Restart scheduler (post-cycle, mai mid-tick): controlla trigger
+        # (file flag dashboard / schedule cron-like / cicli max) e in caso
+        # di match esce con EXIT_CODE_RESTART=100 → run_prod.bat riavvia.
+        try:
+            from core.restart_scheduler import (
+                mark_cycle_completed, should_restart_now, EXIT_CODE_RESTART,
+            )
+            mark_cycle_completed(ciclo)
+            should_restart, reason = should_restart_now()
+            if should_restart:
+                _log("MAIN", f"RESTART richiesto ({reason}) — exit code "
+                             f"{EXIT_CODE_RESTART} → run_prod.bat riavvia")
+                close_all_loggers()
+                sys.exit(EXIT_CODE_RESTART)
+        except SystemExit:
+            raise
+        except Exception as _exc:
+            _log("MAIN", f"[WARN] restart_scheduler: {_exc}")
 
         _log("MAIN", f"Ciclo {ciclo} completato — sleep {SLEEP_CICLO//60} minuti")
         for _ in range(SLEEP_CICLO):

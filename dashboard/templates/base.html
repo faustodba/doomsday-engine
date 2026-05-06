@@ -76,6 +76,14 @@
        hx-swap="innerHTML">
   </div>
 
+  <!-- 06/05 — banner restart bot pendente (visibile solo se richiesta attiva) -->
+  <div id="restart-banner"
+       style="padding:0 20px;max-width:1600px;margin:0 auto"
+       hx-get="/ui/partial/restart-banner"
+       hx-trigger="load, every 10s"
+       hx-swap="innerHTML">
+  </div>
+
   <!-- MAIN -->
   <main class="main">
     {% block content %}{% endblock %}
@@ -103,6 +111,27 @@
         if (typeof htmx !== 'undefined') {
           htmx.ajax('GET', '/ui/partial/maintenance-banner',
                     {target: '#maint-banner', swap: 'innerHTML'});
+        }
+      } catch (err) {
+        alert('Errore: ' + err.message);
+      }
+    }
+
+    // 06/05 — toggle richiesta restart bot
+    async function restartBotToggle(request) {
+      try {
+        if (request) {
+          if (!confirm('Richiedere restart bot al PROSSIMO fine ciclo?\n\nIl bot uscirà con exit code 100 e run_prod.bat lo riavvierà automaticamente fra 5s.\nNessun tick verrà interrotto.')) return;
+          const r = await fetch('/api/restart-bot', {method: 'POST'});
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+        } else {
+          if (!confirm('Cancellare la richiesta di restart pendente?')) return;
+          const r = await fetch('/api/restart-bot', {method: 'DELETE'});
+          if (!r.ok) throw new Error('HTTP ' + r.status);
+        }
+        if (typeof htmx !== 'undefined') {
+          htmx.ajax('GET', '/ui/partial/restart-banner',
+                    {target: '#restart-banner', swap: 'innerHTML'});
         }
       } catch (err) {
         alert('Errore: ' + err.message);

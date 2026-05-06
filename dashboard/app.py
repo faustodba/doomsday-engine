@@ -3228,6 +3228,58 @@ def api_maintenance_stop():
     return {"active": False}
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# Restart bot (06/05) — richiede restart al prossimo fine ciclo
+# ──────────────────────────────────────────────────────────────────────────────
+
+@app.get("/api/restart-bot/status", include_in_schema=False)
+def api_restart_bot_status():
+    """Stato corrente richiesta restart bot."""
+    from core.restart_scheduler import is_restart_requested, _flag_path, _load_state
+    info = {}
+    p = _flag_path()
+    if p.exists():
+        try:
+            import json as _json
+            info = _json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {
+        "requested": is_restart_requested(),
+        "info":      info,
+        "state":     _load_state(),
+    }
+
+
+@app.post("/api/restart-bot", include_in_schema=False)
+def api_restart_bot():
+    """
+    Richiede restart bot al PROSSIMO fine ciclo (mai mid-tick).
+    Crea file flag `data/restart_requested.flag`. Il bot lo rileva post
+    chiusura ultima istanza, esce con exit code 100, run_prod.bat riavvia
+    automaticamente.
+    """
+    from core.restart_scheduler import request_restart
+    ok = request_restart(reason="dashboard")
+    if not ok:
+        raise HTTPException(500, "scrittura flag fallita")
+    return {"requested": True, "reason": "dashboard"}
+
+
+@app.delete("/api/restart-bot", include_in_schema=False)
+def api_restart_bot_cancel():
+    """Cancella richiesta restart pendente (rimuove file flag)."""
+    from core.restart_scheduler import _flag_path
+    p = _flag_path()
+    if p.exists():
+        try:
+            p.unlink()
+            return {"requested": False, "cancelled": True}
+        except Exception as exc:
+            raise HTTPException(500, f"rimozione flag fallita: {exc}")
+    return {"requested": False, "cancelled": False}
+
+
 @app.post("/api/raccolta-ocr-debug/{mode}", include_in_schema=False)
 def api_raccolta_ocr_debug(mode: str):
     """
@@ -3314,6 +3366,52 @@ def partial_maintenance_banner(request: Request):
                          color:var(--text-dim);border:1px solid var(--border);cursor:pointer">
             🔧 manutenzione
           </button>
+          <button onclick="restartBotToggle(true)" class="btn"
+                  style="padding:3px 10px;font-size:11px;background:transparent;
+                         color:var(--text-dim);border:1px solid var(--border);cursor:pointer">
+            🔄 restart fine ciclo
+          </button>
         </div>
         '''
+    return HTMLResponse(body)
+
+
+@app.get("/ui/partial/restart-banner", include_in_schema=False)
+def partial_restart_banner(request: Request):
+    """
+    Banner restart bot — visibile solo se richiesta restart attiva (file flag
+    presente). Auto-cancella quando il bot riparte e fa init_boot().
+    """
+    from core.restart_scheduler import is_restart_requested, _flag_path, _load_state
+    if not is_restart_requested():
+        return HTMLResponse('')
+
+    info = {}
+    try:
+        import json as _json
+        info = _json.loads(_flag_path().read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    reason = info.get("reason", "?")
+    ts = info.get("ts", "")[:19].replace("T", " ")
+
+    state = _load_state()
+    cicli = int(state.get("cicli_da_boot", 0))
+
+    body = f'''
+    <div style="background:rgba(59,130,246,0.15);border:1px solid #3b82f6;
+                color:#60a5fa;padding:6px 12px;border-radius:4px;margin-top:6px;
+                display:flex;align-items:center;gap:10px;font-size:12px">
+      <span style="font-weight:600">🔄 RESTART BOT PENDENTE</span>
+      <span style="color:var(--text-dim)">richiesto {ts} ({reason})
+        · cicli completati post-boot: {cicli}
+        · attesa fine ciclo per uscita pulita</span>
+      <button onclick="restartBotToggle(false)" class="btn"
+              style="margin-left:auto;padding:3px 10px;font-size:11px;
+                     background:transparent;color:#60a5fa;
+                     border:1px solid #3b82f6;cursor:pointer">
+        ✕ annulla
+      </button>
+    </div>
+    '''
     return HTMLResponse(body)
