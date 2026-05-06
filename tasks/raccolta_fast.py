@@ -117,12 +117,19 @@ class RaccoltaFastTask(Task):
             return TaskResult(success=True, message="disabilitato",
                               data={"inviate": 0, "fast": True})
 
+        # WU115 — debug buffer (hot-reload via globali.debug_tasks.raccolta_fast)
+        from shared.debug_buffer import DebugBuffer
+        debug = DebugBuffer.for_task("raccolta_fast",
+                                      getattr(ctx, "instance_name", "_unknown"))
+
         # ── Step 0: navigazione HOME + lettura slot pre-batch ─────────────
         if not ctx.navigator.vai_in_home():
             return TaskResult(success=False, message="vai_in_home fallito",
                               data={"inviate": 0, "fast": True})
 
         time.sleep(1.0)  # stabilizzazione HOME
+        if debug.enabled:
+            debug.snap("00_post_home", ctx.device.screenshot())
 
         obiettivo = int(ctx.config.get("max_squadre", _cfg(ctx, "RACCOLTA_OBIETTIVO")))
         n_truppe  = int(ctx.config.get("truppe", _cfg(ctx, "RACCOLTA_TRUPPE")) or 0)
@@ -146,6 +153,16 @@ class RaccoltaFastTask(Task):
 
         if libere == 0:
             ctx.log_msg(f"RaccoltaFast: nessuna squadra libera ({attive_inizio}/{obiettivo}) — skip")
+            # 06/05 — registra slot pre/post per pannello P(squadre_fuori) reader
+            try:
+                from core.istanza_metrics import imposta_raccolta_slot
+                imposta_raccolta_slot(ctx.instance_name,
+                                      attive_pre=int(attive_inizio),
+                                      attive_post=int(attive_inizio),
+                                      totali=int(obiettivo))
+            except Exception:
+                pass
+            debug.clear()  # niente flush, è skip atteso
             return TaskResult(success=True, message="nessuna squadra libera",
                               data={"inviate": 0, "fast": True})
 
@@ -162,8 +179,12 @@ class RaccoltaFastTask(Task):
         # Naviga in mappa una volta
         ctx.log_msg("RaccoltaFast: naviga → mappa")
         if not ctx.navigator.vai_in_mappa():
+            debug.snap("99_vai_in_mappa_fail", ctx.device.screenshot() if ctx.device else None)
+            debug.flush(success=False, log_fn=ctx.log_msg)
             return TaskResult(success=False, message="vai_in_mappa fallito",
                               data={"inviate": 0, "fast": True})
+        if debug.enabled:
+            debug.snap("01_post_vai_mappa", ctx.device.screenshot())
 
         # ── Loop marce ─────────────────────────────────────────────────────
         attive_corrente = attive_inizio
@@ -177,6 +198,8 @@ class RaccoltaFastTask(Task):
         for n_marcia in range(libere):
             tipo = sequenza_tipi[idx_tipo % len(sequenza_tipi)]
             ctx.log_msg(f"RaccoltaFast: ─── marcia {n_marcia+1}/{libere} tipo={tipo} ───")
+            if debug.enabled:
+                debug.snap(f"02_marcia{n_marcia+1}_pre_{tipo}", ctx.device.screenshot())
 
             ok_marcia = self._tenta_marcia(
                 ctx, tipo, n_truppe, blacklist, blacklist_fuori, obiettivo)
@@ -184,9 +207,11 @@ class RaccoltaFastTask(Task):
             if not ok_marcia:
                 marce_fallite += 1
                 ctx.log_msg(f"RaccoltaFast: marcia fallita — recovery")
+                debug.snap(f"03_marcia{n_marcia+1}_fail_{tipo}", ctx.device.screenshot())
                 # Recovery: BACK fino HOME + vai_in_mappa
                 if not self._recovery_marcia(ctx):
                     ctx.log_msg("RaccoltaFast: recovery fallito — abort batch")
+                    debug.snap(f"99_recovery_fail_marcia{n_marcia+1}", ctx.device.screenshot())
                     break
                 recovery_count += 1
                 # Retry: prova ancora questa marcia (max 1 volta)
@@ -241,6 +266,23 @@ class RaccoltaFastTask(Task):
             f"recovery={recovery_count} fallite={marce_fallite} "
             f"durata={durata_batch}s ({sec_per_marcia}s/marcia)"
         )
+        if debug.enabled:
+            debug.snap("04_post_loop_home", ctx.device.screenshot() if ctx.device else None)
+
+        # 06/05 — registra slot pre/post per pannello P(squadre_fuori)
+        try:
+            from core.istanza_metrics import imposta_raccolta_slot
+            imposta_raccolta_slot(ctx.instance_name,
+                                  attive_pre=int(attive_inizio),
+                                  attive_post=int(attive_corrente),
+                                  totali=int(obiettivo))
+        except Exception:
+            pass
+
+        # Anomalia: marce fallite o recovery → forza flush per analisi
+        anomalia = (marce_fallite > 0) or (recovery_count > 0)
+        debug.flush(success=True, force=anomalia or debug.enabled, log_fn=ctx.log_msg)
+
         return TaskResult(
             success=True,
             message=f"{inviate}/{libere} marce fast",

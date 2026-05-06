@@ -40,6 +40,7 @@ _KNOWN_TASKS: list[str] = [
     "zaino",
     "main_mission",
     "raccolta",
+    "raccolta_fast",       # 06/05 — variante fast (WU57), opt-in via tipologia istanza
     "raccolta_chiusura",
     "rifornimento",
     "district_showdown",
