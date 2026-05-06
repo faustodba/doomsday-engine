@@ -126,15 +126,43 @@ def is_restart_requested() -> bool:
 # ──────────────────────────────────────────────────────────────────────────────
 
 def _read_config() -> dict:
-    """Legge config restart da runtime_overrides.json::globali."""
+    """
+    Legge config restart con priorita' override > baseline.
+
+    Baseline: global_config.json (chiavi top-level, scritte da PATCH
+    /api/config/global merge superficiale, post WU99).
+    Override (hot-reload): runtime_overrides.json::globali (per modifiche
+    immediate senza touch baseline).
+
+    Chiavi cercate: restart_schedule_hh_mm, restart_after_cicli.
+    """
+    out: dict = {}
+    keys = ("restart_schedule_hh_mm", "restart_after_cicli")
+
+    # 1. Baseline (global_config.json root)
+    try:
+        gc_path = _root() / "config" / "global_config.json"
+        if gc_path.exists():
+            gc = json.loads(gc_path.read_text(encoding="utf-8"))
+            for k in keys:
+                if k in gc:
+                    out[k] = gc[k]
+    except Exception:
+        pass
+
+    # 2. Override (runtime_overrides.json::globali) - prevale
     try:
         ov_path = _root() / "config" / "runtime_overrides.json"
-        if not ov_path.exists():
-            return {}
-        ov = json.loads(ov_path.read_text(encoding="utf-8"))
-        return ov.get("globali", {}) or {}
+        if ov_path.exists():
+            ov = json.loads(ov_path.read_text(encoding="utf-8"))
+            globali = ov.get("globali", {}) or {}
+            for k in keys:
+                if k in globali:
+                    out[k] = globali[k]
     except Exception:
-        return {}
+        pass
+
+    return out
 
 
 def _check_schedule_trigger(globali: dict) -> Optional[str]:

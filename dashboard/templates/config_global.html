@@ -60,6 +60,27 @@
           <input type="checkbox" id="gc-ocr-debug" {% if cfg.get('raccolta_ocr_debug') %}checked{% endif %}>
           <span>raccolta OCR debug (WU55)</span>
         </label>
+        <div class="col-sep"></div>
+        <div class="col-sub">restart bot (post-ciclo, mai mid-tick)</div>
+        <div class="p-row">
+          <span class="p-lbl" title="Restart automatico ogni giorno a quest'ora UTC. Vuoto = disabilitato.">schedule UTC (HH:MM)</span>
+          <input class="p-inp" id="gc-restart-hhmm" type="text" placeholder="—"
+                 value="{{ cfg.get('restart_schedule_hh_mm','') }}"
+                 pattern="[0-2][0-9]:[0-5][0-9]" maxlength="5" style="width:60px">
+        </div>
+        <div class="p-row">
+          <span class="p-lbl" title="Restart automatico dopo N cicli completati. 0 = disabilitato.">cicli max</span>
+          <input class="p-inp" id="gc-restart-cicli" type="number" min="0" step="50"
+                 value="{{ cfg.get('restart_after_cicli', 0) }}" style="width:60px">
+        </div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="btn" type="button" onclick="restartBotToggle(true)"
+                  style="padding:4px 8px;font-size:10px;background:transparent;
+                         color:var(--text-dim);border:1px solid var(--border);
+                         cursor:pointer;flex:1">
+            🔄 restart al prossimo fine ciclo
+          </button>
+        </div>
       </div>
       <div class="col-foot">
         <button class="btn btn-primary btn-full" onclick="gcSalvaSistema()">⬡ salva sistema</button>
@@ -376,11 +397,18 @@ async function gcSalvaSistema() {
   const taskList = ['raccolta','rifornimento','zaino','vip','alleanza','messaggi','arena','arena_mercato','boost','store','radar','radar_census','donazione','main_mission','district_showdown','truppe'];
   const task = {};
   taskList.forEach(t => { task[t] = gcGb('gc-task-'+t); });
+  // Restart scheduler config (06/05): HH:MM o stringa vuota = disabilitato,
+  // numero >0 abilita cicli max. Validazione client-side minima per evitare
+  // payload errato (regex HH:MM nel campo input gestisce gran parte dei casi).
+  const restartHHMM = gcGv('gc-restart-hhmm').trim();
+  const restartCicli = gcGi('gc-restart-cicli') || 0;
   const payload = {
     sistema: { max_parallel: gcGi('gc-parallel'), tick_sleep: gcGi('gc-sleep') },
     task: task,
     auto_learn_banner: gcGb('gc-auto-learn'),
     raccolta_ocr_debug: gcGb('gc-ocr-debug'),
+    restart_schedule_hh_mm: restartHHMM,   // "" = disabilitato
+    restart_after_cicli:    restartCicli,  // 0 = disabilitato
   };
   const { ok, data } = await gcApiPatch(payload);
   gcShowMsg('gc-sis-ok', 'gc-sis-err', ok, data.detail || '');
