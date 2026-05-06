@@ -2397,6 +2397,160 @@ def partial_predictor_distribuzione(request: Request):
     )
 
 
+@app.get("/ui/partial/predictor-slot-distribuzione", include_in_schema=False)
+def partial_predictor_slot_distribuzione(request: Request):
+    """
+    Distribuzione empirica slot_liberi vs elapsed_min per istanza (06/05).
+    Bucket: 0-60min, 60-90min, 90-120min, 120-180min, >180min.
+
+    Per ogni istanza, scansiona istanza_metrics.jsonl: per ogni record con
+    `attive_pre` valorizzato + record precedente con invii reali → calcola
+    elapsed_min e attive_pre. Bucket per fascia tempo.
+
+    Mostra distribuzione "quanto velocemente le squadre rientrano" per
+    istanza. Utile per: identificare istanze con tempi atipici (cap residui,
+    livello nodi diversi), capire se livello_nodo va ridotto.
+
+    Refresh 60s via HTMX.
+    """
+    import json as _json
+    from pathlib import Path as _P
+    from collections import defaultdict
+    from datetime import datetime as _dt
+
+    p = _P("C:/doomsday-engine-prod") / "data" / "istanza_metrics.jsonl"
+    if not p.exists():
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:8px;font-size:11px">'
+            'nessun dato disponibile</div>'
+        )
+
+    # bucket boundaries (minuti)
+    BUCKETS = [(0, 60), (60, 90), (90, 120), (120, 180), (180, 99999)]
+    BUCKET_LABELS = ["<60", "60-90", "90-120", "120-180", ">180"]
+
+    # Per istanza: dict bucket_idx → list[attive_pre]
+    per_inst: dict[str, dict[int, list[int]]] = defaultdict(lambda: defaultdict(list))
+    # max_squadre_per_inst (per normalizzare slot_liberi)
+    max_squadre_per: dict[str, int] = {}
+
+    # Read raw records
+    raw: list[dict] = []
+    try:
+        with p.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    raw.append(_json.loads(line))
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    if not raw:
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:8px;font-size:11px">'
+            'nessun record disponibile</div>'
+        )
+
+    # Per istanza: ordina cronologicamente
+    by_inst: dict[str, list[dict]] = defaultdict(list)
+    for r in raw:
+        by_inst[r.get("instance", "?")].append(r)
+
+    for inst, records in by_inst.items():
+        records.sort(key=lambda r: r.get("ts", ""))
+        # Per ogni record con attive_pre valorizzato, cerca il precedente con invii reali
+        for i, r in enumerate(records):
+            rac = r.get("raccolta") or {}
+            attive_pre = rac.get("attive_pre")
+            if attive_pre is None:
+                continue
+            tot = rac.get("totali", 0) or 0
+            if tot:
+                max_squadre_per[inst] = max(max_squadre_per.get(inst, 0), tot)
+            # Risale al primo record precedente con invii reali
+            prev_real = None
+            for j in range(i - 1, -1, -1):
+                if (records[j].get("raccolta") or {}).get("invii"):
+                    prev_real = records[j]
+                    break
+            if prev_real is None:
+                continue
+            try:
+                t_curr = _dt.fromisoformat(r["ts"])
+                t_prev = _dt.fromisoformat(prev_real["ts"])
+                elapsed = (t_curr - t_prev).total_seconds() / 60
+            except Exception:
+                continue
+            # Slot liberi al momento del record corrente = totali - attive_pre
+            slot_liberi = max(0, (tot or 5) - int(attive_pre))
+            for bi, (lo, hi) in enumerate(BUCKETS):
+                if lo <= elapsed < hi:
+                    per_inst[inst][bi].append(slot_liberi)
+                    break
+
+    if not per_inst:
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:8px;font-size:11px">'
+            'nessun campione (servono record con attive_pre + invii reali)</div>'
+        )
+
+    # Render tabella
+    rows_html = []
+    for inst in sorted(per_inst.keys()):
+        max_sq = max_squadre_per.get(inst, 5)
+        cells = [f'<td style="font-family:var(--font-mono);font-weight:600">{inst}</td>',
+                 f'<td style="text-align:center;color:var(--text-dim);font-size:10px">{max_sq}</td>']
+        tot_n = 0
+        for bi in range(len(BUCKETS)):
+            samples = per_inst[inst].get(bi, [])
+            if samples:
+                avg = sum(samples) / len(samples)
+                tot_n += len(samples)
+                # Color: 0=rosso, max=verde, intermedio=giallo
+                pct = avg / max_sq * 100 if max_sq > 0 else 0
+                if pct >= 80:
+                    color = "#4caf50"
+                elif pct >= 40:
+                    color = "#fbbf24"
+                else:
+                    color = "#f44336"
+                cells.append(
+                    f'<td style="text-align:center;font-family:var(--font-mono);'
+                    f'font-size:11px;color:{color}">{avg:.1f}'
+                    f'<span style="color:var(--text-dim);font-size:9px"> ({len(samples)})</span></td>'
+                )
+            else:
+                cells.append('<td style="text-align:center;color:var(--text-dim);font-size:10px">—</td>')
+        cells.append(
+            f'<td style="text-align:center;color:var(--text-dim);font-size:10px">{tot_n}</td>'
+        )
+        rows_html.append(f'<tr>{"".join(cells)}</tr>')
+
+    legend = (
+        '<div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">'
+        'media slot_liberi rientrati per bucket di elapsed_min dal precedente invio reale. '
+        '<span style="color:#f44336">rosso</span>: poche squadre rientrate, '
+        '<span style="color:#fbbf24">giallo</span>: parziale, '
+        '<span style="color:#4caf50">verde</span>: tutte rientrate. '
+        'Numero in parentesi = campioni nel bucket.'
+        '</div>'
+    )
+    return HTMLResponse(
+        legend +
+        '<table class="tel-table"><thead><tr>'
+        '<th>istanza</th>'
+        '<th title="capacità max slot raccolta">max</th>'
+        + "".join(f'<th>{lbl} min</th>' for lbl in BUCKET_LABELS)
+        + '<th title="campioni totali">N</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(rows_html)}</tbody></table>'
+    )
+
+
 @app.get("/ui/partial/copertura-cicli", include_in_schema=False)
 def partial_copertura_cicli(request: Request):
     """

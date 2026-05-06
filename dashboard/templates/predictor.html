@@ -78,6 +78,21 @@
           </div>
         </div>
 
+        <div class="tel-card tel-full">
+          <div class="tel-head">⏳ slot liberi rientrati vs elapsed (storico, per istanza)</div>
+          <div id="predictor-slot-distribuzione"
+               hx-get="/ui/partial/predictor-slot-distribuzione"
+               hx-trigger="load, every 60s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">
+            distribuzione bucket-based del numero di slot liberi al ritorno bot in funzione del tempo trascorso
+            (elapsed_min) dall'ultimo invio reale per istanza. Permette di identificare istanze con tempi raccolta
+            atipici (cap residui, livello nodi ecc.) e capire se livello_nodo va abbassato.
+          </div>
+        </div>
+
       </div>
     </div>
 
