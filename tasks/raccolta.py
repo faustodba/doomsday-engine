@@ -2242,6 +2242,15 @@ class RaccoltaTask(Task):
 
         if libere == 0:
             ctx.log_msg(f"Raccolta: nessuna squadra libera ({attive_inizio}/{obiettivo}) — skip")
+            # 06/05 — registra anche gli skip per slot pieni (P(squadre_fuori) reader)
+            try:
+                from core.istanza_metrics import imposta_raccolta_slot
+                imposta_raccolta_slot(ctx.instance_name,
+                                      attive_pre=int(attive_inizio),
+                                      attive_post=int(attive_inizio),
+                                      totali=int(obiettivo))
+            except Exception:
+                pass
             return TaskResult(success=True, message="nessuna squadra libera", data={"inviate": 0})
 
         # Lettura slot attivi reali via OCR barra contatore.
@@ -2264,6 +2273,15 @@ class RaccoltaTask(Task):
                             f"Raccolta: OCR slot anomalo attive={attive_ocr}>totale={totale_noto} "
                             f"— assumo slot pieni, skip conservativo"
                         )
+                        # 06/05 — registra skip OCR anomalo come slot pieni
+                        try:
+                            from core.istanza_metrics import imposta_raccolta_slot
+                            imposta_raccolta_slot(ctx.instance_name,
+                                                  attive_pre=int(totale_noto),
+                                                  attive_post=int(totale_noto),
+                                                  totali=int(totale_noto))
+                        except Exception:
+                            pass
                         return TaskResult(success=True, message="OCR anomalo — skip conservativo",
                                           data={"inviate": 0})
                     if attive_ocr >= 0:
@@ -2297,6 +2315,15 @@ class RaccoltaTask(Task):
                                 ctx.log_msg(f"[OCR-DEBUG] save home fail: {exc}")
                         if libere == 0:
                             ctx.log_msg("Raccolta: nessuna squadra libera — skip")
+                            # 06/05 — registra skip slot pieni post-OCR HOME
+                            try:
+                                from core.istanza_metrics import imposta_raccolta_slot
+                                imposta_raccolta_slot(ctx.instance_name,
+                                                      attive_pre=int(attive_inizio),
+                                                      attive_post=int(attive_inizio),
+                                                      totali=int(obiettivo))
+                            except Exception:
+                                pass
                             return TaskResult(success=True, message="nessuna squadra libera",
                                               data={"inviate": 0})
                     else:
