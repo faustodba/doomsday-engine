@@ -1803,12 +1803,20 @@ def partial_cycle_snapshot_detail(request: Request):
     # 05/05: per ogni istanza calcola il breakdown della stima (boot_home +
     # task individuali + wait inter-task). Permette espandere la riga e vedere
     # COME è composto il T_s. Necessario per analizzare scostamenti predictor.
-    from core.cycle_duration_predictor import predict_istanza_duration
+    # 06/05: passa gap_min + max_squadre per units-aware su raccolta + rifornimento.
+    from core.cycle_duration_predictor import (
+        predict_istanza_duration, _avg_recent_cycles_min, _max_squadre_for,
+    )
+    gap_min_default = _avg_recent_cycles_min(n=5) or 80.0
     breakdown_per_inst: dict[str, dict] = {}
     for inst in istanze_ab:
         try:
             due = task_per.get(inst, [])
-            pred_data = predict_istanza_duration(inst, due, percentile="median")
+            max_sq = _max_squadre_for(inst)
+            pred_data = predict_istanza_duration(
+                inst, due, percentile="median",
+                gap_min=gap_min_default, max_squadre=max_sq,
+            )
             breakdown_per_inst[inst] = pred_data
         except Exception:
             breakdown_per_inst[inst] = {}
@@ -1934,11 +1942,23 @@ def partial_cycle_snapshot_detail(request: Request):
             set(tasks_bd.keys()) | set(durs_real.keys()),
             key=lambda k: -float(max(tasks_bd.get(k, 0), durs_real.get(k, 0)) or 0)
         )
+        # 06/05: dettagli units predetti (raccolta/rifornimento) per labelling
+        tasks_units = bd.get("tasks_units", {}) or {}
         for tname in all_task_names:
             tval = float(tasks_bd.get(tname, 0) or 0)
             real_t = float(durs_real.get(tname, 0) or 0)
             extra = "extra" if (tval == 0 and real_t > 0 and is_done) else ""
-            bd_rows.append(_row_compare(f"└─ task: {tname}", tval, real_t, is_done, extra_tag=extra))
+            label = f"└─ task: {tname}"
+            # Aggiungi info units se predittore lo ha calcolato
+            uinfo = tasks_units.get(tname)
+            if uinfo:
+                u_units = uinfo.get("units", "?")
+                u_src = uinfo.get("source", "?")
+                if tname == "rifornimento":
+                    label = f"└─ task: {tname} ({u_units} sped · {u_src})"
+                else:
+                    label = f"└─ task: {tname} ({u_units} marce · {u_src})"
+            bd_rows.append(_row_compare(label, tval, real_t, is_done, extra_tag=extra))
         bd_rows.append(_row_compare(f"└─ wait inter-task ({wait_src})", wait_s, wait_real, is_done))
         bd_rows.append(
             f'<div style="display:grid;grid-template-columns:280px 100px 110px 70px;'

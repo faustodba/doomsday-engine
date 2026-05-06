@@ -479,11 +479,49 @@ def predict_istanza_duration(
     }
 
 
+def _avg_recent_cycles_min(n: int = 5) -> Optional[float]:
+    """Media durata ultimi N cicli completati da data/telemetry/cicli.json.
+
+    Usato per stimare gap_min (tempo prossimo passaggio) per units-aware.
+    Ritorna None se nessun ciclo completato disponibile.
+    """
+    try:
+        p = _root() / "data" / "telemetry" / "cicli.json"
+        if not p.exists():
+            return None
+        data = json.loads(p.read_text(encoding="utf-8"))
+        cicli = data.get("cicli") or []
+        durs = [
+            float(c.get("durata_s", 0))
+            for c in cicli[-n - 1:-1]   # esclude ciclo corrente
+            if c.get("completato") and c.get("durata_s", 0) > 0
+        ]
+        if not durs:
+            return None
+        return (sum(durs) / len(durs)) / 60   # in minuti
+    except Exception:
+        return None
+
+
+def _max_squadre_for(istanza: str) -> int:
+    """Ritorna max_squadre da instances.json (default 5)."""
+    try:
+        p = _root() / "config" / "instances.json"
+        data = json.loads(p.read_text(encoding="utf-8"))
+        for ist in data:
+            if ist.get("nome") == istanza:
+                return int(ist.get("max_squadre", 5))
+    except Exception:
+        pass
+    return 5
+
+
 def predict_cycle_duration(
     istanze_attive: list[str],
     tasks_per_istanza: Optional[dict[str, list[str]]] = None,
     tick_sleep_s: float = 300.0,
     percentile: str = "median",
+    units_aware: bool = True,
 ) -> dict:
     """
     Stima durata ciclo bot completo.
@@ -508,9 +546,20 @@ def predict_cycle_duration(
     breakdown = {}
     total_s = 0.0
     confidences = []
+
+    # 06/05: units-aware. gap_min = stima del tempo fra passaggi consecutivi
+    # della stessa istanza. Usa media ultimi cicli completati come bootstrap;
+    # fallback a 80min se nessun ciclo precedente.
+    gap_min_default = _avg_recent_cycles_min(n=5) or 80.0
+
     for inst in istanze_attive:
         scheduled = tpi.get(inst, [])
-        pred = predict_istanza_duration(inst, scheduled, percentile=percentile)
+        if units_aware:
+            max_sq = _max_squadre_for(inst)
+            pred = predict_istanza_duration(inst, scheduled, percentile=percentile,
+                                            gap_min=gap_min_default, max_squadre=max_sq)
+        else:
+            pred = predict_istanza_duration(inst, scheduled, percentile=percentile)
         breakdown[inst] = pred
         total_s += pred["T_s"]
         confidences.append(pred["confidence"])
