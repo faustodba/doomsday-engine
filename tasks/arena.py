@@ -314,6 +314,21 @@ class ArenaTask(Task):
             ctx.log_msg("[ARENA] t=%d sfide=%d esaurite=%s successo=%s",
                         tentativo, run.sfide_eseguite, run.esaurite, successo)
 
+            # 06/05 fix: completate tutte le 5 sfide → segna esaurite per il
+            # resto della giornata. Senza questo, ArenaState.esaurite resta
+            # False (il pin purchase non scatta dopo l'ultima sfida OK), il
+            # task viene ripianificato al tick successivo e fallisce con
+            # "0 sfide (nessuna sfida eseguita dopo tutti i tentativi)".
+            # Pattern osservato 5-6/05: 22 OK + 12 fail wasted.
+            if run.sfide_eseguite >= MAX_SFIDE and not run.esaurite:
+                try:
+                    ctx.state.arena.segna_esaurite()
+                    ctx.log_msg("[ARENA] %d/%d sfide completate → "
+                                "ArenaState segnato esaurite per oggi",
+                                run.sfide_eseguite, MAX_SFIDE)
+                except Exception as exc:
+                    ctx.log_msg("[ARENA] segna_esaurite fallito: %s", exc)
+
             self._torna_home(ctx)
 
             if successo:
