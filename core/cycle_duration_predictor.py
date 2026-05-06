@@ -208,6 +208,157 @@ def _get_stats() -> dict[str, IstanzaStats]:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Units-aware predictors per task con bimodalità (raccolta, rifornimento)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Task con bimodalità nota: durata fortemente correlata a #unità di lavoro.
+# Per questi, usiamo bucket-based prediction invece di percentile globale.
+_UNITS_AWARE_TASKS = {"raccolta", "raccolta_fast", "rifornimento"}
+
+
+def _read_units_history(istanza: str, task_name: str,
+                        last_n: int = 30) -> list[tuple[int, float]]:
+    """Estrae history (units, duration_s) per task da istanza_metrics.jsonl.
+
+    Per raccolta/raccolta_fast: units = len(invii). Per rifornimento:
+    units = len(invii) della sezione rifornimento (post WU103).
+
+    Cross-task fallback (06/05): per raccolta/raccolta_fast la "raccolta.invii"
+    è la stessa struttura → leggiamo SEMPRE da entrambi i task name. Permette
+    bootstrap raccolta_fast subito post-attivazione (no dati propri ancora)
+    riusando lo storico raccolta standard, e viceversa.
+    """
+    p = _metrics_path()
+    if not p.exists():
+        return []
+    # Per raccolta variants: cerca su entrambi task_durations_s keys
+    if task_name in ("raccolta", "raccolta_fast"):
+        target_keys = ("raccolta", "raccolta_fast")
+    else:
+        target_keys = (task_name,)
+    out: list[tuple[int, float]] = []
+    try:
+        with p.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                if r.get("instance") != istanza:
+                    continue
+                durs = r.get("task_durations_s") or {}
+                # Trova quale key è presente (raccolta o raccolta_fast)
+                dur_key = next((k for k in target_keys if k in durs), None)
+                if dur_key is None:
+                    continue
+                if task_name in ("raccolta", "raccolta_fast"):
+                    units = len((r.get("raccolta") or {}).get("invii") or [])
+                elif task_name == "rifornimento":
+                    units = len((r.get("rifornimento") or {}).get("invii") or [])
+                else:
+                    units = 0
+                out.append((units, float(durs[dur_key])))
+    except Exception:
+        return []
+    return out[-last_n:]
+
+
+def predict_task_duration_units_aware(
+    istanza: str, task_name: str, units: int,
+    fallback_s: float = 60.0,
+) -> tuple[float, str]:
+    """Stima durata task in base al numero di units (slot/spedizioni).
+
+    Strategia bucket-based: media durata per bucket di units (0, 1-2, 3, 4, 5+).
+    Ritorna (T_s, source) dove source = "bucket" | "interpolated" | "fallback".
+
+    - Se bucket esatto ha >= 2 campioni → media bucket.
+    - Se bucket vicini (±1) hanno dati → interpolazione lineare.
+    - Altrimenti → fallback_s.
+    """
+    if task_name not in _UNITS_AWARE_TASKS:
+        return fallback_s, "n_a"
+    history = _read_units_history(istanza, task_name)
+    if not history:
+        return fallback_s, "fallback"
+
+    # Aggrega per bucket
+    buckets: dict[int, list[float]] = {}
+    for u, d in history:
+        if d <= 0:
+            continue
+        # Bucket: 0, 1, 2, 3, 4, 5+ (clamp)
+        b = min(u, 5)
+        buckets.setdefault(b, []).append(d)
+
+    target = min(units, 5)
+    if target in buckets and len(buckets[target]) >= 2:
+        avg = sum(buckets[target]) / len(buckets[target])
+        return round(avg, 1), "bucket"
+
+    # Interpolazione lineare con bucket adiacenti se disponibili
+    lower = next((b for b in range(target - 1, -1, -1) if b in buckets and len(buckets[b]) >= 2), None)
+    upper = next((b for b in range(target + 1, 6) if b in buckets and len(buckets[b]) >= 2), None)
+    if lower is not None and upper is not None:
+        avg_l = sum(buckets[lower]) / len(buckets[lower])
+        avg_u = sum(buckets[upper]) / len(buckets[upper])
+        # Interp lineare in target
+        slope = (avg_u - avg_l) / (upper - lower)
+        interp = avg_l + slope * (target - lower)
+        return round(interp, 1), "interpolated"
+    if lower is not None:
+        avg = sum(buckets[lower]) / len(buckets[lower])
+        return round(avg, 1), "extrapolated_low"
+    if upper is not None:
+        avg = sum(buckets[upper]) / len(buckets[upper])
+        return round(avg, 1), "extrapolated_high"
+    return fallback_s, "fallback"
+
+
+def predict_units_for_task(istanza: str, task_name: str,
+                            gap_min: float, max_squadre: int = 5) -> int:
+    """Stima il numero di unità di lavoro previste per il prossimo run del task.
+
+    raccolta/raccolta_fast: predict_slot_liberi_l1 (T_marcia model).
+    rifornimento: stima da history (max recente con sped > 0) + check master saturo
+                  via morfeus_state.daily_recv_limit.
+    """
+    if task_name in ("raccolta", "raccolta_fast"):
+        try:
+            from core.skip_predictor import predict_slot_liberi_l1
+            return predict_slot_liberi_l1(istanza, gap_min, max_squadre)
+        except Exception:
+            return max_squadre   # fallback ottimistico
+
+    if task_name == "rifornimento":
+        # Master saturo? → 0 sped
+        try:
+            from shared import morfeus_state
+            ms = morfeus_state.load() or {}
+            drl = int(ms.get("daily_recv_limit", -1))
+            if drl == 0:
+                ts_iso = ms.get("ts", "")
+                from datetime import datetime, timezone
+                if ts_iso:
+                    ts_dt = datetime.fromisoformat(ts_iso)
+                    midnight = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0)
+                    if ts_dt >= midnight:
+                        return 0
+        except Exception:
+            pass
+        # Stima da history: media sped dei record con > 0
+        history = _read_units_history(istanza, "rifornimento")
+        non_zero = [u for u, d in history if u > 0]
+        if non_zero:
+            avg = sum(non_zero) / len(non_zero)
+            return max(1, round(avg))
+        return 2   # default conservativo
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # API: previsione duration
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -215,6 +366,8 @@ def predict_istanza_duration(
     istanza: str,
     scheduled_tasks: list[str],
     percentile: str = "median",
+    gap_min: Optional[float] = None,
+    max_squadre: Optional[int] = None,
 ) -> dict:
     """
     Stima durata tick istanza in secondi.
@@ -258,10 +411,26 @@ def predict_istanza_duration(
         scheduled_tasks = list(stats.tasks.keys())
 
     tasks_breakdown = {}
+    tasks_units_info: dict[str, dict] = {}   # 06/05: details units-aware per drilldown
     missing = []
     n_with_stats = 0
     for tname in scheduled_tasks:
         ts = stats.tasks.get(tname)
+        # 06/05: units-aware per task con bimodalità nota (raccolta, raccolta_fast,
+        # rifornimento). Se gap_min + max_squadre disponibili → usa bucket-based
+        # con #units predetti. Fallback al percentile per dati insufficienti.
+        if (tname in _UNITS_AWARE_TASKS
+                and gap_min is not None
+                and max_squadre is not None):
+            units_pred = predict_units_for_task(istanza, tname, gap_min, max_squadre)
+            t_pred, source = predict_task_duration_units_aware(istanza, tname, units_pred)
+            if source != "fallback":
+                tasks_breakdown[tname] = t_pred
+                tasks_units_info[tname] = {"units": units_pred, "source": source}
+                n_with_stats += 1
+                continue
+            # source=fallback → procede al percentile classico
+
         # 05/05: applica percentile override per task con bimodalità nota
         # (raccolta_chiusura → p75). Default percentile altrove.
         eff_percentile = PER_TASK_PERCENTILE_OVERRIDE.get(tname, percentile)
@@ -301,6 +470,7 @@ def predict_istanza_duration(
         "T_s":           round(total, 1),
         "boot_home_s":   round(boot_s, 1),
         "tasks":         {k: round(v, 1) for k, v in tasks_breakdown.items()},
+        "tasks_units":   tasks_units_info,   # 06/05: dettagli units-aware (per drilldown)
         "wait_inter_task_s":  round(wait_s, 1),
         "wait_inter_task_src": wait_source,
         "confidence":    conf,

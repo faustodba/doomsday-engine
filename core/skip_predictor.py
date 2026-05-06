@@ -273,6 +273,74 @@ def _predict_gap_minutes() -> float:
     return 120.0   # fallback ragionevole
 
 
+def predict_slot_liberi_l1(istanza: str,
+                            gap_min: float,
+                            max_squadre: int = 5,
+                            history: Optional[list[dict]] = None) -> int:
+    """
+    Livello 1 — Predizione deterministica del numero di slot liberi al
+    prossimo passaggio del bot, basata sul modello T_marcia.
+
+    Logica:
+      1. Risale history fino al primo record con invii reali.
+      2. Per ogni invio attivo, calcola T_marcia (modello cap_nominale × saturazione).
+      3. Confronta con elapsed + gap_min: se T_residuo (= T_marcia - elapsed) <=
+         gap_min → la squadra rientrerà in tempo per il prossimo tick.
+      4. slot_liberi_pred = (max_squadre - invii_attivi) + rientranti.
+
+    Args:
+        istanza: nome istanza
+        gap_min: tempo (minuti) fino al prossimo passaggio bot atteso
+        max_squadre: capacità massima slot (da config istanza)
+        history: history pre-caricata (None → load fresh)
+
+    Returns:
+        int 0..max_squadre. Su dati insufficienti → max_squadre (assume liberi).
+    """
+    if history is None:
+        history = load_metrics_history(istanza, last_n=10)
+    if not history:
+        return max_squadre   # no storia → assume liberi
+
+    # Risale al primo record con invii reali
+    last_real = None
+    for r in reversed(history):
+        if (r.get("raccolta") or {}).get("invii"):
+            last_real = r
+            break
+    if last_real is None:
+        return max_squadre
+
+    invii = last_real["raccolta"]["invii"]
+    invii_attivi = len(invii)
+    if invii_attivi == 0:
+        return max_squadre
+
+    # Elapsed dal record con invii reali
+    try:
+        ts = datetime.fromisoformat(last_real["ts"])
+        elapsed_min = (datetime.now(timezone.utc) - ts).total_seconds() / 60
+    except Exception:
+        return max_squadre
+
+    # Per ogni squadra: T_residuo = T_marcia - elapsed. Rientra se <= gap_min.
+    rientranti = 0
+    for inv in invii:
+        t_marcia = _calc_t_marcia_min(inv, istanza)
+        if t_marcia is None:
+            # Dati insufficienti per questo invio → assumo già rientrato (conservativo)
+            rientranti += 1
+            continue
+        t_residuo = max(0.0, t_marcia - elapsed_min)
+        if t_residuo <= gap_min:
+            rientranti += 1
+
+    # Slot liberi al ritorno = (max - quelli ancora fuori)
+    ancora_fuori = invii_attivi - rientranti
+    slot_liberi = max(0, max_squadre - ancora_fuori)
+    return min(slot_liberi, max_squadre)
+
+
 def _saving_estimato(istanza: str) -> tuple[float, float, float]:
     """
     Stima saving per skip di una istanza:
