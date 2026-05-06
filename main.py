@@ -861,6 +861,18 @@ def _thread_istanza(ist, tasks_cls, dry_run):
         # per quella sola risorsa (es. legno=-1 osservato FAU_00 27/04).
         # Post-fix: ocr_risorse_robust (3 tentativi con merge zone valide)
         # + fallback a valore precedente se tutte le retry falliscono.
+        # 06/05: dismiss banner ATTIVO prima di OCR. Pre-fix: dopo settings
+        # alcuni banner (Equipment Report, eventi laterali) coprono la
+        # top-bar risorse → 3 tentativi OCR tutti KO → fallback prec
+        # (prod/h=0). Aggiunto loop dismiss che smaltisce catalog + X dorato.
+        try:
+            from shared.ui_helpers import dismiss_banners_loop
+            counts = dismiss_banners_loop(ctx, max_iter=4,
+                                           log_fn=lambda m: _log(nome, m))
+            if counts:
+                _log(nome, f"[OCR-PREDISMISS] banner chiusi pre-OCR: {counts}")
+        except Exception as exc:
+            _log(nome, f"[OCR-PREDISMISS] errore best-effort: {exc}")
         try:
             from shared.ocr_helpers import ocr_risorse_robust
             from core.state import _ts_now
@@ -869,6 +881,25 @@ def _thread_istanza(ist, tasks_cls, dry_run):
                 ctx.device, max_attempts=3, sleep_s=0.5,
                 log_fn=lambda m: _log(nome, m),
             )
+            # 06/05: se TUTTE 4 risorse castello KO, ipotesi banner non
+            # smaltito dal predismiss → 1 round dismiss attivo + 1 retry
+            # finale (sleep 1.5s tra retry per dare tempo alla UI).
+            tutte_ko = all(getattr(rd, r) == -1
+                           for r in ("pomodoro", "legno", "acciaio", "petrolio"))
+            if tutte_ko:
+                _log(nome, "[OCR] tutte 4 risorse KO → 1 round dismiss + retry finale")
+                try:
+                    from shared.ui_helpers import dismiss_banners_loop
+                    cs2 = dismiss_banners_loop(ctx, max_iter=4,
+                                                log_fn=lambda m: _log(nome, m))
+                    if cs2:
+                        _log(nome, f"[OCR] post-fail banner chiusi: {cs2}")
+                except Exception:
+                    pass
+                rd = ocr_risorse_robust(
+                    ctx.device, max_attempts=2, sleep_s=1.5,
+                    log_fn=lambda m: _log(nome, m),
+                )
             # Skip-on-fail: per ogni risorsa con valore -1, usa l'ultimo
             # valore valido dalla precedente sessione (risorse_iniziali del
             # produzione_corrente non ancora chiuso).
