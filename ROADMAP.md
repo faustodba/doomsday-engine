@@ -58,6 +58,20 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 06/05/2026 — WU129..WU136 (telemetria fix + arena segna_esaurite + truppe nuovo schema + raccolta_fast attivata)
+
+Sessione consolidata in 8 commit:
+- **WU129** `ef91985` — Telemetry pattern detector: esclusione `rifornimento` da `task_timeout_recurring` (distribuzione trimodale legittima 0/2/5-sped, falsi positivi su 5-sped catch-up). Stessa esclusione cosmetica di WU109 per `raccolta_chiusura`.
+- **WU130** `e55eb5b` — Dashboard banner home estende info restart automatico (3 trigger): flag manuale (esistente) → blu, schedule HH:MM UTC e/o cicli max → grigio info, nessun trigger → vuoto. Validato 4 scenari.
+- **WU131** `dfd64c3` — ArenaTask `segna_esaurite()` chiamato anche su 5/5 sfide completate (oltre che su pin purchase). Risolve pattern 35% wasted (12 fail/22 ok 5-6/05) dove arena ripianificata al tick successivo dopo run OK.
+- **WU132** `d36c593` — TruppeTask schema config 4-caserme indipendenti (`globali.truppe.caserme.{infantry,rider,ranged,engine}`) + override per istanza completo (`istanze.<nome>.truppe_override.caserme.{tipo}: Optional[bool]`). Niente più `tipo_solo`/`livello`/`count_min`. Sezione UI dashboard dedicata full-width. Endpoint dedicato `PUT /api/config/istanze/truppe` + merge in `PUT /istanze` per non cancellare l'override.
+- **WU133** `b27d347` — RaccoltaTask: `imposta_raccolta_slot()` chiamato anche nei 3 path early-return per "slot pieni" (libere==0 da param, OCR anomalo, post-OCR HOME). Pannello dashboard `P(squadre_fuori al ritorno)` ora misura correttamente i tick saturi al ritorno (prima erano invisibili).
+- **WU134** `fe117f5` — RaccoltaFastTask integra DebugBuffer (WU115). 7 snap point + flush condizionale anomalia. `"raccolta_fast"` aggiunto a `_KNOWN_TASKS` per esposizione UI WU115. 2 hook `imposta_raccolta_slot` coerenti con WU133.
+- **WU135** `b33d6d4` — Revert hook OCR consumo addestramento + scorporo `cons_t` in `chiudi_sessione_e_calcola`. OCR fragile (perdeva cifre iniziali), valori cumulati amplificavano errore. Mantenuti dormienti `leggi_consumo_addestramento`, `TruppeState.consumo_oggi`, `aggiungi_consumo`. Pulizia state azzerato `consumo_oggi` residuo in 4 istanze prod.
+- **WU136** `ffff14f` — `main.py::_thread_istanza`: dismiss banner pre-OCR risorse castello + retry post-fail. Risolve caso patologico (Equipment Report o eventi laterali post-settings) dove tutti 4 OCR risorse fallivano → fallback prec → prod/h=0 spurio. Fix in 2 livelli: (1) `dismiss_banners_loop(max_iter=4)` PRE-OCR; (2) se 4/4 risorse=-1 → 1 round dismiss + retry finale `(max_attempts=2, sleep_s=1.5)`.
+
+**Stato bot 06/05 sera**: bot riavviato 15:36 con tutte le istanze (FAU_00..FAU_10) in `tipologia=raccolta_fast` + debug screenshot toggle ON (`globali.debug_tasks.raccolta_fast=True`). FauMorfeus master invariata (`raccolta_only`). In corso analisi costi/benefici: confronto `sec_per_marcia` fast vs standard, ratio successo, marce_fallite, recovery_count.
+
 ### Issue chiuse — Sessione 03/05 notte (WU101-104 — Master istanza generalizzato + Fix raccolta + Predictor 5-invii)
 
 #### Issue trovata: tutte le istanze skippano raccolta dopo modifica dashboard ✅ (Fix A + B)
