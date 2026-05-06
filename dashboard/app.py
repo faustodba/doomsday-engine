@@ -1876,37 +1876,79 @@ def partial_cycle_snapshot_detail(request: Request):
         durs_real = rec.get("task_durations_s") or {}
         wait_real = float(rec.get("wait_inter_task_s", 0) or 0)
 
-        def _row_compare(label: str, pred_val: float, real_val: float, has_real: bool) -> str:
-            """Render riga breakdown con pred | real | Δ%."""
-            if has_real and real_val > 0:
-                err_pct = abs(real_val - pred_val) / pred_val * 100 if pred_val > 0 else 0
+        def _row_compare(label: str, pred_val: float, real_val: float, has_real: bool, extra_tag: str = "") -> str:
+            """Render riga breakdown con label | pred | real | Δ%.
+
+            06/05: layout grid invece di flex-spacebetween (tempi vicini al
+            label, no più spazio vuoto). 4 colonne: label | pred | real | Δ%.
+            extra_tag: opzionale (es. "extra" per task non pianificati).
+            """
+            tag_html = ""
+            if extra_tag:
+                tag_html = (
+                    f'<span style="color:#f44336;font-size:9px;margin-left:6px;'
+                    f'background:rgba(244,67,54,0.15);padding:1px 5px;border-radius:3px">'
+                    f'{extra_tag}</span>'
+                )
+
+            if has_real and real_val > 0 and pred_val > 0:
+                err_pct = abs(real_val - pred_val) / pred_val * 100
                 color = "#4caf50" if err_pct < 10 else ("#fbbf24" if err_pct < 25 else "#f44336")
                 sign = "+" if real_val >= pred_val else "-"
-                real_html = (
-                    f'<span style="color:{color};margin-left:8px">'
-                    f'real {real_val:.1f}s '
-                    f'<span style="font-size:9px">(Δ {sign}{err_pct:.0f}%)</span>'
-                    f'</span>'
-                )
+                real_html = f'<span style="color:{color}">real {real_val:.1f}s</span>'
+                delta_html = f'<span style="color:{color};font-size:9px">(Δ {sign}{err_pct:.0f}%)</span>'
+            elif has_real and real_val > 0 and pred_val == 0:
+                # Task eseguito ma NON pianificato → solo real, no pred (0), evidenza
+                real_html = f'<span style="color:#f44336">real {real_val:.1f}s</span>'
+                delta_html = '<span style="color:#f44336;font-size:9px">(NEW)</span>'
+            elif pred_val > 0:
+                real_html = '<span style="color:var(--text-dim)">real —</span>'
+                delta_html = ''
             else:
-                real_html = '<span style="color:var(--text-dim);margin-left:8px">real —</span>'
+                real_html = ''
+                delta_html = ''
+
+            pred_html = (
+                f'<span style="color:var(--text)">pred {pred_val:.1f}s</span>'
+                if pred_val > 0 else
+                '<span style="color:var(--text-dim)">pred —</span>'
+            )
+
             return (
-                f'<div style="display:flex;justify-content:space-between;font-family:monospace;font-size:10px;padding:1px 0">'
-                f'<span style="color:var(--text-dim)">{label}</span>'
-                f'<span style="color:var(--text)">pred {pred_val:.1f}s{real_html}</span>'
+                f'<div style="display:grid;grid-template-columns:280px 100px 110px 70px;'
+                f'gap:10px;align-items:center;font-family:monospace;font-size:10px;padding:1px 0">'
+                f'<div style="color:var(--text-dim);overflow:hidden;text-overflow:ellipsis">{label}{tag_html}</div>'
+                f'<div style="text-align:right">{pred_html}</div>'
+                f'<div style="text-align:right">{real_html}</div>'
+                f'<div style="text-align:left">{delta_html}</div>'
                 f'</div>'
             )
 
         bd_rows = []
         bd_rows.append(_row_compare("└─ boot_home (avvio→pronto)", boot_s, boot_real, is_done))
-        for tname, tval in sorted(tasks_bd.items(), key=lambda kv: -kv[1]):
+
+        # Unione dei task pianificati + eseguiti, in modo da mostrare anche
+        # i task ESEGUITI ma NON PIANIFICATI (es. donazione/store/main_mission
+        # eseguiti per scheduler interno ma non valutati nel pred snapshot).
+        all_task_names = sorted(
+            set(tasks_bd.keys()) | set(durs_real.keys()),
+            key=lambda k: -float(max(tasks_bd.get(k, 0), durs_real.get(k, 0)) or 0)
+        )
+        for tname in all_task_names:
+            tval = float(tasks_bd.get(tname, 0) or 0)
             real_t = float(durs_real.get(tname, 0) or 0)
-            bd_rows.append(_row_compare(f"└─ task: {tname}", tval, real_t, is_done))
+            extra = "extra" if (tval == 0 and real_t > 0 and is_done) else ""
+            bd_rows.append(_row_compare(f"└─ task: {tname}", tval, real_t, is_done, extra_tag=extra))
         bd_rows.append(_row_compare(f"└─ wait inter-task ({wait_src})", wait_s, wait_real, is_done))
         bd_rows.append(
-            f'<div style="display:flex;justify-content:space-between;font-family:monospace;font-size:11px;padding:3px 0;border-top:1px solid var(--border);margin-top:3px">'
-            f'<span style="color:var(--accent);font-weight:600">TOT predicted</span>'
-            f'<span style="color:var(--accent);font-weight:600">{t_s:.1f}s = {t_s/60:.1f}min</span></div>'
+            f'<div style="display:grid;grid-template-columns:280px 100px 110px 70px;'
+            f'gap:10px;align-items:center;font-family:monospace;font-size:11px;padding:3px 0;'
+            f'border-top:1px solid var(--border);margin-top:3px">'
+            f'<div style="color:var(--accent);font-weight:600">TOT predicted</div>'
+            f'<div style="text-align:right;color:var(--accent);font-weight:600">{t_s:.1f}s</div>'
+            f'<div style="text-align:right;color:var(--accent);font-weight:600">{t_s/60:.1f}min</div>'
+            f'<div></div>'
+            f'</div>'
         )
         # Reale (se eseguito) — confronto con predicted
         if is_done and t_real > 0:
@@ -1914,10 +1956,13 @@ def partial_cycle_snapshot_detail(request: Request):
             real_color = "#4caf50" if err_real_pct < 10 else ("#fbbf24" if err_real_pct < 25 else "#f44336")
             sign = "+" if t_real >= t_s else "-"
             bd_rows.append(
-                f'<div style="display:flex;justify-content:space-between;font-family:monospace;font-size:11px;padding:3px 0">'
-                f'<span style="color:{real_color};font-weight:600">TOT REALE (ciclo corrente)</span>'
-                f'<span style="color:{real_color};font-weight:600">{t_real:.1f}s = {t_real/60:.1f}min '
-                f'<span style="font-size:9px">(Δ {sign}{err_real_pct:.0f}%)</span></span></div>'
+                f'<div style="display:grid;grid-template-columns:280px 100px 110px 70px;'
+                f'gap:10px;align-items:center;font-family:monospace;font-size:11px;padding:3px 0">'
+                f'<div style="color:{real_color};font-weight:600">TOT REALE (ciclo corrente)</div>'
+                f'<div style="text-align:right;color:{real_color};font-weight:600">{t_real:.1f}s</div>'
+                f'<div style="text-align:right;color:{real_color};font-weight:600">{t_real/60:.1f}min</div>'
+                f'<div style="text-align:left;color:{real_color};font-size:9px">(Δ {sign}{err_real_pct:.0f}%)</div>'
+                f'</div>'
             )
         # Stringa T_s reale per cella main (t_real già calcolato sopra)
         if is_done and t_real > 0:
