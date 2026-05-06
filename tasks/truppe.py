@@ -326,15 +326,13 @@ class TruppeTask(Task):
         if dbg and dbg.enabled:
             dbg.snap(f"04_iter{idx}_pre_train_button", ctx.device.screenshot())
 
-        # 5. Pre-tap TRAIN: OCR consumo risorse (scorporo prod_ora) — best effort
-        try:
-            from shared.ocr_truppe import leggi_consumo_addestramento
-            consumo = leggi_consumo_addestramento(screen_train)
-            if consumo and ctx.state is not None:
-                ctx.state.truppe.aggiungi_consumo(consumo)
-                ctx.log_msg("[TRUPPE] consumo letto: %s", consumo)
-        except Exception as exc:
-            ctx.log_msg("[TRUPPE] errore OCR consumo: %s — continuo", exc)
+        # 5. (RIMOSSO 06/05) hook OCR consumo addestramento + scorporo prod_ora.
+        # OCR `leggi_consumo_addestramento` troppo fragile (perdeva cifre iniziali
+        # es "13.0K" letto come "3.0K") + valori cumulativi amplificavano errore.
+        # Per istanze ordinarie il delta_castle vede già implicitamente il consumo
+        # (è la lettura DOPO l'addestramento). Solo il master ne risentirebbe.
+        # `shared/ocr_truppe.leggi_consumo_addestramento` lasciato dormiente in
+        # repo per riattivazione futura post-refactor (ROI + PSM 8 + fallback).
 
         # 6. Tap TRAIN giallo → conferma addestramento (livello max default game)
         ctx.log_msg("[TRUPPE] tap TRAIN %s", _TAP_TRAIN_BUTTON)

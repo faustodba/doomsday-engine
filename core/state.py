@@ -1208,25 +1208,12 @@ class InstanceState:
             durata = 0.0
 
         # Calcolo produzione per ogni risorsa nota.
-        # 06/05: aggiunto SCORPORO consumo addestramento truppe per evitare
-        # prod_ora negativi su istanze con consumo gioco > produzione.
-        # Formula completa: prod = delta_castle - zaino_delta + rifornimento_inv
-        #                          + consumo_truppe (scorporato come "produzione interna
-        #                          consumata" non visibile in delta_castle).
-        # consumo_oggi e' cumulativo della giornata UTC, ma chiudi_sessione_e_calcola
-        # viene chiamato per ogni sessione (~tick). Per evitare doppio-conteggio,
-        # tracciamo qui delta dalla precedente chiamata. Approccio semplice:
-        # leggi consumo_oggi corrente e sottrai consumo_inizio_sessione (salvato
-        # in sess.zaino_delta_iniziale o nuovo campo).
-        # Per ora implementazione MINIMALE: aggiungi sempre consumo_oggi totale
-        # alla sessione (sovrastima leggermente prod_ora se piu' sessioni nello
-        # stesso giorno UTC, ma evita prod_ora negativi che sono il bug
-        # principale). Fix definitivo richiede tracking delta per-sessione.
-        try:
-            consumo_oggi = dict(self.truppe.consumo_oggi or {})
-        except Exception:
-            consumo_oggi = {}
-
+        # Formula: prod = delta_castle - zaino_delta + rifornimento_inv
+        # 06/05: scorporo consumo addestramento RIMOSSO (era basato su OCR
+        # `leggi_consumo_addestramento` troppo fragile — perdeva cifre iniziali
+        # es "13.0K" letto come "3.0K", e i valori cumulativi amplificavano
+        # l'errore). Per istanze ordinarie il delta_castle vede già
+        # implicitamente il consumo (è la lettura DOPO l'addestramento).
         prod_qty = {}
         prod_ora = {}
         for r in ("pomodoro", "legno", "acciaio", "petrolio"):
@@ -1234,9 +1221,8 @@ class InstanceState:
             fin = float(risorse_finali.get(r, 0) or 0)
             inv = int(sess.rifornimento_inviato.get(r, 0))
             zd  = int(sess.zaino_delta.get(r, 0))
-            cons_t = int(consumo_oggi.get(r, 0))   # 06/05 scorporo
             delta_castle = fin - ini
-            prod = delta_castle - zd + inv + cons_t
+            prod = delta_castle - zd + inv
             prod_qty[r] = prod
             prod_ora[r] = (prod / durata * 3600.0) if durata > 0 else 0.0
 
