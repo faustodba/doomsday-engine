@@ -592,7 +592,13 @@ def detect_anomaly_patterns(events: list) -> dict:
     # libere", 60-225s in work-mode "invio 1-4 marce"). La soglia mediana×3
     # genera falsi positivi: tutti gli outlier osservati avevano `invii≥1` ed
     # erano lavoro reale, non timeout patologico. Esclusione cosmetica.
-    EXCLUDED_TASKS_TIMEOUT = {"raccolta_chiusura"}
+    #
+    # 06/05 — esclusione `rifornimento` per stessa ragione: distribuzione
+    # trimodale (0-sped skip ~28s, 2-sped default ~84s, 5-sped catch-up
+    # ~278s). Mediana globale ~85s × 3 = 255s flagga sistematicamente i
+    # 5-sped legittimi (success=True, outcome=ok, no anomalies). Detection
+    # vera dei timeout già coperta da `outcome=fail` + `anomalies`.
+    EXCLUDED_TASKS_TIMEOUT = {"raccolta_chiusura", "rifornimento"}
     for task_name, evs in by_task.items():
         if task_name in EXCLUDED_TASKS_TIMEOUT:
             continue
