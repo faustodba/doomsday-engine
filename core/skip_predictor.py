@@ -21,14 +21,20 @@
 #    - Growth phase: istanze con truppe < 100K NON vengono mai skippate
 #      per regole "low_prod" (loop raccolta→truppe→raccoglitori critico)
 #
-#  REGOLE (in ordine valutazione):
-#    1. growth_phase_block — se total_squads < 100K, blocca skip low_prod
-#    2. squadre_fuori — slot saturi + ritorno bot prematuro
-#    3. trend_magro — last_3 avg_inv (raccolta) < 0.5
-#    4. low_total_invii — last_3 avg(rac+rif) < target*ratio (default 2.5)
-#    5. recovery — outcome 'degraded' recente
-#    6. low_prod — produzione cumulativa bassa (con override growth)
-#    7. default — NO skip
+#  REGOLE — UNICA REGOLA ATTIVA:
+#    1. squadre_fuori — slot saturi + T_residuo > gap_atteso = boot inutile
+#       (skippa istanza con raccolta PIENA al ritorno, NON quella improduttiva)
+#    2. default — NO skip
+#
+#  REGOLE DORMIENTI (codice presente, NON chiamato da predict()):
+#    - trend_magro / low_total_invii / recovery / low_prod
+#  Decisione 06/05 (memoria `feedback_skip_predictor_logic.md`):
+#    Skippare istanza improduttiva (trend basso, prod basso) è ERRATO. Anche
+#    senza raccolta proficua, l'istanza ha SEMPRE altri task da fare (training
+#    truppe, donazione, store, alleanza, ecc.). Il razionale del skip è
+#    "boot inutile perché slot saturati e nulla da raccogliere", non
+#    "boot improduttivo perché produce poco". Le 4 regole secondarie restano
+#    nel codice come riferimento storico ma sono **scollegate da predict()**.
 #
 #  Questo modulo NON modifica state/files. Lettura sola.
 # ==============================================================================
@@ -563,27 +569,17 @@ def predict(istanza: str,
     if history is None:
         history = load_metrics_history(istanza, last_n=10)
 
-    # Growth phase check (truppe basse → skip low_prod inibito)
+    # Growth phase: campo informativo (mantengo signal nel record).
     truppe = load_truppe(istanza)
     growth_phase = 0 < truppe < GROWTH_PHASE_TRUPPE
 
-    # Valuta regole in ordine di priorità (più specifiche prima).
-    # _rule_squadre_fuori richiede `istanza` per accesso config T_L_max.
-    decision: Optional[SkipDecision] = None
-    decision = _rule_squadre_fuori(history, istanza=istanza)
-    if decision is None:
-        for rule in (
-            _rule_trend_magro,
-            _rule_low_total_invii,
-            _rule_recovery,
-        ):
-            decision = rule(history)
-            if decision:
-                break
-
-    # Regola low_prod solo se NON in growth phase
-    if decision is None and not growth_phase:
-        decision = _rule_low_prod(istanza, history)
+    # 06/05: UNICA regola attiva = `_rule_squadre_fuori`. Razionale: skippa
+    # solo l'istanza con raccolta PIENA al ritorno (T_residuo > gap_atteso),
+    # NON l'istanza improduttiva. Memoria `feedback_skip_predictor_logic.md`.
+    # Le funzioni `_rule_trend_magro`, `_rule_low_total_invii`, `_rule_recovery`,
+    # `_rule_low_prod` restano definite nel modulo come riferimento storico
+    # ma NON sono più invocate qui.
+    decision: Optional[SkipDecision] = _rule_squadre_fuori(history, istanza=istanza)
 
     # Default: no skip
     if decision is None:
