@@ -2191,6 +2191,21 @@ class RaccoltaTask(Task):
             return ctx.config.task_abilitato("raccolta")
         return True
 
+    # 07/05 — wrapper per scrittura metriche slot. Override-able da
+    # RaccoltaChiusuraTask per non sovrascrivere `attive_pre` (lo stato
+    # iniziale del tick è scritto solo da RaccoltaTask principale; la
+    # chiusura scrive SOLO il post = stato finale tick).
+    def _persist_slot_metrics(self, ctx, attive_pre: int, attive_post: int,
+                              totali: int) -> None:
+        try:
+            from core.istanza_metrics import imposta_raccolta_slot
+            imposta_raccolta_slot(ctx.instance_name,
+                                  attive_pre=int(attive_pre),
+                                  attive_post=int(attive_post),
+                                  totali=int(totali))
+        except Exception:
+            pass
+
     def run(self, ctx: TaskContext,
             attive_inizio: int = 0,
             slot_liberi: int = -1,
@@ -2243,14 +2258,9 @@ class RaccoltaTask(Task):
         if libere == 0:
             ctx.log_msg(f"Raccolta: nessuna squadra libera ({attive_inizio}/{obiettivo}) — skip")
             # 06/05 — registra anche gli skip per slot pieni (P(squadre_fuori) reader)
-            try:
-                from core.istanza_metrics import imposta_raccolta_slot
-                imposta_raccolta_slot(ctx.instance_name,
-                                      attive_pre=int(attive_inizio),
-                                      attive_post=int(attive_inizio),
-                                      totali=int(obiettivo))
-            except Exception:
-                pass
+            self._persist_slot_metrics(ctx, attive_pre=attive_inizio,
+                                       attive_post=attive_inizio,
+                                       totali=obiettivo)
             # 06/05 — diagnostico anomalia slot pieni cronico (vs T_marcia)
             try:
                 from core.skip_predictor import (
@@ -2307,14 +2317,10 @@ class RaccoltaTask(Task):
                             f"— assumo slot pieni, skip conservativo"
                         )
                         # 06/05 — registra skip OCR anomalo come slot pieni
-                        try:
-                            from core.istanza_metrics import imposta_raccolta_slot
-                            imposta_raccolta_slot(ctx.instance_name,
-                                                  attive_pre=int(totale_noto),
-                                                  attive_post=int(totale_noto),
-                                                  totali=int(totale_noto))
-                        except Exception:
-                            pass
+                        self._persist_slot_metrics(ctx,
+                                                    attive_pre=totale_noto,
+                                                    attive_post=totale_noto,
+                                                    totali=totale_noto)
                         return TaskResult(success=True, message="OCR anomalo — skip conservativo",
                                           data={"inviate": 0})
                     if attive_ocr >= 0:
@@ -2349,14 +2355,10 @@ class RaccoltaTask(Task):
                         if libere == 0:
                             ctx.log_msg("Raccolta: nessuna squadra libera — skip")
                             # 06/05 — registra skip slot pieni post-OCR HOME
-                            try:
-                                from core.istanza_metrics import imposta_raccolta_slot
-                                imposta_raccolta_slot(ctx.instance_name,
-                                                      attive_pre=int(attive_inizio),
-                                                      attive_post=int(attive_inizio),
-                                                      totali=int(obiettivo))
-                            except Exception:
-                                pass
+                            self._persist_slot_metrics(ctx,
+                                                        attive_pre=attive_inizio,
+                                                        attive_post=attive_inizio,
+                                                        totali=obiettivo)
                             return TaskResult(success=True, message="nessuna squadra libera",
                                               data={"inviate": 0})
                     else:
@@ -2531,16 +2533,13 @@ class RaccoltaTask(Task):
             f"(tentativi={tentativi_ciclo}, slot_pieni={slot_pieni})"
         )
         # Hook metriche per-istanza: slot pre/post tick (best-effort)
-        try:
-            from core.istanza_metrics import imposta_raccolta_slot
-            imposta_raccolta_slot(
-                ctx.instance_name,
-                attive_pre=int(attive_inizio),
-                attive_post=int(attive_correnti),
-                totali=int(obiettivo),
-            )
-        except Exception:
-            pass
+        # Hook metriche per-istanza: scrittura via metodo override-able.
+        # RaccoltaChiusuraTask override per non sovrascrivere `attive_pre`
+        # (lo stato iniziale del tick è scritto solo da RaccoltaTask principale).
+        self._persist_slot_metrics(ctx,
+                                    attive_pre=attive_inizio,
+                                    attive_post=attive_correnti,
+                                    totali=obiettivo)
         # Output telemetria — Issue #53 Step 3
         out_data = {
             "inviate":          inviate_totali,
@@ -2586,7 +2585,30 @@ class RaccoltaTask(Task):
 # Se non ci sono slot liberi, run() esce in <2s con "nessuna squadra libera".
 
 class RaccoltaChiusuraTask(RaccoltaTask):
-    """Re-run di RaccoltaTask come ultimo task del tick (chiusura slot pieni)."""
+    """Re-run di RaccoltaTask come ultimo task del tick (chiusura slot pieni).
+
+    Verifica a fine tick se squadre sono rientrate (nodo occupato, fine
+    raccolta) e riempie eventuali slot liberi residui. Garantisce che alla
+    chiusura del tick gli slot raccoglitori siano effettivamente saturati.
+    """
 
     def name(self) -> str:
         return "raccolta_chiusura"
+
+    # 07/05 — override scrittura metriche: aggiorna SOLO `attive_post` e
+    # `totali` (stato finale tick). NON sovrascrive `attive_pre`, scritto
+    # da RaccoltaTask principale che rappresenta lo stato iniziale del tick.
+    # Pre-fix: raccolta_chiusura skippa per slot pieni e sovrascriveva pre=5
+    # → record finale `pre=5/post=5` con `invii=N` semanticamente impossibile.
+    # Post-fix: pre invariato dal write di RaccoltaTask, post aggiornato qui.
+    def _persist_slot_metrics(self, ctx, attive_pre: int, attive_post: int,
+                              totali: int) -> None:
+        try:
+            from core.istanza_metrics import imposta_raccolta_slot
+            # attive_pre=-1 → no-op nel buffer (vedi imposta_raccolta_slot).
+            imposta_raccolta_slot(ctx.instance_name,
+                                  attive_pre=-1,
+                                  attive_post=int(attive_post),
+                                  totali=int(totali))
+        except Exception:
+            pass
