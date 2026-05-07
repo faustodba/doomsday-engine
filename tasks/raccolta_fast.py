@@ -269,6 +269,21 @@ class RaccoltaFastTask(Task):
                         f"RaccoltaFast: ✓ marcia confermata "
                         f"({attive_corrente} → {attive_post})"
                     )
+                    # 07/05 — hook metriche raccolta.invii (era assente in
+                    # raccolta_fast → tutti i record fast avevano invii=[]).
+                    # Cap_nodo/load_squadra/eta_marcia_s = -1 (fast skippa OCR).
+                    try:
+                        from core.istanza_metrics import aggiungi_invio_raccolta
+                        from datetime import datetime as _dt, timezone as _tz
+                        livello_cfg = int(_cfg(ctx, "LIVELLO_NODO") or 7)
+                        aggiungi_invio_raccolta(
+                            ctx.instance_name, tipo, livello_cfg,
+                            cap_nodo=-1, eta_marcia_s=-1,
+                            ts_invio_iso=_dt.now(_tz.utc).isoformat(),
+                            load_squadra=-1,
+                        )
+                    except Exception:
+                        pass
                     attive_corrente = attive_post
                     inviate += 1
                     idx_tipo += 1
