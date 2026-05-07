@@ -341,6 +341,129 @@ def predict_slot_liberi_l1(istanza: str,
     return min(slot_liberi, max_squadre)
 
 
+# Bucket gap_ciclo (minuti) — devono coincidere con quelli del pannello
+# dashboard /ui/partial/predictor-slot-distribuzione (07/05).
+_L2_BUCKETS: list[tuple[float, float]] = [(0, 60), (60, 90), (90, 120), (120, 99999)]
+
+
+def _l2_collect_samples(istanza: str,
+                         metrics_path: Optional["Path"] = None) -> dict[int, list[int]]:
+    """Raccoglie campioni (gap_min, slot_liberi) da istanza_metrics.jsonl per
+    un'istanza, raggruppati per bucket di gap_ciclo.
+
+    Per ogni coppia di record consecutivi (N, N+1) della stessa istanza:
+      gap_min = (ts(N+1) - ts(N)) / 60
+      slot_liberi = totali - attive_pre(N+1)
+
+    Skippa coppie con gap < 1 min (record troppo vicini, doppio write).
+
+    Returns:
+        dict {bucket_idx: list[slot_liberi_int]} per bucket index
+        (0=<60, 1=60-90, 2=90-120, 3=>120).
+    """
+    from collections import defaultdict
+    out: dict[int, list[int]] = defaultdict(list)
+    if metrics_path is None:
+        metrics_path = _resolve_root() / "data" / "istanza_metrics.jsonl"
+    if not metrics_path.exists():
+        return out
+    records = []
+    try:
+        for line in metrics_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                r = json.loads(line)
+            except Exception:
+                continue
+            if r.get("instance") == istanza:
+                records.append(r)
+    except Exception:
+        return out
+    records.sort(key=lambda r: r.get("ts", ""))
+    for i in range(1, len(records)):
+        r = records[i]
+        prev = records[i - 1]
+        rac = r.get("raccolta") or {}
+        attive_pre = rac.get("attive_pre")
+        tot = rac.get("totali", 0) or 0
+        if attive_pre is None or tot <= 0:
+            continue
+        try:
+            t_curr = datetime.fromisoformat(r["ts"])
+            t_prev = datetime.fromisoformat(prev["ts"])
+            gap_min = (t_curr - t_prev).total_seconds() / 60
+        except Exception:
+            continue
+        if gap_min < 1:
+            continue
+        slot_liberi = max(0, tot - int(attive_pre))
+        for bi, (lo, hi) in enumerate(_L2_BUCKETS):
+            if lo <= gap_min < hi:
+                out[bi].append(slot_liberi)
+                break
+    return out
+
+
+def _l2_bucket_for_gap(gap_min: float) -> int:
+    """Bucket index per un gap_min."""
+    for bi, (lo, hi) in enumerate(_L2_BUCKETS):
+        if lo <= gap_min < hi:
+            return bi
+    return len(_L2_BUCKETS) - 1   # fallback ultimo bucket
+
+
+def predict_slot_liberi_l2(istanza: str,
+                            gap_min: float,
+                            max_squadre: int = 5,
+                            min_samples: int = 3) -> Optional[int]:
+    """
+    Livello 2 — Predizione empirica basata su distribuzione storica
+    P(slot_liberi | gap_ciclo) per istanza.
+
+    Coerente con il pannello dashboard `predictor-slot-distribuzione`.
+    Returna media (arrotondata) della distribuzione del bucket
+    corrispondente al gap_min richiesto, OPPURE None se dati insufficienti
+    (< min_samples campioni nel bucket → caller deve usare L1).
+
+    Args:
+        istanza: nome istanza
+        gap_min: tempo (minuti) fino al prossimo passaggio bot
+        max_squadre: clamp output
+        min_samples: numero minimo campioni nel bucket per usare L2
+
+    Returns:
+        int 0..max_squadre OR None se dati insufficienti
+    """
+    samples_by_bucket = _l2_collect_samples(istanza)
+    target_bi = _l2_bucket_for_gap(gap_min)
+    samples = samples_by_bucket.get(target_bi, [])
+    if len(samples) < min_samples:
+        return None
+    avg = sum(samples) / len(samples)
+    rounded = int(round(avg))
+    return max(0, min(rounded, max_squadre))
+
+
+def predict_slot_liberi(istanza: str,
+                         gap_min: float,
+                         max_squadre: int = 5,
+                         min_samples_l2: int = 3) -> tuple[int, str]:
+    """
+    Master predictor con fallback automatico L2 → L1.
+
+    Se L2 ha >= min_samples_l2 nel bucket → usa empirico (più realistico).
+    Altrimenti fallback al modello deterministico L1.
+
+    Returns:
+        (slot_liberi, source) dove source = "l2_empirico" | "l1_modello"
+    """
+    l2 = predict_slot_liberi_l2(istanza, gap_min, max_squadre, min_samples_l2)
+    if l2 is not None:
+        return l2, "l2_empirico"
+    return predict_slot_liberi_l1(istanza, gap_min, max_squadre), "l1_modello"
+
+
 def _saving_estimato(istanza: str) -> tuple[float, float, float]:
     """
     Stima saving per skip di una istanza:

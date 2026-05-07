@@ -328,8 +328,11 @@ def predict_units_for_task(istanza: str, task_name: str,
     """
     if task_name in ("raccolta", "raccolta_fast"):
         try:
-            from core.skip_predictor import predict_slot_liberi_l1
-            return predict_slot_liberi_l1(istanza, gap_min, max_squadre)
+            # 07/05: usa master predictor (L2 empirico se ≥3 campioni nel
+            # bucket gap_ciclo, fallback L1 modello T_marcia).
+            from core.skip_predictor import predict_slot_liberi
+            slot, _src = predict_slot_liberi(istanza, gap_min, max_squadre, min_samples_l2=3)
+            return slot
         except Exception:
             return max_squadre   # fallback ottimistico
 
