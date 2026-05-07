@@ -275,7 +275,9 @@ class RaccoltaFastTask(Task):
                     try:
                         from core.istanza_metrics import aggiungi_invio_raccolta
                         from datetime import datetime as _dt, timezone as _tz
-                        livello_cfg = int(_cfg(ctx, "LIVELLO_NODO") or 7)
+                        # LIVELLO_NODO non è in _DEFAULTS → uso getattr/ctx.config.get
+                        # che attinge agli attributi di _InstanceCfg.
+                        livello_cfg = int(ctx.config.get("LIVELLO_NODO", 7) or 7)
                         aggiungi_invio_raccolta(
                             ctx.instance_name, tipo, livello_cfg,
                             cap_nodo=-1, eta_marcia_s=-1,
