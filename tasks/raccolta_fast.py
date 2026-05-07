@@ -282,8 +282,9 @@ class RaccoltaFastTask(Task):
                             ts_invio_iso=_dt.now(_tz.utc).isoformat(),
                             load_squadra=-1,
                         )
-                    except Exception:
-                        pass
+                        ctx.log_msg(f"[INVII-HOOK] aggiunto invio {tipo} L{livello_cfg}")
+                    except Exception as exc:
+                        ctx.log_msg(f"[INVII-HOOK-FAIL] {type(exc).__name__}: {exc}")
                     attive_corrente = attive_post
                     inviate += 1
                     idx_tipo += 1
