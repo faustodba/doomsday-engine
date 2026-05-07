@@ -2581,7 +2581,6 @@ def partial_predictor_slot_distribuzione(request: Request):
             if samples:
                 avg = sum(samples) / len(samples)
                 tot_n += len(samples)
-                # Color: 0=rosso, max=verde, intermedio=giallo
                 pct = avg / max_sq * 100 if max_sq > 0 else 0
                 if pct >= 80:
                     color = "#4caf50"
@@ -2589,10 +2588,22 @@ def partial_predictor_slot_distribuzione(request: Request):
                     color = "#fbbf24"
                 else:
                     color = "#f44336"
+                # 07/05 — distribuzione completa P(slot_liberi=k) come tooltip
+                # title: "0:X% 1:Y% ... max:Z% (N campioni)"
+                from collections import Counter as _C
+                dist = _C(samples)
+                n = len(samples)
+                dist_lines = []
+                for k in range(0, max_sq + 1):
+                    cnt = dist.get(k, 0)
+                    if cnt:
+                        pct_k = cnt / n * 100
+                        dist_lines.append(f"{k}:{pct_k:.0f}%")
+                tooltip = f"distribuzione P(slot_liberi | gap {BUCKET_LABELS[bi]}min) — {' · '.join(dist_lines)} (n={n})"
                 cells.append(
-                    f'<td style="text-align:center;font-family:var(--font-mono);'
-                    f'font-size:11px;color:{color}">{avg:.1f}'
-                    f'<span style="color:var(--text-dim);font-size:9px"> ({len(samples)})</span></td>'
+                    f'<td title="{tooltip}" style="text-align:center;font-family:var(--font-mono);'
+                    f'font-size:11px;color:{color};cursor:help">{avg:.1f}'
+                    f'<span style="color:var(--text-dim);font-size:9px"> ({n})</span></td>'
                 )
             else:
                 cells.append('<td style="text-align:center;color:var(--text-dim);font-size:10px">—</td>')
@@ -2606,11 +2617,11 @@ def partial_predictor_slot_distribuzione(request: Request):
         'media slot_liberi rientrati al boot tick istanza vs gap_ciclo bot. '
         'Per ogni coppia (record N, record N+1) della stessa istanza: '
         'gap = ts(N+1)−ts(N), slot_liberi = totali−attive_pre(N+1). '
-        '<span style="color:#f44336">rosso</span>: pochi rientrati (≥40% squadre ancora fuori), '
-        '<span style="color:#fbbf24">giallo</span>: parziale (40-80% rientrate), '
-        '<span style="color:#4caf50">verde</span>: tutte rientrate (≥80%). '
+        '<span style="color:#f44336">rosso</span>: ≥40% squadre ancora fuori, '
+        '<span style="color:#fbbf24">giallo</span>: 40-80% rientrate, '
+        '<span style="color:#4caf50">verde</span>: ≥80% rientrate. '
         'Numero in parentesi = campioni bucket. '
-        'Distribuzione P(slot_liberi | gap_ciclo) per istanza.'
+        '<b>Hover sulla cella</b> per distribuzione completa P(slot_liberi=k).'
         '</div>'
     )
     return HTMLResponse(
