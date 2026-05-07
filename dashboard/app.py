@@ -2191,15 +2191,26 @@ def partial_cycle_accuracy(request: Request):
 
         # 07/05: scostamento task pianificati vs eseguiti per il ciclo
         # Δ task = ∑ (extra + missing) su tutte istanze del ciclo
-        # Estraggo task_per_istanza_due dal primo snapshot
-        # Estraggo task_durations_s dai record metrics del ciclo
+        # Estraggo task_per_istanza_due dal primo snapshot del ciclo
+        # (se snapshots vuoti, lookup diretto in cycle_snapshots.jsonl).
         delta_str = "—"
         delta_color = "var(--text-dim)"
         try:
             ic = (sorted_snaps[0].get("input_context") or {}) if sorted_snaps else {}
             tppd = ic.get("tasks_per_istanza_due", {}) or {}
-            cycle_start_iso = r.get("cycle_start_ts") or sorted_snaps[0].get("ts")
-            cycle_end_iso = r.get("cycle_end_ts")
+            # Fallback: se snapshots vuoti, cerca direttamente in cycle_snapshots
+            if not tppd:
+                try:
+                    from core.cycle_predictor_recorder import get_all_snapshots_for_cycle
+                    fallback_snaps = get_all_snapshots_for_cycle(int(cn))
+                    if fallback_snaps:
+                        fs0 = sorted(fallback_snaps, key=lambda s: s.get("elapsed_min", 0))[0]
+                        tppd = (fs0.get("input_context") or {}).get("tasks_per_istanza_due", {}) or {}
+                except Exception:
+                    pass
+            # Schema record: ts_start / ts_end (non cycle_start_ts)
+            cycle_start_iso = r.get("ts_start") or r.get("cycle_start_ts")
+            cycle_end_iso = r.get("ts_end") or r.get("cycle_end_ts")
             if cycle_start_iso and tppd:
                 cs = _dt2.fromisoformat(cycle_start_iso)
                 ce = _dt2.fromisoformat(cycle_end_iso) if cycle_end_iso else None
@@ -2466,16 +2477,17 @@ def partial_predictor_distribuzione(request: Request):
 @app.get("/ui/partial/predictor-slot-distribuzione", include_in_schema=False)
 def partial_predictor_slot_distribuzione(request: Request):
     """
-    Distribuzione empirica slot_liberi vs elapsed_min per istanza (06/05).
-    Bucket: 0-60min, 60-90min, 90-120min, 120-180min, >180min.
+    Distribuzione empirica slot_liberi vs gap_ciclo per istanza (07/05).
 
-    Per ogni istanza, scansiona istanza_metrics.jsonl: per ogni record con
-    `attive_pre` valorizzato + record precedente con invii reali → calcola
-    elapsed_min e attive_pre. Bucket per fascia tempo.
+    Logica corretta: per ogni coppia di record consecutivi (N, N+1) della
+    STESSA istanza:
+        gap_ciclo = ts(N+1) - ts(N)             // lunghezza ciclo bot per istanza
+        slot_liberi = totali - attive_pre(N+1)  // quante rientrate nel gap
+    Bucket gap: <60, 60-90, 90-120, >120 (no >180 separato — il ciclo bot
+    raramente supera 2-3h).
 
-    Mostra distribuzione "quanto velocemente le squadre rientrano" per
-    istanza. Utile per: identificare istanze con tempi atipici (cap residui,
-    livello nodi diversi), capire se livello_nodo va ridotto.
+    Distribuzione P(slot_liberi | gap_ciclo): dopo N campioni dice
+    "quante squadre tipicamente rientrano in un gap di durata X" per istanza.
 
     Refresh 60s via HTMX.
     """
@@ -2491,16 +2503,13 @@ def partial_predictor_slot_distribuzione(request: Request):
             'nessun dato disponibile</div>'
         )
 
-    # bucket boundaries (minuti)
-    BUCKETS = [(0, 60), (60, 90), (90, 120), (120, 180), (180, 99999)]
-    BUCKET_LABELS = ["<60", "60-90", "90-120", "120-180", ">180"]
+    # 07/05 — bucket aggiornati: 4 fasce, gap_ciclo bot raramente >180min
+    BUCKETS = [(0, 60), (60, 90), (90, 120), (120, 99999)]
+    BUCKET_LABELS = ["<60", "60-90", "90-120", ">120"]
 
-    # Per istanza: dict bucket_idx → list[attive_pre]
     per_inst: dict[str, dict[int, list[int]]] = defaultdict(lambda: defaultdict(list))
-    # max_squadre_per_inst (per normalizzare slot_liberi)
     max_squadre_per: dict[str, int] = {}
 
-    # Read raw records
     raw: list[dict] = []
     try:
         with p.open(encoding="utf-8") as f:
@@ -2521,40 +2530,36 @@ def partial_predictor_slot_distribuzione(request: Request):
             'nessun record disponibile</div>'
         )
 
-    # Per istanza: ordina cronologicamente
     by_inst: dict[str, list[dict]] = defaultdict(list)
     for r in raw:
         by_inst[r.get("instance", "?")].append(r)
 
+    # 07/05 — metrica corretta: gap fra coppie consecutive di record
+    # (qualsiasi tipo, anche skip). slot_liberi = totali - attive_pre del
+    # record N+1. Misura quante squadre rientrano nella lunghezza ciclo
+    # bot reale per quell'istanza.
     for inst, records in by_inst.items():
         records.sort(key=lambda r: r.get("ts", ""))
-        # Per ogni record con attive_pre valorizzato, cerca il precedente con invii reali
-        for i, r in enumerate(records):
+        for i in range(1, len(records)):
+            r = records[i]
+            prev = records[i - 1]
             rac = r.get("raccolta") or {}
             attive_pre = rac.get("attive_pre")
-            if attive_pre is None:
-                continue
             tot = rac.get("totali", 0) or 0
-            if tot:
-                max_squadre_per[inst] = max(max_squadre_per.get(inst, 0), tot)
-            # Risale al primo record precedente con invii reali
-            prev_real = None
-            for j in range(i - 1, -1, -1):
-                if (records[j].get("raccolta") or {}).get("invii"):
-                    prev_real = records[j]
-                    break
-            if prev_real is None:
+            if attive_pre is None or tot <= 0:
                 continue
+            max_squadre_per[inst] = max(max_squadre_per.get(inst, 0), tot)
             try:
                 t_curr = _dt.fromisoformat(r["ts"])
-                t_prev = _dt.fromisoformat(prev_real["ts"])
-                elapsed = (t_curr - t_prev).total_seconds() / 60
+                t_prev = _dt.fromisoformat(prev["ts"])
+                gap_min = (t_curr - t_prev).total_seconds() / 60
             except Exception:
                 continue
-            # Slot liberi al momento del record corrente = totali - attive_pre
-            slot_liberi = max(0, (tot or 5) - int(attive_pre))
+            if gap_min < 1:   # record troppo vicini, scarto
+                continue
+            slot_liberi = max(0, tot - int(attive_pre))
             for bi, (lo, hi) in enumerate(BUCKETS):
-                if lo <= elapsed < hi:
+                if lo <= gap_min < hi:
                     per_inst[inst][bi].append(slot_liberi)
                     break
 
@@ -2598,11 +2603,14 @@ def partial_predictor_slot_distribuzione(request: Request):
 
     legend = (
         '<div style="font-size:10px;color:var(--text-dim);margin-bottom:8px">'
-        'media slot_liberi rientrati per bucket di elapsed_min dal precedente invio reale. '
-        '<span style="color:#f44336">rosso</span>: poche squadre rientrate, '
-        '<span style="color:#fbbf24">giallo</span>: parziale, '
-        '<span style="color:#4caf50">verde</span>: tutte rientrate. '
-        'Numero in parentesi = campioni nel bucket.'
+        'media slot_liberi rientrati al boot tick istanza vs gap_ciclo bot. '
+        'Per ogni coppia (record N, record N+1) della stessa istanza: '
+        'gap = ts(N+1)−ts(N), slot_liberi = totali−attive_pre(N+1). '
+        '<span style="color:#f44336">rosso</span>: pochi rientrati (≥40% squadre ancora fuori), '
+        '<span style="color:#fbbf24">giallo</span>: parziale (40-80% rientrate), '
+        '<span style="color:#4caf50">verde</span>: tutte rientrate (≥80%). '
+        'Numero in parentesi = campioni bucket. '
+        'Distribuzione P(slot_liberi | gap_ciclo) per istanza.'
         '</div>'
     )
     return HTMLResponse(
