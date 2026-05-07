@@ -2145,21 +2145,36 @@ def partial_cycle_accuracy(request: Request):
     body = []
     if in_corso_row_html:
         body.append(in_corso_row_html)
+    # 07/05: pre-carica record metrics per calcolare scostamento task
+    # pianificati vs eseguiti per ciclo. Per ogni record, ricava il cycle_id
+    # dal ts confrontandolo con start/end dei cicli accuracy.
+    import json as _json
+    from pathlib import Path as _P
+    from datetime import datetime as _dt2
+    metrics_by_inst_ts: list[dict] = []
+    try:
+        mp = _P("C:/doomsday-engine-prod") / "data" / "istanza_metrics.jsonl"
+        if mp.exists():
+            for line in mp.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    rec = _json.loads(line)
+                    metrics_by_inst_ts.append(rec)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
     for r in rows:
         cn = r.get("cycle_numero", "?")
         actual = r.get("actual_min", 0)
         snaps = r.get("snapshots", []) or []
         n_snaps = len(snaps)
-        # 05/05: STIMA INIZIALE = predicted del PRIMO snapshot del ciclo
-        # (recorder ora forza snap immediato all'avvio nuovo ciclo).
-        # È la stima "lock-in" che il predictor aveva a inizio ciclo,
-        # prima che le esecuzioni modifichino last_run.
-        # ordering: snapshots ordinati per elapsed_min asc nel record accuracy
         sorted_snaps = sorted(snaps, key=lambda s: s.get("elapsed_min", 0))
         initial_pred = sorted_snaps[0].get("predicted_min", 0) if sorted_snaps else 0
         initial_err = sorted_snaps[0].get("error_pct", 0) if sorted_snaps else 0
         initial_color = "#4caf50" if initial_err < 10 else ("#ff9800" if initial_err < 25 else "#f44336")
-        # Calcola errore medio se ci sono snapshots
         if n_snaps > 0:
             avg_err = sum(s.get("error_pct", 0) for s in snaps) / n_snaps
             min_err = min(s.get("error_pct", 0) for s in snaps)
@@ -2169,18 +2184,68 @@ def partial_cycle_accuracy(request: Request):
         else:
             err_summary = "no snapshots"
             err_color = "var(--text-dim)"
-        # Lista snapshots compatta
         snaps_str = " · ".join(
             f'+{s.get("elapsed_min",0):.0f}m={s.get("predicted_min",0):.0f}m({s.get("error_pct",0):.0f}%)'
             for s in snaps[:5]
         )
+
+        # 07/05: scostamento task pianificati vs eseguiti per il ciclo
+        # Δ task = ∑ (extra + missing) su tutte istanze del ciclo
+        # Estraggo task_per_istanza_due dal primo snapshot
+        # Estraggo task_durations_s dai record metrics del ciclo
+        delta_str = "—"
+        delta_color = "var(--text-dim)"
+        try:
+            ic = (sorted_snaps[0].get("input_context") or {}) if sorted_snaps else {}
+            tppd = ic.get("tasks_per_istanza_due", {}) or {}
+            cycle_start_iso = r.get("cycle_start_ts") or sorted_snaps[0].get("ts")
+            cycle_end_iso = r.get("cycle_end_ts")
+            if cycle_start_iso and tppd:
+                cs = _dt2.fromisoformat(cycle_start_iso)
+                ce = _dt2.fromisoformat(cycle_end_iso) if cycle_end_iso else None
+                tot_extra = 0
+                tot_missing = 0
+                for inst, due in tppd.items():
+                    due_set = set(due or [])
+                    # Cerca record dell'istanza nel ciclo
+                    rec = None
+                    for m in metrics_by_inst_ts:
+                        if m.get("instance") != inst:
+                            continue
+                        ts = m.get("ts", "")
+                        try:
+                            md = _dt2.fromisoformat(ts)
+                            if md >= cs and (ce is None or md <= ce):
+                                rec = m
+                                break
+                        except Exception:
+                            pass
+                    if rec is None:
+                        continue
+                    exec_set = set((rec.get("task_durations_s") or {}).keys())
+                    extra = exec_set - due_set     # eseguiti non pianificati
+                    missing = due_set - exec_set   # pianificati non eseguiti
+                    tot_extra += len(extra)
+                    tot_missing += len(missing)
+                if tot_extra > 0 or tot_missing > 0:
+                    delta_str = f"+{tot_extra} / -{tot_missing}"
+                    delta_color = "#ff9800" if (tot_extra + tot_missing) > 5 else "#fbbf24"
+                else:
+                    delta_str = "0"
+                    delta_color = "#4caf50"
+        except Exception:
+            pass
+
         body.append(
             f'<tr>'
             f'<td style="font-weight:600;color:var(--accent)">#{cn}</td>'
             f'<td style="text-align:right;font-family:monospace">{actual:.1f}m</td>'
-            f'<td style="text-align:right;font-family:monospace;color:{initial_color}" title="stima iniziale (primo snapshot del ciclo) — predicted={initial_pred:.1f}min vs actual={actual:.1f}min, err={initial_err:.1f}%">{initial_pred:.1f}m</td>'
+            f'<td style="text-align:right;font-family:monospace;color:{initial_color}" title="stima iniziale (primo snapshot del ciclo)">{initial_pred:.1f}m</td>'
             f'<td style="text-align:center;font-size:10px">{n_snaps}</td>'
             f'<td style="color:{err_color};font-weight:500">{err_summary}</td>'
+            f'<td style="text-align:center;color:{delta_color};font-family:monospace;font-size:11px" '
+            f'title="task eseguiti non pianificati / task pianificati non eseguiti (sommati su tutte le istanze del ciclo)">'
+            f'{delta_str}</td>'
             f'<td style="color:var(--text-dim);font-size:10px;font-family:monospace">{snaps_str}</td>'
             f'</tr>'
         )
@@ -2188,10 +2253,11 @@ def partial_cycle_accuracy(request: Request):
         '<table class="tel-table"><thead><tr>'
         '<th>ciclo</th>'
         '<th style="text-align:right">actual</th>'
-        '<th style="text-align:right" title="stima iniziale = predicted del primo snapshot del ciclo (lock-in a inizio ciclo)">stima iniziale</th>'
+        '<th style="text-align:right" title="stima iniziale = predicted del primo snapshot del ciclo">stima iniziale</th>'
         '<th style="text-align:center">N snap</th>'
         '<th>errore medio</th>'
-        '<th>snapshots (elapsed=predicted/err%)</th>'
+        '<th title="scostamento task pianificati vs eseguiti: +N=eseguiti non previsti, -N=pianificati non eseguiti, sommati su tutte le istanze del ciclo">Δ task</th>'
+        '<th>snapshots</th>'
         '</tr></thead>'
         f'<tbody>{"".join(body)}</tbody></table>'
     )
