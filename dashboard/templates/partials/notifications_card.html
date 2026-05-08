@@ -74,6 +74,27 @@
       </td>
     </tr>
     <tr>
+      <td>alert real-time</td>
+      <td>
+        {% set ad = cfg.alerts_disabled|default([]) %}
+        <input type="checkbox" id="notif-alerts" {% if cfg.alerts_enabled %}checked{% endif %}>
+        <span style="margin-left:8px;font-size:11px;color:#888">eventi:</span>
+        {% for ev,lbl in [
+            ('cascade_adb',           'cascade ADB'),
+            ('heartbeat_cicli',       'heartbeat cicli'),
+            ('master_saturo_long',    'master saturo'),
+            ('maintenance_long',      'maintenance lunga'),
+            ('bot_unexpected_restart','restart inatteso'),
+        ] %}
+        <label style="font-size:11px;margin-left:6px;cursor:pointer"
+               title="event_type: {{ ev }}">
+          <input type="checkbox" class="notif-alert-ev" data-ev="{{ ev }}"
+                 {% if ev not in ad %}checked{% endif %}> {{ lbl }}
+        </label>
+        {% endfor %}
+      </td>
+    </tr>
+    <tr>
       <td>mittente</td>
       <td>
         <input type="email" id="notif-from" style="width:260px"
@@ -145,10 +166,17 @@
     setMsg('salvataggio...', '#0066cc');
     const recipients = ($('notif-recipients').value || '')
       .split(',').map(s => s.trim()).filter(Boolean);
+    // Alert event_type checkbox: lista degli ev DISABILITATI (uncheck = disabled)
+    const alertsDisabled = [];
+    document.querySelectorAll('.notif-alert-ev').forEach(cb => {
+      if (!cb.checked) alertsDisabled.push(cb.dataset.ev);
+    });
     const payload = {
       enabled:               $('notif-enabled').checked,
       daily_report_enabled:  $('notif-daily').checked,
       daily_report_hour_utc: parseInt($('notif-hour').value || 6),
+      alerts_enabled:        $('notif-alerts').checked,
+      alerts_disabled:       alertsDisabled,
       from_addr:             $('notif-from').value.trim(),
       recipients:            recipients,
       smtp_host:             $('notif-smtp-host').value.trim(),

@@ -251,6 +251,12 @@ class Orchestrator:
                         f"— abort tick + reset emergenziale: {exc}"
                     )
                     setattr(self._ctx, "adb_unhealthy", True)
+                    # WU137 fase 2 — alert email se >=3 cascade in 1h
+                    try:
+                        from core.alerts import report_cascade_adb
+                        report_cascade_adb(self._ctx.instance_name)
+                    except Exception:
+                        pass
                     return results
                 except Exception as exc:
                     in_home = False
@@ -311,6 +317,12 @@ class Orchestrator:
                     f"— abort tick + reset emergenziale: {exc}"
                 )
                 setattr(self._ctx, "adb_unhealthy", True)
+                # WU137 fase 2 — alert email se >=3 cascade in 1h
+                try:
+                    from core.alerts import report_cascade_adb
+                    report_cascade_adb(self._ctx.instance_name)
+                except Exception:
+                    pass
                 # Emetti telemetry prima del return — outcome=abort, anomalia ADB
                 try:
                     tel_event.add_anomaly(ANOM_ADB_UNHEALTHY)

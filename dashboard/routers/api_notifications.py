@@ -123,6 +123,9 @@ class NotificationsPatch(BaseModel):
     enabled: Optional[bool] = None
     daily_report_enabled: Optional[bool] = None
     daily_report_hour_utc: Optional[int] = None
+    # WU137 fase 2 — alert real-time master toggle + lista event_type silenziati
+    alerts_enabled: Optional[bool] = None
+    alerts_disabled: Optional[list[str]] = None
     from_addr: Optional[str] = None
     recipients: Optional[list[str]] = None
     smtp_host: Optional[str] = None
@@ -159,6 +162,15 @@ def patch_notifications(payload: NotificationsPatch) -> dict:
                                 detail="daily_report_hour_utc fuori range 0-23")
         notif["daily_report_hour_utc"] = h
         changed["daily_report_hour_utc"] = h
+    # WU137 fase 2 — alert real-time
+    if payload.alerts_enabled is not None:
+        notif["alerts_enabled"] = bool(payload.alerts_enabled)
+        changed["alerts_enabled"] = notif["alerts_enabled"]
+    if payload.alerts_disabled is not None:
+        notif["alerts_disabled"] = [
+            str(s).strip() for s in payload.alerts_disabled if str(s).strip()
+        ]
+        changed["alerts_disabled"] = notif["alerts_disabled"]
     if payload.from_addr is not None:
         addr = payload.from_addr.strip()
         if "@" not in addr:
