@@ -221,21 +221,22 @@ istanza in base a `state.schedule[task]` + `interval_hours` + edge
 cases (es. main_mission gate UTC≥20). Rolling stats da ultimi 20
 record per istanza. Cache TTL 30min.
 
-### 4.10 `core/skip_predictor.py`
+### 4.10 `core/skip_predictor.py` ⚠ DEPRECATO
 
-Decide se skippare il tick di una istanza (saving ~600s boot+task).
-5 regole + guardrail anti-stallo + master exclusion:
+**Rimosso 08/05/2026** — regola architetturale "no skip istanza": nessun
+sistema di predizione può saltare un'istanza nel ciclo. Modulo lasciato
+in repo per git history; le funzioni helper (`_calc_t_marcia_min`,
+`load_metrics_history`) restano usate da `core/adaptive_scheduler.py`.
 
-1. `squadre_fuori` (score 0.90, refactor empirico) — slot saturi +
-   T_min_rientro > gap_atteso
-2. `trend_magro` (0.65) — avg_invii_3 < 0.5
-3. `low_total_invii` (0.60, WU103) — avg(rac+rif)_3 < target × 0.5
-4. `recovery` (0.75) — outcome degraded + gap < 5min
-5. `low_prod` (0.55) — prod_h < 100K (con growth_phase block)
-
-Modello empirico: `T_marcia = 2×eta + saturazione × T_L_max[livello, istanza]`.
+Modello empirico T_marcia ancora vivo:
+`T_marcia = (2×eta + saturazione × T_L_max[livello, istanza]) × coef`.
 `saturazione = load_squadra / cap_nominale_L_max` (post-WU116).
-`T_L_max` da `config/predictor_t_l_max.json`.
+`T_L_max` da `config/predictor_t_l_max.json` (statico).
+`coef` da `core/t_marcia_calibration.py` (closed-loop, vedi 4.13).
+
+Skip totale di un'istanza VIETATO. L'unico riordino consentito è
+quello dell'**Adaptive Scheduler** (4.12). Vedi memoria
+`feedback_no_skip_istanza.md`.
 
 ### 4.11 `core/cycle_predictor_recorder.py`
 
@@ -249,6 +250,103 @@ Storage:
 
 Background task in dashboard `lifespan` esegue `record_snapshot()` +
 `evaluate_cycles()` ogni 15 min.
+
+### 4.12 `core/adaptive_scheduler.py` (08/05)
+
+Riordino dinamico delle istanze nel ciclo bot per massimizzare la
+produttività dell'arrivo del bot ad ogni istanza. **Mai skip totale**:
+tutte le istanze vengono processate ogni ciclo; cambia solo l'**ordine**.
+
+Componenti:
+- `should_activate_scheduler()` — 4 precondizioni in OR:
+  1. master DRL residuo ≤ 50M (saturo, riordino utile)
+  2. rifornimento OFF
+  3. ≥50% istanze sature
+  4. spedizioni oggi > 100
+- `compute_slot_liberi_atteso(ist, t_offset)` — score per istanza:
+  blend deterministico (modello T_marcia) + empirico (lookup_slot_liberi
+  storico). `α` adaptive in funzione di n_samples (proposta A 08/05).
+- `ordina_istanze_adaptive(istanze, log_fn)` — greedy con sort key
+  `(score desc, p_saturo asc, anzianita desc)`. Master FauMorfeus sempre
+  in fondo. Trace step-by-step in `bot.log` come `[ADAPT-TRACE]`.
+- `compute_ab_test_metrics()` + `record_ab_test()` — confronto virtuale
+  ordine adaptive vs naive (proposta E). Persiste `delta_slot` in
+  `data/predictions/scheduler_ab.jsonl`.
+- `_stima_durata_istanza_min()` — chiama `predict_cycle_from_config(
+  strict_schedule=True)` × `get_calibration_factor()` (proposta D).
+
+Stati:
+- `enabled=False` → no-op
+- `enabled+shadow_only=True` → calcola+logga, **no apply**
+- `enabled+shadow_only=False` → applica riordino + persistence
+
+Persistence: `data/scheduler_planned_order.json` con TTL 4h, supporta
+resume post-restart bot.
+
+### 4.13 `core/empirical_slot_predictor.py` (08/05, proposta A)
+
+Lookup empirico `E[slot_liberi | gap_min, istanza]` da
+`data/istanza_metrics.jsonl` (coppie consecutive di record per istanza).
+Bucket gap: `<60, 60-90, 90-120, >120` min. Stessa logica del pannello
+dashboard "slot liberi rientrati vs elapsed", estratta in modulo
+riusabile. Cache TTL 60s.
+
+API:
+- `lookup_slot_liberi(ist, gap_min) → {n_samples, mean, median, p25,
+  p75, max_squadre, bucket_label}`
+- `lookup_p_saturo_globale(ist) → fract sample con slot_liberi=0`
+  (proposta C, tie-breaker greedy)
+- `get_lookup_summary()` — info dashboard
+
+### 4.14 `core/cycle_predictor_calibration.py` (08/05, proposta D)
+
+Calibrazione closed-loop **globale** del cycle predictor. Legge ultimi
+N=10 cicli da `cycle_accuracy.jsonl`, calcola bias mediano
+`(actual - predicted) / predicted` → factor moltiplicativo applicato
+in `_stima_durata_istanza_min()`.
+
+Persiste in `data/predictions/cycle_calibration.json`. Cache TTL 30min.
+Auto-rebuild se stale.
+
+Guardrail: factor clamped `[0.5, 2.0]`, min 5 cicli, bias < 5% → 1.0.
+Validazione prod: bias +19% → factor 1.19 (cycle predictor sottostima
+sistematicamente).
+
+### 4.15 `core/t_marcia_calibration.py` (08/05, proposta B)
+
+Calibrazione closed-loop **per (istanza, livello)** del modello T_marcia.
+Per ogni record con `adaptive_scheduler_meta.slot_liberi_attesi`
+(predizione al ciclo N), confronta col record successivo della stessa
+istanza con `raccolta.attive_pre + totali` (osservazione N+1). Aggrega
+bias_slot mediano per (ist, lv) → coefficiente moltiplicativo applicato
+in `_calc_t_marcia_min()`.
+
+Persiste in `data/predictor_t_l_calibration.json`. Cache TTL 30min.
+Guardrail: min 5 sample per (ist, lv), bias < 0.5 slot → 1.0,
+coef clamped `[0.7, 1.5]`. Si auto-attiva dopo accumulo dati post adaptive.
+
+### 4.16 `core/alerts.py` (WU137 fase 2)
+
+Alert real-time email per eventi anomali bot, rate-limited per event_type
+con state persistente `data/alerts_state.json`. 5 event_type configurati:
+
+| event_type | trigger | severity | cooldown |
+|---|---|---|---|
+| `cascade_adb` | ≥3 cascade in 1h per istanza | error | 1h |
+| `heartbeat_cicli` | 0 cicli in 1h | critical | 30min |
+| `master_saturo_long` | DRL=0 da >1h | warn | 2h |
+| `maintenance_long` | maintenance.flag >2h | warn | 4h |
+| `bot_unexpected_restart` | restart senza exit pulito | critical | 15min |
+
+API:
+- `trigger_alert(event_type, severity, title, body, instance, cooldown_s)`
+- `check_master_saturo()` / `check_heartbeat_cicli()` /
+  `check_maintenance_long()` — chiamati post-ciclo da `main.py`
+- `report_cascade_adb(istanza)` — hook in
+  `core/orchestrator.py` su `ADBUnhealthyError`
+
+Master toggle `globali.notifications.alerts_enabled` (default False) +
+lista `alerts_disabled` per silenziare singoli event_type.
 
 ---
 
@@ -612,13 +710,27 @@ False (l'utente abilita via dashboard). Sezioni: `task`, `sistema`,
 
 ### 6.3 `config/runtime_overrides.json` (hot-reload)
 
-Override runtime per dashboard. Modificato live, letto a ogni tick:
+Override runtime per dashboard. Modificato live dalla HOME `/ui`,
+letto ad ogni tick:
 
 - `globali.task.<nome>: bool` — flag abilitazione task
 - `globali.sistema.tick_sleep_min: int` — minuti tra cicli
-- `globali.skip_predictor_enabled` / `shadow_only` — predictor flags
+- `globali.adaptive_scheduler_enabled` / `shadow_only` /
+  `adaptive_scheduler_thresholds` — adaptive scheduler 08/05
+- `globali.notifications.{enabled, alerts_enabled, alerts_disabled,
+  daily_report_enabled, daily_report_hour_utc, from_addr, recipients,
+  smtp.{host,port}}` — email notifier
 - `globali.debug_tasks.<nome>: bool` — debug screenshot per task (WU115)
-- `istanze.<nome>.<campo>` — override per istanza
+- `globali.rifornimento_comune.{acciaio_abilitato, allocazione, ...}` —
+  config rifornimento
+- `istanze.<nome>.<campo>` — override per istanza (livello, max_squadre,
+  truppe, tipologia, fascia_oraria, raccolta_fuori_territorio,
+  truppe_override.caserme.{infantry,rider,ranged,engine})
+
+**Regola architetturale (WU140)**: dashboard HOME modifica SOLO dynamic;
+dashboard CONFIG modifica SOLO static. I 2 piani sono indipendenti.
+Bootstrap copia static→dynamic al primo avvio. Reset esplicito ricrea
+dynamic da static. Promote runtime → static disponibile via bottone UI.
 
 ### 6.4 `config/task_setup.json`
 
@@ -630,6 +742,19 @@ Vincolante: `_TASK_SETUP` in `main.py` deve essere identico.
 Baseline empirica T_L_max (minuti gather) per livello +
 multiplier per istanza. Validato FAU_00 best gatherers L7=125min /
 L6=114min, multiplier istanze farm 1.3-1.5x.
+
+### 6.6 Files calibrazione closed-loop (08/05)
+
+Auto-generati dalle pipeline calibrazione, no manutenzione manuale:
+
+- `data/predictions/cycle_calibration.json` — factor moltiplicativo
+  globale del cycle predictor (proposta D, ~30min TTL)
+- `data/predictor_t_l_calibration.json` — coefficienti T_marcia per
+  (istanza, livello) (proposta B, ~30min TTL)
+- `data/alerts_state.json` — state rate-limit alert real-time
+  (last_sent_iso + count per event_type)
+- `data/scheduler_planned_order.json` — ordine pianificato adaptive
+  ciclo in volo (TTL 4h, supporta resume post-restart)
 
 ---
 
@@ -647,7 +772,10 @@ L6=114min, multiplier istanze farm 1.3-1.5x.
 | `data/cap_nodi_dataset.jsonl` | per-invio raccolta `{tipo, livello, capacita, load_squadra}` | append in raccolta hook |
 | `data/predictions/cycle_snapshots.jsonl` | snapshot predictor ogni 15min | dashboard background task |
 | `data/predictions/cycle_accuracy.jsonl` | accuracy fine-ciclo (errore% per snapshot) | dashboard background task |
-| `data/predictor_decisions.jsonl` | decisioni skip predictor live | append at skip hook |
+| `data/predictions/scheduler_ab.jsonl` | A/B test virtuale adaptive vs naive (proposta E) | append ad ogni greedy |
+| `data/predictor_decisions.jsonl` | decisioni skip predictor live (legacy, no più scritto post-RIMOZIONE WU89 08/05) | dormiente |
+| `data/mail_queue.jsonl` | queue email notifier (WU137) | append at enqueue, mutate at dispatch |
+| `data/alerts_state.json` | state rate-limit alert real-time (WU137 fase 2) | mutate at trigger_alert |
 | `data/storico_truppe.json` | snapshot daily Total Squads per istanza | 1×/die UTC settings_helper |
 | `data/storico_farm.json` | spedizioni rifornimento daily (retention 90gg) | append at rifornimento end |
 
@@ -665,26 +793,86 @@ L6=114min, multiplier istanze farm 1.3-1.5x.
 
 ---
 
-## 8. Predictor (cycle + skip)
+## 8. Predictor (cycle + adaptive scheduler)
 
-Vedi sezione 4.9, 4.10, 4.11 + dashboard `/ui/predictor`.
+Pagina dashboard: `/ui/predictor-istanze` (assorbe vecchio `/ui/predictor`).
 
-**Cycle Duration Predictor**: stima T_ciclo dato un setup
-(istanze + task + interval/last_run). Output: T_ciclo_min,
-breakdown per istanza, schedule_debug DUE/SKIP.
+### 8.1 Architettura del sistema predittivo (08/05)
 
-**Skip Predictor**: decide se skippare il tick di una istanza.
-Modalità shadow (log+telemetria, no apply) o LIVE (skip applicato).
+```
+┌─ Fonti dati ──────────────────────────────────────────────────┐
+│  data/istanza_metrics.jsonl (raccolta.invii, attive_pre/post,  │
+│                              adaptive_scheduler_meta)          │
+│  data/predictions/cycle_accuracy.jsonl                         │
+│  data/morfeus_state.json (DRL master)                          │
+└──────┬──────────────────┬──────────────────────┬──────────────┘
+       ▼                  ▼                      ▼
+┌──────────────────┐ ┌─────────────────┐ ┌────────────────────┐
+│ EMPIRICAL slot   │ │ CYCLE predictor │ │ T_MARCIA calib     │
+│ lookup (4.13)    │ │ calib (4.14)    │ │ (4.15)             │
+│ — median/p25/p75 │ │ — factor global │ │ — coef per         │
+│ — P_saturo       │ │   (~1.19 prod)  │ │   (ist, livello)   │
+└────────┬─────────┘ └────────┬────────┘ └─────────┬──────────┘
+         ▼                    ▼                    ▼
+   compute_slot_liberi_atteso (det+emp blend, prop. A)
+   _stima_durata_istanza_min  (× cycle_factor, prop. D)
+   _calc_t_marcia_min         (× t_marcia_coef, prop. B)
+                          ▼
+   ordina_istanze_adaptive (greedy + sort: score desc → P_saturo asc
+                            → anzianita desc, prop. C)
+                          ▼
+   compute_ab_test_metrics (confronto vs naive, prop. E)
+                          ▼
+   data/scheduler_planned_order.json + bot.log [ADAPT-TRACE]
+```
 
-**Workflow attivazione**:
-1. Restart bot — flag default off → bot identico
-2. Attivare shadow da dashboard (home → sistema → predictor)
-3. Osservare 6-12 cicli — analisi `predictor_decisions.jsonl`
-4. Se OK precision/recall → attivare LIVE (saving stimato 480-600s/skip)
+### 8.2 Componenti
 
-**Accuracy tracking**: snapshot ogni 15min auto-correlato con cycle
-in corso. A fine ciclo: error% per ogni snapshot vs actual_min.
-Pannello `/ui/predictor` mostra storia.
+**Cycle Duration Predictor** (4.9): stima T_ciclo dato un setup
+(istanze + task DUE da `state.schedule + interval`). Output: T_ciclo_min,
+breakdown per istanza, schedule_debug DUE/SKIP. Usa rolling stats
+ultimi 20 record.
+
+**Adaptive Scheduler** (4.12): riordina le istanze nel ciclo per
+massimizzare slot liberi al passaggio. **Mai skip totale** (regola
+"no skip istanza" 08/05).
+
+**Empirical slot lookup** (4.13): `E[slot_liberi | gap, istanza]` da
+storico. Usato come blend nel deterministico.
+
+**Cycle predictor calibration** (4.14): factor moltiplicativo globale
+da bias closed-loop `actual/predicted`. Auto-rebuild ogni 30min.
+
+**T_marcia calibration** (4.15): coefficiente per (istanza, livello)
+da bias predicted vs real per `slot_liberi_atteso`. Si attiva dopo 5+
+sample per (ist, lv).
+
+**A/B test virtuale** (`compute_ab_test_metrics`): registra ad ogni
+greedy adaptive_tot vs naive_tot in `data/predictions/scheduler_ab.jsonl`.
+Misura oggettiva del valore aggiunto dello scheduler (es. delta +4 slot
+in setup tipico = +36% produttività predetta).
+
+**Skip Predictor** (4.10): ⚠ DEPRECATO. Le sue funzioni helper restano
+usate (`_calc_t_marcia_min`, `load_metrics_history`).
+
+### 8.3 Workflow attivazione adaptive scheduler
+
+1. Restart bot — flag default off → bot identico (sequenziale alfabetico).
+2. Attivare flag da dashboard `/ui/predictor-istanze` card 🎯:
+   - `enabled=True, shadow_only=True` → calcola+logga `[ADAPT-TRACE]` ma NO apply
+   - `enabled=True, shadow_only=False` → applica riordino + persistence
+3. Osservare:
+   - `[ADAPT-TRACE]` in `bot.log` per trace step-by-step del greedy
+   - Pagina `/ui/predictor-istanze` 🧮 simulazione live
+   - `[ADAPT-AB]` log per delta_slot adaptive vs naive
+4. Calibrazioni si auto-attivano dopo accumulo dati (~10 cicli per D,
+   ~5 sample per (ist,lv) per B).
+
+### 8.4 Accuracy tracking
+
+Snapshot ogni 15min auto-correlato con cycle in corso. A fine ciclo:
+error% per ogni snapshot vs actual_min. Pannello
+`/ui/predictor-istanze` ⏱ mostra storia.
 
 ### 8.1 Allineamento bot ↔ predictor (sweep 05/05/2026)
 
@@ -754,11 +942,12 @@ Avvio: `run_dashboard_prod.bat` → uvicorn su `:8765`.
 
 | URL | Descrizione |
 |-----|-------------|
-| `/ui` | **Home**: card produzione istanze, configurazione 4-card (sistema · rifornimento · zaino · allocazione), tabella istanze, sidebar farm (trend7gg + risorse + ora-tbl) |
-| `/ui/telemetria` | 8 tel-card: telemetria task, storico cicli, health 24h, ciclo corrente, tempi medi 7gg, trend 7gg, storico truppe, debug screenshot, copertura squadre |
-| `/ui/predictor` | Cycle predictor + drilldown what-if + accuracy snapshots + skip predictor live |
-| `/ui/storico` | Tabella storico eventi filtrabile per istanza + task |
-| `/ui/config/global` | Configurazione baseline (global_config.json) — tutte le sezioni |
+| `/ui` | **Home**: card produzione istanze (con controlli inline post-WU142), configurazione 4-card (sistema · rifornimento · zaino · allocazione raccolta), sidebar farm (trend7gg + risorse + ora-tbl) |
+| `/ui/advanced` | Bulk istanze + addestramento truppe (default globale + override per istanza) |
+| `/ui/telemetria` | Tel-card: telemetria task, storico cicli, health 24h, trend 7gg, storico truppe, debug screenshot |
+| `/ui/predictor-istanze` | Adaptive scheduler config + 🧮 simulazione greedy + cycle predictor + distribuzione empirica slot |
+| `/ui/predictor` | redirect 302 → `/ui/predictor-istanze` (legacy) |
+| `/ui/config/global` | Configurazione baseline (global_config.json) + bottone "↺ reset runtime" + "⬆ runtime → static" (promote) |
 | `/ui/instance/<nome>` | Dettaglio singola istanza |
 | `/docs` | OpenAPI auto-doc |
 
@@ -766,9 +955,17 @@ Avvio: `run_dashboard_prod.bat` → uvicorn su `:8765`.
 
 | Endpoint | Metodo | Funzione |
 |----------|--------|----------|
-| `/api/config/globals` | PUT | Save sistema + task + skip_predictor flags |
-| `/api/config/rifornimento` | PUT | Save rifornimento config |
-| `/api/config/istanze` | PUT | Save istanze (instances.json + runtime_overrides) |
+| `/api/config/globals` | PUT | Save sistema + task (HOME → dynamic) |
+| `/api/config/rifornimento` | PUT | Save rifornimento config (HOME → dynamic) |
+| `/api/config/zaino` | PUT | Save zaino config (HOME → dynamic) |
+| `/api/config/allocazione` | PUT | Save allocazione raccolta (HOME → dynamic) |
+| `/api/config/istanze` | PUT | Save istanze (CONFIG → static `instances.json`) |
+| `/api/config/global` | PATCH | Save baseline `global_config.json` (CONFIG → static) |
+| `/api/config/reset` | POST | Reset runtime_overrides ← static |
+| `/api/config/promote` | POST | Promuove runtime → static (inverso del reset) |
+| `/api/notifications` | PATCH | Email notifier config + alert flags |
+| `/api/adaptive-scheduler` | PATCH | Adaptive scheduler flags + soglie precondizioni |
+| `/api/adaptive-scheduler/preview` | GET | Greedy live preview + ordine persisted |
 | `/api/maintenance/{start\|stop}` | POST | Toggle modalità manutenzione bot |
 | `/api/debug-tasks/<task>/{enable\|disable}` | PATCH | Toggle debug screenshot per task |
 | `/api/restart-bot` | POST/DELETE | Richiedi/cancella restart bot post-cycle (§11.4) |
@@ -778,6 +975,8 @@ Avvio: `run_dashboard_prod.bat` → uvicorn su `:8765`.
 
 - **HTMX** per refresh asincrono pannelli (no full reload)
 - **Hot-reload config**: cambio runtime_overrides → attivo al prossimo tick
+- **Static vs Dynamic** (regola WU140): config CONFIG → static (non hot,
+  serve restart/reset per applicare); HOME → dynamic (hot)
 - **Master istanza** ★ marker accanto al nome (FauMorfeus, hardcoded WU121)
 - **Dashboard parla solo PROD** (DOOMSDAY_ROOT env var)
 
@@ -792,9 +991,15 @@ Eseguibili standalone (no dipendenza dashboard):
 | `tools/analisi_istanza_metrics.py` | Boot HOME, tick total, task durata, raccolta, ETA marcia |
 | `tools/analisi_cap_nodi.py` | Capacità nominale + saturazione + copertura squadra |
 | `tools/predict_cycle.py` | Stima T_ciclo + breakdown istanza (CLI cycle predictor) |
-| `tools/predictor_backtest.py` | Backtest empirico Skip Predictor su dati storici |
-| `tools/predictor_shadow.py` | Replay storico decisioni predictor (Step 3) |
+| `tools/predictor_backtest.py` | Backtest empirico Skip Predictor (offline, post-WU89 RIMOSSO) |
+| `tools/predictor_shadow.py` | Replay storico decisioni predictor (offline) |
 | `tools/report_copertura_ciclo.py` | Report istanza×ciclo SATURA/NON SATURA per invio |
+| `python -m core.adaptive_scheduler --check` | Test precondizioni + score per istanza |
+| `python -m core.cycle_predictor_calibration compute` | Forza ricalcolo factor globale |
+| `python -m core.t_marcia_calibration compute` | Forza ricalcolo coefficienti per (ist, lv) |
+| `python -m core.empirical_slot_predictor --summary` | Stato lookup table empirico |
+| `python -m core.alerts trigger --type test --sev info ...` | Test trigger alert manuale |
+| `python -m core.notifier {enqueue\|dispatch\|stats}` | Test queue email |
 
 Tutti supportano `--prod` per leggere da `C:/doomsday-engine-prod/`.
 
