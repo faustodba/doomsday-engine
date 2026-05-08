@@ -535,6 +535,14 @@ def _blend_with_empirical(out: dict, istanza: str, gap_min: float) -> dict:
     det_val = float(out.get("slot_liberi_atteso", 0))
     emp_val = float(emp.get("median", 0.0))
 
+    # P_saturo globale per tie-breaker (proposta C 08/05)
+    try:
+        from core.empirical_slot_predictor import lookup_p_saturo_globale
+        p_sat = lookup_p_saturo_globale(istanza)
+    except Exception:
+        p_sat = None
+    out["p_saturo_glob"] = p_sat   # None se no samples
+
     if alpha >= 1.0:
         # Solo deterministico, niente blend (ma esponi info)
         out["empirical"] = {
@@ -679,9 +687,16 @@ def ordina_istanze_adaptive(istanze: list[str],
         scores = [compute_slot_liberi_atteso(ist, t_offset_min=t_offset)
                   for ist in rimanenti]
 
-        # Ordina: score desc, poi anzianita_tick desc (più in ritardo prima)
-        scores.sort(key=lambda x: (x["score"], x["anzianita_tick_min"]),
-                    reverse=True)
+        # Ordina (proposta C 08/05): score desc, poi p_saturo asc (preferisci
+        # istanze con bassa probabilità storica di essere sature), poi
+        # anzianita_tick desc (più in ritardo prima).
+        # `p_saturo_glob` può essere None → trattato come 0.5 (neutro) per non
+        # penalizzare/favorire istanze senza dati storici.
+        scores.sort(key=lambda x: (
+            x["score"],
+            1.0 - (x.get("p_saturo_glob") if x.get("p_saturo_glob") is not None else 0.5),
+            x["anzianita_tick_min"],
+        ), reverse=True)
 
         # Trace candidati (compatto, max 4 per step per non saturare log)
         if log_fn is not None:

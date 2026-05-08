@@ -203,6 +203,28 @@ def lookup_slot_liberi(istanza: str, gap_min: float) -> Optional[dict]:
     }
 
 
+def lookup_p_saturo_globale(istanza: str) -> Optional[float]:
+    """Frazione di sample storici con `slot_liberi==0` (saturo) per istanza,
+    aggregata su tutti i bucket gap. Usato come tie-breaker nel greedy
+    (proposta C 08/05): a parità di score, preferire istanze con bassa
+    P_saturo storica.
+
+    Returns:
+        float in [0.0, 1.0], oppure None se nessun sample per quell'istanza.
+    """
+    lookup = _get_lookup()
+    per_inst = (lookup.get("per_inst") or {}).get(istanza, {})
+    if not per_inst:
+        return None
+    all_samples: list[int] = []
+    for bucket_samples in per_inst.values():
+        all_samples.extend(bucket_samples)
+    if not all_samples:
+        return None
+    n_saturo = sum(1 for s in all_samples if s == 0)
+    return n_saturo / len(all_samples)
+
+
 def get_lookup_summary() -> dict:
     """Per dashboard / debug: stato corrente lookup table."""
     lookup = _get_lookup()
