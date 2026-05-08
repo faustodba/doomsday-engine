@@ -66,10 +66,71 @@ def get_adaptive_scheduler() -> dict:
         raise HTTPException(status_code=500, detail=f"errore: {exc}")
 
 
+@router.get("/adaptive-scheduler/preview")
+def preview_adaptive_scheduler() -> dict:
+    """Simulazione live dell'ordine pianificato dal scheduler.
+
+    Calcola greedy l'ordine attuale per le istanze abilitate (master in fondo)
+    + carica eventuale ordine persisted in `data/scheduler_planned_order.json`.
+
+    Returns:
+        {
+          "now_iso":         str,
+          "ordine_live":     [ {ist, score, slot_liberi_atteso, slot_liberi_now,
+                                 totali, attive_now, rientro_atteso,
+                                 t_avvio_min, anzianita_tick_min,
+                                 elapsed_min, t_residue_min, data_completa,
+                                 is_master}, ... ],
+          "ordine_persisted": dict | None,   # ordine ciclo corrente (se in volo)
+          "active":          bool,
+          "shadow_only":     bool,
+          "enabled":         bool,
+          "reasons":         list[str],
+        }
+    """
+    try:
+        from core.adaptive_scheduler import (
+            get_status, ordina_istanze_adaptive, load_planned_order,
+        )
+        from dashboard.services.config_manager import get_instances
+        from dashboard.services.config_manager import get_overrides
+
+        status = get_status()
+        all_ist = get_instances() or []
+        ov_ist = ((get_overrides() or {}).get("istanze") or {})
+
+        # Filtro: solo istanze abilitate (override > static)
+        nomi: list[str] = []
+        for i in all_ist:
+            nome = i.get("nome", "")
+            if not nome:
+                continue
+            ov = ov_ist.get(nome) or {}
+            on = ov.get("abilitata", i.get("abilitata", True))
+            if on:
+                nomi.append(nome)
+
+        from datetime import datetime, timezone
+        ordine_live = ordina_istanze_adaptive(nomi)
+        persisted = load_planned_order()
+
+        return {
+            "now_iso":          datetime.now(timezone.utc).isoformat(),
+            "ordine_live":      ordine_live,
+            "ordine_persisted": persisted,
+            "active":           status.get("active", False),
+            "shadow_only":      status.get("shadow_only", False),
+            "enabled":          status.get("enabled", False),
+            "reasons":          status.get("reasons", []),
+        }
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"errore: {exc}")
+
+
 class AdaptiveSchedulerPatch(BaseModel):
     enabled:                    Optional[bool] = None
     shadow_only:                Optional[bool] = None
-    threshold_drl_residuo_pct:  Optional[int]  = None
+    threshold_drl_residuo_m:    Optional[int]  = None
     threshold_pct_istanze_sat:  Optional[int]  = None
     threshold_spedizioni_oggi:  Optional[int]  = None
 
@@ -97,14 +158,18 @@ def patch_adaptive_scheduler(payload: AdaptiveSchedulerPatch) -> dict:
         gc["adaptive_scheduler_shadow_only"] = bool(payload.shadow_only)
         changed["shadow_only"] = bool(payload.shadow_only)
 
-    # Thresholds (validati)
+    # Thresholds (validati). 08/05: drl_residuo_m sostituisce drl_residuo_pct.
+    # Cleanup automatico: se la chiave legacy è ancora presente, rimossa.
     th = gc.setdefault("adaptive_scheduler_thresholds", {})
-    if payload.threshold_drl_residuo_pct is not None:
-        v = int(payload.threshold_drl_residuo_pct)
-        if not (0 <= v <= 100):
-            raise HTTPException(status_code=400, detail="drl_residuo_pct fuori 0-100")
-        th["drl_residuo_pct"] = v
-        changed["drl_residuo_pct"] = v
+    if payload.threshold_drl_residuo_m is not None:
+        v = int(payload.threshold_drl_residuo_m)
+        if not (0 <= v <= 10000):
+            raise HTTPException(status_code=400,
+                                detail="drl_residuo_m fuori 0-10000 (M)")
+        th["drl_residuo_m"] = v
+        changed["drl_residuo_m"] = v
+        if "drl_residuo_pct" in th:
+            del th["drl_residuo_pct"]
     if payload.threshold_pct_istanze_sat is not None:
         v = int(payload.threshold_pct_istanze_sat)
         if not (0 <= v <= 100):

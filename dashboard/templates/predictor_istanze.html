@@ -1,0 +1,149 @@
+{% extends "base.html" %}
+{% block title %}Doomsday V6 — Predictor istanze{% endblock %}
+{% block content %}
+
+<div class="page-layout">
+  <div class="main-col" style="width:100%">
+
+    {# 08/05: pagina dedicata ai predictor lato istanze. Assorbe la vecchia
+       /ui/predictor (cycle predictor + distribuzione empirica slot) +
+       Adaptive Scheduler (config + simulazione ordine), spostato qui da
+       /ui/config/global per separare config statica da strumenti operativi.
+       Regola "no skip istanza": nessun sistema può saltare un'istanza nel
+       ciclo, solo riordinare. #}
+
+    <!-- ──────────────────────────────────────────────────────
+         SEZIONE 1 — ADAPTIVE SCHEDULER (config flag + precondizioni)
+         ────────────────────────────────────────────────────── -->
+    <div class="section">
+      <div class="sec-label">🎯 adaptive scheduler · ordine istanze adattivo per slot liberi attesi</div>
+      <div id="adapt-card"
+           hx-get="/ui/partial/adaptive-scheduler"
+           hx-trigger="load, refresh, every 30s"
+           hx-swap="innerHTML">
+        <div class="tel-grid">
+          <div class="tel-card tel-full">
+            <div class="tel-head">caricamento…</div>
+            <div style="padding:14px;color:var(--text-dim);font-size:12px">…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ──────────────────────────────────────────────────────
+         SEZIONE 2 — SIMULAZIONE ORDINE ADATTIVO
+         ────────────────────────────────────────────────────── -->
+    <div class="section">
+      <div class="sec-label">🧮 simulazione ordine adattivo · cosa farebbe lo scheduler ADESSO</div>
+      <div id="adapt-preview"
+           hx-get="/ui/partial/adaptive-scheduler-preview"
+           hx-trigger="load, refresh, every 30s"
+           hx-swap="innerHTML">
+        <div class="tel-grid">
+          <div class="tel-card tel-full">
+            <div class="tel-head">caricamento simulazione…</div>
+            <div style="padding:14px;color:var(--text-dim);font-size:12px">…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ──────────────────────────────────────────────────────
+         SEZIONE 2 — CYCLE DURATION PREDICTOR
+         ────────────────────────────────────────────────────── -->
+    <div class="section">
+      <div class="sec-label">⏱ cycle predictor — stima durata ciclo bot</div>
+      <div class="tel-grid">
+
+        <div class="tel-card tel-full">
+          <div class="tel-head">stima corrente (schedule-aware)</div>
+          <div id="cycle-prediction"
+               hx-get="/ui/partial/cycle-prediction"
+               hx-trigger="load, every 60s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">
+            T_ciclo = Σ_istanza(boot + Σ task_due) + tick_sleep · rolling stats ultimi 20 record · refresh 60s
+          </div>
+        </div>
+
+        <div class="tel-card tel-full">
+          <div class="tel-head">🔍 drilldown — input context per istanza</div>
+          <div id="cycle-snapshot-detail"
+               hx-get="/ui/partial/cycle-snapshot-detail"
+               hx-trigger="load, every 15s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">
+            input context dell'ultimo snapshot · per ogni istanza: T_s + task dovuti · refresh 15s (cattura chiusura tick istanza ~5-10min)
+          </div>
+        </div>
+
+        <div class="tel-card tel-full">
+          <div class="tel-head">📊 accuracy storica (snapshot ogni 15 min × ciclo)</div>
+          <div id="cycle-accuracy"
+               hx-get="/ui/partial/cycle-accuracy"
+               hx-trigger="load, every 30s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">
+            ad ogni snapshot: error% = |predicted - actual| / actual × 100 · 🟢 &lt;10% · 🟠 10-25% · 🔴 &gt;25% · refresh 30s (riga ▶ ciclo in corso aggiorna elapsed)
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ──────────────────────────────────────────────────────
+         SEZIONE 3 — DISTRIBUZIONE EMPIRICA SLOT (storico)
+         ────────────────────────────────────────────────────── -->
+    <div class="section">
+      <div class="sec-label">📈 distribuzione empirica slot — analisi ciclo-su-ciclo</div>
+      <div class="tel-grid">
+
+        <div class="tel-card tel-full">
+          <div class="tel-head">P(squadre fuori al ritorno) per istanza · ultime 30 transizioni</div>
+          <div id="predictor-distribuzione"
+               hx-get="/ui/partial/predictor-distribuzione"
+               hx-trigger="load, every 60s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">
+            lookup empirico su <code>data/istanza_metrics.jsonl</code> · per ogni coppia (tick N, tick N+1):
+            P = fract(slot pieni a N+1 | erano pieni a fine N) · Δt = gap in minuti fra le 2 osservazioni della stessa
+            istanza (solo coppie post_pieni) · 🔴 ≥70% borderline · 🟠 30-70% mid · 🟢 &lt;30% libero · refresh 60s
+          </div>
+        </div>
+
+        <div class="tel-card tel-full">
+          <div class="tel-head">⏳ slot liberi rientrati vs elapsed (storico, per istanza)</div>
+          <div id="predictor-slot-distribuzione"
+               hx-get="/ui/partial/predictor-slot-distribuzione"
+               hx-trigger="load, every 60s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">
+            distribuzione bucket-based del numero di slot liberi al ritorno bot in funzione del tempo trascorso
+            (elapsed_min) dall'ultimo invio reale per istanza. Permette di identificare istanze con tempi raccolta
+            atipici (cap residui, livello nodi ecc.) e capire se livello_nodo va abbassato.
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+  </div>
+</div>
+
+{% endblock %}

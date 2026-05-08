@@ -1,4 +1,4 @@
-{# 08/05 — Adaptive Scheduler card (HTMX partial)
+{# 08/05 — Adaptive Scheduler config card (2x2 grid, dimezzata).
    Endpoint: /ui/partial/adaptive-scheduler  (refresh ogni 30s)
    PATCH:    /api/adaptive-scheduler  (salva flag + soglie)
 #}
@@ -6,142 +6,101 @@
 {% set thr = d.thresholds %}
 {% set live = d.live %}
 
-<div class="tel-card" id="adapt-card-inner" style="padding:14px">
-  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
-    <span style="font-size:18px">🎯</span>
-    <b>adaptive scheduler</b>
-    <span style="margin-left:auto">
-      {% if not d.enabled %}
-        <span style="color:#c00">○ DISABILITATO</span>
-      {% elif d.shadow_only %}
-        <span style="color:#0066cc">◐ SHADOW</span>
-      {% elif d.active %}
-        <span style="color:#0a8000">● LIVE · attivo</span>
-      {% else %}
-        <span style="color:#888">● LIVE · waiting (no precondizione)</span>
-      {% endif %}
+<style>
+.as-pill { display:inline-block; padding:1px 8px; border-radius:10px;
+           font-size:10px; font-weight:600; letter-spacing:0.5px;
+           text-transform:uppercase; line-height:14px; }
+.as-pill.off    { background:rgba(220,40,40,0.15);  color:#e36262; }
+.as-pill.shadow { background:rgba(0,120,200,0.18); color:#4ea8d8; }
+.as-pill.live   { background:rgba(40,180,80,0.18); color:#5fcc7e; }
+.as-pill.wait   { background:rgba(150,150,150,0.18); color:var(--text-dim); }
+
+.as-grid { display:grid; grid-template-columns:1fr 1fr; gap:4px 12px;
+           padding:4px 12px; }
+.as-cell { display:flex; align-items:center; gap:6px; font-size:11px;
+           padding:2px 0; border-bottom:1px solid var(--border); }
+.as-cell:last-child, .as-cell:nth-last-child(2) { border-bottom:none; }
+.as-cell-lbl  { flex:1; color:var(--text); }
+.as-cell-thr  { font-family:var(--font-mono); }
+.as-cell-thr input[type=number] { width:48px; padding:1px 3px; font-size:11px; }
+.as-cell-live { font-family:var(--font-mono); color:var(--text-dim);
+                min-width:50px; text-align:right; }
+.as-cell-st   { width:14px; text-align:center; }
+.as-ok        { color:#5fcc7e; font-weight:600; }
+.as-no        { color:var(--text-dim); }
+</style>
+
+<div class="tel-card tel-full">
+  <div class="tel-head" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:5px 12px">
+    <span>stato &amp; precondizioni</span>
+    <span class="as-pill {% if not d.enabled %}off{% elif d.shadow_only %}shadow{% elif d.active %}live{% else %}wait{% endif %}">
+      {% if not d.enabled %}disabilitato
+      {% elif d.shadow_only %}shadow
+      {% elif d.active %}live · attivo
+      {% else %}live · waiting{% endif %}
     </span>
+    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-weight:400;font-size:11px">
+      <input type="checkbox" id="adapt-enabled" {% if d.enabled %}checked{% endif %}>
+      enabled
+    </label>
+    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-weight:400;font-size:11px">
+      <input type="checkbox" id="adapt-shadow" {% if d.shadow_only %}checked{% endif %}>
+      shadow only
+    </label>
+    <button class="btn btn-primary" type="button" onclick="adaptSave()"
+            style="padding:2px 10px;font-size:11px">⬡ salva</button>
+    <span id="adapt-msg" style="font-size:11px"></span>
   </div>
 
-  <!-- 2 flag toggle -->
-  <table style="width:100%;font-size:12px;margin-bottom:10px">
-    <tr>
-      <td style="padding:4px 8px 4px 0;width:50%">
-        <label>
-          <input type="checkbox" id="adapt-enabled" {% if d.enabled %}checked{% endif %}>
-          <b>enabled</b> (master toggle)
-        </label>
-      </td>
-      <td>
-        <label>
-          <input type="checkbox" id="adapt-shadow" {% if d.shadow_only %}checked{% endif %}>
-          <b>shadow only</b> (calcola+logga, non riordina)
-        </label>
-      </td>
-    </tr>
-  </table>
+  {% set drl_ok  = (live.drl_residuo_m is not none) and (live.drl_residuo_m <= thr.drl_residuo_m) %}
+  {% set rif_ok  = not live.rifornimento_on %}
+  {% set sat_ok  = live.pct_istanze_sat >= thr.pct_istanze_sat %}
+  {% set sped_ok = live.spedizioni_oggi > thr.spedizioni_oggi %}
 
-  <!-- 3 soglie precondizioni -->
-  <div style="font-size:12px;margin-bottom:6px"><b>precondizioni attivazione</b> (basta una vera)</div>
-  <table style="width:100%;font-size:12px;border-collapse:collapse">
-    <thead>
-      <tr style="background:#f5f5f5">
-        <th style="padding:4px;text-align:left">condizione</th>
-        <th style="padding:4px;text-align:right">soglia</th>
-        <th style="padding:4px;text-align:right">live</th>
-        <th style="padding:4px;text-align:center">stato</th>
-      </tr>
-    </thead>
-    <tbody>
-      <tr>
-        <td style="padding:4px">master DRL residuo ≥</td>
-        <td style="padding:4px;text-align:right">
-          <input type="number" id="adapt-th-drl" min="0" max="100" style="width:55px"
-                 value="{{ thr.drl_residuo_pct }}">%
-        </td>
-        <td style="padding:4px;text-align:right;font-family:monospace">
-          {% if live.drl_residuo_pct is not none %}
-            {{ live.drl_residuo_pct }}%
-          {% else %}
-            <span style="color:#888">N/A</span>
-          {% endif %}
-        </td>
-        <td style="padding:4px;text-align:center">
-          {% if live.drl_residuo_pct is not none and live.drl_residuo_pct >= thr.drl_residuo_pct %}
-            <span style="color:#0a8000">✓</span>
-          {% else %}
-            <span style="color:#888">·</span>
-          {% endif %}
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:4px">rifornimento OFF da dashboard</td>
-        <td style="padding:4px;text-align:right;color:#888">—</td>
-        <td style="padding:4px;text-align:right;font-family:monospace">
-          {% if live.rifornimento_on %}ON{% else %}OFF{% endif %}
-        </td>
-        <td style="padding:4px;text-align:center">
-          {% if not live.rifornimento_on %}
-            <span style="color:#0a8000">✓</span>
-          {% else %}
-            <span style="color:#888">·</span>
-          {% endif %}
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:4px">istanze sature ≥</td>
-        <td style="padding:4px;text-align:right">
-          <input type="number" id="adapt-th-sat" min="0" max="100" style="width:55px"
-                 value="{{ thr.pct_istanze_sat }}">%
-        </td>
-        <td style="padding:4px;text-align:right;font-family:monospace">
-          {{ live.pct_istanze_sat }}%
-        </td>
-        <td style="padding:4px;text-align:center">
-          {% if live.pct_istanze_sat >= thr.pct_istanze_sat %}
-            <span style="color:#0a8000">✓</span>
-          {% else %}
-            <span style="color:#888">·</span>
-          {% endif %}
-        </td>
-      </tr>
-      <tr>
-        <td style="padding:4px">spedizioni oggi &gt;</td>
-        <td style="padding:4px;text-align:right">
-          <input type="number" id="adapt-th-sped" min="0" max="9999" style="width:65px"
-                 value="{{ thr.spedizioni_oggi }}">
-        </td>
-        <td style="padding:4px;text-align:right;font-family:monospace">
-          {{ live.spedizioni_oggi }}
-        </td>
-        <td style="padding:4px;text-align:center">
-          {% if live.spedizioni_oggi > thr.spedizioni_oggi %}
-            <span style="color:#0a8000">✓</span>
-          {% else %}
-            <span style="color:#888">·</span>
-          {% endif %}
-        </td>
-      </tr>
-    </tbody>
-  </table>
+  <div class="as-grid">
+    <div class="as-cell">
+      <span class="as-cell-lbl">master DRL residuo ≤</span>
+      <span class="as-cell-thr">
+        <input type="number" id="adapt-th-drl-m" min="0" max="10000" value="{{ thr.drl_residuo_m }}"> M
+      </span>
+      <span class="as-cell-live">
+        {% if live.drl_residuo_m is not none %}{{ "%.1f"|format(live.drl_residuo_m) }} M
+        {% else %}<span class="as-no">N/A</span>{% endif %}
+      </span>
+      <span class="as-cell-st {{ 'as-ok' if drl_ok else 'as-no' }}">{{ '✓' if drl_ok else '·' }}</span>
+    </div>
 
-  <!-- Bottoni + status -->
-  <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
-    <button class="btn-orange" onclick="adaptSave()">salva</button>
-    <span id="adapt-msg" style="margin-left:8px;font-size:11px;align-self:center"></span>
+    <div class="as-cell">
+      <span class="as-cell-lbl">rifornimento OFF</span>
+      <span class="as-cell-thr as-no">—</span>
+      <span class="as-cell-live">{% if live.rifornimento_on %}ON{% else %}OFF{% endif %}</span>
+      <span class="as-cell-st {{ 'as-ok' if rif_ok else 'as-no' }}">{{ '✓' if rif_ok else '·' }}</span>
+    </div>
+
+    <div class="as-cell">
+      <span class="as-cell-lbl">istanze sature ≥</span>
+      <span class="as-cell-thr">
+        <input type="number" id="adapt-th-sat" min="0" max="100" value="{{ thr.pct_istanze_sat }}">%
+      </span>
+      <span class="as-cell-live">{{ live.pct_istanze_sat }}%</span>
+      <span class="as-cell-st {{ 'as-ok' if sat_ok else 'as-no' }}">{{ '✓' if sat_ok else '·' }}</span>
+    </div>
+
+    <div class="as-cell">
+      <span class="as-cell-lbl">spedizioni oggi &gt;</span>
+      <span class="as-cell-thr">
+        <input type="number" id="adapt-th-sped" min="0" max="9999" style="width:60px" value="{{ thr.spedizioni_oggi }}">
+      </span>
+      <span class="as-cell-live">{{ live.spedizioni_oggi }}</span>
+      <span class="as-cell-st {{ 'as-ok' if sped_ok else 'as-no' }}">{{ '✓' if sped_ok else '·' }}</span>
+    </div>
   </div>
 
-  <!-- Footer info -->
-  <div style="margin-top:10px;font-size:11px;color:#666;border-top:1px solid #eee;padding-top:8px">
-    {% if d.active %}
-      <b>scheduler attivo</b> — reasons: {{ d.reasons|join(', ') }}
-    {% elif d.enabled %}
-      <b>scheduler abilitato</b> ma nessuna precondizione vera ora — non riordina
-    {% else %}
-      <b>scheduler disabilitato</b> — flag enabled=false
-    {% endif %}
-    <br>
-    <i>Mai skip totale: tutte le istanze processate. Master FauMorfeus sempre fissa in fondo al ciclo.</i>
+  <div class="tel-foot" style="padding:3px 12px">
+    {% if d.active %}attivo · reasons: {{ d.reasons|join(', ') }}
+    {% elif d.enabled %}abilitato · nessuna precondizione vera ora
+    {% else %}disabilitato · enabled=false{% endif %}
+    · basta una vera (OR) · mai skip totale · master fissa fondo
   </div>
 </div>
 
@@ -152,7 +111,7 @@
     const m = $('adapt-msg');
     if (!m) return;
     m.textContent = txt;
-    m.style.color = color || '#666';
+    m.style.color = color || 'var(--text-dim)';
   };
 
   window.adaptSave = async function() {
@@ -160,7 +119,7 @@
     const payload = {
       enabled:                    $('adapt-enabled').checked,
       shadow_only:                $('adapt-shadow').checked,
-      threshold_drl_residuo_pct:  parseInt($('adapt-th-drl').value || 30),
+      threshold_drl_residuo_m:    parseInt($('adapt-th-drl-m').value || 50),
       threshold_pct_istanze_sat:  parseInt($('adapt-th-sat').value || 50),
       threshold_spedizioni_oggi:  parseInt($('adapt-th-sped').value || 100),
     };
@@ -173,7 +132,7 @@
       const j = await r.json();
       if (r.ok) {
         setMsg('✓ salvato', '#0a8000');
-        htmx.trigger('#adapt-card', 'refresh');
+        if (typeof htmx !== 'undefined') htmx.trigger('#adapt-card', 'refresh');
       } else {
         setMsg('✗ ' + (j.detail || 'errore'), '#c00');
       }

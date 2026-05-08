@@ -1,0 +1,129 @@
+{# 08/05 — Adaptive Scheduler — pannello simulazione ordine pianificato.
+   Endpoint: /ui/partial/adaptive-scheduler-preview  (refresh ogni 30s)
+
+   Layout uniforme col resto della pagina (tel-card · tel-head · tel-foot).
+#}
+{% set live = data.ordine_live %}
+{% set persisted = data.ordine_persisted %}
+
+<div class="tel-grid">
+
+  <!-- Card 1: ordine LIVE -->
+  <div class="tel-card tel-full">
+    <div class="tel-head">
+      🧮 ordine calcolato adesso
+      <span style="float:right;font-weight:400;font-size:11px">
+        {% if data.enabled and not data.shadow_only and data.active %}
+          <span style="color:#0a8000">● live · attivo</span>
+        {% elif data.enabled and data.shadow_only %}
+          <span style="color:#0066cc">◐ shadow · solo simulazione</span>
+        {% elif data.enabled %}
+          <span style="color:var(--text-dim)">● enabled · waiting precondizione</span>
+        {% else %}
+          <span style="color:#c00">○ disabilitato</span>
+        {% endif %}
+      </span>
+    </div>
+    <div style="padding:8px 14px">
+      {% if live %}
+      <div style="overflow-x:auto">
+      <table style="width:100%;font-size:11px;border-collapse:collapse">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border);color:var(--text-dim)">
+            <th style="padding:5px 6px;text-align:right;width:24px">#</th>
+            <th style="padding:5px 6px;text-align:left">istanza</th>
+            <th style="padding:5px 6px;text-align:right" title="t_avvio: offset in minuti dall'inizio del ciclo (cumulativo)">t_avvio</th>
+            <th style="padding:5px 6px;text-align:right" title="slot liberi attesi al momento t_avvio (= score greedy)">slot atteso</th>
+            <th style="padding:5px 6px;text-align:right" title="slot liberi adesso (now)">slot now</th>
+            <th style="padding:5px 6px;text-align:right" title="totali / attive ora">tot/att</th>
+            <th style="padding:5px 6px;text-align:right" title="squadre che rientrano entro t_avvio">rientri</th>
+            <th style="padding:5px 6px;text-align:right" title="elapsed dall'ultimo record (min)">last tick</th>
+            <th style="padding:5px 6px;text-align:left" title="T_residue per ogni squadra fuori (min)">residui (min)</th>
+            <th style="padding:5px 6px;text-align:center" title="data_completa">⚑</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in live %}
+          {% set is_master = r.get('is_master', False) %}
+          {% set sla = r.get('slot_liberi_atteso', 0) %}
+          <tr style="border-bottom:1px solid var(--border)
+                     {% if is_master %};background:rgba(245,197,66,0.08){% endif %}">
+            <td style="padding:4px 6px;text-align:right;color:var(--text-dim)">{{ loop.index }}</td>
+            <td style="padding:4px 6px;font-family:var(--font-mono)">
+              {{ r.ist }}
+              {% if is_master %}<span title="master — sempre fondo" style="color:#f5c542">★</span>{% endif %}
+            </td>
+            <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono)">{{ "%.1f"|format(r.get('t_avvio_min', 0)) }}</td>
+            <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono)
+                       {% if is_master %};color:var(--text-dim){% elif sla >= (r.get('totali',0)) %};color:#0a8000;font-weight:600{% elif sla > 0 %};color:#0066cc{% else %};color:#c00{% endif %}">
+              {% if is_master %}—{% else %}{{ sla }}{% endif %}
+            </td>
+            <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono);color:var(--text-dim)">
+              {{ r.get('slot_liberi_now', 0) }}
+            </td>
+            <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono);color:var(--text-dim)">
+              {{ r.get('totali', 0) }}/{{ r.get('attive_now', 0) }}
+            </td>
+            <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono);color:var(--text-dim)">
+              {{ r.get('rientro_atteso', 0) }}
+            </td>
+            <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono);color:var(--text-dim)">
+              {% set elap = r.get('elapsed_min') %}
+              {% if elap is none or elap < 0 %}—{% else %}{{ "%.0f"|format(elap) }}{% endif %}
+            </td>
+            <td style="padding:4px 6px;font-family:var(--font-mono);font-size:10px;color:var(--text-dim)">
+              {% set resid = r.get('t_residue_min') or [] %}
+              {% if resid %}{{ resid | map('round', 0) | map('int') | join(', ') }}{% else %}—{% endif %}
+            </td>
+            <td style="padding:4px 6px;text-align:center">
+              {% if r.get('data_completa') %}<span style="color:#0a8000">✓</span>
+              {% else %}<span title="metrics incompleti, score basato su default" style="color:#c80">∼</span>{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+      <div style="padding:8px;color:var(--text-dim);font-size:11px">nessuna istanza abilitata</div>
+      {% endif %}
+    </div>
+    <div class="tel-foot">
+      greedy: ad ogni step sceglie istanza con max <code>slot_liberi_atteso</code> al
+      tempo <code>t_avvio</code>. master sempre in fondo. score = slot_liberi_atteso a t_avvio:
+      maggiore = più produttivo. ✓ data completa · ∼ metrics parziali (default)
+    </div>
+  </div>
+
+  {% if persisted %}
+  <!-- Card 2: ordine PERSISTED (ciclo in volo) -->
+  <div class="tel-card tel-full">
+    <div class="tel-head">
+      📌 ordine persisted (ciclo in volo)
+      <span style="float:right;font-weight:400;color:var(--text-dim);font-size:11px">
+        TTL 4h · saved {{ persisted.get('ts_saved','')[:19] }}
+      </span>
+    </div>
+    <div style="padding:10px 14px">
+      <div style="font-family:var(--font-mono);font-size:11px;line-height:1.7">
+        {% set comp = (persisted.get('completate') or []) %}
+        {% for item in (persisted.get('ordine') or []) %}
+          {% set nome = item.get('ist','') %}
+          {% if nome in comp %}
+            <span style="color:var(--text-dim);text-decoration:line-through">{{ nome }}</span>
+          {% else %}
+            <span>{{ nome }}</span>
+          {% endif %}
+          {% if not loop.last %} → {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+    <div class="tel-foot">
+      {{ comp | length }}/{{ (persisted.get('ordine') or []) | length }} completate ·
+      barrate = già processate ·
+      reasons: {{ (persisted.get('reasons') or []) | join(', ') or '—' }}
+    </div>
+  </div>
+  {% endif %}
+
+</div>

@@ -54,10 +54,13 @@ def _root() -> Path:
 
 _PLANNED_ORDER_PATH = lambda: _root() / "data" / "scheduler_planned_order.json"
 
-# Soglie precondizioni — DEFAULT, sovrascrivibili da config
-# `globali.adaptive_scheduler_thresholds.{drl_residuo_pct, pct_istanze_sat, spedizioni_oggi}`.
+# Soglie precondizioni — DEFAULT, sovrascrivibili da
+# `globali.adaptive_scheduler_thresholds.{drl_residuo_m, pct_istanze_sat, spedizioni_oggi}`.
+# 08/05: `drl_residuo_m` (M residui assoluti) sostituisce `drl_residuo_pct`
+# (% relative al max). Il bot legge il residuo OCR direttamente in unità,
+# soglia parametrica più diretta. Default 50 M.
 DEFAULT_SOGLIE = {
-    "drl_residuo_pct":  30,
+    "drl_residuo_m":    50,
     "pct_istanze_sat":  50,
     "spedizioni_oggi":  100,
 }
@@ -67,7 +70,11 @@ PLANNED_ORDER_TTL_MIN = 240   # 4 ore
 
 
 def _get_soglie() -> dict:
-    """Legge soglie precondizioni da config; fallback a DEFAULT_SOGLIE."""
+    """Legge soglie precondizioni da config; fallback a DEFAULT_SOGLIE.
+
+    08/05: backward compat per chiave legacy `drl_residuo_pct` se presente
+    nei file (interpretata come % di 600M → convertita a M assoluti).
+    """
     try:
         from config.config_loader import load_global
         gc = load_global()
@@ -79,6 +86,13 @@ def _get_soglie() -> dict:
                     out[k] = int(cfg[k])
                 except (TypeError, ValueError):
                     pass
+        # Migrazione legacy: drl_residuo_pct (%) → drl_residuo_m (M)
+        if "drl_residuo_m" not in cfg and "drl_residuo_pct" in cfg:
+            try:
+                pct = int(cfg["drl_residuo_pct"])
+                out["drl_residuo_m"] = max(0, int(pct * 6))  # 30% × 6 = 180M
+            except (TypeError, ValueError):
+                pass
         return out
     except Exception:
         return dict(DEFAULT_SOGLIE)
@@ -86,41 +100,77 @@ def _get_soglie() -> dict:
 
 # ─── Precondizioni attivazione ─────────────────────────────────────────────
 
-def _master_drl_residuo_pct() -> float:
-    """% residuo del Daily Receiving Limit master.
+def _master_drl_residuo_m() -> float:
+    """Residuo Daily Receiving Limit master in **milioni** (M).
 
-    `daily_recv_limit` è il limite TOTALE giornaliero del master (es. 580M).
-    `inviato_oggi` (calcolato da storico_farm o dal dashboard reader) è
-    quanto già ricevuto oggi. Residuo = (limit - inviato) / limit.
-
-    Returns: 0..100, oppure -1 se non determinabile.
+    Returns:
+        Valore in M (= residuo / 1_000_000), oppure -1 se mai letto.
+        0 = master saturo. Esempio: residuo 280_000_000 → 280.0
     """
     try:
         ms_path = _root() / "data" / "morfeus_state.json"
         if not ms_path.exists():
             return -1.0
         ms = json.loads(ms_path.read_text(encoding="utf-8"))
-        limit = float(ms.get("daily_recv_limit", -1) or -1)
-        if limit <= 0:
+        residuo = ms.get("daily_recv_limit", -1)
+        if residuo is None or int(residuo) < 0:
             return -1.0
-        # Inviato oggi: somma spedizioni di tutte le istanze ordinarie
-        # (escludo master) da storico_farm.json giorno UTC corrente.
-        farm_path = _root() / "data" / "storico_farm.json"
-        oggi_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        if not farm_path.exists():
-            return 100.0   # nessun invio → residuo 100%
-        farm = json.loads(farm_path.read_text(encoding="utf-8"))
-        day = farm.get(oggi_utc) or {}
-        inviato = 0
-        for ist, vals in day.items():
-            if not isinstance(vals, dict):
-                continue
-            # somma tutte e 4 risorse (NETTE post-tassa, già scritte così
-            # da WU58 in poi — vedi storico_farm)
-            for r in ("pomodoro", "legno", "acciaio", "petrolio"):
-                inviato += int(vals.get(r) or 0)
-        residuo = max(0, limit - inviato)
-        return (residuo / limit) * 100.0
+        return float(int(residuo)) / 1_000_000.0
+    except Exception as exc:
+        _log.warning("[ADAPT-SCHED] DRL residuo (M) error: %s", exc)
+        return -1.0
+
+
+def _master_drl_residuo_pct() -> float:
+    """% residuo del Daily Receiving Limit master.
+
+    `daily_recv_limit` letto da OCR = RESIDUO assoluto corrente (decresce
+    nella giornata, reset 00:00 UTC). 0 = master saturo.
+
+    `daily_recv_limit_max` = massimo monotone osservato nel giorno UTC
+    corrente (= stima del limite totale giornaliero). 08/05 patch.
+
+    Pre-08/05 questa funzione interpretava erroneamente `daily_recv_limit`
+    come limite totale e sottraeva inviato_oggi da `storico_farm.json`,
+    causando "N/A" (-1) quando il master era saturo (limit=0).
+
+    Returns: 0..100, oppure -1 se mai letto.
+    """
+    try:
+        ms_path = _root() / "data" / "morfeus_state.json"
+        if not ms_path.exists():
+            return -1.0
+        ms = json.loads(ms_path.read_text(encoding="utf-8"))
+        residuo = ms.get("daily_recv_limit", -1)
+        if residuo is None or int(residuo) < 0:
+            return -1.0   # mai letto (no OCR ancora)
+        residuo = float(residuo)
+        # 0 esplicito → saturo
+        if residuo == 0:
+            return 0.0
+        # Stima limite giornaliero: max monotone osservato (preferito) >
+        # config statica > default 600M (~stima VIP medio).
+        max_lim = 0
+        ms_max = ms.get("daily_recv_limit_max")
+        if ms_max and int(ms_max) > 0:
+            max_lim = int(ms_max)
+        if max_lim <= 0:
+            try:
+                gc_path = _root() / "config" / "global_config.json"
+                if gc_path.exists():
+                    gc = json.loads(gc_path.read_text(encoding="utf-8"))
+                    cfg_max = (gc.get("rifornimento_comune") or {}).get(
+                        "daily_recv_limit_max", 0)
+                    if cfg_max and int(cfg_max) > 0:
+                        max_lim = int(cfg_max)
+            except Exception:
+                pass
+        if max_lim <= 0:
+            max_lim = 600_000_000   # fallback prudente
+        # Clamp 0..100 (max_lim può essere stato sottostimato se l'OCR ha
+        # registrato solo il residuo basso del giorno)
+        max_lim = max(max_lim, int(residuo))
+        return min(100.0, (residuo / max_lim) * 100.0)
     except Exception as exc:
         _log.warning("[ADAPT-SCHED] DRL residuo error: %s", exc)
         return -1.0
@@ -231,9 +281,12 @@ def should_activate_scheduler() -> tuple[bool, list[str]]:
 
     soglie = _get_soglie()
     reasons: list[str] = []
-    drl_pct = _master_drl_residuo_pct()
-    if drl_pct >= soglie["drl_residuo_pct"]:
-        reasons.append(f"master_residuo={drl_pct:.0f}%>={soglie['drl_residuo_pct']}%")
+    drl_m = _master_drl_residuo_m()
+    # Precondizione: residuo master BASSO (= master quasi saturo) → riordino
+    # ha senso perché le istanze sature crescono e gli slot vanno ottimizzati.
+    # Soglia="≤ N M": scheduler attivo quando residuo <= N. Default 50 M.
+    if drl_m >= 0 and drl_m <= soglie["drl_residuo_m"]:
+        reasons.append(f"master_residuo={drl_m:.0f}M<={soglie['drl_residuo_m']}M")
     if not _rifornimento_abilitato():
         reasons.append("rifornimento_OFF")
     pct_sat = _percentuale_istanze_sature()
@@ -249,7 +302,7 @@ def get_status() -> dict:
     """Status completo per dashboard: flag + soglie + valori live + reasons."""
     enabled, shadow = _flags_status()
     soglie = _get_soglie()
-    drl_pct = _master_drl_residuo_pct()
+    drl_m = _master_drl_residuo_m()
     rif_on = _rifornimento_abilitato()
     pct_sat = _percentuale_istanze_sature()
     sped = _spedizioni_oggi_totali()
@@ -261,7 +314,7 @@ def get_status() -> dict:
         "reasons":      reasons,
         "thresholds":   soglie,
         "live": {
-            "drl_residuo_pct":  round(drl_pct, 1) if drl_pct >= 0 else None,
+            "drl_residuo_m":    round(drl_m, 1) if drl_m >= 0 else None,
             "rifornimento_on":  rif_on,
             "pct_istanze_sat":  round(pct_sat, 1),
             "spedizioni_oggi":  sped,
@@ -442,13 +495,16 @@ def _stima_durata_istanza_min(istanza: str) -> float:
 
 
 def ordina_istanze_adaptive(istanze: list[str],
-                              master_excluded: bool = True) -> list[dict]:
+                              master_excluded: bool = True,
+                              log_fn=None) -> list[dict]:
     """Greedy adattivo: ordina istanze per `slot_liberi_atteso` decrescente.
 
     Args:
         istanze: lista nomi istanze ordinarie (master tipicamente escluso).
         master_excluded: se True, master FauMorfeus (se presente) viene
                          appeso a fine lista senza partecipare al ranking.
+        log_fn: callable opzionale `log_fn(msg: str)`. Se passato, emette un
+                trace step-by-step del greedy con candidati + score + scelto.
 
     Returns:
         list[dict] in ordine ottimale, ciascuno con campi di
@@ -462,6 +518,10 @@ def ordina_istanze_adaptive(istanze: list[str],
         - t_avvio_min[i+1] = t_avvio_min[i] + T_predicted_istanza_scelta
         - ripete con istanze rimanenti
     """
+    def _trace(msg: str) -> None:
+        if log_fn is not None:
+            try: log_fn(f"[ADAPT-TRACE] {msg}")
+            except Exception: pass
     try:
         from shared.instance_meta import is_master_instance
     except Exception:
@@ -478,8 +538,12 @@ def ordina_istanze_adaptive(istanze: list[str],
     risultato: list[dict] = []
     rimanenti = list(ordinarie)
     t_offset = 0.0
+    step = 0
+
+    _trace(f"start greedy · ordinarie={len(ordinarie)} master={len(master)}")
 
     while rimanenti:
+        step += 1
         # Calcola score per tutte le rimanenti al momento `t_offset`
         scores = [compute_slot_liberi_atteso(ist, t_offset_min=t_offset)
                   for ist in rimanenti]
@@ -488,13 +552,28 @@ def ordina_istanze_adaptive(istanze: list[str],
         scores.sort(key=lambda x: (x["score"], x["anzianita_tick_min"]),
                     reverse=True)
 
+        # Trace candidati (compatto, max 4 per step per non saturare log)
+        if log_fn is not None:
+            cand_str = " | ".join(
+                f"{s['ist']}:sla={s['slot_liberi_atteso']}/{s['totali']}"
+                f"(now={s['slot_liberi_now']},rientri={s['rientro_atteso']},"
+                f"elap={s['elapsed_min']:.0f}m)"
+                for s in scores[:4]
+            )
+            extra = f" +{len(scores) - 4}" if len(scores) > 4 else ""
+            _trace(f"step{step} t={t_offset:5.1f}m | {cand_str}{extra}")
+
         scelto = scores[0]
         scelto["t_avvio_min"] = round(t_offset, 1)
         risultato.append(scelto)
         rimanenti.remove(scelto["ist"])
 
         # Avanza offset di durata stimata istanza scelta + tick_sleep ratio
-        t_offset += _stima_durata_istanza_min(scelto["ist"])
+        durata_scelto = _stima_durata_istanza_min(scelto["ist"])
+        _trace(f"  → scelto: {scelto['ist']} (sla={scelto['slot_liberi_atteso']}, "
+               f"anzianità={scelto['anzianita_tick_min']:.0f}m) · "
+               f"avanza t_offset +{durata_scelto:.1f}m → {t_offset + durata_scelto:.1f}m")
+        t_offset += durata_scelto
 
     # Master in fondo (con t_avvio_min finale)
     for m in master:
@@ -505,7 +584,11 @@ def ordina_istanze_adaptive(istanze: list[str],
             "data_completa": False,
             "is_master": True,
         })
+        _trace(f"  master: {m} t_avvio={t_offset:.1f}m (sempre fondo)")
         t_offset += _stima_durata_istanza_min(m)
+
+    if log_fn is not None:
+        _trace(f"end · T_ciclo_atteso={t_offset:.1f}m · ordine={[r['ist'] for r in risultato]}")
 
     return risultato
 
@@ -645,7 +728,7 @@ if __name__ == "__main__":
 
     active, reasons = should_activate_scheduler()
     print(f"=== Precondizioni: {'ATTIVO' if active else 'OFF'} ===")
-    print(f"  master_drl_residuo_pct = {_master_drl_residuo_pct():.1f}%")
+    print(f"  master_drl_residuo_m   = {_master_drl_residuo_m():.1f}M")
     print(f"  rifornimento_abilitato = {_rifornimento_abilitato()}")
     print(f"  istanze_sature_pct     = {_percentuale_istanze_sature():.1f}%")
     print(f"  spedizioni_oggi        = {_spedizioni_oggi_totali()}")
