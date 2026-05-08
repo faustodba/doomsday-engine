@@ -393,8 +393,9 @@ def compute_slot_liberi_atteso(istanza: str,
 
     if invii_record is None:
         # No invii nella storia → non possiamo stimare rientri.
-        # Conservativo: assume slot_liberi_atteso = slot_liberi_now
-        return {
+        # Conservativo: assume slot_liberi_atteso = slot_liberi_now.
+        # Tentativo di blend empirico usando gap = anzianita_tick + t_offset.
+        out = {
             "ist": istanza,
             "totali": int(totali),
             "attive_now": int(attive_now),
@@ -407,6 +408,7 @@ def compute_slot_liberi_atteso(istanza: str,
             "anzianita_tick_min": round(anz_min, 1),
             "data_completa": False,
         }
+        return _blend_with_empirical(out, istanza, anz_min + t_offset_min)
 
     # Calcola T_marcia per ogni invio
     invii = invii_record["raccolta"]["invii"]
@@ -417,8 +419,8 @@ def compute_slot_liberi_atteso(istanza: str,
             t_marce.append(t)
 
     if not t_marce:
-        # Dati pre-WU116 (load=-1) → conservativo
-        return {
+        # Dati pre-WU116 (load=-1) → conservativo + blend empirico se disponibile.
+        out = {
             "ist": istanza,
             "totali": int(totali),
             "attive_now": int(attive_now),
@@ -431,6 +433,7 @@ def compute_slot_liberi_atteso(istanza: str,
             "anzianita_tick_min": round(anz_min, 1),
             "data_completa": False,
         }
+        return _blend_with_empirical(out, istanza, anz_min + t_offset_min)
 
     # Elapsed dal record con invii
     try:
@@ -449,7 +452,7 @@ def compute_slot_liberi_atteso(istanza: str,
 
     slot_liberi_atteso = max(0, int(totali) - int(attive_now) + rientri)
 
-    return {
+    out = {
         "ist": istanza,
         "totali": int(totali),
         "attive_now": int(attive_now),
@@ -462,6 +465,9 @@ def compute_slot_liberi_atteso(istanza: str,
         "anzianita_tick_min": round(anz_min, 1),
         "data_completa": True,
     }
+    # Blend con lookup empirico (proposta A 08/05).
+    # gap_min = elapsed dal record con invii + t_offset_greedy
+    return _blend_with_empirical(out, istanza, elapsed + t_offset_min)
 
 
 def _empty_score(istanza: str) -> dict:
@@ -479,6 +485,80 @@ def _empty_score(istanza: str) -> dict:
         "anzianita_tick_min": 0.0,
         "data_completa": False,
     }
+
+
+# ─── Blend deterministico + empirico (proposta A 08/05) ─────────────────────
+
+def _blend_alpha(n_samples: int) -> float:
+    """Peso deterministico in funzione del numero di sample empirici disponibili.
+
+    Più sample empirici → meno peso al deterministico → più peso a empirico.
+        n>=30  → α=0.3 (peso forte empirico)
+        15-29  → α=0.5 (50/50)
+        5-14   → α=0.7 (peso forte deterministico)
+        <5     → α=1.0 (solo deterministico, no fiducia empirica)
+    """
+    if n_samples >= 30: return 0.3
+    if n_samples >= 15: return 0.5
+    if n_samples >= 5:  return 0.7
+    return 1.0
+
+
+def _blend_with_empirical(out: dict, istanza: str, gap_min: float) -> dict:
+    """Aggiorna `out` con blend deterministico + empirico per slot_liberi_atteso.
+
+    Args:
+        out: dict score uscita di `compute_slot_liberi_atteso` (deterministico).
+        istanza: nome istanza.
+        gap_min: minuti dall'ultimo passaggio (= elapsed + t_offset_greedy).
+
+    Effetto:
+        - Se sample empirici disponibili per (istanza, bucket gap):
+          out["slot_liberi_atteso"] = round(α·det + (1-α)·median_empirical)
+          out["score"] = stesso valore
+          out["empirical"] = {n_samples, median, alpha, det_value, blended_value}
+        - Se nessun sample → out invariato + out["empirical"] = None
+    """
+    try:
+        from core.empirical_slot_predictor import lookup_slot_liberi
+        emp = lookup_slot_liberi(istanza, gap_min)
+    except Exception as exc:
+        _log.debug("[ADAPT-SCHED] empirical lookup error: %s", exc)
+        emp = None
+
+    if emp is None or emp.get("n_samples", 0) == 0:
+        out["empirical"] = None
+        return out
+
+    n = int(emp["n_samples"])
+    alpha = _blend_alpha(n)
+    det_val = float(out.get("slot_liberi_atteso", 0))
+    emp_val = float(emp.get("median", 0.0))
+
+    if alpha >= 1.0:
+        # Solo deterministico, niente blend (ma esponi info)
+        out["empirical"] = {
+            "n_samples":   n,
+            "median":      emp_val,
+            "alpha":       1.0,
+            "det_value":   det_val,
+            "blended":     det_val,
+            "bucket":      emp.get("bucket_label", ""),
+        }
+        return out
+
+    blended = round(alpha * det_val + (1.0 - alpha) * emp_val)
+    out["slot_liberi_atteso"] = int(blended)
+    out["score"] = float(blended)
+    out["empirical"] = {
+        "n_samples":   n,
+        "median":      emp_val,
+        "alpha":       round(alpha, 2),
+        "det_value":   det_val,
+        "blended":     float(blended),
+        "bucket":      emp.get("bucket_label", ""),
+    }
+    return out
 
 
 # ─── Ordinamento adattivo greedy ───────────────────────────────────────────
@@ -593,10 +673,16 @@ def ordina_istanze_adaptive(istanze: list[str],
 
         # Trace candidati (compatto, max 4 per step per non saturare log)
         if log_fn is not None:
+            def _emp_str(s: dict) -> str:
+                """Format compatto info empirical (se presente)."""
+                e = s.get("empirical")
+                if not e:
+                    return ""
+                return f",emp={e['blended']:.0f}/n{e['n_samples']}α{e['alpha']:.1f}"
             cand_str = " | ".join(
                 f"{s['ist']}:sla={s['slot_liberi_atteso']}/{s['totali']}"
                 f"(now={s['slot_liberi_now']},rientri={s['rientro_atteso']},"
-                f"elap={s['elapsed_min']:.0f}m)"
+                f"elap={s['elapsed_min']:.0f}m{_emp_str(s)})"
                 for s in scores[:4]
             )
             extra = f" +{len(scores) - 4}" if len(scores) > 4 else ""
