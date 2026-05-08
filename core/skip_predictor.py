@@ -243,7 +243,12 @@ def _calc_t_marcia_min(invio: dict, istanza: str) -> Optional[float]:
     """
     Stima T_marcia totale (andata + raccolta + ritorno) in minuti per 1 invio.
 
-    Formula: T_marcia = 2 × eta_marcia_min + saturazione × T_L_max[livello, istanza]
+    Formula: T_marcia = (2 × eta_marcia_min + saturazione × T_L_max[livello, istanza]) × coef
+
+    `coef` da calibrazione closed-loop (proposta B 08/05): coefficiente
+    moltiplicativo per (istanza, livello) auto-calibrato dal bias storico
+    predicted vs real (file `data/predictor_t_l_calibration.json`). Default
+    1.0 quando insufficienti samples o bias < trigger.
 
     Ritorna None se dati insufficienti (livello o load_squadra mancanti).
     """
@@ -259,7 +264,15 @@ def _calc_t_marcia_min(invio: dict, istanza: str) -> Optional[float]:
     saturazione = min(1.0, load / cap)
     eta_min = eta_s / 60.0
     t_l_max = _get_t_l_max_min(istanza, livello)
-    return 2 * eta_min + saturazione * t_l_max
+    t_marcia = 2 * eta_min + saturazione * t_l_max
+    # Calibrazione closed-loop (proposta B 08/05)
+    try:
+        from core.t_marcia_calibration import get_calibration_coef
+        coef = get_calibration_coef(istanza, livello)
+        t_marcia *= coef
+    except Exception:
+        pass
+    return t_marcia
 
 
 def _predict_gap_minutes() -> float:
