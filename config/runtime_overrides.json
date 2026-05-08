@@ -65,6 +65,19 @@
     },
     "debug_tasks": {
       "zaino": false
+    },
+    "notifications": {
+      "from_addr": "bot.dooms.report@gmail.com",
+      "recipients": [
+        "fausto.pace@gmail.com"
+      ],
+      "enabled": false,
+      "daily_report_enabled": true,
+      "daily_report_hour_utc": 6,
+      "smtp": {
+        "host": "smtp.gmail.com",
+        "port": 465
+      }
     }
   },
   "istanze": {
@@ -74,7 +87,6 @@
       "tipologia": "full",
       "fascia_oraria": null,
       "max_squadre": 5,
-      "layout": null,
       "livello": 7
     },
     "FAU_01": {
@@ -83,7 +95,6 @@
       "tipologia": "full",
       "fascia_oraria": null,
       "max_squadre": 4,
-      "layout": null,
       "livello": 6
     },
     "FAU_02": {
@@ -92,7 +103,6 @@
       "tipologia": "full",
       "fascia_oraria": null,
       "max_squadre": 4,
-      "layout": null,
       "livello": 6
     },
     "FAU_03": {
@@ -101,7 +111,6 @@
       "tipologia": "full",
       "fascia_oraria": null,
       "max_squadre": 4,
-      "layout": null,
       "livello": 6
     },
     "FAU_04": {
@@ -110,7 +119,6 @@
       "tipologia": "full",
       "fascia_oraria": null,
       "max_squadre": 4,
-      "layout": null,
       "livello": 6
     },
     "FAU_05": {
@@ -119,7 +127,6 @@
       "tipologia": "full",
       "fascia_oraria": null,
       "max_squadre": 4,
-      "layout": null,
       "livello": 6
     },
     "FAU_06": {
@@ -128,7 +135,6 @@
       "tipologia": "full",
       "fascia_oraria": null,
       "max_squadre": 4,
-      "layout": null,
       "livello": 6
     },
     "FAU_07": {
@@ -137,7 +143,6 @@
       "tipologia": "full",
       "fascia_oraria": null,
       "max_squadre": 4,
-      "layout": null,
       "livello": 6
     },
     "FAU_08": {
@@ -146,7 +151,6 @@
       "tipologia": "full",
       "fascia_oraria": null,
       "max_squadre": 4,
-      "layout": null,
       "livello": 6
     },
     "FAU_09": {
@@ -155,7 +159,6 @@
       "tipologia": "full",
       "fascia_oraria": null,
       "max_squadre": 4,
-      "layout": null,
       "livello": 6
     },
     "FauMorfeus": {
@@ -164,7 +167,6 @@
       "tipologia": "raccolta_only",
       "fascia_oraria": null,
       "max_squadre": 5,
-      "layout": null,
       "livello": 7,
       "master": true
     },
@@ -174,7 +176,6 @@
       "tipologia": "full",
       "fascia_oraria": null,
       "max_squadre": 4,
-      "layout": null,
       "livello": 6
     }
   }

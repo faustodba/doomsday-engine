@@ -58,6 +58,153 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 08/05/2026 (pomeriggio/sera) — WU140..WU142 (architettura static/dynamic + cleanup + dashboard refactor UI)
+
+#### WU140 — Architettura config STATICA vs DINAMICA + bootstrap/reset
+
+Regola architetturale vincolante per tutti gli endpoint dashboard:
+- **STATIC** (`global_config.json` + `instances.json`): parametri iniziali al fresh boot. Modificabile SOLO da `/ui/config/global`. NON hot-reload.
+- **DYNAMIC** (`runtime_overrides.json`): stato runtime corrente. Modificabile SOLO da HOME. Hot-reload.
+- **Bootstrap**: primo avvio senza dynamic → copia static→dynamic
+- **Reset**: endpoint `POST /api/config/reset` ricrea dynamic da static (`force=True`)
+- I 2 piani sono **indipendenti** durante il funzionamento; match solo in bootstrap/reset
+
+Implementazione:
+- `config/config_loader.py`: `bootstrap_runtime_from_static_if_missing()` + `_build_runtime_from_static()` (deep copy, esclude mumu/_note)
+- `main.py`: hook bootstrap pre-load
+- `api_config_overrides.py`: endpoint `POST /reset` + refactor PUT /istanze (solo static), PUT /istanze/truppe (solo static), PATCH /overrides/istanze (solo dynamic)
+- `api_notifications.py`, `api_adaptive_scheduler.py`: refactor PATCH → scrivono `global_config.json`
+- `config_global.html`: banner giallo + bottone "↺ reset runtime"
+- 17 endpoint conformi, smoke test 7/7
+
+#### WU141 — Cleanup file statici (instances.json + global_config.json)
+
+`instances.json`:
+- Rimosso campo `layout` (deprecato WU22 — TM dinamico)
+- Rimosso campo `lingua` (sempre EN, non più supportato)
+- `livello` allineato a valori dynamic correnti (FAU_01..FAU_08 7→6, FAU_00/FauMorfeus 7)
+
+`global_config.json` — sezioni complete per garantire bootstrap funzionante:
+- `truppe.caserme = {infantry, rider, ranged, engine: True}`
+- `notifications.{enabled=true, from_addr=bot.dooms.report@gmail.com, recipients=[fausto.pace@gmail.com]}`
+- `debug_tasks = {}`
+
+Bug fix correlati:
+- `_InstanceCfg`: rimossi `cfg.layout` e `cfg.lingua` (codice morto)
+- `IstanzaOverride`: rimosso `layout`, enum `TipologiaIstanza` rimossa "raccolta" (alias morto di "full")
+- `save_instances_fields::allowed_fields`: esteso da 4 a 8 campi (abilitata, truppe, profilo, fascia_oraria, max_squadre, livello, raccolta_fuori_territorio, master, truppe_override)
+- Save tipologia: `.value` invece di `str()` (era `"TipologiaIstanza.full"` invece di `"full"`)
+
+#### WU142 — Dashboard refactor UI completo
+
+**Card istanza HOME** con controlli inline:
+- 6 campi compatti su 2 righe (ON/FT/truppe/livello→**nodo**/max_sq→**squadre** + tipologia/save)
+- PATCH real-time → dynamic, auto-refresh sospeso in editing, scroll preservato
+- Master FauMorfeus inclusa
+- Tabella istanze in fondo HOME RIMOSSA (sostituita)
+
+**Pagina `/ui/advanced` NEW**:
+- Tabella istanze bulk (configurazione veloce, save SEQUENZIALE per evitare race condition)
+- Addestramento truppe (default globale + override per istanza)
+- Link nav top-bar tra HOME e telemetria
+
+**`/ui/predictor`**:
+- Sezione "⚙ configurazione predictor (WU89)" **SOPRA a tutto** (era ultima)
+- Toggle abilitato + shadow + bottone salva + guida utilizzo collassabile
+- Sezione predictor RIMOSSA dalla card sistema HOME
+
+**`/ui/telemetria`** 3 pannelli rimossi (ridondanti):
+- 🔄 ciclo corrente
+- ⏱ tempi medi task 7gg IQR
+- 🛡 copertura squadre 5 cicli
+
+**`/ui/storico`** ELIMINATA (route + link nav rimossi).
+
+**`/ui/config/global`** ridotto:
+- Sezione truppe → spostata in `/ui/advanced`
+- Banner reset runtime in cima
+- Sezioni rimaste: cfg4 cards · restart scheduler · email notifier · adaptive scheduler · istanze default · mumu read-only
+
+**7 bug fix UI**:
+1. `partial_ist_table` leggeva `livello`/`max_squadre` solo da static → tabella bulk mostrava sempre static dopo save → fix override>base
+2. Race condition save bulk `Promise.all` 12 PATCH → "alcune righe fallite" intermittente → serializzazione `for await`
+3. Card home generata inline da `partial_produzione_istanze`, non da template orfano `card_istanza.html` → helper `_build_ctrl_block_html` chiamato nel ciclo
+4. Auto-refresh HOME perdeva valori in editing → listener `htmx:beforeRequest` cancella refresh se input dei controlli in focus
+5. Refresh post-save scrollava in fondo → listener `htmx:afterSwap` ripristina `scrollY`
+6. Save tipologia: enum repr `"TipologiaIstanza.full"` invece di `"full"` → `.value` invece di `str()`
+7. Voce select `tipologia="raccolta"` alias morto rimossa (era identica a `full` lato bot)
+
+Memoria: `project_dashboard_refactor_08_05.md`.
+
+---
+
+### Sessione 08/05/2026 (mattina) — WU137..WU139 (Email Notifier completo + Adaptive Scheduler + bug dashboard save merge)
+
+**Tre milestone implementate**:
+
+#### WU137 — Email Notifier (fase 1 + enrichment)
+
+Step A-F completi + 6 sezioni daily report enriched.
+
+File creati (6):
+- `shared/mailer.py` — client SMTP minimale (`send_email(to, subj, body, html, from_addr) → bool`)
+- `shared/secrets.py` — storage app password write-only (`data/secrets.json`, gitignored, mai esposto da API)
+- `core/notifier.py` — queue persistente JSONL + dispatcher async + retry exponential backoff (1m/5m/15m/1h/4h × 5)
+- `core/daily_report.py` — builder 10 sezioni: cicli/produzione/trend7gg/rifornimento/truppe/performance/boot/copertura/eventi/anomalie
+- `dashboard/routers/api_notifications.py` — REST endpoint
+- `dashboard/templates/partials/notifications_card.html` — UI card HTMX
+
+Modifiche:
+- `dashboard/models.py` + `config/config_loader.py` + `config/global_config.json` — schema `globali.notifications.*`
+- `main.py` — hook post-ciclo `maybe_send_daily_report()` + dispatcher boot atexit
+- `.gitignore` — `data/secrets.json`
+
+Tutto **parametrico** via runtime_overrides (default Python vuoti, helper `load_effective_notifications()` merge baseline+overrides). Validato end-to-end con `bot.dooms.report@gmail.com` → `fausto.pace@gmail.com`. Daily report giornaliero auto a `daily_report_hour_utc` (default 6 = 8 CEST).
+
+#### WU138 — Adaptive Scheduler ordine istanze
+
+Sostituisce skip_predictor statico con riordino adattivo del ciclo.
+
+File creati (2):
+- `core/adaptive_scheduler.py` — modulo principale (350 righe): `should_activate_scheduler()`, `compute_slot_liberi_atteso()`, `ordina_istanze_adaptive()` greedy, persistence `data/scheduler_planned_order.json`, resume post-restart
+- `dashboard/routers/api_adaptive_scheduler.py` + `dashboard/templates/partials/adaptive_scheduler_card.html`
+
+Logica:
+- Greedy: ad ogni step seleziona istanza con `slot_liberi_atteso(t_avvio_offset)` massimo
+- Score = `totali - (attive_now - rientri_previsti_entro_t_offset)` via modello `T_marcia` da skip_predictor
+- Master FauMorfeus sempre fissa fondo
+- **Mai skip totale** — tutte le istanze processate sempre (anche per analisi slot)
+
+4 precondizioni in OR (modificabili da dashboard):
+1. Master DRL residuo ≥ 30% (default)
+2. Rifornimento OFF da dashboard
+3. ≥ 50% istanze sature (provviste_esaurite=True)
+4. Spedizioni oggi > 100
+
+2 flag operativi:
+- `adaptive_scheduler_enabled` (default False)
+- `adaptive_scheduler_shadow_only` (default True)
+
+3 stati: OFF / SHADOW (calcola+logga, no riordino) / LIVE (applica + persistence + resume)
+
+UI dashboard: card 🎯 con stato live + 2 toggle + 3 input soglie + indicatori ✓/· per condizione.
+
+#### WU139 — Bug dashboard PUT endpoint (Pydantic default_factory sovrascriveva campi)
+
+**Sintomo utente**: salvi una sezione e altri campi cambiano:
+- `acciaio_abilitato` true → false
+- `rifugio.coord_y` 529 → 532
+- allocazione raccolta {35,35,20,10} → {25,25,25,25}
+- `tick_sleep_min` reset
+
+**Root cause**: `PayloadRifornimento.rifornimento_comune = Field(default_factory=RifornimentoComuneOverride)` con default Pydantic `acciaio_abilitato=False`. Invio parziale → Pydantic rifabbricava modello con tutti default. `ov.globali.rifornimento_comune = payload.rifornimento_comune` sostituiva in toto.
+
+**Fix**: refactor 4 endpoint PUT (`rifornimento`, `allocazione`, `zaino`, `globals`) per parsare JSON raw via `await request.json()` e applicare SOLO le chiavi esplicitamente presenti via `setattr` field-by-field. Backward compatible.
+
+Test 4/4 verdi: invio parziale preserva tutti gli altri campi. Memoria `feedback_dashboard_save_merge.md` con pattern obbligatorio per nuovi endpoint futuri.
+
+---
+
 ### Sessione 06/05/2026 — WU129..WU136 (telemetria fix + arena segna_esaurite + truppe nuovo schema + raccolta_fast attivata)
 
 Sessione consolidata in 8 commit:

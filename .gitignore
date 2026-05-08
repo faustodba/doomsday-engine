@@ -59,3 +59,7 @@ env/
 # Handoff di sessione — solo locale, non versionato
 .claude/SESSION.md.claude/settings.local.json
 .claude/settings.local.json
+
+# Secrets (Email Notifier app password) — mai in git
+data/secrets.json
+data/secrets.json.tmp

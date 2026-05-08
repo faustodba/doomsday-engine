@@ -1,0 +1,255 @@
+{% extends "base.html" %}
+{% block title %}Advanced — Doomsday Engine{% endblock %}
+
+{% block content %}
+{# 08/05: pagina advanced — operazioni bulk istanze + truppe.
+   Estrae da config_global le 2 sezioni che servivano "configurazione veloce".
+   Restart bot e mail rimangono in /ui/config/global. #}
+
+<!-- ── TABELLA ISTANZE BULK (operazioni rapide su tutte le istanze) ─── -->
+<div class="section">
+  <div class="sec-label">istanze — configurazione bulk veloce</div>
+  <div style="background:rgba(0,0,0,0.04);border:1px solid var(--border);border-radius:6px;
+              padding:8px 12px;margin-bottom:10px;font-size:12px;color:var(--text-dim)">
+    Modifiche real-time → scrivono su <code>runtime_overrides.json</code> (dynamic).
+    Per modificare i default statici (parametri iniziali) usa <a href="/ui/config/global">config</a>.
+  </div>
+  <div style="overflow-x:auto">
+    <table class="ist-tbl">
+      <thead><tr>
+        <th>on</th><th>nome</th><th>truppe</th>
+        <th title="max squadre concorrenti">squadre</th>
+        <th>prof.</th>
+        <th title="livello nodo target">nodo</th>
+        <th title="raccolta fuori territorio (WU50)">FT</th>
+        <th>fascia oraria</th>
+      </tr></thead>
+      <tbody id="adv-ist-tbody"
+             hx-get="/ui/partial/ist-table"
+             hx-trigger="load"
+             hx-swap="innerHTML">
+        <tr><td colspan="8" style="color:var(--text-dim);font-size:9px;padding:8px">caricamento...</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <div class="save-row" style="margin-top:10px">
+    <button class="btn btn-primary" onclick="advSalvaIstanze()">⬡ salva istanze</button>
+    <span class="save-note">modifiche real-time hot-reload</span>
+    <span class="save-ok" id="adv-ist-ok">✓ salvato</span>
+    <span class="save-err" id="adv-ist-err"></span>
+  </div>
+</div>
+
+<div class="divider"></div>
+
+<!-- ── ADDESTRAMENTO TRUPPE (default + override per istanza) ─── -->
+{% set tr_cfg = cfg.get('truppe', {}) %}
+{% set tr_cas = tr_cfg.get('caserme', {}) %}
+<div class="section">
+  <div class="sec-label">🪖 addestramento truppe — default globale + override per istanza</div>
+
+  <div style="background:rgba(245,197,66,0.06);border:1px solid var(--border);
+              border-radius:6px;padding:10px 14px;margin-bottom:14px">
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <span style="font-weight:600">default globale</span>
+      <span style="color:var(--text-dim);font-size:11px">applicato a tutte le istanze tranne quelle con override esplicito</span>
+    </div>
+    <div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:10px">
+      {% for k, lbl, ico in [('infantry','Infantry','🪖'),('rider','Rider','🐎'),('ranged','Ranged','🏹'),('engine','Engine','⚙')] %}
+      <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
+        <input type="checkbox" id="adv-truppe-g-{{ k }}"
+               {% if tr_cas.get(k, True) %}checked{% endif %}>
+        <span>{{ ico }} {{ lbl }}</span>
+      </label>
+      {% endfor %}
+    </div>
+    <div style="margin-top:10px">
+      <button class="btn btn-primary" onclick="advSalvaTruppeGlobali()">⬡ salva default globale</button>
+      <span class="save-ok" id="adv-truppe-ok">✓ salvato</span>
+      <span class="save-err" id="adv-truppe-err"></span>
+    </div>
+  </div>
+
+  <div class="sec-label" style="margin:14px 0 8px">override per istanza · null = eredita default</div>
+  <div style="overflow-x:auto">
+    <table class="ist-tbl">
+      <thead>
+        <tr>
+          <th>nome</th>
+          <th>🪖 Inf</th>
+          <th>🐎 Rid</th>
+          <th>🏹 Ran</th>
+          <th>⚙ Eng</th>
+          <th>azione</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ist in instances %}
+        {% set ov_full = overrides.get('istanze', {}).get(ist.nome, {}) %}
+        {% set tr_ov = (ov_full.get('truppe_override') or {}).get('caserme', {}) %}
+        {% set is_master = ist.nome in master_names %}
+        <tr data-nome="{{ ist.nome }}" class="adv-truppe-row">
+          <td>
+            <span style="font-family:var(--font-mono);font-weight:600">{{ ist.nome }}</span>
+            {% if is_master %}<span title="master" style="color:#f5c542;font-weight:700;margin-left:4px">★</span>{% endif %}
+          </td>
+          {% for k in ['infantry','rider','ranged','engine'] %}
+          <td>
+            <select class="adv-truppe-ov" data-key="{{ k }}" style="width:84px;font-size:10px">
+              <option value="" {% if tr_ov.get(k) is none %}selected{% endif %}>(default)</option>
+              <option value="true"  {% if tr_ov.get(k)==True %}selected{% endif %}>ON</option>
+              <option value="false" {% if tr_ov.get(k)==False %}selected{% endif %}>OFF</option>
+            </select>
+          </td>
+          {% endfor %}
+          <td>
+            <button class="btn" style="padding:2px 8px;font-size:10px"
+                    onclick="advResetTruppeIstanza('{{ ist.nome }}')">↻ reset</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="save-row" style="margin-top:10px">
+    <button class="btn btn-primary" onclick="advSalvaTruppeIstanze()">⬡ salva override istanze</button>
+    <span class="save-note">scrive su instances.json (static · regola architetturale)</span>
+    <span class="save-ok" id="adv-truppe-ist-ok">✓ salvato</span>
+    <span class="save-err" id="adv-truppe-ist-err"></span>
+  </div>
+</div>
+
+<script>
+// Helpers locali (prefix `adv-` per evitare collisioni)
+const advG = (id) => document.getElementById(id);
+const advGb = (id) => advG(id)?.checked === true;
+
+function advShowMsg(okId, errId, ok, errMsg) {
+  const okEl = advG(okId), errEl = advG(errId);
+  if (ok) {
+    if (okEl) { okEl.style.opacity = '1'; setTimeout(()=>okEl.style.opacity='0', 3000); }
+    if (errEl) errEl.style.opacity = '0';
+  } else {
+    if (errEl) { errEl.textContent = errMsg || 'errore'; errEl.style.opacity = '1';
+                 setTimeout(()=>errEl.style.opacity='0', 5000); }
+    if (okEl) okEl.style.opacity = '0';
+  }
+}
+
+// ── Istanze bulk (real-time → dynamic) ──────────────────────────────────────
+// 08/05: chiamate SERIALIZZATE invece di Promise.all per evitare race condition
+// sul file runtime_overrides.json (ogni PATCH fa load+save, parallel = collisioni).
+async function advSalvaIstanze() {
+  const rows = Array.from(document.querySelectorAll('#adv-ist-tbody tr[data-nome]'));
+  let okCount = 0;
+  let failCount = 0;
+  const failNames = [];
+  for (const tr of rows) {
+    const nome = tr.dataset.nome;
+    if (!nome) continue;
+    const da = tr.querySelector('.ist-fascia-da')?.value;
+    const a  = tr.querySelector('.ist-fascia-a')?.value;
+    const payload = {
+      abilitata:    tr.querySelector('.ist-cb')?.checked ?? true,
+      truppe:       parseInt(tr.querySelector('.ist-truppe')?.value)||0,
+      tipologia:    tr.querySelector('.ist-prof')?.value||'full',
+      fascia_oraria: (da||a) ? `${da||'00:00'}-${a||'23:59'}` : null,
+      max_squadre:  parseInt(tr.querySelector('.ist-sq')?.value)||null,
+      livello:      parseInt(tr.querySelector('.ist-lv')?.value)||null,
+      raccolta_fuori_territorio: tr.querySelector('.ist-fuori-terr')?.checked ?? false,
+    };
+    try {
+      const r = await fetch('/api/config/overrides/istanze/' + encodeURIComponent(nome), {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      if (r.ok) {
+        okCount++;
+      } else {
+        failCount++;
+        failNames.push(nome);
+      }
+    } catch (e) {
+      failCount++;
+      failNames.push(nome);
+    }
+  }
+  if (failCount === 0) {
+    advShowMsg('adv-ist-ok', 'adv-ist-err', true,
+               `✓ ${okCount} istanze salvate`);
+  } else {
+    advShowMsg('adv-ist-ok', 'adv-ist-err', false,
+               `${okCount} ok, ${failCount} fallite: ${failNames.join(', ')}`);
+  }
+}
+
+// ── Truppe default globale (CONFIG → static) ────────────────────────────────
+async function advSalvaTruppeGlobali() {
+  const payload = {
+    truppe: {
+      caserme: {
+        infantry: advGb('adv-truppe-g-infantry'),
+        rider:    advGb('adv-truppe-g-rider'),
+        ranged:   advGb('adv-truppe-g-ranged'),
+        engine:   advGb('adv-truppe-g-engine'),
+      },
+    },
+  };
+  try {
+    const r = await fetch('/api/config/global', {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const j = await r.json().catch(() => ({}));
+    advShowMsg('adv-truppe-ok', 'adv-truppe-err', r.ok, j.detail || '');
+  } catch (e) {
+    advShowMsg('adv-truppe-ok', 'adv-truppe-err', false, e.message);
+  }
+}
+
+// ── Truppe override per istanza (CONFIG → instances.json) ───────────────────
+async function advSalvaTruppeIstanze() {
+  const istanze = {};
+  document.querySelectorAll('tr.adv-truppe-row[data-nome]').forEach(tr => {
+    const sel = tr.querySelectorAll('.adv-truppe-ov');
+    if (!sel.length) return;
+    const nome = tr.dataset.nome;
+    const caserme = {};
+    let any_override = false;
+    sel.forEach(s => {
+      const v = s.value;
+      if (v === '') {
+        caserme[s.dataset.key] = null;
+      } else {
+        caserme[s.dataset.key] = (v === 'true');
+        any_override = true;
+      }
+    });
+    if (any_override) {
+      istanze[nome] = { truppe_override: { caserme } };
+    } else {
+      istanze[nome] = { truppe_override: null };
+    }
+  });
+  try {
+    const r = await fetch('/api/config/istanze/truppe', {
+      method: 'PUT',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ istanze }),
+    });
+    const j = await r.json().catch(() => ({}));
+    advShowMsg('adv-truppe-ist-ok', 'adv-truppe-ist-err', r.ok, j.detail || '');
+  } catch (e) {
+    advShowMsg('adv-truppe-ist-ok', 'adv-truppe-ist-err', false, e.message);
+  }
+}
+
+function advResetTruppeIstanza(nome) {
+  const tr = document.querySelector(`tr.adv-truppe-row[data-nome="${nome}"]`);
+  if (!tr) return;
+  tr.querySelectorAll('.adv-truppe-ov').forEach(s => s.value = '');
+}
+</script>
+{% endblock %}

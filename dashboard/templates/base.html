@@ -52,9 +52,9 @@
     {% endif %}
     <nav class="topbar-nav">
       <a href="/ui" class="{% if active=='home' %}active{% endif %}">home</a>
+      <a href="/ui/advanced" class="{% if active=='advanced' %}active{% endif %}">advanced</a>
       <a href="/ui/telemetria" class="{% if active=='telemetria' %}active{% endif %}">telemetria</a>
       <a href="/ui/predictor" class="{% if active=='predictor' %}active{% endif %}">predictor</a>
-      <a href="/ui/storico" class="{% if active=='storico' %}active{% endif %}">storico</a>
       <a href="/ui/config/global" class="{% if active=='global' %}active{% endif %}">config</a>
       <a href="/docs" target="_blank">api</a>
     </nav>
@@ -116,6 +116,79 @@
         alert('Errore: ' + err.message);
       }
     }
+
+    // 08/05 — save controlli card istanza (real-time → dynamic)
+    async function saveCardCtrl(btn, nome) {
+      const card = btn.closest('.card');
+      if (!card) return;
+      const msgEl = card.querySelector('.ic-msg');
+      const setMsg = (txt, color) => {
+        if (!msgEl) return;
+        msgEl.textContent = txt;
+        msgEl.style.color = color || '#888';
+      };
+      setMsg('salvataggio...', '#0066cc');
+      const payload = {
+        abilitata:                 card.querySelector('.ic-on').checked,
+        raccolta_fuori_territorio: card.querySelector('.ic-ft').checked,
+        tipologia:                 card.querySelector('.ic-tip').value,
+        truppe:                    parseInt(card.querySelector('.ic-tr').value || '0', 10),
+        livello:                   parseInt(card.querySelector('.ic-lv').value || '7', 10),
+        max_squadre:               parseInt(card.querySelector('.ic-sq').value || '4', 10),
+      };
+      try {
+        const r = await fetch('/api/config/overrides/istanze/' + encodeURIComponent(nome), {
+          method: 'PATCH',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload),
+        });
+        const j = await r.json().catch(() => ({}));
+        if (r.ok) {
+          setMsg('✓ salvato (effetto al prossimo tick)', '#0a8000');
+          // Refresh container produzione-istanze preservando scroll position
+          if (typeof htmx !== 'undefined') {
+            const scrollY = window.scrollY || window.pageYOffset || 0;
+            // Listener one-shot per ripristinare scroll dopo lo swap
+            const restoreScroll = function(evt) {
+              if (evt.detail && evt.detail.target && evt.detail.target.id === 'prod-istanze') {
+                window.scrollTo(0, scrollY);
+                document.removeEventListener('htmx:afterSwap', restoreScroll);
+              }
+            };
+            document.addEventListener('htmx:afterSwap', restoreScroll);
+            setTimeout(() => htmx.ajax('GET', '/ui/partial/produzione-istanze',
+              {target: '#prod-istanze', swap: 'innerHTML'}), 800);
+          }
+        } else {
+          setMsg('✗ ' + (j.detail || 'errore'), '#c00');
+        }
+      } catch (e) {
+        setMsg('✗ ' + e.message, '#c00');
+      }
+    }
+
+    // 08/05 — Pausa auto-refresh produzione-istanze quando l'utente sta
+    // editando un controllo card (preserva valori che sta digitando).
+    // Il prossimo trigger ciclico riprenderà normalmente quando il focus
+    // esce dai controlli.
+    document.addEventListener('htmx:beforeRequest', function(evt) {
+      try {
+        const target = evt.detail && evt.detail.target;
+        const elt    = evt.detail && evt.detail.elt;
+        // Vincoliamo SOLO al refresh di prod-istanze, non altri pannelli
+        if (target && target.id === 'prod-istanze') {
+          // Skip se un input/select dei controlli card-ctrl è in focus
+          const focused = document.activeElement;
+          if (focused && (focused.tagName === 'INPUT' || focused.tagName === 'SELECT')) {
+            const inCtrl = focused.closest('.card-ctrl');
+            if (inCtrl) {
+              evt.preventDefault();   // cancella questo tick di refresh
+              return;
+            }
+          }
+        }
+      } catch (e) { /* failsafe — non bloccare htmx */ }
+    });
 
     // 06/05 — toggle richiesta restart bot
     async function restartBotToggle(request) {

@@ -1,7 +1,11 @@
+{# Card istanza HOME — info real-time + controlli inline (08/05).
+   Ctrl scrive dynamic via PATCH /api/config/overrides/istanze/{nome}.
+   `fascia_oraria` nascosta per ora (richiesta utente). #}
 {% set stato = s.stato_live %}
 {% set badge_class = "badge-" + stato %}
 {% set is_master = s.master if s.master is defined else False %}
-<div class="card{% if is_master %} card-master{% endif %}">
+{% set ct = ctrl|default({}) %}
+<div class="card{% if is_master %} card-master{% endif %}" data-istanza="{{ s.nome }}">
   <div class="card-header">
     <span class="card-name">{% if is_master %}<span title="master — rifugio destinatario" style="color:#f5c542;font-weight:700;margin-right:4px">★</span>{% endif %}{{ s.nome }}</span>
     <span class="badge {{ badge_class }}">{{ stato }}</span>
@@ -39,6 +43,59 @@
       <span class="card-value" style="color:var(--error)">
         {{ s.ultimo_tick.task_falliti | join(", ") }}
       </span>
+    </div>
+    {% endif %}
+
+    {# ── Sezione controlli inline (real-time → dynamic) ─────────────────── #}
+    {% if ct %}
+    <div class="card-ctrl" style="margin-top:8px;padding:8px;background:rgba(0,0,0,0.04);
+                                    border-radius:4px;border-top:1px solid rgba(0,0,0,0.08)">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px 10px;font-size:11px;align-items:center">
+        <label style="display:flex;align-items:center;gap:4px">
+          <input type="checkbox" class="ic-on" {% if ct.abilitata %}checked{% endif %}>
+          <b>ON</b>
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;justify-self:end">
+          <input type="checkbox" class="ic-ft" {% if ct.raccolta_fuori_territorio %}checked{% endif %}>
+          <span title="raccolta fuori territorio">FT</span>
+        </label>
+
+        <label style="grid-column:1/3;display:flex;align-items:center;gap:6px">
+          <span style="min-width:60px;color:var(--text-dim)">tipologia</span>
+          <select class="ic-tip" style="flex:1;font-size:11px">
+            <option value="full"          {% if ct.tipologia=="full"          %}selected{% endif %}>completo</option>
+            <option value="raccolta_fast" {% if ct.tipologia=="raccolta_fast" %}selected{% endif %}>completo · fast</option>
+            <option value="raccolta_only" {% if ct.tipologia=="raccolta_only" %}selected{% endif %}>solo raccolta</option>
+            {# 08/05: rimossa option 'raccolta' (alias morto, vedi models.py) #}
+          </select>
+        </label>
+
+        <label style="display:flex;align-items:center;gap:4px">
+          <span style="min-width:48px;color:var(--text-dim)">truppe</span>
+          <input type="number" class="ic-tr" min="0" step="100"
+                 value="{{ ct.truppe }}" style="width:70px;font-size:11px">
+        </label>
+        <label style="display:flex;align-items:center;gap:4px;justify-self:end"
+               title="livello nodo target">
+          <span style="color:var(--text-dim)">nodo</span>
+          <input type="number" class="ic-lv" min="1" max="9"
+                 value="{{ ct.livello }}" style="width:42px;font-size:11px">
+        </label>
+
+        <label style="display:flex;align-items:center;gap:4px"
+               title="max squadre concorrenti">
+          <span style="min-width:48px;color:var(--text-dim)">squadre</span>
+          <input type="number" class="ic-sq" min="1" max="6"
+                 value="{{ ct.max_squadre }}" style="width:42px;font-size:11px">
+        </label>
+        <button class="ic-save" type="button"
+                onclick="saveCardCtrl(this, '{{ s.nome }}')"
+                style="padding:3px 10px;font-size:11px;background:var(--accent);
+                       color:#fff;border:0;border-radius:3px;cursor:pointer;justify-self:end">
+          salva
+        </button>
+      </div>
+      <div class="ic-msg" style="font-size:10px;margin-top:4px;min-height:12px"></div>
     </div>
     {% endif %}
   </div>

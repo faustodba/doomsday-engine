@@ -146,7 +146,8 @@ def check_instances() -> tuple[bool, list[dict]]:
         check("instances.json JSON valido", False, str(exc))
         return False, []
 
-    campi_obbligatori = ["nome", "indice", "porta", "truppe", "max_squadre", "layout", "lingua"]
+    # 08/05: rimossi 'layout' (deprecato WU22) e 'lingua' (non più supportato)
+    campi_obbligatori = ["nome", "indice", "porta", "truppe", "max_squadre"]
     tutti_ok = True
     for ist in istanze:
         mancanti = [c for c in campi_obbligatori if c not in ist]

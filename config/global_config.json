@@ -94,5 +94,35 @@
   "raccolta_ocr_debug": false,
   "auto_learn_banner": false,
   "skip_predictor_enabled": false,
-  "skip_predictor_shadow_only": true
+  "skip_predictor_shadow_only": true,
+  "adaptive_scheduler_enabled": false,
+  "adaptive_scheduler_shadow_only": true,
+  "adaptive_scheduler_thresholds": {
+    "drl_residuo_pct": 30,
+    "pct_istanze_sat": 50,
+    "spedizioni_oggi": 100
+  },
+  "notifications": {
+    "enabled": true,
+    "daily_report_enabled": true,
+    "daily_report_hour_utc": 6,
+    "from_addr": "bot.dooms.report@gmail.com",
+    "recipients": [
+      "fausto.pace@gmail.com"
+    ],
+    "smtp": {
+      "host": "smtp.gmail.com",
+      "port": 465
+    }
+  },
+  "truppe": {
+    "_note": "Default 4 caserme abilitate. Override per istanza in instances.json::istanze[].truppe_override.",
+    "caserme": {
+      "infantry": true,
+      "rider": true,
+      "ranged": true,
+      "engine": true
+    }
+  },
+  "debug_tasks": {}
 }

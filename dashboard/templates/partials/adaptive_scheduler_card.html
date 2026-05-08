@@ -1,0 +1,185 @@
+{# 08/05 — Adaptive Scheduler card (HTMX partial)
+   Endpoint: /ui/partial/adaptive-scheduler  (refresh ogni 30s)
+   PATCH:    /api/adaptive-scheduler  (salva flag + soglie)
+#}
+{% set d = data %}
+{% set thr = d.thresholds %}
+{% set live = d.live %}
+
+<div class="tel-card" id="adapt-card-inner" style="padding:14px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+    <span style="font-size:18px">🎯</span>
+    <b>adaptive scheduler</b>
+    <span style="margin-left:auto">
+      {% if not d.enabled %}
+        <span style="color:#c00">○ DISABILITATO</span>
+      {% elif d.shadow_only %}
+        <span style="color:#0066cc">◐ SHADOW</span>
+      {% elif d.active %}
+        <span style="color:#0a8000">● LIVE · attivo</span>
+      {% else %}
+        <span style="color:#888">● LIVE · waiting (no precondizione)</span>
+      {% endif %}
+    </span>
+  </div>
+
+  <!-- 2 flag toggle -->
+  <table style="width:100%;font-size:12px;margin-bottom:10px">
+    <tr>
+      <td style="padding:4px 8px 4px 0;width:50%">
+        <label>
+          <input type="checkbox" id="adapt-enabled" {% if d.enabled %}checked{% endif %}>
+          <b>enabled</b> (master toggle)
+        </label>
+      </td>
+      <td>
+        <label>
+          <input type="checkbox" id="adapt-shadow" {% if d.shadow_only %}checked{% endif %}>
+          <b>shadow only</b> (calcola+logga, non riordina)
+        </label>
+      </td>
+    </tr>
+  </table>
+
+  <!-- 3 soglie precondizioni -->
+  <div style="font-size:12px;margin-bottom:6px"><b>precondizioni attivazione</b> (basta una vera)</div>
+  <table style="width:100%;font-size:12px;border-collapse:collapse">
+    <thead>
+      <tr style="background:#f5f5f5">
+        <th style="padding:4px;text-align:left">condizione</th>
+        <th style="padding:4px;text-align:right">soglia</th>
+        <th style="padding:4px;text-align:right">live</th>
+        <th style="padding:4px;text-align:center">stato</th>
+      </tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td style="padding:4px">master DRL residuo ≥</td>
+        <td style="padding:4px;text-align:right">
+          <input type="number" id="adapt-th-drl" min="0" max="100" style="width:55px"
+                 value="{{ thr.drl_residuo_pct }}">%
+        </td>
+        <td style="padding:4px;text-align:right;font-family:monospace">
+          {% if live.drl_residuo_pct is not none %}
+            {{ live.drl_residuo_pct }}%
+          {% else %}
+            <span style="color:#888">N/A</span>
+          {% endif %}
+        </td>
+        <td style="padding:4px;text-align:center">
+          {% if live.drl_residuo_pct is not none and live.drl_residuo_pct >= thr.drl_residuo_pct %}
+            <span style="color:#0a8000">✓</span>
+          {% else %}
+            <span style="color:#888">·</span>
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:4px">rifornimento OFF da dashboard</td>
+        <td style="padding:4px;text-align:right;color:#888">—</td>
+        <td style="padding:4px;text-align:right;font-family:monospace">
+          {% if live.rifornimento_on %}ON{% else %}OFF{% endif %}
+        </td>
+        <td style="padding:4px;text-align:center">
+          {% if not live.rifornimento_on %}
+            <span style="color:#0a8000">✓</span>
+          {% else %}
+            <span style="color:#888">·</span>
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:4px">istanze sature ≥</td>
+        <td style="padding:4px;text-align:right">
+          <input type="number" id="adapt-th-sat" min="0" max="100" style="width:55px"
+                 value="{{ thr.pct_istanze_sat }}">%
+        </td>
+        <td style="padding:4px;text-align:right;font-family:monospace">
+          {{ live.pct_istanze_sat }}%
+        </td>
+        <td style="padding:4px;text-align:center">
+          {% if live.pct_istanze_sat >= thr.pct_istanze_sat %}
+            <span style="color:#0a8000">✓</span>
+          {% else %}
+            <span style="color:#888">·</span>
+          {% endif %}
+        </td>
+      </tr>
+      <tr>
+        <td style="padding:4px">spedizioni oggi &gt;</td>
+        <td style="padding:4px;text-align:right">
+          <input type="number" id="adapt-th-sped" min="0" max="9999" style="width:65px"
+                 value="{{ thr.spedizioni_oggi }}">
+        </td>
+        <td style="padding:4px;text-align:right;font-family:monospace">
+          {{ live.spedizioni_oggi }}
+        </td>
+        <td style="padding:4px;text-align:center">
+          {% if live.spedizioni_oggi > thr.spedizioni_oggi %}
+            <span style="color:#0a8000">✓</span>
+          {% else %}
+            <span style="color:#888">·</span>
+          {% endif %}
+        </td>
+      </tr>
+    </tbody>
+  </table>
+
+  <!-- Bottoni + status -->
+  <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+    <button class="btn-orange" onclick="adaptSave()">salva</button>
+    <span id="adapt-msg" style="margin-left:8px;font-size:11px;align-self:center"></span>
+  </div>
+
+  <!-- Footer info -->
+  <div style="margin-top:10px;font-size:11px;color:#666;border-top:1px solid #eee;padding-top:8px">
+    {% if d.active %}
+      <b>scheduler attivo</b> — reasons: {{ d.reasons|join(', ') }}
+    {% elif d.enabled %}
+      <b>scheduler abilitato</b> ma nessuna precondizione vera ora — non riordina
+    {% else %}
+      <b>scheduler disabilitato</b> — flag enabled=false
+    {% endif %}
+    <br>
+    <i>Mai skip totale: tutte le istanze processate. Master FauMorfeus sempre fissa in fondo al ciclo.</i>
+  </div>
+</div>
+
+<script>
+(function() {
+  const $ = (id) => document.getElementById(id);
+  const setMsg = (txt, color) => {
+    const m = $('adapt-msg');
+    if (!m) return;
+    m.textContent = txt;
+    m.style.color = color || '#666';
+  };
+
+  window.adaptSave = async function() {
+    setMsg('salvataggio...', '#0066cc');
+    const payload = {
+      enabled:                    $('adapt-enabled').checked,
+      shadow_only:                $('adapt-shadow').checked,
+      threshold_drl_residuo_pct:  parseInt($('adapt-th-drl').value || 30),
+      threshold_pct_istanze_sat:  parseInt($('adapt-th-sat').value || 50),
+      threshold_spedizioni_oggi:  parseInt($('adapt-th-sped').value || 100),
+    };
+    try {
+      const r = await fetch('/api/adaptive-scheduler', {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      const j = await r.json();
+      if (r.ok) {
+        setMsg('✓ salvato', '#0a8000');
+        htmx.trigger('#adapt-card', 'refresh');
+      } else {
+        setMsg('✗ ' + (j.detail || 'errore'), '#c00');
+      }
+    } catch (e) {
+      setMsg('✗ ' + e.message, '#c00');
+    }
+  };
+})();
+</script>

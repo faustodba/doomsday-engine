@@ -1,0 +1,246 @@
+{# Step F — Email Notifier card (HTMX partial)
+   Endpoint: /ui/partial/notifications  (refresh ogni 30s tramite hx-trigger)
+   PATCH:    /api/notifications  (salva config)
+   POST:     /api/notifications/test-send | dispatch-now
+#}
+{% set cfg = data.config %}
+{% set qs = data.queue_stats or {} %}
+{% set ds = data.daily_state or {} %}
+{% set app_pw = data.app_password_set %}
+{% set app_pw_src = data.app_password_source %}
+
+<div class="tel-card" id="notif-card-inner" style="padding:14px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+    <span style="font-size:18px">📧</span>
+    <b>email notifier</b>
+    <span style="margin-left:auto">
+      {% if cfg.enabled %}
+        <span style="color:#0a8000">● ATTIVO</span>
+      {% else %}
+        <span style="color:#c00">○ DISABILITATO</span>
+      {% endif %}
+    </span>
+  </div>
+
+  <!-- App password input — storage in data/secrets.json (write-only, mai mostrata) -->
+  <div style="margin-bottom:10px;padding:8px;border-radius:4px;
+              background:{{ '#e8f5e9' if app_pw else '#fff3cd' }};
+              color:{{ '#0a5d11' if app_pw else '#856404' }};font-size:12px">
+    <div style="margin-bottom:6px">
+      🔑 <b>app password Gmail</b>
+      {% if app_pw %}
+        — configurata
+        <span style="color:#888;font-size:11px">
+          (sorgente: {{ app_pw_src }})
+        </span>
+      {% else %}
+        — <b>NON CONFIGURATA</b>
+      {% endif %}
+    </div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <input type="password" id="notif-app-pw" autocomplete="new-password"
+             placeholder="{% if app_pw %}••••••••••••••••  (per cambiarla){% else %}16 caratteri da Google App Passwords{% endif %}"
+             style="flex:1;font-family:monospace;font-size:12px">
+      <button class="btn-orange" onclick="notifSavePassword()">salva password</button>
+      {% if app_pw and app_pw_src == 'secrets' %}
+        <button class="btn" onclick="notifDeletePassword()" title="Rimuove dalla dashboard (env var resta se presente)">×</button>
+      {% endif %}
+    </div>
+    <div style="font-size:10.5px;color:#666;margin-top:4px">
+      genera su <a href="https://myaccount.google.com/apppasswords" target="_blank"
+                   style="color:#0066cc">myaccount.google.com/apppasswords</a>
+      (richiede 2FA attivo). La password è scritta in
+      <code>data/secrets.json</code>, mai esposta da queste API.
+    </div>
+  </div>
+
+  <!-- Form config -->
+  <table style="width:100%;font-size:12px">
+    <tr>
+      <td style="padding:4px 8px 4px 0">attivo</td>
+      <td>
+        <input type="checkbox" id="notif-enabled"
+               {% if cfg.enabled %}checked{% endif %}>
+      </td>
+    </tr>
+    <tr>
+      <td>daily report</td>
+      <td>
+        <input type="checkbox" id="notif-daily"
+               {% if cfg.daily_report_enabled %}checked{% endif %}>
+        ora UTC:
+        <input type="number" id="notif-hour" min="0" max="23" style="width:50px"
+               value="{{ cfg.daily_report_hour_utc|default(6) }}">
+      </td>
+    </tr>
+    <tr>
+      <td>mittente</td>
+      <td>
+        <input type="email" id="notif-from" style="width:260px"
+               value="{{ cfg.from_addr|default('') }}">
+      </td>
+    </tr>
+    <tr>
+      <td>destinatari</td>
+      <td>
+        <input type="text" id="notif-recipients" style="width:260px"
+               value="{{ (cfg.recipients|default([]))|join(', ') }}"
+               placeholder="a@x.com, b@y.com">
+      </td>
+    </tr>
+    <tr>
+      <td>SMTP</td>
+      <td>
+        <input type="text" id="notif-smtp-host" style="width:170px"
+               value="{{ (cfg.smtp or {}).get('host')|default('smtp.gmail.com') }}">
+        :
+        <input type="number" id="notif-smtp-port" style="width:60px"
+               value="{{ (cfg.smtp or {}).get('port')|default(465) }}">
+      </td>
+    </tr>
+  </table>
+
+  <!-- Bottoni azione -->
+  <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+    <button class="btn-orange" onclick="notifSave()">salva</button>
+    <button class="btn" onclick="notifTestSend()" {% if not app_pw %}disabled{% endif %}>
+      test send
+    </button>
+    <button class="btn" onclick="notifDispatchNow()">dispatch now</button>
+    <span id="notif-msg" style="margin-left:8px;font-size:11px;align-self:center"></span>
+  </div>
+
+  <!-- Queue stats + last daily -->
+  <div style="margin-top:12px;font-size:11px;color:#666;border-top:1px solid #eee;padding-top:8px">
+    <b>queue:</b>
+    {% if qs.error %}
+      <span style="color:#c00">{{ qs.error }}</span>
+    {% else %}
+      pending={{ qs.get('pending', 0) }} ·
+      sent={{ qs.get('sent', 0) }} ·
+      failed_perm={{ qs.get('failed_perm', 0) }} ·
+      expired={{ qs.get('expired', 0) }} ·
+      total={{ qs.get('total', 0) }}
+    {% endif %}
+    {% if ds.last_sent_date %}
+      <br><b>ultimo daily:</b> {{ ds.last_sent_date }}
+      ({{ ds.last_sent_ts|default('?')|truncate(19, True, '') }})
+    {% else %}
+      <br><b>ultimo daily:</b> —
+    {% endif %}
+  </div>
+</div>
+
+<script>
+(function() {
+  const $ = (id) => document.getElementById(id);
+  const setMsg = (txt, color) => {
+    const m = $('notif-msg');
+    if (!m) return;
+    m.textContent = txt;
+    m.style.color = color || '#666';
+  };
+
+  window.notifSave = async function() {
+    setMsg('salvataggio...', '#0066cc');
+    const recipients = ($('notif-recipients').value || '')
+      .split(',').map(s => s.trim()).filter(Boolean);
+    const payload = {
+      enabled:               $('notif-enabled').checked,
+      daily_report_enabled:  $('notif-daily').checked,
+      daily_report_hour_utc: parseInt($('notif-hour').value || 6),
+      from_addr:             $('notif-from').value.trim(),
+      recipients:            recipients,
+      smtp_host:             $('notif-smtp-host').value.trim(),
+      smtp_port:             parseInt($('notif-smtp-port').value || 465),
+    };
+    try {
+      const r = await fetch('/api/notifications', {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      const j = await r.json();
+      if (r.ok) {
+        setMsg('✓ salvato', '#0a8000');
+        htmx.trigger('#notif-card', 'refresh');
+      } else {
+        setMsg('✗ ' + (j.detail || 'errore'), '#c00');
+      }
+    } catch (e) {
+      setMsg('✗ ' + e.message, '#c00');
+    }
+  };
+
+  window.notifTestSend = async function() {
+    setMsg('invio test...', '#0066cc');
+    try {
+      const r = await fetch('/api/notifications/test-send', {method: 'POST'});
+      const j = await r.json();
+      if (r.ok) setMsg('✓ test inviato a ' + (j.to || []).join(', '), '#0a8000');
+      else setMsg('✗ ' + (j.detail || 'errore'), '#c00');
+    } catch (e) {
+      setMsg('✗ ' + e.message, '#c00');
+    }
+  };
+
+  window.notifSavePassword = async function() {
+    const inp = $('notif-app-pw');
+    const pw = (inp.value || '').trim();
+    if (!pw) { setMsg('inserisci la password', '#c00'); return; }
+    setMsg('salvataggio password...', '#0066cc');
+    try {
+      const r = await fetch('/api/notifications/app-password', {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({password: pw}),
+      });
+      const j = await r.json();
+      if (r.ok) {
+        setMsg('✓ password salvata (len=' + j.len + ')', '#0a8000');
+        inp.value = '';
+        htmx.trigger('#notif-card', 'refresh');
+      } else {
+        setMsg('✗ ' + (j.detail || 'errore'), '#c00');
+      }
+    } catch (e) {
+      setMsg('✗ ' + e.message, '#c00');
+    }
+  };
+
+  window.notifDeletePassword = async function() {
+    if (!confirm('Rimuovere app password dalla dashboard?')) return;
+    setMsg('rimozione...', '#0066cc');
+    try {
+      const r = await fetch('/api/notifications/app-password', {method: 'DELETE'});
+      const j = await r.json();
+      if (r.ok) {
+        setMsg('✓ rimossa (source=' + j.source + ')', '#0a8000');
+        htmx.trigger('#notif-card', 'refresh');
+      } else {
+        setMsg('✗ ' + (j.detail || 'errore'), '#c00');
+      }
+    } catch (e) {
+      setMsg('✗ ' + e.message, '#c00');
+    }
+  };
+
+  window.notifDispatchNow = async function() {
+    setMsg('dispatch...', '#0066cc');
+    try {
+      const r = await fetch('/api/notifications/dispatch-now', {method: 'POST'});
+      const j = await r.json();
+      if (r.ok) {
+        const s = j.stats || {};
+        setMsg('✓ sent=' + (s.sent||0) + ' retry=' + (s.retry||0) +
+               ' fail=' + (s.failed_perm||0), '#0a8000');
+        htmx.trigger('#notif-card', 'refresh');
+      } else {
+        setMsg('✗ ' + (j.detail || 'errore'), '#c00');
+      }
+    } catch (e) {
+      setMsg('✗ ' + e.message, '#c00');
+    }
+  };
+})();
+</script>

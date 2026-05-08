@@ -248,6 +248,34 @@ class TruppeIstanzaOverride(BaseModel):
 # GlobaliOverride — contenuto di runtime_overrides.json.globali
 # ==============================================================================
 
+class NotificationsSmtp(BaseModel):
+    """SMTP server config (Email Notifier — Step C)."""
+    host: str = "smtp.gmail.com"
+    port: int = 465
+
+
+class NotificationsOverride(BaseModel):
+    """Email notifier config (memoria `project_email_notifier.md`).
+
+    L'app password si legge da env var `DOOMSDAY_GMAIL_APP_PASSWORD`
+    (non in config per sicurezza). Tutto il resto è in dashboard.
+
+    Default vuoti per `from_addr` e `recipients`: l'utente DEVE configurarli
+    in dashboard prima di abilitare le notifiche. Nessun fallback hardcoded.
+    Vedi `config/global_config.json::notifications` per valori baseline.
+    """
+    # Master toggle: se False il dispatcher non parte e nessuna mail viene inviata
+    enabled:                bool                = False
+    # Fase 1: daily report giornaliero (Step D/E)
+    daily_report_enabled:   bool                = True
+    daily_report_hour_utc:  int                 = 6     # 06:00 UTC = 08:00 CEST
+    # Mittente (account dedicato Gmail) — vuoto = NON configurato
+    from_addr:              str                 = ""
+    # Destinatari — vuoto = NON configurato (richiesto per abilitare invio)
+    recipients:             List[str]           = Field(default_factory=list)
+    smtp:                   NotificationsSmtp   = Field(default_factory=NotificationsSmtp)
+
+
 class GlobaliOverride(BaseModel):
     task:                 TaskFlags                  = Field(default_factory=TaskFlags)
     sistema:              SistemaOverride             = Field(default_factory=SistemaOverride)
@@ -257,6 +285,8 @@ class GlobaliOverride(BaseModel):
     zaino:                ZainoOverride               = Field(default_factory=ZainoOverride)
     raccolta:             RaccoltaOverride            = Field(default_factory=RaccoltaOverride)
     truppe:               TruppeOverride              = Field(default_factory=TruppeOverride)
+    # Step C — Email Notifier
+    notifications:        NotificationsOverride       = Field(default_factory=NotificationsOverride)
     # WU55 — Data collection OCR slot HOME vs MAPPA
     raccolta_ocr_debug:   bool                       = False
     # WU93 — BannerLearner auto-apprendimento banner non catalogati
@@ -264,6 +294,19 @@ class GlobaliOverride(BaseModel):
     # WU89 Step 3 — Skip Predictor (default OFF, shadow first)
     skip_predictor_enabled:     bool                 = False
     skip_predictor_shadow_only: bool                 = True
+    # 08/05 — Adaptive Scheduler ordine istanze (default OFF + shadow first).
+    # Se enabled=True, calcola ordine adattivo. Se shadow_only=True, logga
+    # ma NON riordina il ciclo (osservabilità senza side-effect).
+    adaptive_scheduler_enabled:     bool             = False
+    adaptive_scheduler_shadow_only: bool             = True
+    # Soglie precondizioni (dict per evitare proliferazione campi top-level)
+    adaptive_scheduler_thresholds:  Dict[str, int]  = Field(
+        default_factory=lambda: {
+            "drl_residuo_pct":  30,    # master DRL: residuo >= X% del totale
+            "pct_istanze_sat":  50,    # >= Y% istanze sature (provviste esaurite)
+            "spedizioni_oggi":  100,   # spedizioni cumulative > N
+        }
+    )
     # WU115 — Debug screenshot per task (hot-reload via dashboard).
     # Dict {task_name: bool}, default empty (= tutti False).
     # Vedi shared/debug_buffer.py per architettura completa.
@@ -276,7 +319,8 @@ class GlobaliOverride(BaseModel):
 
 class TipologiaIstanza(str, Enum):
     full          = "full"
-    raccolta      = "raccolta"
+    # 08/05: rimossa `raccolta` (alias morto di `full`, non gestita dal bot —
+    # main.py:732-744 mappava solo raccolta_only e raccolta_fast).
     raccolta_only = "raccolta_only"   # alias profilo bot (FauMorfeus)
     raccolta_fast = "raccolta_fast"   # WU57 — RaccoltaFastTask al posto di RaccoltaTask
 
@@ -292,7 +336,7 @@ class IstanzaOverride(BaseModel):
     tipologia:    TipologiaIstanza        = TipologiaIstanza.full
     fascia_oraria: Optional[str]          = None   # "HH:MM-HH:MM" | null
     max_squadre:  Optional[int]           = None   # scritto su instances.json
-    layout:       Optional[int]           = None   # scritto su instances.json
+    # 08/05: `layout` rimosso (deprecato WU22 — TM dinamico, no coord per layout)
     livello:      Optional[int]           = None   # scritto su instances.json
     # WU50 — raccolta fuori territorio (per istanza)
     raccolta_fuori_territorio: bool       = False

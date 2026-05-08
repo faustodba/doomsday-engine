@@ -29,6 +29,8 @@ from dashboard.routers import (
     api_status, api_stats,
     api_config_global, api_config_overrides, api_log,
     api_debug,
+    api_notifications,
+    api_adaptive_scheduler,
 )
 
 
@@ -212,6 +214,8 @@ app.include_router(api_config_global.router)
 app.include_router(api_config_overrides.router)
 app.include_router(api_log.router)
 app.include_router(api_debug.router)   # WU115 — debug screenshot per task
+app.include_router(api_notifications.router)   # Step F — email notifier
+app.include_router(api_adaptive_scheduler.router)   # 08/05 — Adaptive Scheduler
 
 
 # ==============================================================================
@@ -265,22 +269,36 @@ def ui_telemetria(request: Request):
     })
 
 
-@app.get("/ui/storico", include_in_schema=False)
-def ui_storico(request: Request):
-    """Pagina dedicata storico eventi — tabella filtrabile per istanza+task."""
-    from dashboard.services.config_manager import get_instances
-    return templates.TemplateResponse(request, "storico.html", {
-        "active":  "storico",
-        "istanze": get_instances(),
-        **_env_label(),
-    })
+# 08/05: pagina /ui/storico ELIMINATA. Endpoint partial/storico mantenuto
+# per compat (non più usato dalla nav). Template storico.html resta sul disco
+# ma non più routed.
 
 
 @app.get("/ui/predictor", include_in_schema=False)
 def ui_predictor(request: Request):
-    """Pagina dedicata predictor — cycle duration + skip squadre fuori."""
+    """Pagina dedicata predictor — cycle duration + skip squadre fuori.
+    08/05: include `cfg` raw per esporre toggle skip_predictor_* (sezione
+    spostata da home → predictor)."""
+    import json as _json
+    from dashboard.services.config_manager import _GLOBAL_CONFIG_PATH
+    try:
+        with open(_GLOBAL_CONFIG_PATH, "r", encoding="utf-8") as f:
+            cfg_raw = _json.load(f)
+    except Exception:
+        cfg_raw = {}
+    # Override da runtime per riflettere stato corrente effettivo
+    try:
+        from dashboard.services.config_manager import get_overrides
+        ov_glob = (get_overrides() or {}).get("globali") or {}
+        if "skip_predictor_enabled" in ov_glob:
+            cfg_raw["skip_predictor_enabled"] = ov_glob["skip_predictor_enabled"]
+        if "skip_predictor_shadow_only" in ov_glob:
+            cfg_raw["skip_predictor_shadow_only"] = ov_glob["skip_predictor_shadow_only"]
+    except Exception:
+        pass
     return templates.TemplateResponse(request, "predictor.html", {
         "active": "predictor",
+        "cfg":    cfg_raw,
         **_env_label(),
     })
 
@@ -554,6 +572,32 @@ def ui_config(request: Request):
     return RedirectResponse(url="/ui/config/global", status_code=302)
 
 
+@app.get("/ui/advanced", include_in_schema=False)
+def ui_advanced(request: Request):
+    """08/05: pagina advanced — operazioni bulk istanze + truppe.
+    Estrae da config_global le 2 sezioni che servivano "configurazione veloce".
+    Restart bot e mail rimangono in /ui/config/global.
+    """
+    import json
+    from dashboard.services.config_manager import (
+        _GLOBAL_CONFIG_PATH, get_instances, get_overrides,
+    )
+    from shared.instance_meta import get_master_instances
+    try:
+        with open(_GLOBAL_CONFIG_PATH, "r", encoding="utf-8") as f:
+            cfg_raw = json.load(f)
+    except Exception:
+        cfg_raw = {}
+    return templates.TemplateResponse(request, "advanced.html", {
+        "active":       "advanced",
+        "cfg":          cfg_raw,
+        "instances":    get_instances(),
+        "overrides":    get_overrides(),
+        "master_names": set(get_master_instances()),
+        **_env_label(),
+    })
+
+
 @app.get("/ui/config/global", include_in_schema=False)
 def ui_config_global(request: Request):
     """Pagina config — legge global_config.json RAW (no round-trip via
@@ -586,9 +630,44 @@ def ui_config_global(request: Request):
 
 @app.get("/ui/partial/card/{nome}", include_in_schema=False)
 def ui_partial_card(request: Request, nome: str):
+    """08/05: card istanza estesa con controlli inline (real-time → dynamic).
+
+    Oltre alle info live (s = InstanceStats), passa anche `ctrl` con i valori
+    correnti da `runtime_overrides::istanze.{nome}` (con fallback su
+    `instances.json` per i campi mancanti). Il save form chiama
+    PATCH /api/config/overrides/istanze/{nome} → solo dynamic (regola
+    architetturale).
+    """
     from dashboard.services.stats_reader import get_instance_stats
+    from dashboard.services.config_manager import get_overrides, get_instances
+
+    ov = (get_overrides() or {}).get("istanze", {}) or {}
+    ov_ist = ov.get(nome) or {}
+
+    ist_base: dict = {}
+    for r in (get_instances() or []):
+        if r.get("nome") == nome:
+            ist_base = r
+            break
+
+    # Helper merge: override prevale su base
+    def _val(field: str, default=None):
+        if field in ov_ist:
+            return ov_ist[field]
+        return ist_base.get(field, default)
+
+    ctrl = {
+        "abilitata":     bool(_val("abilitata", True)),
+        "tipologia":     str(_val("tipologia", ov_ist.get("tipologia", ist_base.get("profilo", "full")))),
+        "truppe":        int(_val("truppe", 0) or 0),
+        "livello":       int(_val("livello", 7) or 7),
+        "max_squadre":   int(_val("max_squadre", 4) or 4),
+        "raccolta_fuori_territorio": bool(_val("raccolta_fuori_territorio", False)),
+    }
+
     return templates.TemplateResponse(request, "partials/card_istanza.html", {
-        "s": get_instance_stats(nome),
+        "s":    get_instance_stats(nome),
+        "ctrl": ctrl,
     })
 
 
@@ -614,6 +693,25 @@ def ui_partial_task_flags(request: Request):
     return templates.TemplateResponse(request, "partials/task_flags.html", {
         "overrides": get_overrides(),
     })
+
+
+@app.get("/ui/partial/notifications", include_in_schema=False)
+def ui_partial_notifications(request: Request):
+    """Step F — card email notifier in /ui/config/global."""
+    from dashboard.routers.api_notifications import get_notifications
+    return templates.TemplateResponse(request, "partials/notifications_card.html", {
+        "data": get_notifications(),
+    })
+
+
+@app.get("/ui/partial/adaptive-scheduler", include_in_schema=False)
+def ui_partial_adaptive_scheduler(request: Request):
+    """08/05 — card Adaptive Scheduler in /ui/config/global."""
+    from dashboard.routers.api_adaptive_scheduler import get_adaptive_scheduler
+    return templates.TemplateResponse(
+        request, "partials/adaptive_scheduler_card.html",
+        {"data": get_adaptive_scheduler()},
+    )
 
 
 # ==============================================================================
@@ -789,8 +887,10 @@ def partial_ist_table(request: Request):
         truppe      = ist_ov.get("truppe",        ist.get("truppe",       0))
         tipologia   = ist_ov.get("tipologia",     ist.get("profilo",      "full"))
         fascia_raw  = ist_ov.get("fascia_oraria", ist.get("fascia_oraria", ""))
-        max_squadre = ist.get("max_squadre", 4)
-        livello     = ist.get("livello", 6)
+        # 08/05 fix: override > instances.json anche per livello e max_squadre
+        # (pre-fix la tabella mostrava sempre il valore static dopo save bulk)
+        max_squadre = ist_ov.get("max_squadre",   ist.get("max_squadre", 4))
+        livello     = ist_ov.get("livello",       ist.get("livello",     6))
         # WU50 — flag fuori territorio: override > instances.json (default)
         fuori_terr  = bool(ist_ov.get(
             "raccolta_fuori_territorio",
@@ -1020,12 +1120,105 @@ def partial_res_totali(request: Request):
     return HTMLResponse(html)
 
 
+def _build_ctrl_block_html(nome: str) -> str:
+    """08/05: sezione controlli inline per card istanza HOME (real-time → dynamic).
+
+    Genera HTML dei 6 campi editabili (on/off, FT, tipologia, truppe, livello,
+    max_squadre) + bottone salva. Save chiama PATCH /api/config/overrides/istanze/{nome}.
+    fascia_oraria nascosta (richiesta utente).
+    """
+    from dashboard.services.config_manager import get_overrides, get_instances
+    ov = (get_overrides() or {}).get("istanze", {}) or {}
+    ov_ist = ov.get(nome) or {}
+    ist_base: dict = {}
+    for r in (get_instances() or []):
+        if r.get("nome") == nome:
+            ist_base = r
+            break
+
+    def _val(field: str, default=None):
+        if field in ov_ist:
+            return ov_ist[field]
+        return ist_base.get(field, default)
+
+    abil  = bool(_val("abilitata", True))
+    fuori = bool(_val("raccolta_fuori_territorio", False))
+    tip   = str(_val("tipologia", ist_base.get("profilo", "full")))
+    truppe = int(_val("truppe", 0) or 0)
+    livello = int(_val("livello", 7) or 7)
+    sq    = int(_val("max_squadre", 4) or 4)
+
+    def _opt(v, current):
+        return "selected" if v == current else ""
+
+    # Stile coerente con tema dashboard (scuro). Usa variabili CSS della pagina
+    # con fallback espliciti per garantire leggibilità.
+    LBL = "color:var(--text-dim);font-weight:500"
+    INP = ("font-size:11px;background:var(--bg);color:var(--text);"
+           "border:1px solid var(--border);padding:2px 4px;border-radius:3px")
+    # Riga 1 = ON · FT · truppe · livello · nodo (max_sq) | Riga 2 = tipologia · save
+    return f'''
+    <div class="card-ctrl" style="margin-top:8px;padding:8px 10px;
+         border-top:1px solid rgba(255,255,255,0.08);font-size:11px;color:var(--text)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap">
+        <label style="display:flex;align-items:center;gap:3px;cursor:pointer">
+          <input type="checkbox" class="ic-on" {"checked" if abil else ""}>
+          <b>ON</b>
+        </label>
+        <label style="display:flex;align-items:center;gap:3px;cursor:pointer"
+               title="raccolta fuori territorio">
+          <input type="checkbox" class="ic-ft" {"checked" if fuori else ""}>
+          <span>FT</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:3px">
+          <span style="{LBL}">truppe</span>
+          <input type="number" class="ic-tr" min="0" step="100" value="{truppe}"
+                 style="width:64px;{INP}">
+        </label>
+        <label style="display:flex;align-items:center;gap:3px"
+               title="livello nodo target">
+          <span style="{LBL}">nodo</span>
+          <input type="number" class="ic-lv" min="1" max="9" value="{livello}"
+                 style="width:42px;{INP}">
+        </label>
+        <label style="display:flex;align-items:center;gap:3px"
+               title="max squadre concorrenti">
+          <span style="{LBL}">squadre</span>
+          <input type="number" class="ic-sq" min="1" max="6" value="{sq}"
+                 style="width:42px;{INP}">
+        </label>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        <span style="{LBL}">tipologia</span>
+        <select class="ic-tip" style="flex:1;max-width:200px;{INP}">
+          <option value="full"          {_opt("full", tip)}>completo</option>
+          <option value="raccolta_fast" {_opt("raccolta_fast", tip)}>completo · fast</option>
+          <option value="raccolta_only" {_opt("raccolta_only", tip)}>solo raccolta</option>
+        </select>
+        <button class="ic-save" type="button"
+                onclick="saveCardCtrl(this, '{nome}')"
+                style="margin-left:auto;padding:3px 14px;font-size:11px;
+                       background:#e67e22;color:#fff;border:0;border-radius:3px;
+                       cursor:pointer;font-weight:600">
+          salva
+        </button>
+      </div>
+      <div class="ic-msg" style="font-size:10px;margin-top:4px;min-height:12px;
+           color:var(--text-dim)"></div>
+    </div>
+    '''
+
+
 @app.get("/ui/partial/produzione-istanze", include_in_schema=False)
 def partial_produzione_istanze(request: Request):
     """
     Auto-WU14 step3: cards produzione per istanza — compatta.
     Mostra sessione corrente + sessione precedente in grid 3-col.
     No scroll: tutte le istanze visibili.
+
+    08/05: aggiunta sezione controlli inline (`_build_ctrl_block_html`) per
+    modifica real-time → dynamic via PATCH /api/config/overrides/istanze/{nome}.
+    Sostituisce la tabella istanze in fondo (rimossa).
     """
     from dashboard.services.stats_reader import get_produzione_istanze
     # Include master in fondo alla griglia: card con badge ★ + bordo dorato
@@ -1462,8 +1655,13 @@ def partial_produzione_istanze(request: Request):
         master_border = "border:1.5px solid #f5c542;" if is_master else "border:1px solid var(--border);"
         master_star = '<span title="master — rifugio destinatario" style="color:#f5c542;font-weight:700;margin-right:2px">★</span>' if is_master else ""
         master_pill = '<span style="background:rgba(245,197,66,0.15);color:#f5c542;font-size:9px;font-weight:600;padding:1px 5px;border-radius:3px;letter-spacing:0.5px;margin-left:4px">MASTER</span>' if is_master else ""
+        # 08/05: sezione controlli inline (real-time → dynamic) per TUTTE le
+        # istanze (incluso master). Il flag `master` resta hardcoded in
+        # shared/instance_meta.py ma gli altri campi (abilitata, truppe,
+        # tipologia, livello, max_squadre) sono modificabili anche per FauMorfeus.
+        ctrl_html = _build_ctrl_block_html(nome)
         cards_html.append(f'''
-        <div class="prod-card" style="background:var(--bg-card);{master_border}
+        <div class="prod-card card" data-istanza="{nome}" style="background:var(--bg-card);{master_border}
              border-radius:5px;padding:8px 10px;font-size:12px;opacity:{card_opacity}">
           <div style="display:flex;justify-content:space-between;align-items:center;
                margin-bottom:4px;font-weight:600;font-size:14px">
@@ -1490,6 +1688,7 @@ def partial_produzione_istanze(request: Request):
             <tbody>{rows}</tbody>
           </table>
           {bottom_block}
+          {ctrl_html}
         </div>
         ''')
 

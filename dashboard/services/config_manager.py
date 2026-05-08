@@ -158,8 +158,17 @@ def save_instances_fields(updates: dict[str, dict]) -> None:
     """
     # WU50  — raccolta_fuori_territorio è un default statico per-istanza
     # master — flag istanza rifugio destinatario (esclusione aggregati)
-    allowed_fields = {"max_squadre", "layout", "livello",
-                      "raccolta_fuori_territorio", "master"}
+    # 08/05: layout rimosso (deprecato WU22 — TM dinamico)
+    # 08/05 bis: estesi a tutti i campi modificabili dalla CONFIG (regola
+    # architetturale "config modifica entrambi i piani"). Pre-fix solo 4 campi
+    # propagavano a instances.json — abilitata/truppe/profilo/fascia_oraria
+    # restavano solo in runtime_overrides → reset config non li ripristinava.
+    # 08/05 ter: aggiunto truppe_override (sub-dict caserme) per override per
+    # istanza dalla pagina CONFIG card truppe.
+    allowed_fields = {"abilitata", "truppe", "profilo", "fascia_oraria",
+                      "max_squadre", "livello",
+                      "raccolta_fuori_territorio", "master",
+                      "truppe_override"}
 
     # Filtra solo campi ammessi
     filtered: dict[str, dict] = {}

@@ -1,0 +1,683 @@
+"""core/adaptive_scheduler.py — scheduler adattivo ordine istanze nel ciclo.
+
+08/05/2026 — sostituisce il pattern "skip statico" del predictor.
+Razionale: invece di skippare un'istanza con slot pieni (perdita lavoro),
+riordina l'ordine di avvio nel ciclo per privilegiare quelle con più slot
+liberi attesi al momento del loro turno. Le istanze con score basso
+slittano in coda — l'attesa naturale durante il giro fa rientrare squadre
+e libera slot.
+
+LOGICA:
+  1. Pre-ciclo: check `should_activate_scheduler()` (4 precondizioni in OR).
+     Se NESSUNA vera → ordine fisso come oggi.
+  2. Se attivo: greedy adattivo:
+     a. Per ogni istanza calcola `slot_liberi_atteso(t_avvio_previsto)`
+     b. Sceglie quella col score più alto come prossima
+     c. Aggiorna t_avvio_previsto cumulando T_predicted dell'istanza scelta
+     d. Ripete finché tutte assegnate
+  3. Master FauMorfeus sempre fissa in fondo (fuori ranking).
+  4. **Mai skip definitivo**: tutte le istanze processate.
+  5. Persistence: salva ordine pianificato in `data/scheduler_planned_order.json`.
+     Su restart bot, se file esiste e fresh → resume da sequenza memorizzata.
+
+API:
+    from core.adaptive_scheduler import (
+        should_activate_scheduler, ordina_istanze_adaptive,
+        save_planned_order, load_planned_order, clear_planned_order,
+    )
+
+    active, reasons = should_activate_scheduler()
+    if active:
+        ordine = ordina_istanze_adaptive(istanze_ciclo)
+        save_planned_order(ordine)
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+from datetime import datetime, timezone, timedelta
+from pathlib import Path
+from typing import Optional
+
+_log = logging.getLogger(__name__)
+
+# ─── Path helpers ──────────────────────────────────────────────────────────
+
+def _root() -> Path:
+    env = os.environ.get("DOOMSDAY_ROOT")
+    if env and Path(env).exists():
+        return Path(env)
+    return Path(__file__).resolve().parents[1]
+
+
+_PLANNED_ORDER_PATH = lambda: _root() / "data" / "scheduler_planned_order.json"
+
+# Soglie precondizioni — DEFAULT, sovrascrivibili da config
+# `globali.adaptive_scheduler_thresholds.{drl_residuo_pct, pct_istanze_sat, spedizioni_oggi}`.
+DEFAULT_SOGLIE = {
+    "drl_residuo_pct":  30,
+    "pct_istanze_sat":  50,
+    "spedizioni_oggi":  100,
+}
+
+# Persistence freshness — se file > N min, ignoralo (assumiamo restart vecchio)
+PLANNED_ORDER_TTL_MIN = 240   # 4 ore
+
+
+def _get_soglie() -> dict:
+    """Legge soglie precondizioni da config; fallback a DEFAULT_SOGLIE."""
+    try:
+        from config.config_loader import load_global
+        gc = load_global()
+        cfg = getattr(gc, "adaptive_scheduler_thresholds", None) or {}
+        out = dict(DEFAULT_SOGLIE)
+        for k in DEFAULT_SOGLIE:
+            if k in cfg:
+                try:
+                    out[k] = int(cfg[k])
+                except (TypeError, ValueError):
+                    pass
+        return out
+    except Exception:
+        return dict(DEFAULT_SOGLIE)
+
+
+# ─── Precondizioni attivazione ─────────────────────────────────────────────
+
+def _master_drl_residuo_pct() -> float:
+    """% residuo del Daily Receiving Limit master.
+
+    `daily_recv_limit` è il limite TOTALE giornaliero del master (es. 580M).
+    `inviato_oggi` (calcolato da storico_farm o dal dashboard reader) è
+    quanto già ricevuto oggi. Residuo = (limit - inviato) / limit.
+
+    Returns: 0..100, oppure -1 se non determinabile.
+    """
+    try:
+        ms_path = _root() / "data" / "morfeus_state.json"
+        if not ms_path.exists():
+            return -1.0
+        ms = json.loads(ms_path.read_text(encoding="utf-8"))
+        limit = float(ms.get("daily_recv_limit", -1) or -1)
+        if limit <= 0:
+            return -1.0
+        # Inviato oggi: somma spedizioni di tutte le istanze ordinarie
+        # (escludo master) da storico_farm.json giorno UTC corrente.
+        farm_path = _root() / "data" / "storico_farm.json"
+        oggi_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        if not farm_path.exists():
+            return 100.0   # nessun invio → residuo 100%
+        farm = json.loads(farm_path.read_text(encoding="utf-8"))
+        day = farm.get(oggi_utc) or {}
+        inviato = 0
+        for ist, vals in day.items():
+            if not isinstance(vals, dict):
+                continue
+            # somma tutte e 4 risorse (NETTE post-tassa, già scritte così
+            # da WU58 in poi — vedi storico_farm)
+            for r in ("pomodoro", "legno", "acciaio", "petrolio"):
+                inviato += int(vals.get(r) or 0)
+        residuo = max(0, limit - inviato)
+        return (residuo / limit) * 100.0
+    except Exception as exc:
+        _log.warning("[ADAPT-SCHED] DRL residuo error: %s", exc)
+        return -1.0
+
+
+def _rifornimento_abilitato() -> bool:
+    """Rifornimento abilitato globalmente (task flag)?
+
+    True = abilitato. False = OFF da dashboard (= precondizione scheduler vera).
+    """
+    try:
+        ov_path = _root() / "config" / "runtime_overrides.json"
+        if ov_path.exists():
+            ov = json.loads(ov_path.read_text(encoding="utf-8"))
+            tf = (ov.get("globali") or {}).get("task") or {}
+            if "rifornimento" in tf:
+                return bool(tf["rifornimento"])
+        # Fallback global_config
+        gc_path = _root() / "config" / "global_config.json"
+        if gc_path.exists():
+            gc = json.loads(gc_path.read_text(encoding="utf-8"))
+            tf = gc.get("task") or {}
+            return bool(tf.get("rifornimento", True))
+    except Exception:
+        pass
+    return True
+
+
+def _percentuale_istanze_sature() -> float:
+    """% istanze ordinarie con `provviste_esaurite=True` nel state."""
+    try:
+        from shared.instance_meta import is_master_instance
+        state_dir = _root() / "state"
+        if not state_dir.exists():
+            return 0.0
+        oggi_utc = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        n_total = 0
+        n_sat = 0
+        for f in state_dir.glob("*.json"):
+            ist = f.stem
+            if is_master_instance(ist):
+                continue
+            try:
+                s = json.loads(f.read_text(encoding="utf-8"))
+            except Exception:
+                continue
+            n_total += 1
+            rif = s.get("rifornimento") or {}
+            esaurite = bool(rif.get("provviste_esaurite", False))
+            data_rif = rif.get("data_riferimento", "")
+            # Considera saturo solo se flag fresh (oggi UTC), altrimenti
+            # è stantio dal giorno precedente
+            if esaurite and data_rif == oggi_utc:
+                n_sat += 1
+        return (n_sat / n_total * 100.0) if n_total else 0.0
+    except Exception:
+        return 0.0
+
+
+def _spedizioni_oggi_totali() -> int:
+    """Numero spedizioni cumulative di TUTTE le istanze ordinarie oggi UTC."""
+    try:
+        from shared.instance_meta import is_master_instance
+        farm_path = _root() / "data" / "storico_farm.json"
+        if not farm_path.exists():
+            return 0
+        farm = json.loads(farm_path.read_text(encoding="utf-8"))
+        oggi = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        day = farm.get(oggi) or {}
+        n = 0
+        for ist, vals in day.items():
+            if is_master_instance(ist):
+                continue
+            if isinstance(vals, dict):
+                n += int(vals.get("spedizioni") or 0)
+        return n
+    except Exception:
+        return 0
+
+
+def _flags_status() -> tuple[bool, bool]:
+    """Legge `adaptive_scheduler_enabled` + `_shadow_only` da config.
+
+    Returns: (enabled, shadow_only). Default (False, True) — sicuro.
+    """
+    try:
+        from config.config_loader import load_global
+        gc = load_global()
+        return (bool(getattr(gc, "adaptive_scheduler_enabled", False)),
+                bool(getattr(gc, "adaptive_scheduler_shadow_only", True)))
+    except Exception:
+        return (False, True)
+
+
+def should_activate_scheduler() -> tuple[bool, list[str]]:
+    """Master gate + 4 precondizioni in OR. Ritorna (active, reasons).
+
+    `active=True` SOLO se:
+      - flag `adaptive_scheduler_enabled=True` da config (master toggle)
+      - AND ≥1 delle 4 precondizioni è vera
+
+    Reasons elenca quali condizioni sono vere (per log + telemetria).
+    Se shadow_only=True, l'attivazione è solo per LOG (caller deve verificare).
+    """
+    enabled, _shadow = _flags_status()
+    if not enabled:
+        return (False, ["flag_disabled"])
+
+    soglie = _get_soglie()
+    reasons: list[str] = []
+    drl_pct = _master_drl_residuo_pct()
+    if drl_pct >= soglie["drl_residuo_pct"]:
+        reasons.append(f"master_residuo={drl_pct:.0f}%>={soglie['drl_residuo_pct']}%")
+    if not _rifornimento_abilitato():
+        reasons.append("rifornimento_OFF")
+    pct_sat = _percentuale_istanze_sature()
+    if pct_sat >= soglie["pct_istanze_sat"]:
+        reasons.append(f"istanze_sature={pct_sat:.0f}%>={soglie['pct_istanze_sat']}%")
+    sped = _spedizioni_oggi_totali()
+    if sped > soglie["spedizioni_oggi"]:
+        reasons.append(f"sped_oggi={sped}>{soglie['spedizioni_oggi']}")
+    return (len(reasons) > 0, reasons)
+
+
+def get_status() -> dict:
+    """Status completo per dashboard: flag + soglie + valori live + reasons."""
+    enabled, shadow = _flags_status()
+    soglie = _get_soglie()
+    drl_pct = _master_drl_residuo_pct()
+    rif_on = _rifornimento_abilitato()
+    pct_sat = _percentuale_istanze_sature()
+    sped = _spedizioni_oggi_totali()
+    active, reasons = should_activate_scheduler()
+    return {
+        "enabled":      enabled,
+        "shadow_only":  shadow,
+        "active":       active,
+        "reasons":      reasons,
+        "thresholds":   soglie,
+        "live": {
+            "drl_residuo_pct":  round(drl_pct, 1) if drl_pct >= 0 else None,
+            "rifornimento_on":  rif_on,
+            "pct_istanze_sat":  round(pct_sat, 1),
+            "spedizioni_oggi":  sped,
+        },
+    }
+
+
+def is_shadow_mode() -> bool:
+    """True se shadow_only attivo (calcola ordine ma NON applica al ciclo)."""
+    _enabled, shadow = _flags_status()
+    return shadow
+
+
+# ─── Calcolo slot liberi attesi ────────────────────────────────────────────
+
+def compute_slot_liberi_atteso(istanza: str,
+                                 t_offset_min: float = 0.0) -> dict:
+    """Stima slot liberi attesi al momento `now + t_offset_min`.
+
+    Usa modello T_marcia da `core.skip_predictor._calc_t_marcia_min` per ogni
+    invio nell'ultimo record con invii reali. Una squadra rientra in tempo
+    se `T_marcia_residuo[i] <= t_offset_min`.
+
+    Returns dict:
+        {
+          "ist": str,
+          "totali": int,
+          "attive_now": int,            # slot occupati ora
+          "rientro_atteso": int,         # squadre che rientrano entro offset
+          "slot_liberi_atteso": int,     # totali - (attive_now - rientro)
+          "slot_liberi_now": int,        # totali - attive_now
+          "score": float,                # = slot_liberi_atteso (per ordinamento)
+          "elapsed_min": float,
+          "t_residue_min": list[float],
+          "anzianita_tick_min": float,   # tempo dall'ultimo tick (tie-breaker)
+          "data_completa": bool,         # False se metrics incompleti
+        }
+    """
+    try:
+        from core.skip_predictor import _calc_t_marcia_min, load_metrics_history
+    except Exception as exc:
+        _log.warning("[ADAPT-SCHED] import error: %s", exc)
+        return _empty_score(istanza)
+
+    history = load_metrics_history(istanza, last_n=10)
+    if not history:
+        return _empty_score(istanza)
+
+    last = history[-1]
+    rac = last.get("raccolta") or {}
+    totali = rac.get("totali")
+    attive_now = rac.get("attive_post")
+
+    if totali is None or attive_now is None:
+        # Dati incompleti — score conservativo medio
+        out = _empty_score(istanza)
+        out["data_completa"] = False
+        return out
+
+    # Anzianità tick (tie-breaker: priorità a quelle in ritardo)
+    try:
+        ts_last = datetime.fromisoformat(last.get("ts", ""))
+        anz_min = (datetime.now(timezone.utc) - ts_last).total_seconds() / 60
+    except Exception:
+        anz_min = 0.0
+
+    # Cerca ultimo record con invii reali (per modello T_marcia)
+    invii_record = None
+    for r in reversed(history):
+        if (r.get("raccolta") or {}).get("invii"):
+            invii_record = r
+            break
+
+    # Slot già liberi ora
+    slot_liberi_now = max(0, int(totali) - int(attive_now))
+
+    if invii_record is None:
+        # No invii nella storia → non possiamo stimare rientri.
+        # Conservativo: assume slot_liberi_atteso = slot_liberi_now
+        return {
+            "ist": istanza,
+            "totali": int(totali),
+            "attive_now": int(attive_now),
+            "rientro_atteso": 0,
+            "slot_liberi_atteso": slot_liberi_now,
+            "slot_liberi_now": slot_liberi_now,
+            "score": float(slot_liberi_now),
+            "elapsed_min": 0.0,
+            "t_residue_min": [],
+            "anzianita_tick_min": round(anz_min, 1),
+            "data_completa": False,
+        }
+
+    # Calcola T_marcia per ogni invio
+    invii = invii_record["raccolta"]["invii"]
+    t_marce = []
+    for inv in invii:
+        t = _calc_t_marcia_min(inv, istanza)
+        if t is not None:
+            t_marce.append(t)
+
+    if not t_marce:
+        # Dati pre-WU116 (load=-1) → conservativo
+        return {
+            "ist": istanza,
+            "totali": int(totali),
+            "attive_now": int(attive_now),
+            "rientro_atteso": 0,
+            "slot_liberi_atteso": slot_liberi_now,
+            "slot_liberi_now": slot_liberi_now,
+            "score": float(slot_liberi_now),
+            "elapsed_min": 0.0,
+            "t_residue_min": [],
+            "anzianita_tick_min": round(anz_min, 1),
+            "data_completa": False,
+        }
+
+    # Elapsed dal record con invii
+    try:
+        ts_inv = datetime.fromisoformat(invii_record["ts"])
+        elapsed = max(0.0, (datetime.now(timezone.utc) - ts_inv).total_seconds() / 60)
+    except Exception:
+        elapsed = 0.0
+
+    # T_residue dei singoli invii (da ADESSO)
+    t_residue_min = [max(0.0, t - elapsed) for t in t_marce]
+
+    # Squadre che rientreranno entro `t_offset_min`
+    rientri = sum(1 for t in t_residue_min if t <= t_offset_min)
+    # Cap: non possiamo avere più rientri delle squadre attive
+    rientri = min(rientri, int(attive_now))
+
+    slot_liberi_atteso = max(0, int(totali) - int(attive_now) + rientri)
+
+    return {
+        "ist": istanza,
+        "totali": int(totali),
+        "attive_now": int(attive_now),
+        "rientro_atteso": rientri,
+        "slot_liberi_atteso": slot_liberi_atteso,
+        "slot_liberi_now": slot_liberi_now,
+        "score": float(slot_liberi_atteso),
+        "elapsed_min": round(elapsed, 1),
+        "t_residue_min": [round(t, 1) for t in sorted(t_residue_min)],
+        "anzianita_tick_min": round(anz_min, 1),
+        "data_completa": True,
+    }
+
+
+def _empty_score(istanza: str) -> dict:
+    """Score di fallback per istanze senza dati."""
+    return {
+        "ist": istanza,
+        "totali": 0,
+        "attive_now": 0,
+        "rientro_atteso": 0,
+        "slot_liberi_atteso": 2,   # stima neutra
+        "slot_liberi_now": 2,
+        "score": 2.0,
+        "elapsed_min": 0.0,
+        "t_residue_min": [],
+        "anzianita_tick_min": 0.0,
+        "data_completa": False,
+    }
+
+
+# ─── Ordinamento adattivo greedy ───────────────────────────────────────────
+
+def _stima_durata_istanza_min(istanza: str) -> float:
+    """T_predicted per istanza dal cycle predictor. Default 8min se non noto."""
+    try:
+        from core.cycle_duration_predictor import predict_istanza_duration
+        # No scheduled tasks specifici → media completa
+        pred = predict_istanza_duration(istanza, scheduled_tasks=[])
+        return float(pred.get("T_s", 480.0)) / 60.0   # default 8min
+    except Exception:
+        return 8.0
+
+
+def ordina_istanze_adaptive(istanze: list[str],
+                              master_excluded: bool = True) -> list[dict]:
+    """Greedy adattivo: ordina istanze per `slot_liberi_atteso` decrescente.
+
+    Args:
+        istanze: lista nomi istanze ordinarie (master tipicamente escluso).
+        master_excluded: se True, master FauMorfeus (se presente) viene
+                         appeso a fine lista senza partecipare al ranking.
+
+    Returns:
+        list[dict] in ordine ottimale, ciascuno con campi di
+        `compute_slot_liberi_atteso` + `t_avvio_min` (offset previsto).
+        Master sempre ultimo (con t_avvio_min calcolato).
+
+    Logica greedy:
+        - t_avvio_min[0] = 0
+        - score[ist] = compute_slot_liberi_atteso(ist, t_avvio_min[i])
+        - sceglie max score (tie-break: anzianità_tick desc)
+        - t_avvio_min[i+1] = t_avvio_min[i] + T_predicted_istanza_scelta
+        - ripete con istanze rimanenti
+    """
+    try:
+        from shared.instance_meta import is_master_instance
+    except Exception:
+        is_master_instance = lambda x: False   # fallback
+
+    # Separa ordinarie da master
+    ordinarie = [i for i in istanze if not is_master_instance(i)]
+    master = [i for i in istanze if is_master_instance(i)]
+
+    if not master_excluded:
+        ordinarie = ordinarie + master
+        master = []
+
+    risultato: list[dict] = []
+    rimanenti = list(ordinarie)
+    t_offset = 0.0
+
+    while rimanenti:
+        # Calcola score per tutte le rimanenti al momento `t_offset`
+        scores = [compute_slot_liberi_atteso(ist, t_offset_min=t_offset)
+                  for ist in rimanenti]
+
+        # Ordina: score desc, poi anzianita_tick desc (più in ritardo prima)
+        scores.sort(key=lambda x: (x["score"], x["anzianita_tick_min"]),
+                    reverse=True)
+
+        scelto = scores[0]
+        scelto["t_avvio_min"] = round(t_offset, 1)
+        risultato.append(scelto)
+        rimanenti.remove(scelto["ist"])
+
+        # Avanza offset di durata stimata istanza scelta + tick_sleep ratio
+        t_offset += _stima_durata_istanza_min(scelto["ist"])
+
+    # Master in fondo (con t_avvio_min finale)
+    for m in master:
+        risultato.append({
+            "ist": m,
+            "score": -1,   # marker: fuori ranking
+            "t_avvio_min": round(t_offset, 1),
+            "data_completa": False,
+            "is_master": True,
+        })
+        t_offset += _stima_durata_istanza_min(m)
+
+    return risultato
+
+
+# ─── Persistence ordine pianificato ───────────────────────────────────────
+
+def save_planned_order(ordine: list[dict],
+                        ts_inizio_ciclo: Optional[datetime] = None,
+                        reasons: Optional[list[str]] = None) -> bool:
+    """Persiste ordine pianificato in `data/scheduler_planned_order.json`.
+
+    Args:
+        ordine: lista dict da `ordina_istanze_adaptive` (con scores+offsets).
+        ts_inizio_ciclo: timestamp inizio ciclo (default: now).
+        reasons: precondizioni che hanno attivato (per audit).
+
+    Returns: True se OK.
+    """
+    if ts_inizio_ciclo is None:
+        ts_inizio_ciclo = datetime.now(timezone.utc)
+    payload = {
+        "ts_inizio_ciclo": ts_inizio_ciclo.isoformat(),
+        "ts_saved":        datetime.now(timezone.utc).isoformat(),
+        "reasons":         reasons or [],
+        "ordine":          ordine,
+        "completate":      [],   # lista istanze già processate (per resume)
+    }
+    p = _PLANNED_ORDER_PATH()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    try:
+        tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2),
+                       encoding="utf-8")
+        os.replace(tmp, p)
+        return True
+    except Exception as exc:
+        _log.error("[ADAPT-SCHED] save planned order fail: %s", exc)
+        return False
+
+
+def load_planned_order() -> Optional[dict]:
+    """Carica ordine pianificato se fresh (< TTL_MIN).
+
+    Returns: dict con `ordine` + `completate` + `reasons`, oppure None se:
+        - file non esiste
+        - ordine stantio (ts_saved > TTL_MIN fa)
+        - parse error
+    """
+    p = _PLANNED_ORDER_PATH()
+    if not p.exists():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        ts_saved = datetime.fromisoformat(data.get("ts_saved", ""))
+        age_min = (datetime.now(timezone.utc) - ts_saved).total_seconds() / 60
+        if age_min > PLANNED_ORDER_TTL_MIN:
+            _log.info("[ADAPT-SCHED] planned order stale (%.0f min) — ignored",
+                      age_min)
+            return None
+        return data
+    except Exception as exc:
+        _log.warning("[ADAPT-SCHED] load planned order error: %s", exc)
+        return None
+
+
+def mark_completed(istanza: str) -> bool:
+    """Aggiorna lista completate nel file pianificato (per resume).
+
+    Idempotente: se istanza già in lista, no-op.
+    """
+    p = _PLANNED_ORDER_PATH()
+    if not p.exists():
+        return False
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        completate = data.get("completate", []) or []
+        if istanza not in completate:
+            completate.append(istanza)
+        data["completate"] = completate
+        data["ts_last_update"] = datetime.now(timezone.utc).isoformat()
+        tmp = p.with_suffix(p.suffix + ".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                       encoding="utf-8")
+        os.replace(tmp, p)
+        return True
+    except Exception as exc:
+        _log.warning("[ADAPT-SCHED] mark_completed error: %s", exc)
+        return False
+
+
+def clear_planned_order() -> bool:
+    """Rimuove file ordine pianificato (chiamare a fine ciclo OK)."""
+    p = _PLANNED_ORDER_PATH()
+    if not p.exists():
+        return True
+    try:
+        p.unlink()
+        return True
+    except Exception:
+        return False
+
+
+def get_remaining_from_resume() -> Optional[list[str]]:
+    """Se planned order esiste fresh, ritorna nomi istanze NON ancora completate.
+
+    Usato per resume post-restart: invece di ricalcolare ordine da zero, riprende
+    dalla lista già pianificata nel ciclo precedente, dalla prossima istanza.
+
+    Returns: lista nomi (in ordine pianificato) oppure None se nessun resume.
+    """
+    data = load_planned_order()
+    if data is None:
+        return None
+    completate = set(data.get("completate", []) or [])
+    rimanenti = [
+        item.get("ist")
+        for item in (data.get("ordine") or [])
+        if item.get("ist") and item.get("ist") not in completate
+    ]
+    return rimanenti or None
+
+
+# ─── CLI ad-hoc per debug ──────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    import argparse
+
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s %(levelname)s %(message)s")
+
+    p = argparse.ArgumentParser(description="Test adaptive scheduler.")
+    p.add_argument("--istanze", default=None,
+                   help="CSV nomi istanze (default: legge da instances.json)")
+    p.add_argument("--check", action="store_true",
+                   help="Solo check precondizioni + score per istanza, no save")
+    args = p.parse_args()
+
+    active, reasons = should_activate_scheduler()
+    print(f"=== Precondizioni: {'ATTIVO' if active else 'OFF'} ===")
+    print(f"  master_drl_residuo_pct = {_master_drl_residuo_pct():.1f}%")
+    print(f"  rifornimento_abilitato = {_rifornimento_abilitato()}")
+    print(f"  istanze_sature_pct     = {_percentuale_istanze_sature():.1f}%")
+    print(f"  spedizioni_oggi        = {_spedizioni_oggi_totali()}")
+    print(f"  reasons attive         = {reasons}")
+    print()
+
+    if args.istanze:
+        istanze = [s.strip() for s in args.istanze.split(",") if s.strip()]
+    else:
+        try:
+            inst_path = _root() / "config" / "instances.json"
+            insts = json.loads(inst_path.read_text(encoding="utf-8"))
+            istanze = [i.get("nome") for i in insts if i.get("abilitata", True)]
+        except Exception as exc:
+            print(f"errore lettura instances: {exc}")
+            raise SystemExit(1)
+
+    print(f"=== Ordine adattivo ({len(istanze)} istanze) ===")
+    ordine = ordina_istanze_adaptive(istanze)
+    print(f"{'#':3} {'istanza':14} {'t_avvio':9} {'slot_liberi':12} "
+          f"{'now':5} {'rientri':8} {'anz_min':8} {'data':5}")
+    print("-" * 70)
+    for i, item in enumerate(ordine):
+        if item.get("is_master"):
+            print(f"{i:3} {item['ist']:14} (master, fissa fondo)")
+            continue
+        print(
+            f"{i:3} {item['ist']:14} "
+            f"{item['t_avvio_min']:6.1f}min  "
+            f"{item['slot_liberi_atteso']}/{item['totali']:8}  "
+            f"{item['slot_liberi_now']:5}  "
+            f"{item['rientro_atteso']:8}  "
+            f"{item['anzianita_tick_min']:6.0f}m  "
+            f"{'OK' if item['data_completa'] else 'INC':5}"
+        )

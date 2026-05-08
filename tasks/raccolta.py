@@ -2601,13 +2601,26 @@ class RaccoltaChiusuraTask(RaccoltaTask):
     # Pre-fix: raccolta_chiusura skippa per slot pieni e sovrascriveva pre=5
     # → record finale `pre=5/post=5` con `invii=N` semanticamente impossibile.
     # Post-fix: pre invariato dal write di RaccoltaTask, post aggiornato qui.
+    #
+    # 07/05 fallback: se nessuno ha scritto attive_pre nel buffer (es.
+    # raccolta_fast skippato per OCR slot HOME fallito) → scrivi quello letto
+    # da chiusura come migliore approssimazione disponibile, evita N/A nel
+    # record JSONL. Se attive_pre già scritto → no-op come prima.
     def _persist_slot_metrics(self, ctx, attive_pre: int, attive_post: int,
                               totali: int) -> None:
         try:
-            from core.istanza_metrics import imposta_raccolta_slot
-            # attive_pre=-1 → no-op nel buffer (vedi imposta_raccolta_slot).
+            from core.istanza_metrics import (
+                imposta_raccolta_slot, get_raccolta_attive_pre,
+            )
+            existing_pre = get_raccolta_attive_pre(ctx.instance_name)
+            if existing_pre is None and attive_pre >= 0:
+                # Fallback: nessun pre scritto → usa quello letto da chiusura
+                pre_to_write = int(attive_pre)
+            else:
+                # No-op: preserva pre scritto da raccolta_fast/standard
+                pre_to_write = -1
             imposta_raccolta_slot(ctx.instance_name,
-                                  attive_pre=-1,
+                                  attive_pre=pre_to_write,
                                   attive_post=int(attive_post),
                                   totali=int(totali))
         except Exception:

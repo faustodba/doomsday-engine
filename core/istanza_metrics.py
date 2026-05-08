@@ -107,6 +107,45 @@ def imposta_raccolta_slot(instance: str, attive_pre: int = -1,
             rac["totali"] = int(totali)
 
 
+def get_raccolta_attive_pre(instance: str):
+    """Ritorna `attive_pre` dal buffer raccolta corrente; None se non settato.
+
+    Usato da `RaccoltaChiusuraTask` per decidere se scrivere `attive_pre` come
+    fallback (quando il task raccolta principale ha skippato senza scriverlo,
+    es. raccolta_fast su OCR slot HOME fallito).
+    """
+    with _lock:
+        buf = _BUFFER_PER_INSTANCE.get(instance)
+        if buf is None:
+            return None
+        rac = buf.get("raccolta") or {}
+        return rac.get("attive_pre")
+
+
+def imposta_adaptive_scheduler_meta(instance: str,
+                                       slot_liberi_attesi: int,
+                                       slot_liberi_now: int,
+                                       t_avvio_min_atteso: float,
+                                       reasons_attive: list[str],
+                                       posizione_in_ciclo: int) -> None:
+    """Hook adaptive scheduler: traccia score/posizione PREVISTI per istanza.
+
+    Chiamato dal main loop quando lo scheduler attiva e calcola l'ordine.
+    Permette poi di confrontare slot_liberi_attesi vs reali (post-OCR HOME)
+    per validare l'efficacia del modello T_marcia + scheduler.
+    """
+    with _lock:
+        buf = _BUFFER_PER_INSTANCE.get(instance)
+        if buf is None:
+            return
+        meta = buf.setdefault("adaptive_scheduler", {})
+        meta["slot_liberi_attesi"]  = int(slot_liberi_attesi)
+        meta["slot_liberi_now"]     = int(slot_liberi_now)
+        meta["t_avvio_min_atteso"]  = round(float(t_avvio_min_atteso), 1)
+        meta["reasons_attive"]      = list(reasons_attive)
+        meta["posizione_in_ciclo"]  = int(posizione_in_ciclo)
+
+
 def aggiungi_invio_raccolta(instance: str, tipo: str, livello: int,
                             cap_nodo: int, eta_marcia_s: int,
                             ts_invio_iso: str | None = None,

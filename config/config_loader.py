@@ -204,6 +204,119 @@ def load_overrides(path) -> dict:
         return {}
 
 
+# ==============================================================================
+# Bootstrap static → dynamic (regola architetturale 08/05)
+# ==============================================================================
+
+# Campi delle istanze copiati nel bootstrap (= mirror static→dynamic).
+# Mapping nomi diversi: profilo (instances.json) → tipologia (override).
+_INSTANCE_BOOTSTRAP_FIELDS = (
+    "abilitata", "truppe", "fascia_oraria", "max_squadre",
+    "livello", "raccolta_fuori_territorio", "master",
+)
+
+
+def _build_runtime_from_static(global_config: dict, instances: list) -> dict:
+    """Costruisce dict runtime_overrides da global_config + instances.
+
+    Replica TUTTI i campi configurabili (regola "bootstrap copia static→dynamic").
+    Esclude campi read-only/architetturali (mumu, _note).
+    """
+    SKIP_KEYS = {"_note", "mumu"}
+
+    globali: dict = {}
+    if isinstance(global_config, dict):
+        for k, v in global_config.items():
+            if k in SKIP_KEYS:
+                continue
+            # Deep copy via json round-trip per evitare reference shared
+            globali[k] = __import__('json').loads(
+                __import__('json').dumps(v, ensure_ascii=False)
+            )
+
+    istanze: dict = {}
+    if isinstance(instances, list):
+        for ist in instances:
+            if not isinstance(ist, dict):
+                continue
+            nome = ist.get("nome")
+            if not nome:
+                continue
+            entry: dict = {}
+            for f in _INSTANCE_BOOTSTRAP_FIELDS:
+                if f == "fascia_oraria":
+                    # Default vuoto se mancante
+                    entry[f] = ist.get(f, "") or ""
+                elif f in ist:
+                    entry[f] = ist[f]
+            # Mapping profilo → tipologia (instance.json usa profilo, override tipologia)
+            if "profilo" in ist:
+                entry["tipologia"] = ist["profilo"]
+            istanze[nome] = entry
+
+    return {"globali": globali, "istanze": istanze}
+
+
+def bootstrap_runtime_from_static_if_missing(
+    overrides_path: str | Path | None = None,
+    global_config_path: str | Path | None = None,
+    instances_path: str | Path | None = None,
+    force: bool = False,
+) -> bool:
+    """Crea `runtime_overrides.json` copiando static (`global_config.json` +
+    `instances.json`) se file mancante o `force=True`.
+
+    Regola architetturale: dynamic deve essere popolato dai valori static al
+    primo avvio (o dopo reset esplicito). Da quel momento in poi, dynamic
+    diventa indipendente — modifiche real-time dalla HOME non toccano static
+    e modifiche dalla CONFIG non toccano dynamic.
+
+    Args:
+        force: se True, sovrascrive runtime_overrides anche se esiste (= reset).
+
+    Returns:
+        True se file creato/sovrascritto, False se esistente e non force.
+    """
+    import json
+    from pathlib import Path
+
+    ov_path = Path(overrides_path) if overrides_path else (_ROOT / "config" / "runtime_overrides.json")
+    gc_path = Path(global_config_path) if global_config_path else _GLOBAL_CONFIG_PATH
+    ist_path = Path(instances_path) if instances_path else _INSTANCES_PATH
+
+    if ov_path.exists() and not force:
+        return False
+
+    # Leggi static
+    try:
+        gc_raw = json.loads(gc_path.read_text(encoding="utf-8")) if gc_path.exists() else {}
+    except Exception:
+        gc_raw = {}
+    try:
+        ist_raw = json.loads(ist_path.read_text(encoding="utf-8")) if ist_path.exists() else []
+    except Exception:
+        ist_raw = []
+
+    runtime = _build_runtime_from_static(gc_raw, ist_raw)
+
+    # Scrittura atomica
+    ov_path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = ov_path.with_suffix(ov_path.suffix + ".tmp")
+    try:
+        tmp.write_text(
+            json.dumps(runtime, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(tmp, ov_path)
+        return True
+    except Exception:
+        try:
+            if tmp.exists(): tmp.unlink()
+        except Exception:
+            pass
+        return False
+
+
 def merge_config(gcfg: dict, overrides: dict) -> dict:
     """
     Merge tra global_config.json raw (gcfg: dict) e runtime_overrides (overrides: dict).
@@ -275,12 +388,14 @@ def merge_config(gcfg: dict, overrides: dict) -> dict:
     except Exception:
         pass
 
-    # ── flag globali root-level (WU55, WU93, WU89-step3, WU115) ─────────────
+    # ── flag globali root-level (WU55, WU93, WU89-step3, WU115, Step C) ─────
     # Flag a livello root di globali che non hanno una sezione dedicata.
     # Estendibile: aggiungere chiavi qui se servono nuovi flag globali.
     for _k in ("raccolta_ocr_debug", "auto_learn_banner",
                "skip_predictor_enabled", "skip_predictor_shadow_only",
-               "debug_tasks"):
+               "adaptive_scheduler_enabled", "adaptive_scheduler_shadow_only",
+               "adaptive_scheduler_thresholds",
+               "debug_tasks", "notifications"):
         try:
             if _k in globali:
                 merged[_k] = globali[_k]
@@ -418,6 +533,67 @@ class MumuConfig:
 # GlobalConfig — parametri globali tipizzati
 # ==============================================================================
 
+_NOTIFICATIONS_DEFAULT: dict = {
+    "enabled":               False,
+    "daily_report_enabled":  True,
+    "daily_report_hour_utc": 6,
+    # Vuoti: l'utente li configura in dashboard prima di abilitare l'invio.
+    # Valori baseline iniziali in `config/global_config.json` (sovrascrivibili).
+    "from_addr":             "",
+    "recipients":            [],
+    "smtp":                  {"host": "smtp.gmail.com", "port": 465},
+}
+
+
+def _merge_notifications_default(raw: dict) -> dict:
+    """Merge raw config (anche parziale) con i default. Default per chiavi
+    mancanti, deep-merge per `smtp`. Ritorna sempre dict completo."""
+    out = dict(_NOTIFICATIONS_DEFAULT)
+    if not isinstance(raw, dict):
+        return out
+    for k, v in raw.items():
+        if k == "smtp" and isinstance(v, dict):
+            smtp_merged = dict(_NOTIFICATIONS_DEFAULT["smtp"])
+            smtp_merged.update(v)
+            out["smtp"] = smtp_merged
+        else:
+            out[k] = v
+    return out
+
+
+def load_effective_notifications() -> dict:
+    """Ritorna config notifications EFFETTIVA (baseline + runtime_overrides).
+
+    Priorità: `runtime_overrides.json::globali.notifications` >
+              `global_config.json::notifications` > defaults.
+
+    Tutti i consumer (daily_report, api_notifications, main.py boot) DEVONO
+    usare questa per leggere config notifications, NON `load_global()` che
+    legge solo il baseline. Ritorna sempre dict completo (chiavi mai mancanti).
+    """
+    gc = load_global()
+    base = dict(gc.notifications or {})
+    try:
+        ov_path = _ROOT / "config" / "runtime_overrides.json"
+        if ov_path.exists():
+            with ov_path.open(encoding="utf-8") as f:
+                ov = json.load(f) or {}
+            ov_notif = (ov.get("globali") or {}).get("notifications") or {}
+            if isinstance(ov_notif, dict):
+                # Deep merge per smtp, shallow per resto (override > base)
+                for k, v in ov_notif.items():
+                    if k == "smtp" and isinstance(v, dict):
+                        smtp = dict(base.get("smtp") or {})
+                        smtp.update(v)
+                        base["smtp"] = smtp
+                    else:
+                        base[k] = v
+    except Exception:
+        pass
+    # Garantisce chiavi sempre presenti (anche se entrambi i file mancano alcune)
+    return _merge_notifications_default(base)
+
+
 @dataclass
 class GlobalConfig:
     """
@@ -463,8 +639,23 @@ class GlobalConfig:
     skip_predictor_enabled:     bool = False
     skip_predictor_shadow_only: bool = True
 
+    # 08/05 — Adaptive Scheduler (flag-driven, default OFF + shadow first)
+    adaptive_scheduler_enabled:     bool = False
+    adaptive_scheduler_shadow_only: bool = True
+    adaptive_scheduler_thresholds:  dict = field(default_factory=lambda: {
+        "drl_residuo_pct":  30,
+        "pct_istanze_sat":  50,
+        "spedizioni_oggi":  100,
+    })
+
     # WU115 — Debug screenshot per task (hot-reload via shared/debug_buffer.py)
     debug_tasks:            dict = field(default_factory=dict)
+
+    # Step C Email Notifier — config notifications globale.
+    # Schema: {enabled, daily_report_enabled, daily_report_hour_utc, from_addr,
+    #          recipients: list[str], smtp: {host, port}}.
+    # App password sempre da env var DOOMSDAY_GMAIL_APP_PASSWORD (non in config).
+    notifications:          dict = field(default_factory=lambda: dict(_NOTIFICATIONS_DEFAULT))
 
     # Rifornimento — parametri comuni
     dooms_account:                    str   = ""
@@ -598,10 +789,34 @@ class GlobalConfig:
                 raw.get("skip_predictor_shadow_only",
                         raw.get("globali", {}).get("skip_predictor_shadow_only", True))
             ),
+            # 08/05 — Adaptive Scheduler flags
+            adaptive_scheduler_enabled = bool(
+                raw.get("adaptive_scheduler_enabled",
+                        raw.get("globali", {}).get("adaptive_scheduler_enabled", False))
+            ),
+            adaptive_scheduler_shadow_only = bool(
+                raw.get("adaptive_scheduler_shadow_only",
+                        raw.get("globali", {}).get("adaptive_scheduler_shadow_only", True))
+            ),
+            adaptive_scheduler_thresholds = dict(
+                raw.get("adaptive_scheduler_thresholds",
+                        raw.get("globali", {}).get("adaptive_scheduler_thresholds",
+                                                    {"drl_residuo_pct": 30,
+                                                     "pct_istanze_sat": 50,
+                                                     "spedizioni_oggi": 100})) or {}
+            ),
             # WU115 — Debug screenshot per task (dict {task: bool}, hot-reload)
             debug_tasks = dict(
                 raw.get("debug_tasks",
                         raw.get("globali", {}).get("debug_tasks", {})) or {}
+            ),
+
+            # Step C Email Notifier — config notifications.
+            # Merge con default per garantire chiavi sempre presenti anche se
+            # `runtime_overrides.json` ha solo override parziale (es. solo `enabled`).
+            notifications = _merge_notifications_default(
+                raw.get("notifications",
+                        raw.get("globali", {}).get("notifications", {})) or {}
             ),
 
             # Rifornimento — comune
@@ -807,14 +1022,15 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
 
     class _InstanceCfg:
         # ── Identità istanza ─────────────────────────────────────────────────
+        # 08/05: rimossi `layout` (deprecato post-WU22 → TM dinamico) e `lingua`
+        # (non più supportato, sempre EN). Vedi memoria `feedback_dashboard_save_merge.md`
+        # e `instances.json` cleanup 08/05.
         instance_name = nome
         truppe        = _ovr("truppe",      ist.get("truppe",      12000))
         max_squadre   = _ovr("max_squadre", ist.get("max_squadre", 4))
-        layout        = _ovr("layout",      ist.get("layout",      1))
         livello       = _ovr("livello",     ist.get("livello",     gcfg.livello_nodo))
         profilo       = _ovr("profilo",     ist.get("profilo",     "full"))
         fascia_oraria = _ovr("fascia_oraria", ist.get("fascia_oraria", ""))
-        lingua        = ist.get("lingua", "en")
         abilitata     = ist.get("abilitata", True)
         tipologia     = _tipologia
 
@@ -931,7 +1147,7 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         def __repr__(self):
             return (
                 f"InstanceCfg(nome={nome!r}, profilo={self.profilo!r}, "
-                f"layout={self.layout}, livello={self.livello})"
+                f"livello={self.livello})"
             )
 
     return _InstanceCfg()

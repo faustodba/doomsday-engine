@@ -1150,6 +1150,18 @@ def main():
         _log("MAIN", f"tick_sleep CLI esplicito: {args.tick_sleep}s")
 
     _log("MAIN", f"Root: {ROOT}  dry-run: {args.dry_run}  tick-sleep: {args.tick_sleep}s")
+
+    # Bootstrap runtime_overrides.json se mancante (regola architetturale 08/05:
+    # static → dynamic al primo avvio, vedi memoria architecture_config_static_dynamic.md).
+    try:
+        from config.config_loader import bootstrap_runtime_from_static_if_missing
+        created = bootstrap_runtime_from_static_if_missing()
+        if created:
+            _log("MAIN", "[BOOTSTRAP] runtime_overrides.json creato da static "
+                         "(global_config.json + instances.json)")
+    except Exception as _exc:
+        _log("MAIN", f"[WARN] bootstrap fallito: {_exc}")
+
     _log("MAIN", f"Task setup: {len(_TASK_SETUP)} task da {_TASK_SETUP_PATH}")
     if usa_runtime:
         _log("MAIN", "Configurazione runtime mantenuta")
@@ -1170,6 +1182,23 @@ def main():
         _restart_init_boot()
     except Exception as _exc:
         _log("MAIN", f"[WARN] restart_scheduler init: {_exc}")
+
+    # Step B/E Email Notifier — avvia dispatcher background se notifications
+    # enabled in config (merge baseline + runtime_overrides). Best-effort: il
+    # dispatcher gira anche se queue vuota. Stop su SIGINT/SIGTERM via atexit.
+    try:
+        from config.config_loader import load_effective_notifications
+        _notif_boot = load_effective_notifications()
+        if _notif_boot.get("enabled", False):
+            from core.notifier import start_dispatcher, stop_dispatcher
+            import atexit
+            if start_dispatcher(interval_s=60):
+                _log("MAIN", "[NOTIFIER] dispatcher mail avviato (interval=60s)")
+                atexit.register(lambda: stop_dispatcher(timeout_s=3))
+        else:
+            _log("MAIN", "[NOTIFIER] disabilitato (globali.notifications.enabled=false)")
+    except Exception as _exc:
+        _log("MAIN", f"[WARN] notifier init: {_exc}")
 
     tasks_cls = _import_tasks()
     _log("MAIN", f"Task: {list(tasks_cls.keys())}")
@@ -1249,6 +1278,83 @@ def main():
         # Rilettura dinamica istanze (recepisce modifiche dashboard pre-ciclo)
         istanze_ciclo = _carica_istanze_ciclo(filtro=filtro)
         _log("MAIN", f"CICLO {ciclo} — {[i['nome'] for i in istanze_ciclo]}")
+
+        # ─── 08/05 Adaptive Scheduler ─────────────────────────────────────
+        # 2 flag: `adaptive_scheduler_enabled` (master) + `_shadow_only`.
+        # - enabled=False         → no-op completo
+        # - enabled+shadow=True   → calcola + logga + telemetria, NO riordino
+        # - enabled+shadow=False  → riordina davvero + persistence + resume
+        # Mai skip totale: tutte le istanze processate sempre.
+        try:
+            from core.adaptive_scheduler import (
+                should_activate_scheduler, ordina_istanze_adaptive,
+                save_planned_order, get_remaining_from_resume,
+                clear_planned_order, is_shadow_mode, _flags_status,
+            )
+            _enabled, _shadow = _flags_status()
+            if not _enabled:
+                # No-op: scheduler completamente off
+                pass
+            else:
+                # 1) Resume post-restart (solo modalità LIVE, non shadow)
+                resume_ordine = None
+                if not _shadow and ciclo == 1:
+                    resume_ordine = get_remaining_from_resume()
+
+                if resume_ordine:
+                    _log("MAIN", f"[ADAPT-SCHED] resume da planned order: "
+                                 f"{len(resume_ordine)} istanze rimanenti")
+                    ist_by_nome = {i["nome"]: i for i in istanze_ciclo}
+                    istanze_ciclo = [ist_by_nome[n] for n in resume_ordine
+                                     if n in ist_by_nome]
+                else:
+                    active, reasons = should_activate_scheduler()
+                    if active:
+                        nomi = [i["nome"] for i in istanze_ciclo]
+                        ordine_dict = ordina_istanze_adaptive(nomi)
+                        nomi_ordinati_adapt = [d["ist"] for d in ordine_dict]
+                        ist_by_nome = {i["nome"]: i for i in istanze_ciclo}
+
+                        # Telemetria meta scheduler per ogni istanza (sia shadow che live)
+                        try:
+                            from core.istanza_metrics import (
+                                imposta_adaptive_scheduler_meta,
+                            )
+                            for pos, item in enumerate(ordine_dict):
+                                if item.get("is_master"):
+                                    continue
+                                imposta_adaptive_scheduler_meta(
+                                    item["ist"],
+                                    slot_liberi_attesi=item.get("slot_liberi_atteso", 0),
+                                    slot_liberi_now=item.get("slot_liberi_now", 0),
+                                    t_avvio_min_atteso=item.get("t_avvio_min", 0.0),
+                                    reasons_attive=reasons,
+                                    posizione_in_ciclo=pos,
+                                )
+                        except Exception:
+                            pass
+
+                        if _shadow:
+                            # SHADOW: logga ma NON riordina, NO persistence
+                            _log("MAIN", f"[ADAPT-SCHED] SHADOW ({', '.join(reasons)})")
+                            _log("MAIN", f"[ADAPT-SCHED] ordine_calcolato: "
+                                         f"{nomi_ordinati_adapt}")
+                            _log("MAIN", f"[ADAPT-SCHED] ordine_applicato (no shadow): "
+                                         f"{[i['nome'] for i in istanze_ciclo]}")
+                        else:
+                            # LIVE: applica riordino + persistence
+                            istanze_ciclo = [ist_by_nome[n] for n in nomi_ordinati_adapt
+                                             if n in ist_by_nome]
+                            save_planned_order(ordine_dict, reasons=reasons)
+                            _log("MAIN", f"[ADAPT-SCHED] LIVE ({', '.join(reasons)})")
+                            _log("MAIN", f"[ADAPT-SCHED] ordine: "
+                                         f"{[i['nome'] for i in istanze_ciclo]}")
+                    else:
+                        _log("MAIN", f"[ADAPT-SCHED] OFF (reason={reasons})")
+                        if not _shadow:
+                            clear_planned_order()
+        except Exception as _exc:
+            _log("MAIN", f"[WARN] adaptive scheduler: {_exc}")
 
         # WU46 — Telemetria cicli persistenti (Issue #53 estesa).
         # Scrive data/telemetry/cicli.json con start/end/durata per ciclo +
@@ -1331,6 +1437,13 @@ def main():
             except Exception:
                 pass
 
+            # 08/05 Adaptive Scheduler — marca istanza completata per resume
+            try:
+                from core.adaptive_scheduler import mark_completed
+                mark_completed(nome)
+            except Exception:
+                pass
+
             _log("MAIN", f"--- Istanza {nome} completata ---")
 
         # Fine ciclo — cancella checkpoint solo se completato senza interruzioni
@@ -1346,6 +1459,25 @@ def main():
             record_cicle_end(ciclo)
         except Exception:
             pass
+
+        # 08/05 Adaptive Scheduler — ciclo completato, cancella planned order
+        try:
+            from core.adaptive_scheduler import clear_planned_order
+            clear_planned_order()
+        except Exception:
+            pass
+
+        # Step E Email Notifier — hook idempotente daily report.
+        # Decide se inviare report di "ieri UTC" (config + state-driven).
+        # Se notifications disabled / window non raggiunta / già inviato → no-op.
+        try:
+            from core.daily_report import maybe_send_daily_report
+            res = maybe_send_daily_report()
+            if res.get("sent"):
+                _log("MAIN", f"[REPORT] daily report enqueued date={res.get('date')} "
+                             f"id={res.get('enqueue_id')}")
+        except Exception as _exc:
+            _log("MAIN", f"[WARN] maybe_send_daily_report: {_exc}")
 
         # Restart scheduler (post-cycle, mai mid-tick): controlla trigger
         # (file flag dashboard / schedule cron-like / cicli max) e in caso

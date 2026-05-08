@@ -79,6 +79,33 @@ _cache: dict = {"computed_at": 0.0, "stats": {}}
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Diagnostic log (toggle via env DOOMSDAY_PREDICTOR_DBG=1)
+# ──────────────────────────────────────────────────────────────────────────────
+# Log delle decisioni `_is_task_due` per snapshot in predict_cycle_from_config.
+# Default OFF (no overhead). Attivare per investigare discrepanze pred vs reale:
+#   PowerShell: $env:DOOMSDAY_PREDICTOR_DBG="1"
+# Output: data/predictor_debug.log (append, best-effort, no rotation).
+_DBG_LOCK = threading.Lock()
+
+
+def _dbg_enabled() -> bool:
+    return os.environ.get("DOOMSDAY_PREDICTOR_DBG", "").strip() in ("1", "true", "True")
+
+
+def _dbg_log(line: str) -> None:
+    if not _dbg_enabled():
+        return
+    try:
+        path = _root() / "data" / "predictor_debug.log"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with _DBG_LOCK:
+            with path.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+    except Exception:
+        pass
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Calcolo stats da metrics
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -970,6 +997,13 @@ def predict_cycle_from_config(strict_schedule: bool = True,
     tpi: dict[str, list[str]] = {}
     schedule_debug: dict[str, dict] = {}
     offset_s: float = 0.0   # cumulativo durata istanze precedenti
+
+    # Diagnostic snapshot header (solo se DBG attivo)
+    _dbg_log(
+        f"[SNAPSHOT] {now_utc.isoformat()} strict={strict_schedule} "
+        f"percentile={percentile} tick_sleep_s={tick_sleep_s} "
+        f"abilitate={len(abilitate)} task_globali={task_globali}"
+    )
     for inst in abilitate:
         now_for_inst = now_utc + _timedelta(seconds=offset_s)
         # Tipologia istanza per filtro raccolta_only / raccolta_fast
@@ -1013,10 +1047,35 @@ def predict_cycle_from_config(strict_schedule: bool = True,
             if entry is None:
                 # Task senza entry in task_setup (raccolta_fast non c'è) → conserva
                 due_tasks.append(tn)
+                _dbg_log(
+                    f"[DBG] {inst} {tn} schedule=NO_ENTRY decision=DUE "
+                    f"(task senza entry in task_setup)"
+                )
                 continue
             last_run = sch_state.get(tn)
-            if _is_task_due(tn, entry, last_run, now_for_inst,
-                            istanza=inst, tick_sleep_s=tick_sleep_s):
+            decision = _is_task_due(tn, entry, last_run, now_for_inst,
+                                    istanza=inst, tick_sleep_s=tick_sleep_s)
+            # Log diagnostico: tutti i campi che concorrono alla decisione
+            try:
+                sch_type = entry.get("schedule", "periodic")
+                interv_h = float(entry.get("interval_hours", 0) or 0)
+                if last_run:
+                    from datetime import datetime as __dt
+                    last_dt = __dt.fromisoformat(last_run)
+                    elapsed_h = (now_for_inst - last_dt).total_seconds() / 3600.0
+                    last_str = last_run
+                    elapsed_str = f"{elapsed_h:.2f}h"
+                else:
+                    last_str = "None"
+                    elapsed_str = "N/A"
+                _dbg_log(
+                    f"[DBG] {inst} {tn} schedule={sch_type} interval={interv_h}h "
+                    f"last={last_str} now_for_inst={now_for_inst.isoformat()} "
+                    f"elapsed={elapsed_str} decision={'DUE' if decision else 'SKIP'}"
+                )
+            except Exception as _e:
+                _dbg_log(f"[DBG-ERR] {inst} {tn}: {type(_e).__name__}: {_e}")
+            if decision:
                 due_tasks.append(tn)
             else:
                 skipped.append(tn)

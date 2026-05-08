@@ -19,6 +19,49 @@
 {% set tsk = cfg.get('task',{}) %}
 {% set mum = cfg.get('mumu',{}) %}
 
+<!-- ── BANNER REGOLA ARCHITETTURALE STATIC vs DYNAMIC (08/05) ─── -->
+<div class="section">
+  <div style="background:#fff8dc;border:1px solid #d4b842;border-radius:6px;
+              padding:10px 14px;font-size:12px;color:#5a4a00">
+    <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span style="font-size:18px">⚙</span>
+      <div style="flex:1">
+        <b>Configurazione INIZIALE (statica)</b> — questi valori sono i parametri di partenza
+        del bot al fresh boot/reset. <b>Non sono hot-reload</b>: il bot continua a usare i
+        valori runtime correnti finché non fai <b>reset</b>.
+      </div>
+      <button class="btn-orange" onclick="resetConfigRuntime()"
+              title="Sovrascrive runtime_overrides.json con i valori static qui sotto">
+        ↺ reset runtime
+      </button>
+    </div>
+    <div id="reset-msg" style="margin-top:6px;font-size:11px"></div>
+  </div>
+</div>
+
+<script>
+async function resetConfigRuntime() {
+  const m = document.getElementById('reset-msg');
+  if (!confirm('Sovrascrivere runtime_overrides.json con i valori static? Tutte le modifiche real-time correnti andranno perse.')) return;
+  m.textContent = 'reset in corso...';
+  m.style.color = '#0066cc';
+  try {
+    const r = await fetch('/api/config/reset', {method: 'POST'});
+    const j = await r.json();
+    if (r.ok) {
+      m.textContent = '✓ ' + (j.msg || 'reset eseguito') + ' — il bot leggerà i nuovi valori al prossimo tick';
+      m.style.color = '#0a8000';
+    } else {
+      m.textContent = '✗ ' + (j.detail || 'errore');
+      m.style.color = '#c00';
+    }
+  } catch (e) {
+    m.textContent = '✗ ' + e.message;
+    m.style.color = '#c00';
+  }
+}
+</script>
+
 <!-- ── CONFIGURAZIONE 4-card (clone overview, target=global_config) ─── -->
 <div class="section">
   <div class="sec-label">configurazione</div>
@@ -364,80 +407,30 @@
 
 <div class="divider"></div>
 
-<!-- ── ADDESTRAMENTO TRUPPE (06/05) ─────────────────────────────────────── -->
-{% set tr_cfg = cfg.get('truppe', {}) %}
-{% set tr_cas = tr_cfg.get('caserme', {}) %}
+{# 08/05: sezione "🪖 addestramento truppe" spostata in pagina /ui/advanced
+   (default globale + override per istanza). Vedi templates/advanced.html. #}
+
+<!-- ── EMAIL NOTIFIER (Step F) ─────────────────── -->
 <div class="section">
-  <div class="sec-label">🪖 addestramento truppe — default globale + override per istanza</div>
-
-  <div style="background:rgba(245,197,66,0.06);border:1px solid var(--border);
-              border-radius:6px;padding:10px 14px;margin-bottom:14px">
-    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
-      <span style="font-weight:600">default globale</span>
-      <span style="color:var(--text-dim);font-size:11px">applicato a tutte le istanze tranne quelle con override esplicito</span>
-    </div>
-    <div style="display:flex;flex-wrap:wrap;gap:18px;margin-top:10px">
-      {% for k, lbl, ico in [('infantry','Infantry','🪖'),('rider','Rider','🐎'),('ranged','Ranged','🏹'),('engine','Engine','⚙')] %}
-      <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer">
-        <input type="checkbox" id="gc-truppe-g-{{ k }}"
-               {% if tr_cas.get(k, True) %}checked{% endif %}>
-        <span>{{ ico }} {{ lbl }}</span>
-      </label>
-      {% endfor %}
-    </div>
-    <div style="margin-top:10px">
-      <button class="btn btn-primary" onclick="gcSalvaTruppeGlobali()">⬡ salva default globale</button>
-      <span class="save-ok" id="gc-truppe-ok">✓ salvato</span>
-      <span class="save-err" id="gc-truppe-err"></span>
-    </div>
+  <div class="sec-label">📧 email notifier · daily report + alert (account dedicato)</div>
+  <div id="notif-card"
+       hx-get="/ui/partial/notifications"
+       hx-trigger="load, refresh, every 30s"
+       hx-swap="innerHTML">
+    <div style="padding:14px;color:#888;font-size:12px">caricamento…</div>
   </div>
+</div>
 
-  <div class="sec-label" style="margin:14px 0 8px">override per istanza · null = eredita default</div>
-  <div style="overflow-x:auto">
-    <table class="ist-tbl">
-      <thead>
-        <tr>
-          <th>nome</th>
-          <th>🪖 Inf</th>
-          <th>🐎 Rid</th>
-          <th>🏹 Ran</th>
-          <th>⚙ Eng</th>
-          <th>azione</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for ist in instances %}
-        {% set ov_full = overrides.get('istanze', {}).get(ist.nome, {}) %}
-        {% set tr_ov = (ov_full.get('truppe_override') or {}).get('caserme', {}) %}
-        {% set is_master = ist.nome in master_names %}
-        <tr data-nome="{{ ist.nome }}">
-          <td class="gc-ist-name-col">
-            <span style="font-family:var(--font-mono);font-weight:600">{{ ist.nome }}</span>
-            {% if is_master %}<span title="master" style="color:#f5c542;font-weight:700;margin-left:4px">★</span>{% endif %}
-          </td>
-          {% for k in ['infantry','rider','ranged','engine'] %}
-          <td>
-            <select class="gc-truppe-ov" data-key="{{ k }}" style="width:84px;font-size:10px">
-              <option value="" {% if tr_ov.get(k) is none %}selected{% endif %}>(default)</option>
-              <option value="true"  {% if tr_ov.get(k)==True %}selected{% endif %}>ON</option>
-              <option value="false" {% if tr_ov.get(k)==False %}selected{% endif %}>OFF</option>
-            </select>
-          </td>
-          {% endfor %}
-          <td>
-            <button class="btn" style="padding:2px 8px;font-size:10px"
-                    onclick="gcResetTruppeIstanza('{{ ist.nome }}')">↻ reset</button>
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  <div class="save-row" style="margin-top:10px">
-    <button class="btn btn-primary" onclick="gcSalvaTruppeIstanze()">⬡ salva override istanze</button>
-    <span class="save-note">scrive su runtime_overrides.istanze.<i>nome</i>.truppe_override · hot-reload</span>
-    <span class="save-ok" id="gc-truppe-ist-ok">✓ salvato</span>
-    <span class="save-err" id="gc-truppe-ist-err"></span>
+<div class="divider"></div>
+
+<!-- ── ADAPTIVE SCHEDULER (08/05) ─────────────────── -->
+<div class="section">
+  <div class="sec-label">🎯 adaptive scheduler · ordine istanze adattivo per slot liberi attesi</div>
+  <div id="adapt-card"
+       hx-get="/ui/partial/adaptive-scheduler"
+       hx-trigger="load, refresh, every 30s"
+       hx-swap="innerHTML">
+    <div style="padding:14px;color:#888;font-size:12px">caricamento…</div>
   </div>
 </div>
 
@@ -451,7 +444,8 @@
       <thead>
         <tr>
           <th>on</th><th>nome</th><th>porta</th><th>profilo</th><th>truppe</th>
-          <th>sq.</th><th>liv.</th><th>layout</th>
+          <th title="max squadre concorrenti">squadre</th>
+          <th title="livello nodo target">nodo</th>
           <th title="raccolta fuori territorio (WU50)">FT</th>
         </tr>
       </thead>
@@ -475,7 +469,7 @@
               <option value="full"          {% if tipo=='full'          %}selected{% endif %}>completo</option>
               <option value="raccolta_fast" {% if tipo=='raccolta_fast' %}selected{% endif %}>completo · fast</option>
               <option value="raccolta_only" {% if tipo=='raccolta_only' %}selected{% endif %}>solo raccolta</option>
-              <option value="raccolta"      {% if tipo=='raccolta'      %}selected{% endif %}>raccolta</option>
+              {# 08/05: rimossa option 'raccolta' (alias morto, vedi models.py) #}
             </select>
           </td>
           <td>
@@ -489,10 +483,6 @@
           <td>
             <input class="gc-ist-lv" type="number" min="1" max="9"
                    value="{{ ov.get('livello', ist.get('livello', 6)) }}" style="width:52px">
-          </td>
-          <td>
-            <input class="gc-ist-layout" type="number" min="1" max="5"
-                   value="{{ ov.get('layout', ist.get('layout', 1)) or 1 }}" style="width:52px">
           </td>
           <td>
             <input class="gc-ist-fuori-terr" type="checkbox" {% if fuori %}checked{% endif %}>
@@ -732,7 +722,6 @@ async function gcSalvaIstanze() {
       fascia_oraria: null,
       max_squadre:  parseInt(tr.querySelector('.gc-ist-sq')?.value)||null,
       livello:      parseInt(tr.querySelector('.gc-ist-lv')?.value)||null,
-      layout:       parseInt(tr.querySelector('.gc-ist-layout')?.value)||null,
       raccolta_fuori_territorio: tr.querySelector('.gc-ist-fuori-terr')?.checked ?? false,
     };
   });

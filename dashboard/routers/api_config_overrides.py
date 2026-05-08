@@ -86,39 +86,55 @@ def read_overrides():
 # ==============================================================================
 
 @router.put("/globals")
-def save_globals(payload: PayloadGlobals):
+async def save_globals(request: Request):
     """
-    Aggiorna task flags e parametri globali sistema.
-    Merge incrementale: solo i campi esplicitamente presenti nel payload
-    vengono aggiornati (exclude_unset). I campi task non inviati mantengono
-    lo stato precedente.
+    Aggiorna task flags e parametri globali sistema — MERGE INCREMENTALE.
 
-    Bug storico: payload task={} faceva Pydantic costruire TaskFlags() con
-    default — sovrascrivendo rifornimento/radar_census a False (default
-    Pydantic) ogni volta che l'utente salvava "sistema".
+    Bug fix 08/05: pre-fix `ov.globali.sistema = payload.sistema` sovrascriveva
+    i 2 campi sistema con i default Pydantic se non inviati. Ora merge raw.
 
     Hot-reload: attivo al prossimo tick del bot.
     """
+    try:
+        raw = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"JSON non valido: {e}")
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="payload deve essere un oggetto JSON")
+
     ov = _load_ov()
 
-    # Merge incrementale task — solo campi esplicitamente presenti
-    task_updates = payload.task.model_dump(exclude_unset=True)
-    for k, v in task_updates.items():
-        setattr(ov.globali.task, k, v)
+    # Task flags — merge solo chiavi esplicitamente presenti
+    task_payload = raw.get("task") or {}
+    task_updated_keys: list[str] = []
+    if isinstance(task_payload, dict):
+        for k, v in task_payload.items():
+            if hasattr(ov.globali.task, k):
+                setattr(ov.globali.task, k, bool(v))
+                task_updated_keys.append(k)
 
-    # Sistema sempre sovrascritto (solo 2 campi, poco rischio di miss)
-    ov.globali.sistema = payload.sistema
+    # Sistema — merge field-by-field (bug fix tick_sleep/max_parallel sovrascritti)
+    sistema_payload = raw.get("sistema") or {}
+    if isinstance(sistema_payload, dict):
+        cur_sis = ov.globali.sistema
+        for field in ("max_parallel", "tick_sleep_min"):
+            if field in sistema_payload:
+                try:
+                    setattr(cur_sis, field, int(sistema_payload[field]))
+                except (TypeError, ValueError):
+                    raise HTTPException(status_code=400,
+                                        detail=f"valore non numerico per {field}")
 
-    # WU89-Step4 — Skip Predictor flags (None = no update, preservation pattern)
-    if payload.skip_predictor_enabled is not None:
-        ov.globali.skip_predictor_enabled = bool(payload.skip_predictor_enabled)
-    if payload.skip_predictor_shadow_only is not None:
-        ov.globali.skip_predictor_shadow_only = bool(payload.skip_predictor_shadow_only)
+    # Skip Predictor flags — pattern Optional preservation
+    if "skip_predictor_enabled" in raw:
+        ov.globali.skip_predictor_enabled = bool(raw["skip_predictor_enabled"])
+    if "skip_predictor_shadow_only" in raw:
+        ov.globali.skip_predictor_shadow_only = bool(raw["skip_predictor_shadow_only"])
 
     _save_ov(ov)
     return {
         "ok": True, "restart_required": False, "sezione": "globals",
-        "task_updated": list(task_updates.keys()),
+        "task_updated": task_updated_keys,
     }
 
 
@@ -127,29 +143,72 @@ def save_globals(payload: PayloadGlobals):
 # ==============================================================================
 
 @router.put("/rifornimento")
-def save_rifornimento(payload: PayloadRifornimento):
+async def save_rifornimento(request: Request):
     """
-    Aggiorna configurazione rifornimento completa:
-      - rifornimento_comune: account, max spedizioni, soglie per risorsa, flag per risorsa
-      - rifugio: coordinate X/Y mappa
-      - modalità: mappa_abilitata / membri_abilitati (mutuamente esclusivi)
+    Aggiorna configurazione rifornimento — MERGE INCREMENTALE.
 
+    Bug fix 08/05: pre-fix `PayloadRifornimento` aveva `default_factory` su
+    sub-modelli → invio parziale → Pydantic rifabbricava il modello con default
+    Pydantic (es. acciaio_abilitato=False, coord rifugio 687/532) sovrascrivendo
+    i valori esistenti nel runtime_overrides.
+
+    Post-fix: parse JSON raw, applica SOLO le chiavi effettivamente presenti.
+    Backward compatible: client che inviano payload completo continuano a
+    funzionare; client parziali preservano i campi non inviati.
     Hot-reload: attivo al prossimo tick.
     """
-    ov = _load_ov()
-    ov.globali.rifornimento_comune = payload.rifornimento_comune
-    ov.globali.rifugio             = payload.rifugio
+    try:
+        raw = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"JSON non valido: {e}")
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="payload deve essere un oggetto JSON")
 
-    # Modalità mutuamente esclusiva: se mappa ON → membri OFF e viceversa
-    if payload.mappa_abilitata:
-        ov.globali.rifornimento.mappa_abilitata  = True
-        ov.globali.rifornimento.membri_abilitati = False
-    elif payload.membri_abilitati:
-        ov.globali.rifornimento.mappa_abilitata  = False
-        ov.globali.rifornimento.membri_abilitati = True
-    else:
-        ov.globali.rifornimento.mappa_abilitata  = False
-        ov.globali.rifornimento.membri_abilitati = False
+    ov = _load_ov()
+
+    # Sub-section "rifornimento_comune" — merge incrementale field-by-field
+    rc_payload = raw.get("rifornimento_comune") or {}
+    if isinstance(rc_payload, dict):
+        cur_rc = ov.globali.rifornimento_comune
+        for field in ("dooms_account", "max_spedizioni_ciclo",
+                      "soglia_campo_m", "soglia_legno_m",
+                      "soglia_petrolio_m", "soglia_acciaio_m",
+                      "campo_abilitato", "legno_abilitato",
+                      "petrolio_abilitato", "acciaio_abilitato"):
+            if field in rc_payload:
+                setattr(cur_rc, field, rc_payload[field])
+        # Sub-sub: allocazione (anch'essa merge)
+        alloc_payload = rc_payload.get("allocazione") or {}
+        if isinstance(alloc_payload, dict):
+            for field in ("pomodoro", "legno", "petrolio", "acciaio"):
+                if field in alloc_payload:
+                    setattr(cur_rc.allocazione, field,
+                            float(alloc_payload[field]))
+
+    # Sub-section "rifugio" — merge incrementale (preserva coord se non inviate)
+    rifugio_payload = raw.get("rifugio") or {}
+    if isinstance(rifugio_payload, dict):
+        cur_r = ov.globali.rifugio
+        for field in ("coord_x", "coord_y"):
+            if field in rifugio_payload:
+                setattr(cur_r, field, int(rifugio_payload[field]))
+
+    # Modalità mutuamente esclusive: applica SOLO se almeno una è esplicitamente
+    # presente nel payload (altrimenti preserva stato esistente)
+    has_mappa = "mappa_abilitata" in raw
+    has_membri = "membri_abilitati" in raw
+    if has_mappa or has_membri:
+        m = bool(raw.get("mappa_abilitata", False))
+        mb = bool(raw.get("membri_abilitati", False))
+        if m:
+            ov.globali.rifornimento.mappa_abilitata  = True
+            ov.globali.rifornimento.membri_abilitati = False
+        elif mb:
+            ov.globali.rifornimento.mappa_abilitata  = False
+            ov.globali.rifornimento.membri_abilitati = True
+        else:
+            ov.globali.rifornimento.mappa_abilitata  = False
+            ov.globali.rifornimento.membri_abilitati = False
 
     _save_ov(ov)
     return {"ok": True, "restart_required": False, "sezione": "rifornimento"}
@@ -159,18 +218,67 @@ def save_rifornimento(payload: PayloadRifornimento):
 # PUT /api/config/zaino — modalità e soglie
 # ==============================================================================
 
-@router.put("/zaino")
-def save_zaino(payload: PayloadZaino):
-    """
-    Aggiorna configurazione zaino:
-      - modalita: "bag" | "svuota" (mutuamente esclusive)
-      - usa_*: flag per risorsa
-      - soglia_*_m: soglia deposito per risorsa
+# ==============================================================================
+# POST /api/config/reset — ripristina runtime da static (regola 08/05)
+# ==============================================================================
 
-    Hot-reload: attivo al prossimo tick.
+@router.post("/reset")
+def reset_runtime_overrides() -> dict:
+    """Cancella `runtime_overrides.json` e lo ricrea da static (`global_config.json`
+    + `instances.json`).
+
+    Equivalente a "reset configurazione runtime": tutti i valori dinamici
+    correnti vengono persi e sostituiti dai valori static voluti dall'utente
+    (set in `/ui/config/global`).
+
+    Effetto: runtime_overrides.json sovrascritto. Bot legge nuovi valori al
+    prossimo tick istanza (hot-reload).
+
+    Vedi memoria `architecture_config_static_dynamic.md`.
     """
+    try:
+        from config.config_loader import bootstrap_runtime_from_static_if_missing
+        ok = bootstrap_runtime_from_static_if_missing(force=True)
+        if not ok:
+            raise HTTPException(status_code=500, detail="bootstrap fallito")
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"errore: {exc}")
+
+    return {
+        "ok": True,
+        "msg": "runtime_overrides.json ricreato da static",
+        "restart_required": False,
+    }
+
+
+@router.put("/zaino")
+async def save_zaino(request: Request):
+    """
+    Aggiorna configurazione zaino — MERGE INCREMENTALE (bug fix 08/05).
+    Pre-fix `payload.zaino` aveva default_factory → invio parziale rifabbricava
+    il modello sovrascrivendo flag risorsa/soglie ai default Pydantic.
+    """
+    try:
+        raw = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"JSON non valido: {e}")
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="payload deve essere un oggetto JSON")
+
+    # Supporta sia wrapper "zaino" sia flat
+    z_payload = raw.get("zaino") if isinstance(raw.get("zaino"), dict) else raw
+
     ov = _load_ov()
-    ov.globali.zaino = payload.zaino
+    cur_z = ov.globali.zaino
+    for field in ("modalita", "usa_pomodoro", "usa_legno",
+                  "usa_petrolio", "usa_acciaio",
+                  "soglia_pomodoro_m", "soglia_legno_m",
+                  "soglia_petrolio_m", "soglia_acciaio_m"):
+        if field in z_payload:
+            setattr(cur_z, field, z_payload[field])
+
     _save_ov(ov)
     return {"ok": True, "restart_required": False, "sezione": "zaino"}
 
@@ -180,38 +288,47 @@ def save_zaino(payload: PayloadZaino):
 # ==============================================================================
 
 @router.put("/allocazione")
-def save_allocazione(payload: PayloadAllocazione):
+async def save_allocazione(request: Request):
     """
-    Aggiorna percentuali allocazione raccolta.
-    Somma consigliata = 100%. Il bot normalizza internamente.
-    Le percentuali vengono convertite in frazioni (0.0-1.0) prima della scrittura.
+    Aggiorna percentuali allocazione raccolta — MERGE INCREMENTALE.
 
+    Bug fix 08/05: pre-fix il payload aveva `default_factory=AllocazioneOverride`
+    con default uniforme 25/25/25/25. Invio parziale (es. solo `pomodoro=35`)
+    rifabbricava modello con default → altre risorse a 25.
+
+    Post-fix: applica SOLO i field presenti nel JSON raw.
     Hot-reload: attivo al prossimo tick.
     """
-    ov = _load_ov()
-    ov.globali.raccolta.allocazione = payload.allocazione
+    try:
+        raw = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"JSON non valido: {e}")
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="payload deve essere un oggetto JSON")
 
-    # Scrivi frazioni nel raccolta del merged che il bot legge via raccolta.allocazione
-    frazioni = payload.allocazione.to_frazioni()
-    ov.globali.raccolta.allocazione.pomodoro = payload.allocazione.pomodoro
-    ov.globali.raccolta.allocazione.legno    = payload.allocazione.legno
-    ov.globali.raccolta.allocazione.petrolio = payload.allocazione.petrolio
-    ov.globali.raccolta.allocazione.acciaio  = payload.allocazione.acciaio
+    ov = _load_ov()
+
+    # Supporta sia payload con wrapper "allocazione" sia flat
+    alloc_payload = raw.get("allocazione") if isinstance(raw.get("allocazione"), dict) else raw
+
+    cur_alloc = ov.globali.raccolta.allocazione
+    for field in ("pomodoro", "legno", "petrolio", "acciaio"):
+        if field in alloc_payload:
+            try:
+                setattr(cur_alloc, field, float(alloc_payload[field]))
+            except (TypeError, ValueError):
+                raise HTTPException(status_code=400,
+                                    detail=f"valore non numerico per {field}")
 
     _save_ov(ov)
 
-    totale = sum([
-        payload.allocazione.pomodoro,
-        payload.allocazione.legno,
-        payload.allocazione.petrolio,
-        payload.allocazione.acciaio,
-    ])
+    totale = sum([cur_alloc.pomodoro, cur_alloc.legno,
+                  cur_alloc.petrolio, cur_alloc.acciaio])
     return {
         "ok": True,
         "restart_required": False,
         "sezione": "allocazione",
         "totale_pct": round(totale, 1),
-        "frazioni": frazioni,
         "warn": None if abs(totale - 100.0) <= 0.5 else f"Totale {totale:.1f}% ≠ 100% — il bot normalizzerà",
     }
 
@@ -236,35 +353,29 @@ def save_istanze(payload: PayloadIstanze):
 
     Hot-reload: attivo al prossimo avvio istanza.
     """
-    raw = get_overrides() or {}
-    raw_istanze = dict(raw.get("istanze") or {})
-    for nome, ov_new in payload.istanze.items():
-        cur = raw_istanze.get(nome) or {}
-        new = ov_new.model_dump(exclude_none=True)
-        # Preserva truppe_override esistente (gestito dall'endpoint dedicato)
-        if "truppe_override" in cur and "truppe_override" not in new:
-            new["truppe_override"] = cur["truppe_override"]
-        raw_istanze[nome] = new
-    raw["istanze"] = raw_istanze
-    save_overrides(raw)
-
-    # Estrai campi da scrivere su instances.json (max_squadre, layout, livello,
-    # raccolta_fuori_territorio — WU50 default statico per istanza,
-    # master — flag istanza rifugio destinatario)
+    # 08/05 — REGOLA ARCHITETTURALE:
+    # CONFIG (`/ui/config/global`) modifica SOLO i parametri iniziali (static).
+    # I parametri runtime NON vengono toccati: i due piani entrano in match solo
+    # in bootstrap (primo avvio senza runtime_overrides.json) o reset esplicito.
+    # Questo garantisce che modifiche al "default voluto" non sovrascrivano lo
+    # stato corrente del bot.
+    # Vedi memoria `architecture_config_static_dynamic.md`.
     instances_updates: dict[str, dict] = {}
     for nome, ist_ov in payload.istanze.items():
-        upd = {}
+        upd: dict = {}
+        upd["abilitata"] = bool(ist_ov.abilitata)
+        upd["truppe"] = int(ist_ov.truppe or 0)
+        # tipologia (Enum) → profilo (str). `.value` evita "TipologiaIstanza.full"
+        tip = ist_ov.tipologia
+        upd["profilo"] = tip.value if hasattr(tip, "value") else str(tip)
+        upd["raccolta_fuori_territorio"] = bool(ist_ov.raccolta_fuori_territorio)
+        upd["master"] = bool(ist_ov.master)
+        if ist_ov.fascia_oraria is not None:
+            upd["fascia_oraria"] = ist_ov.fascia_oraria
         if ist_ov.max_squadre is not None:
             upd["max_squadre"] = ist_ov.max_squadre
-        if ist_ov.layout is not None:
-            upd["layout"] = ist_ov.layout
         if ist_ov.livello is not None:
             upd["livello"] = ist_ov.livello
-        # WU50 — flag fuori territorio sempre persistito in instances.json
-        # (è un default statico per-istanza, configurabile da dashboard)
-        upd["raccolta_fuori_territorio"] = bool(ist_ov.raccolta_fuori_territorio)
-        # master flag persistito in instances.json (default statico per-istanza)
-        upd["master"] = bool(ist_ov.master)
         instances_updates[nome] = upd
 
     # Invalida cache instance_meta (master flag potrebbe essere cambiato)
@@ -299,9 +410,12 @@ def save_istanze(payload: PayloadIstanze):
 @router.put("/istanze/truppe")
 async def save_istanze_truppe(request: Request):
     """
-    Aggiorna SOLO l'override truppe per istanza (campo `truppe_override`).
-    Preserva tutti gli altri campi dell'IstanzaOverride esistente (abilitata,
-    tipologia, max_squadre, ecc).
+    Aggiorna l'override truppe per istanza (campo `truppe_override`).
+
+    08/05: secondo regola architetturale, questo endpoint è chiamato dalla
+    sezione CONFIG `/ui/config/global` → scrive SOLO su `instances.json`
+    (static). Il bot legge dynamic (runtime_overrides) durante l'esecuzione,
+    quindi le modifiche diventano attive al prossimo bootstrap o reset.
 
     Payload atteso:
       { "istanze": {
@@ -309,8 +423,6 @@ async def save_istanze_truppe(request: Request):
             "FAU_01": { "truppe_override": null },   // reset → eredita globale
             ...
         } }
-
-    Hot-reload: attivo al prossimo avvio istanza.
     """
     try:
         body = await request.json()
@@ -320,35 +432,34 @@ async def save_istanze_truppe(request: Request):
     if not isinstance(payload_istanze, dict):
         raise HTTPException(400, "campo 'istanze' deve essere dict")
 
-    raw = get_overrides() or {}
-    raw_istanze = raw.get("istanze") or {}
+    # Costruisci updates per save_instances_fields (scrive su instances.json)
+    instances_updates: dict[str, dict] = {}
     aggiornate: list[str] = []
-
     for nome, patch in payload_istanze.items():
         if not isinstance(patch, dict):
             continue
-        cur = raw_istanze.get(nome) or {}
-        # Solo il campo truppe_override viene toccato.
-        # null/None → rimuovi la chiave (= eredita default globale)
         new_to = patch.get("truppe_override")
         if new_to is None:
-            cur.pop("truppe_override", None)
+            # Reset: rimuovi truppe_override → segnaliamo None (save lo gestirà)
+            instances_updates[nome] = {"truppe_override": None}
         else:
-            # validate via Pydantic per coercion + check schema
             from dashboard.models import TruppeIstanzaOverride
             try:
-                cur["truppe_override"] = TruppeIstanzaOverride.model_validate(new_to).model_dump()
+                validated = TruppeIstanzaOverride.model_validate(new_to).model_dump()
             except Exception as exc:
                 raise HTTPException(400, f"truppe_override invalido per {nome}: {exc}")
-        raw_istanze[nome] = cur
+            instances_updates[nome] = {"truppe_override": validated}
         aggiornate.append(nome)
 
-    raw["istanze"] = raw_istanze
-    save_overrides(raw)
+    if instances_updates:
+        try:
+            save_instances_fields(instances_updates)
+        except Exception as e:
+            raise HTTPException(500, f"scrittura instances.json fallita: {e}")
 
     return {
         "ok": True,
-        "sezione": "istanze.truppe_override",
+        "sezione": "istanze.truppe_override (static)",
         "aggiornate": aggiornate,
     }
 
@@ -446,29 +557,26 @@ def set_zaino_mode(sub: str):
 @router.patch("/overrides/istanze/{nome}")
 def patch_istanza(nome: str, data: dict):
     """
-    Aggiorna i campi override di una singola istanza.
+    Aggiorna i campi override di una singola istanza (HOME real-time).
     Merge con i valori esistenti (non sovrascrive tutto).
+
+    08/05 fix: NON tocca `instances.json` (file statico). Le modifiche
+    real-time dalla HOME vivono SOLO in `runtime_overrides.json`. Per
+    modificare i default statici (instances.json) usare la sezione
+    config tramite `PUT /api/config/istanze`.
     """
     ov = _load_ov()
     current      = ov.istanze.get(nome, IstanzaOverride())
     current_dict = current.model_dump()
 
+    # 08/05: rimosso 'layout' (deprecato WU22)
     allowed = {"abilitata", "truppe", "tipologia", "fascia_oraria",
-               "max_squadre", "layout", "livello"}
+               "max_squadre", "livello"}
     for k, v in data.items():
         if k in allowed:
             current_dict[k] = v
 
     ov.istanze[nome] = IstanzaOverride.model_validate(current_dict)
     _save_ov(ov)
-
-    # Aggiorna instances.json se presenti campi strutturali
-    instances_upd = {k: current_dict[k] for k in ("max_squadre", "layout", "livello")
-                     if current_dict.get(k) is not None}
-    if instances_upd:
-        try:
-            save_instances_fields({nome: instances_upd})
-        except Exception:
-            pass  # non bloccante
 
     return {"ok": True, "istanza": nome, "aggiornato": current_dict}

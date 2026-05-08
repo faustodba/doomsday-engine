@@ -54,57 +54,8 @@
                  hx-swap="innerHTML"
                  style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px">
             </div>
-            <div class="col-sep"></div>
-            <div class="col-sub" title="WU89 Skip Predictor — taglia cicli inefficaci">predictor (WU89)</div>
-            <label class="p-row" style="font-size:11px;cursor:pointer">
-              <input type="checkbox" id="g-pred-enabled"
-                     {% if cfg.get('skip_predictor_enabled') %}checked{% endif %}
-                     style="accent-color:var(--accent);margin-right:6px">
-              <span class="p-lbl" style="flex:1">abilitato</span>
-            </label>
-            <label class="p-row" style="font-size:11px;cursor:pointer"
-                   title="se attivo: predict + log + telemetria, MA NON skippa cicli (modalità di test sicura)">
-              <input type="checkbox" id="g-pred-shadow"
-                     {% if cfg.get('skip_predictor_shadow_only', True) %}checked{% endif %}
-                     style="accent-color:var(--accent);margin-right:6px">
-              <span class="p-lbl" style="flex:1">solo shadow (log no skip)</span>
-            </label>
-            <details style="font-size:9px;color:var(--text-dim);margin-top:6px;line-height:1.4">
-              <summary style="cursor:pointer;color:var(--accent);font-size:10px">guida utilizzo</summary>
-              <div style="padding:4px 0 0 8px">
-                <b style="color:var(--text)">cosa fa</b>: prima di avviare ogni istanza,
-                analizza la cronologia ultimi 20 cicli e decide se skippare (saving
-                stimato ~600s per skip applicato). Esegue 5 regole:
-                <i>squadre_fuori, trend_magro, low_total_invii, recovery, low_prod</i>.
-                <br>
-                <br>
-                <b style="color:var(--text)">3 stati</b>:
-                <ul style="margin:2px 0 4px 16px;padding:0">
-                  <li><code style="color:var(--text)">abilitato=OFF</code> →
-                  no-op, bot identico (default deploy)</li>
-                  <li><code style="color:var(--text)">abilitato=ON, shadow=ON</code> →
-                  predict + log + telemetria, <b>nessuno skip applicato</b>
-                  (test sicuro)</li>
-                  <li><code style="color:var(--text)">abilitato=ON, shadow=OFF</code> →
-                  attivo: skippa realmente cicli inefficaci</li>
-                </ul>
-                <b style="color:var(--text)">workflow consigliato</b>:
-                <ol style="margin:2px 0 4px 16px;padding:0">
-                  <li>attiva <i>shadow</i> → osserva log
-                  <code>[PREDICTOR-SHADOW]</code> per 6-12 cicli</li>
-                  <li>analizza <code>data/predictor_decisions.jsonl</code>
-                  per precision/recall</li>
-                  <li>se OK → disattiva shadow per applicare skip live</li>
-                </ol>
-                <b style="color:var(--text)">guardrail</b>: max 3 skip
-                consecutivi → forza retry; cooldown 2 cicli post-retry; istanze
-                master e in growth phase mai skippate.
-                <br>
-                <br>
-                <b style="color:var(--text)">hot-reload</b>: cambio attivo al
-                prossimo tick istanza, no restart bot.
-              </div>
-            </details>
+            {# 08/05: sezione "predictor (WU89)" spostata in /ui/predictor
+               (pagina dedicata). Vedi templates/predictor.html. #}
           </div>
           <div class="col-foot">
             <button class="btn btn-primary btn-full" onclick="salvaGlobals()">⬡ salva sistema</button>
@@ -300,33 +251,9 @@
       </div>
     </div>
 
-    <div class="divider"></div>
-
-    <!-- ── ISTANZE MUMUPLAYER ─────────────────────────────── -->
-    <div class="section">
-      <div class="sec-label">istanze mumuplayer</div>
-      <div style="overflow-x:auto">
-        <table class="ist-tbl">
-          <thead><tr>
-            <th>on</th><th>nome</th><th>truppe</th><th>sq.</th>
-            <th>prof.</th><th>lv.</th><th title="raccolta fuori territorio (WU50)">FT</th>
-            <th>fascia oraria</th>
-          </tr></thead>
-          <tbody id="ist-tbody"
-                 hx-get="/ui/partial/ist-table"
-                 hx-trigger="load"
-                 hx-swap="innerHTML">
-            <tr><td colspan="8" style="color:var(--text-dim);font-size:9px;padding:8px">caricamento...</td></tr>
-          </tbody>
-        </table>
-      </div>
-      <div class="save-row" style="margin-top:10px">
-        <button class="btn btn-primary" onclick="salvaIstanze()">⬡ salva istanze</button>
-        <span class="save-note">modifiche attive al prossimo avvio istanza</span>
-        <span class="save-ok" id="ist-ok">✓ salvato</span>
-        <span class="save-err" id="ist-err"></span>
-      </div>
-    </div>
+    {# 08/05: tabella istanze rimossa — i controlli sono ora inline in ogni
+       card istanza (`partials/card_istanza.html` sezione card-ctrl). Modifiche
+       real-time scrivono solo dynamic via PATCH /api/config/overrides/istanze. #}
 
   </div><!-- /main-col -->
 
@@ -506,11 +433,10 @@ function updateAllocTotal() {
 }
 
 async function salvaGlobals() {
+  // 08/05: skip_predictor_* spostati in /ui/predictor (pagina dedicata)
   const {ok,data} = await apiPut('/api/config/globals', {
     sistema: {max_parallel: gi('g-parallel'), tick_sleep_min: gi('g-sleep')},
     task: {},
-    skip_predictor_enabled:     gb('g-pred-enabled'),
-    skip_predictor_shadow_only: gb('g-pred-shadow'),
   });
   showMsg('g-ok','g-err', ok, data.detail||'');
 }
@@ -581,27 +507,8 @@ async function salvaAllocazione() {
   if (ok && data.warn) g('alloc-warn').textContent = data.warn;
 }
 
-async function salvaIstanze() {
-  const rows = document.querySelectorAll('#ist-tbody tr[data-nome]');
-  const istanze = {};
-  rows.forEach(tr => {
-    const nome = tr.dataset.nome;
-    if (!nome) return;
-    const da = tr.querySelector('.ist-fascia-da')?.value;
-    const a  = tr.querySelector('.ist-fascia-a')?.value;
-    istanze[nome] = {
-      abilitata:    tr.querySelector('.ist-cb')?.checked ?? true,
-      truppe:       parseInt(tr.querySelector('.ist-truppe')?.value)||0,
-      tipologia:    tr.querySelector('.ist-prof')?.value||'full',
-      fascia_oraria: (da||a) ? `${da||'00:00'}-${a||'23:59'}` : null,
-      max_squadre:  parseInt(tr.querySelector('.ist-sq')?.value)||null,
-      livello:      parseInt(tr.querySelector('.ist-lv')?.value)||null,
-      raccolta_fuori_territorio: tr.querySelector('.ist-fuori-terr')?.checked ?? false,
-    };
-  });
-  const {ok,data} = await apiPut('/api/config/istanze', {istanze});
-  showMsg('ist-ok','ist-err', ok, data.detail||'');
-}
+// 08/05: salvaIstanze() rimossa — sostituita da saveCardCtrl() in base.html
+// (chiamata dai bottoni inline nelle card istanza). Vedi partials/card_istanza.html.
 
 document.addEventListener('DOMContentLoaded', () => { updateAllocTotal(); updateRallocTotal(); });
 </script>
