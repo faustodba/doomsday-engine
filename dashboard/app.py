@@ -274,11 +274,16 @@ def ui_telemetria(request: Request):
 # ma non più routed.
 
 
-@app.get("/ui/predictor", include_in_schema=False)
-def ui_predictor(request: Request):
-    """Pagina dedicata predictor — cycle duration + skip squadre fuori.
-    08/05: include `cfg` raw per esporre toggle skip_predictor_* (sezione
-    spostata da home → predictor)."""
+@app.get("/ui/predictor-istanze", include_in_schema=False)
+def ui_predictor_istanze(request: Request):
+    """Pagina dedicata "predictor istanze" — assorbe cycle predictor +
+    distribuzione empirica slot + Adaptive Scheduler (config + simulazione).
+
+    08/05: nasce dalla fusione della vecchia /ui/predictor con i pannelli
+    Adaptive Scheduler che erano in /ui/config/global. Separa config statica
+    (in /ui/config/global) da strumenti operativi runtime (qui). Regola
+    "no skip istanza": nessun sistema può saltare un'istanza nel ciclo.
+    """
     import json as _json
     from dashboard.services.config_manager import _GLOBAL_CONFIG_PATH
     try:
@@ -286,21 +291,17 @@ def ui_predictor(request: Request):
             cfg_raw = _json.load(f)
     except Exception:
         cfg_raw = {}
-    # Override da runtime per riflettere stato corrente effettivo
-    try:
-        from dashboard.services.config_manager import get_overrides
-        ov_glob = (get_overrides() or {}).get("globali") or {}
-        if "skip_predictor_enabled" in ov_glob:
-            cfg_raw["skip_predictor_enabled"] = ov_glob["skip_predictor_enabled"]
-        if "skip_predictor_shadow_only" in ov_glob:
-            cfg_raw["skip_predictor_shadow_only"] = ov_glob["skip_predictor_shadow_only"]
-    except Exception:
-        pass
-    return templates.TemplateResponse(request, "predictor.html", {
+    return templates.TemplateResponse(request, "predictor_istanze.html", {
         "active": "predictor",
         "cfg":    cfg_raw,
         **_env_label(),
     })
+
+
+@app.get("/ui/predictor", include_in_schema=False)
+def ui_predictor_redirect():
+    """08/05: route legacy → redirect a `/ui/predictor-istanze`."""
+    return RedirectResponse(url="/ui/predictor-istanze", status_code=302)
 
 
 @app.get("/ui/mockup/telemetria", include_in_schema=False)
@@ -702,6 +703,16 @@ def ui_partial_notifications(request: Request):
     return templates.TemplateResponse(request, "partials/notifications_card.html", {
         "data": get_notifications(),
     })
+
+
+@app.get("/ui/partial/adaptive-scheduler-preview", include_in_schema=False)
+def ui_partial_adaptive_scheduler_preview(request: Request):
+    """08/05 — pannello simulazione ordine adattivo (greedy live + persisted)."""
+    from dashboard.routers.api_adaptive_scheduler import preview_adaptive_scheduler
+    return templates.TemplateResponse(
+        request, "partials/adaptive_scheduler_preview.html",
+        {"data": preview_adaptive_scheduler()},
+    )
 
 
 @app.get("/ui/partial/adaptive-scheduler", include_in_schema=False)

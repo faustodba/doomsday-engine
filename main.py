@@ -646,45 +646,10 @@ class _TaskWrapper:
 _contatori: dict[str, dict[str, int]] = {}
 _contatori_lock = threading.Lock()
 
-# WU89-Step4 — Skip Predictor: state per-istanza in-memory (guardrail tracking).
-# Persiste finché il bot è vivo, reset su restart (accettabile). Vedi
-# core.skip_predictor.IstanzaSkipState per i campi.
-_predictor_states: dict = {}
-_predictor_decisions_lock = threading.Lock()
-
-
-def _append_predictor_decision(nome: str, decision, mode: str, applied: bool) -> None:
-    """Append decisione predictor a data/predictor_decisions.jsonl (best-effort).
-
-    Schema:
-      {ts, instance, mode (LIVE|SHADOW), should_skip, reason, score, signals,
-       growth_phase, guardrail, applied}
-
-    `applied=True` solo se decisione `should_skip=True` AND mode=LIVE AND
-    guardrail non ha bloccato. Alimenta Step 5 (dashboard precision/recall).
-    Errore I/O = silent skip — il predictor non rompe il bot.
-    """
-    try:
-        from datetime import datetime, timezone
-        path = os.path.join(ROOT, "data", "predictor_decisions.jsonl")
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        record = {
-            "ts":           datetime.now(timezone.utc).isoformat(),
-            "instance":     nome,
-            "mode":         mode,
-            "should_skip":  bool(decision.should_skip),
-            "reason":       decision.reason,
-            "score":        round(float(decision.score), 3),
-            "signals":      decision.signals or {},
-            "growth_phase": bool(decision.growth_phase),
-            "guardrail":    decision.guardrail_triggered,
-            "applied":      bool(applied),
-        }
-        with _predictor_decisions_lock:
-            with open(path, "a", encoding="utf-8") as f:
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except Exception:
-        pass
+# 08/05: WU89 Skip Predictor RIMOSSO — regola architetturale: nessun sistema
+# di predizione può saltare l'esecuzione di un'istanza nel ciclo. Tutte le
+# istanze processate ad ogni tick. Riordino consentito (Adaptive Scheduler,
+# WU138) ma mai skip totale. Vedi memoria `feedback_no_skip_istanza.md`.
 
 
 def _thread_istanza(ist, tasks_cls, dry_run):
@@ -763,75 +728,10 @@ def _thread_istanza(ist, tasks_cls, dry_run):
 
     _log_fn = lambda msg: _log(nome, msg)
 
-    # ── WU89-Step4 — Skip Predictor hook (flag-driven) ────────────────────
-    # Eseguito DOPO setup orchestrator e PRIMA dell'avvio MuMu (massimo saving:
-    # evita boot+settings+attendi_home se l'istanza viene skippata).
-    # Stati controllati da 2 flag in `globali`:
-    #   - skip_predictor_enabled (default False) → no-op, bot invariato
-    #   - skip_predictor_shadow_only (default True) → predict+log, no skip
-    # Failsafe try/except: errore predictor non rompe il bot.
-    if getattr(gcfg, "skip_predictor_enabled", False) and not dry_run:
-        try:
-            from core.skip_predictor import (
-                predict, IstanzaSkipState, load_metrics_history,
-                COOLDOWN_POST_RETRY_CICLI,
-            )
-            history    = load_metrics_history(nome, last_n=20)
-            skip_state = _predictor_states.setdefault(nome, IstanzaSkipState())
-            decision   = predict(nome, history, state=skip_state)
-            shadow     = bool(getattr(gcfg, "skip_predictor_shadow_only", True))
-            mode       = "SHADOW" if shadow else "LIVE"
-            applied    = bool(decision.should_skip) and not shadow
-
-            _log(nome,
-                 f"[PREDICTOR-{mode}] should_skip={decision.should_skip} "
-                 f"reason={decision.reason} score={decision.score:.2f}"
-                 + (f" guardrail={decision.guardrail_triggered}"
-                    if decision.guardrail_triggered else "")
-                 + (f" growth_phase=True" if decision.growth_phase else ""))
-            _append_predictor_decision(nome, decision, mode, applied)
-
-            if applied:
-                # Skip ciclo reale: aggiorna state, chiudi metriche, early return
-                skip_state.last_skip_count_consec += 1
-                skip_state.cicli_totali           += 1
-                sig = decision.signals or {}
-                saving_min = sig.get("saving_estimato_min", 0.0)
-                saving_boot = sig.get("saving_boot_home_s", 0.0)
-                saving_tasks = sig.get("saving_tasks_s", 0.0)
-                _log(nome,
-                     f"[PREDICTOR-LIVE] SKIP CICLO — saving={saving_min:.1f}min "
-                     f"(boot {saving_boot:.0f}s + task {saving_tasks:.0f}s) "
-                     f"consec={skip_state.last_skip_count_consec}")
-                try:
-                    from core.istanza_metrics import chiudi_tick
-                    chiudi_tick(nome, outcome="skipped_by_predictor")
-                except Exception:
-                    pass
-                _aggiorna_stato_istanza(nome, {
-                    "stato": "idle",
-                    "ultimo_task": {
-                        "nome": "predictor_skip", "esito": "skipped",
-                        "msg": f"reason={decision.reason}",
-                        "ts": time.strftime("%H:%M:%S"), "durata_s": 0.0,
-                    },
-                })
-                return
-            else:
-                # No skip: reset counter consecutivi, incrementa totali
-                skip_state.last_skip_count_consec = 0
-                skip_state.cicli_totali           += 1
-                # Cooldown post-retry: reset se guardrail ha forzato un retry
-                # (max_skip_consec o re_eval_periodic); altrimenti incrementa
-                # con clamp a COOLDOWN per uscire dal blocco.
-                gr = decision.guardrail_triggered or ""
-                if "max_skip_consec" in gr or "re_eval_periodic" in gr:
-                    skip_state.cicli_dall_ultimo_retry = 0
-                elif skip_state.cicli_dall_ultimo_retry < COOLDOWN_POST_RETRY_CICLI:
-                    skip_state.cicli_dall_ultimo_retry += 1
-        except Exception as exc:
-            _log(nome, f"[PREDICTOR] errore best-effort: {exc}")
-            # Procede con flow normale anche su errore predictor
+    # 08/05: WU89 Skip Predictor RIMOSSO. Regola architetturale: nessun sistema
+    # di predizione può saltare l'esecuzione di un'istanza nel ciclo. Tutte le
+    # istanze processate ad ogni tick. Riordino consentito (Adaptive Scheduler
+    # WU138) ma mai skip totale.
 
     # ── 1. Avvio istanza MuMu + attesa HOME ─────────────────────────
     if not dry_run:
@@ -1309,9 +1209,29 @@ def main():
                                      if n in ist_by_nome]
                 else:
                     active, reasons = should_activate_scheduler()
+                    # Log live values precondizioni (anche se non attivo)
+                    try:
+                        from core.adaptive_scheduler import (
+                            _master_drl_residuo_m, _rifornimento_abilitato,
+                            _percentuale_istanze_sature, _spedizioni_oggi_totali,
+                            _get_soglie,
+                        )
+                        _so = _get_soglie()
+                        _log("MAIN",
+                             f"[ADAPT-TRACE] precondizioni LIVE: "
+                             f"drl={_master_drl_residuo_m():.1f}M (≤{_so['drl_residuo_m']}M) · "
+                             f"rifornimento_ON={_rifornimento_abilitato()} · "
+                             f"sature={_percentuale_istanze_sature():.0f}% (≥{_so['pct_istanze_sat']}%) · "
+                             f"sped={_spedizioni_oggi_totali()} (>{_so['spedizioni_oggi']})")
+                    except Exception:
+                        pass
                     if active:
                         nomi = [i["nome"] for i in istanze_ciclo]
-                        ordine_dict = ordina_istanze_adaptive(nomi)
+                        # Trace step-by-step del greedy nel bot.log
+                        ordine_dict = ordina_istanze_adaptive(
+                            nomi,
+                            log_fn=lambda m: _log("MAIN", m),
+                        )
                         nomi_ordinati_adapt = [d["ist"] for d in ordine_dict]
                         ist_by_nome = {i["nome"]: i for i in istanze_ciclo}
 
@@ -1478,6 +1398,20 @@ def main():
                              f"id={res.get('enqueue_id')}")
         except Exception as _exc:
             _log("MAIN", f"[WARN] maybe_send_daily_report: {_exc}")
+
+        # WU137 fase 2 — alert real-time check post-ciclo. Ogni check è
+        # rate-limited per event_type → no-op silenzioso se in cooldown.
+        # Master toggle: globali.notifications.alerts_enabled (default False).
+        try:
+            from core.alerts import (
+                check_master_saturo, check_heartbeat_cicli,
+                check_maintenance_long,
+            )
+            check_master_saturo()      # warn 1×/2h se DRL=0 da >1h
+            check_heartbeat_cicli()    # critical 1×/30min se 0 cicli in 1h
+            check_maintenance_long()   # warn 1×/4h se maintenance > 2h
+        except Exception as _exc:
+            _log("MAIN", f"[WARN] alerts check: {_exc}")
 
         # Restart scheduler (post-cycle, mai mid-tick): controlla trigger
         # (file flag dashboard / schedule cron-like / cicli max) e in caso

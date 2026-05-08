@@ -125,11 +125,8 @@ async def save_globals(request: Request):
                     raise HTTPException(status_code=400,
                                         detail=f"valore non numerico per {field}")
 
-    # Skip Predictor flags — pattern Optional preservation
-    if "skip_predictor_enabled" in raw:
-        ov.globali.skip_predictor_enabled = bool(raw["skip_predictor_enabled"])
-    if "skip_predictor_shadow_only" in raw:
-        ov.globali.skip_predictor_shadow_only = bool(raw["skip_predictor_shadow_only"])
+    # 08/05: skip_predictor_* RIMOSSI (regola "no skip istanza"). Eventuali
+    # chiavi residue nel payload vengono ignorate silenziosamente.
 
     _save_ov(ov)
     return {
@@ -250,6 +247,37 @@ def reset_runtime_overrides() -> dict:
         "ok": True,
         "msg": "runtime_overrides.json ricreato da static",
         "restart_required": False,
+    }
+
+
+@router.post("/promote")
+def promote_runtime_to_static_endpoint() -> dict:
+    """Promuove `runtime_overrides.json` → `global_config.json` + `instances.json`.
+
+    Inverso del `/reset`: la configurazione runtime corrente (modifiche
+    real-time fatte da HOME/card istanza) diventa il nuovo baseline statico.
+
+    Preserva i campi del file static non gestiti dal runtime (mumu, _note,
+    qta_*). Effetto: global_config.json + instances.json sovrascritti.
+
+    Bot: nessun impatto immediato (legge dynamic). Si applica al prossimo
+    bootstrap (file dynamic mancante) o reset esplicito.
+    """
+    try:
+        from config.config_loader import promote_runtime_to_static
+        result = promote_runtime_to_static()
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"errore: {exc}")
+
+    if result.get("error") and not (result.get("global_updated") and result.get("instances_updated")):
+        raise HTTPException(status_code=500, detail=result["error"])
+
+    return {
+        "ok": True,
+        "msg": "runtime promosso a static (global_config.json + instances.json)",
+        "global_updated":    result.get("global_updated", False),
+        "instances_updated": result.get("instances_updated", False),
+        "warning": result.get("error"),  # non-fatal warning se uno dei due solo OK
     }
 
 

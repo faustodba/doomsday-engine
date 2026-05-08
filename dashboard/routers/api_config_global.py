@@ -24,9 +24,17 @@ def _save_global_raw(data: dict) -> None:
     """Scrive global_config.json senza round-trip via GlobalConfig dataclass.
     Preserva campi che non sono nel dataclass (rifugio, rifornimento unificato,
     auto_learn_banner, raccolta_ocr_debug, soglia_allocazione, ecc.).
-    Scrittura atomica (tmp + replace)."""
+    Scrittura atomica (tmp + replace).
+
+    08/05: cleanup migrazione `sistema.tick_sleep` (secondi, legacy) →
+    `sistema.tick_sleep_min` (minuti, nuovo). Se entrambi presenti dopo un
+    merge da file vecchio, rimuove il legacy.
+    """
     if not isinstance(data, dict) or not data:
         raise HTTPException(status_code=400, detail="payload deve essere dict non vuoto")
+    sis = data.get("sistema") if isinstance(data.get("sistema"), dict) else None
+    if sis and "tick_sleep_min" in sis and "tick_sleep" in sis:
+        del sis["tick_sleep"]
     path = Path(_GLOBAL_CONFIG_PATH)
     tmp = path.with_suffix(".tmp")
     tmp.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")

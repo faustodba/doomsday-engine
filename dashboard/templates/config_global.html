@@ -12,6 +12,7 @@
 {% set sis = cfg.get('sistema',{}) %}
 {% set rfg = cfg.get('rifugio',{}) %}
 {% set ric = cfg.get('rifornimento_comune',{}) %}
+{% set ralloc = ric.get('allocazione',{}) %}
 {% set rif = cfg.get('rifornimento',{}) %}
 {% set zai = cfg.get('zaino',{}) %}
 {% set rac = cfg.get('raccolta',{}) %}
@@ -30,6 +31,10 @@
         del bot al fresh boot/reset. <b>Non sono hot-reload</b>: il bot continua a usare i
         valori runtime correnti finché non fai <b>reset</b>.
       </div>
+      <button class="btn-orange" onclick="promoteRuntimeToStatic()"
+              title="Sovrascrive global_config.json + instances.json con i valori CORRENTI di runtime_overrides.json (HOME)">
+        ⬆ runtime → static
+      </button>
       <button class="btn-orange" onclick="resetConfigRuntime()"
               title="Sovrascrive runtime_overrides.json con i valori static qui sotto">
         ↺ reset runtime
@@ -60,6 +65,36 @@ async function resetConfigRuntime() {
     m.style.color = '#c00';
   }
 }
+
+async function promoteRuntimeToStatic() {
+  const m = document.getElementById('reset-msg');
+  if (!confirm('Sovrascrivere global_config.json + instances.json con i valori CORRENTI di runtime_overrides.json? La baseline statica verrà rimpiazzata dalla config runtime attuale.')) return;
+  m.textContent = 'promuovendo runtime → static...';
+  m.style.color = '#0066cc';
+  try {
+    const r = await fetch('/api/config/promote', {method: 'POST'});
+    const j = await r.json();
+    if (r.ok) {
+      const parts = [];
+      if (j.global_updated)    parts.push('global_config.json');
+      if (j.instances_updated) parts.push('instances.json');
+      m.textContent = '✓ ' + (j.msg || 'promote eseguito') +
+                      (parts.length ? ' — aggiornati: ' + parts.join(' + ') : '') +
+                      ' · ricarica la pagina per vedere i nuovi valori';
+      m.style.color = '#0a8000';
+      if (j.warning) {
+        m.textContent += ' ⚠ ' + j.warning;
+        m.style.color = '#aa6600';
+      }
+    } else {
+      m.textContent = '✗ ' + (j.detail || 'errore');
+      m.style.color = '#c00';
+    }
+  } catch (e) {
+    m.textContent = '✗ ' + e.message;
+    m.style.color = '#c00';
+  }
+}
 </script>
 
 <!-- ── CONFIGURAZIONE 4-card (clone overview, target=global_config) ─── -->
@@ -79,9 +114,11 @@ async function resetConfigRuntime() {
                  value="{{ sis.get('max_parallel', 1) }}" min="1" max="12" style="width:50px">
         </div>
         <div class="p-row">
-          <span class="p-lbl">tick sleep (s)</span>
+          <span class="p-lbl">tick sleep (min)</span>
           <input class="p-inp" id="gc-sleep" type="number"
-                 value="{{ sis.get('tick_sleep', 60) }}" min="0" step="30" style="width:60px">
+                 value="{{ sis.get('tick_sleep_min', (sis.get('tick_sleep',300)|int)//60) }}"
+                 min="1" max="1440" step="1" style="width:60px"
+                 title="intervallo tra cicli bot in minuti (1-1440)">
         </div>
         <div class="col-sep"></div>
         <div class="col-sub">task baseline (default reset)</div>
@@ -150,6 +187,23 @@ async function resetConfigRuntime() {
           </div>
         </div>
         {% endfor %}
+        <div class="col-sep"></div>
+        <div class="col-sub">allocazione % invio</div>
+        {% for r,ico,default in [('pomodoro','🍅',25),('legno','🪵',25),('acciaio','⚙',25),('petrolio','🛢',25)] %}
+        <div class="rr" id="gc-ra-{{ r }}">
+          <span class="rr-ico">{{ ico }}</span>
+          <span class="rr-name">{{ r }}</span>
+          <input class="rr-inp" id="gc-ralloc-{{ r }}" type="number" step="5" min="0" max="100"
+                 value="{{ (ralloc.get(r, default/100) * 100) | round | int if (ralloc.get(r, default/100)|float) <= 1 else (ralloc.get(r, default)|float) | round | int }}"
+                 oninput="gcUpdateRallocTotal()">
+          <span class="rr-unit">%</span>
+        </div>
+        {% endfor %}
+        <div class="alloc-total">
+          <span class="alloc-lbl">totale</span>
+          <span class="alloc-val ok" id="gc-ralloc-total">100%</span>
+        </div>
+        <div class="alloc-bar"><div class="alloc-fill" id="gc-ralloc-bar" style="width:100%"></div></div>
         <div class="col-sep"></div>
         <div class="col-sub">modalità</div>
         <div class="mode-row">
@@ -423,18 +477,9 @@ async function resetConfigRuntime() {
 
 <div class="divider"></div>
 
-<!-- ── ADAPTIVE SCHEDULER (08/05) ─────────────────── -->
-<div class="section">
-  <div class="sec-label">🎯 adaptive scheduler · ordine istanze adattivo per slot liberi attesi</div>
-  <div id="adapt-card"
-       hx-get="/ui/partial/adaptive-scheduler"
-       hx-trigger="load, refresh, every 30s"
-       hx-swap="innerHTML">
-    <div style="padding:14px;color:#888;font-size:12px">caricamento…</div>
-  </div>
-</div>
-
-<div class="divider"></div>
+{# 08/05: sezione "🎯 adaptive scheduler" SPOSTATA in /ui/predictor-istanze
+   (config + simulazione ordine). /ui/config/global resta solo per config
+   statica/baseline. #}
 
 <!-- ── ISTANZE (default statici) ─────────────────── -->
 <div class="section">
@@ -581,6 +626,22 @@ function gcUpdateAllocTotal() {
   if (wEl) wEl.textContent = tot!==100 ? `⚠ totale ${tot}% — il bot normalizzerà` : '';
 }
 
+function gcUpdateRallocTotal() {
+  let tot = 0;
+  ['pomodoro','legno','acciaio','petrolio'].forEach(r => { tot += gcGn('gc-ralloc-'+r); });
+  tot = Math.round(tot);
+  const tEl = gcG('gc-ralloc-total');
+  const bEl = gcG('gc-ralloc-bar');
+  if (tEl) {
+    tEl.textContent = tot + '%';
+    tEl.className = 'alloc-val ' + (tot===100 ? 'ok' : 'warn');
+  }
+  if (bEl) {
+    bEl.style.width = Math.min(tot,100) + '%';
+    bEl.className = 'alloc-fill' + (tot>100 ? ' over' : '');
+  }
+}
+
 // ── SAVE: ogni card → PATCH /api/config/global con la sua sezione ──────────
 
 async function gcSalvaSistema() {
@@ -596,7 +657,9 @@ async function gcSalvaSistema() {
   const restartHHMM  = schedOn ? gcGv('gc-restart-hhmm').trim() : '';
   const restartCicli = cicliOn ? (gcGi('gc-restart-cicli') || 0) : 0;
   const payload = {
-    sistema: { max_parallel: gcGi('gc-parallel'), tick_sleep: gcGi('gc-sleep') },
+    // 08/05: tick_sleep_min uniforma static col dynamic (runtime_overrides).
+    // Loader converte ×60 → tick_sleep secondi internamente.
+    sistema: { max_parallel: gcGi('gc-parallel'), tick_sleep_min: gcGi('gc-sleep') },
     task: task,
     auto_learn_banner: gcGb('gc-auto-learn'),
     raccolta_ocr_debug: gcGb('gc-ocr-debug'),
@@ -642,6 +705,14 @@ function gcRestartToggleCicli(on) {
 async function gcSalvaRifornimento() {
   const mappaOn = gcG('gc-mode-mappa')?.classList.contains('active') || false;
   const memOn   = gcG('gc-mode-membri')?.classList.contains('active') || false;
+  // allocazione % invio: UI in 0-100, file static usa frazioni 0-1 (schema
+  // `RifornimentoAllocazioneOverride`, default 0.25). Conversione UI→storage.
+  const ralloc = {
+    pomodoro: gcGn('gc-ralloc-pomodoro') / 100,
+    legno:    gcGn('gc-ralloc-legno')    / 100,
+    acciaio:  gcGn('gc-ralloc-acciaio')  / 100,
+    petrolio: gcGn('gc-ralloc-petrolio') / 100,
+  };
   const payload = {
     rifornimento_comune: {
       dooms_account: gcGv('gc-r-account'),
@@ -654,6 +725,7 @@ async function gcSalvaRifornimento() {
       legno_abilitato:    gcGb('gc-r-flag-legno'),
       petrolio_abilitato: gcGb('gc-r-flag-petrolio'),
       acciaio_abilitato:  gcGb('gc-r-flag-acciaio'),
+      allocazione: ralloc,
     },
     rifornimento: {
       mappa_abilitata: mappaOn,
@@ -803,7 +875,10 @@ function gcResetTruppeIstanza(nome) {
   tr.querySelectorAll('.gc-truppe-ov').forEach(s => { s.value = ''; });
 }
 
-document.addEventListener('DOMContentLoaded', () => { gcUpdateAllocTotal(); });
+document.addEventListener('DOMContentLoaded', () => {
+  gcUpdateAllocTotal();
+  gcUpdateRallocTotal();
+});
 </script>
 
 {% endblock %}

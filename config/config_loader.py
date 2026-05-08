@@ -58,7 +58,8 @@ _INSTANCES_PATH     = _ROOT / "config" / "instances.json"
 # ==============================================================================
 
 _DEFAULTS: dict[str, Any] = {
-    # Sistema
+    # Sistema (chiave interna `tick_sleep` in secondi; raw config usa
+    # `tick_sleep_min` in minuti — conversione in merge_config).
     "tick_sleep":   300,
     "max_parallel": 2,
 
@@ -257,6 +258,138 @@ def _build_runtime_from_static(global_config: dict, instances: list) -> dict:
     return {"globali": globali, "istanze": istanze}
 
 
+def _build_static_from_runtime(
+    runtime: dict, current_global: dict, current_instances: list
+) -> tuple[dict, list]:
+    """Costruisce (global_config, instances) da runtime_overrides.
+
+    Inverso di `_build_runtime_from_static`. Usato dall'endpoint
+    `POST /api/config/promote` per "promuovere" la configurazione runtime
+    corrente a baseline statico.
+
+    Preserva i campi non gestiti dal runtime (mumu, _note, qta_*, ecc.):
+    parte da `current_global` / `current_instances` e sovrascrive solo i
+    campi presenti nel runtime.
+    """
+    import copy
+
+    SKIP_KEYS = {"_note", "mumu"}
+
+    def _deep_merge(dst: dict, src: dict) -> None:
+        """Merge ricorsivo: src in dst. Sovrascrive scalari/list, fonde sub-dict.
+        Preserva sub-key di dst non presenti in src (es. qta_* che vivono solo in static)."""
+        for k, v in src.items():
+            if isinstance(v, dict) and isinstance(dst.get(k), dict):
+                _deep_merge(dst[k], v)
+            else:
+                dst[k] = copy.deepcopy(v)
+
+    new_global = copy.deepcopy(current_global) if isinstance(current_global, dict) else {}
+    rt_globali = runtime.get("globali", {}) if isinstance(runtime, dict) else {}
+    if isinstance(rt_globali, dict):
+        for k, v in rt_globali.items():
+            if k in SKIP_KEYS:
+                continue
+            if isinstance(v, dict) and isinstance(new_global.get(k), dict):
+                _deep_merge(new_global[k], v)
+            else:
+                new_global[k] = copy.deepcopy(v)
+
+    # Cleanup migrazione 08/05: chiave legacy `sistema.tick_sleep` (secondi)
+    # rimossa se affianca la nuova `sistema.tick_sleep_min` (minuti).
+    sis = new_global.get("sistema") if isinstance(new_global.get("sistema"), dict) else None
+    if sis and "tick_sleep_min" in sis and "tick_sleep" in sis:
+        del sis["tick_sleep"]
+
+    rt_istanze = runtime.get("istanze", {}) if isinstance(runtime, dict) else {}
+    new_instances: list = []
+    if isinstance(current_instances, list):
+        for ist in current_instances:
+            if not isinstance(ist, dict):
+                continue
+            entry = copy.deepcopy(ist)
+            nome = entry.get("nome")
+            if nome and isinstance(rt_istanze, dict) and nome in rt_istanze:
+                ovr = rt_istanze[nome] or {}
+                if isinstance(ovr, dict):
+                    for f in _INSTANCE_BOOTSTRAP_FIELDS:
+                        if f in ovr and ovr[f] is not None:
+                            entry[f] = ovr[f]
+                    # Mapping inverso: tipologia (override) → profilo (instances.json)
+                    if "tipologia" in ovr and ovr["tipologia"] is not None:
+                        entry["profilo"] = ovr["tipologia"]
+                    # truppe_override: campo per-istanza, vive in instances.json
+                    if "truppe_override" in ovr:
+                        entry["truppe_override"] = copy.deepcopy(ovr["truppe_override"])
+            new_instances.append(entry)
+
+    return new_global, new_instances
+
+
+def promote_runtime_to_static(
+    overrides_path: str | Path | None = None,
+    global_config_path: str | Path | None = None,
+    instances_path: str | Path | None = None,
+) -> dict:
+    """Sovrascrive `global_config.json` + `instances.json` con i valori
+    correnti di `runtime_overrides.json`.
+
+    Inverso di `bootstrap_runtime_from_static_if_missing(force=True)`.
+
+    Returns:
+        dict con `{global_updated: bool, instances_updated: bool, error: str|None}`.
+    """
+    import json
+
+    ov_path  = Path(overrides_path)       if overrides_path       else (_ROOT / "config" / "runtime_overrides.json")
+    gc_path  = Path(global_config_path)   if global_config_path   else _GLOBAL_CONFIG_PATH
+    ist_path = Path(instances_path)       if instances_path       else _INSTANCES_PATH
+
+    try:
+        runtime = json.loads(ov_path.read_text(encoding="utf-8")) if ov_path.exists() else {}
+    except Exception as exc:
+        return {"global_updated": False, "instances_updated": False,
+                "error": f"runtime_overrides illeggibile: {exc}"}
+
+    try:
+        gc_raw = json.loads(gc_path.read_text(encoding="utf-8")) if gc_path.exists() else {}
+    except Exception:
+        gc_raw = {}
+    try:
+        ist_raw = json.loads(ist_path.read_text(encoding="utf-8")) if ist_path.exists() else []
+    except Exception:
+        ist_raw = []
+
+    new_global, new_instances = _build_static_from_runtime(runtime, gc_raw, ist_raw)
+
+    g_ok = i_ok = False
+    err: str | None = None
+
+    # Scrittura atomica global_config
+    try:
+        gc_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = gc_path.with_suffix(gc_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(new_global, ensure_ascii=False, indent=2) + "\n",
+                       encoding="utf-8")
+        os.replace(tmp, gc_path)
+        g_ok = True
+    except Exception as exc:
+        err = f"global_config write fallita: {exc}"
+
+    # Scrittura atomica instances
+    try:
+        ist_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = ist_path.with_suffix(ist_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(new_instances, ensure_ascii=False, indent=2) + "\n",
+                       encoding="utf-8")
+        os.replace(tmp, ist_path)
+        i_ok = True
+    except Exception as exc:
+        err = (err + " · " if err else "") + f"instances write fallita: {exc}"
+
+    return {"global_updated": g_ok, "instances_updated": i_ok, "error": err}
+
+
 def bootstrap_runtime_from_static_if_missing(
     overrides_path: str | Path | None = None,
     global_config_path: str | Path | None = None,
@@ -330,6 +463,17 @@ def merge_config(gcfg: dict, overrides: dict) -> dict:
     """
     import copy
     merged = copy.deepcopy(gcfg)
+
+    # Normalizzazione baseline: chiave raw `tick_sleep_min` (minuti, dashboard
+    # 08/05 uniforma file static a minuti) → chiave interna `tick_sleep`
+    # (secondi, usata dal bot per time.sleep). Conversione esplicita ×60.
+    try:
+        sis = merged.setdefault("sistema", {}) if isinstance(merged, dict) else {}
+        if "tick_sleep_min" in sis:
+            sis["tick_sleep"] = int(sis.pop("tick_sleep_min")) * 60
+    except Exception:
+        pass
+
     if not overrides:
         return merged
 
@@ -392,7 +536,6 @@ def merge_config(gcfg: dict, overrides: dict) -> dict:
     # Flag a livello root di globali che non hanno una sezione dedicata.
     # Estendibile: aggiungere chiavi qui se servono nuovi flag globali.
     for _k in ("raccolta_ocr_debug", "auto_learn_banner",
-               "skip_predictor_enabled", "skip_predictor_shadow_only",
                "adaptive_scheduler_enabled", "adaptive_scheduler_shadow_only",
                "adaptive_scheduler_thresholds",
                "debug_tasks", "notifications"):
@@ -537,6 +680,12 @@ _NOTIFICATIONS_DEFAULT: dict = {
     "enabled":               False,
     "daily_report_enabled":  True,
     "daily_report_hour_utc": 6,
+    # WU137 fase 2 — alert real-time (master toggle). Default OFF per safety.
+    # Lista `alerts_disabled` permette di silenziare specifici event_type
+    # (es. "cascade_adb", "heartbeat_cicli", "master_saturo_long",
+    # "maintenance_long", "bot_unexpected_restart").
+    "alerts_enabled":        False,
+    "alerts_disabled":       [],
     # Vuoti: l'utente li configura in dashboard prima di abilitare l'invio.
     # Valori baseline iniziali in `config/global_config.json` (sovrascrivibili).
     "from_addr":             "",
@@ -635,9 +784,9 @@ class GlobalConfig:
     # prima del learner. Vedi shared/banner_learner.py + shared/learned_banners.py.
     auto_learn_banner:      bool = False
 
-    # WU89 Step 3 — Skip Predictor (flag-driven, default OFF + shadow first)
-    skip_predictor_enabled:     bool = False
-    skip_predictor_shadow_only: bool = True
+    # 08/05 — WU89 Skip Predictor RIMOSSO (regola "no skip istanza"). I campi
+    # `skip_predictor_enabled` / `skip_predictor_shadow_only` non sono più
+    # parte di GlobalConfig.
 
     # 08/05 — Adaptive Scheduler (flag-driven, default OFF + shadow first)
     adaptive_scheduler_enabled:     bool = False
@@ -746,8 +895,12 @@ class GlobalConfig:
                 n_back_pulizia      = int(m.get("n_back_pulizia",      5)),
             ),
 
-            # Sistema
-            tick_sleep   = int(s.get("tick_sleep",   300)),
+            # Sistema (raw usa `tick_sleep_min` in minuti dal 08/05 — uniformato
+            # con dynamic. Fallback alla vecchia chiave `tick_sleep` (secondi)
+            # per backward compat finché tutti i file non sono migrati.)
+            tick_sleep   = (int(s["tick_sleep_min"]) * 60
+                            if "tick_sleep_min" in s
+                            else int(s.get("tick_sleep", 300))),
             max_parallel = int(s.get("max_parallel", 2)),
 
             # Task
@@ -780,15 +933,7 @@ class GlobalConfig:
                         raw.get("globali", {}).get("auto_learn_banner", False))
             ),
 
-            # WU89 Step 3 — Skip Predictor (default OFF, shadow first)
-            skip_predictor_enabled     = bool(
-                raw.get("skip_predictor_enabled",
-                        raw.get("globali", {}).get("skip_predictor_enabled", False))
-            ),
-            skip_predictor_shadow_only = bool(
-                raw.get("skip_predictor_shadow_only",
-                        raw.get("globali", {}).get("skip_predictor_shadow_only", True))
-            ),
+            # 08/05: WU89 Skip Predictor RIMOSSO — vedi nota dataclass.
             # 08/05 — Adaptive Scheduler flags
             adaptive_scheduler_enabled = bool(
                 raw.get("adaptive_scheduler_enabled",
@@ -879,11 +1024,13 @@ class GlobalConfig:
         )
 
     def to_dict(self) -> dict:
-        """Serializza in dict compatibile con global_config.json."""
+        """Serializza in dict compatibile con global_config.json.
+        08/05: scrittura usa `tick_sleep_min` (minuti) per uniformità con
+        runtime_overrides; il campo interno resta `tick_sleep` (secondi)."""
         return {
             "sistema": {
-                "tick_sleep":   self.tick_sleep,
-                "max_parallel": self.max_parallel,
+                "tick_sleep_min": int(self.tick_sleep // 60),
+                "max_parallel":   self.max_parallel,
             },
             "mumu": {
                 "manager":             self.mumu.manager,
@@ -1022,15 +1169,21 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
 
     class _InstanceCfg:
         # ── Identità istanza ─────────────────────────────────────────────────
-        # 08/05: rimossi `layout` (deprecato post-WU22 → TM dinamico) e `lingua`
-        # (non più supportato, sempre EN). Vedi memoria `feedback_dashboard_save_merge.md`
-        # e `instances.json` cleanup 08/05.
+        # 08/05 — Regola architetturale: campi per-istanza configurabili
+        # (truppe, max_squadre, livello, profilo, fascia_oraria) letti SOLO
+        # da runtime (`runtime_overrides.json::istanze.<nome>.*`). Mai dal
+        # static `instances.json` durante l'esecuzione: static serve solo per
+        # bootstrap/reset. Bootstrap copia static→dynamic al primo avvio.
+        # Default fallback: valore globale (`gcfg.*`) o costante neutra.
+        # Vedi memoria `architecture_config_static_dynamic.md`.
+        # `abilitata` invece resta dual-source (è anche nel filtro pre-tick di
+        # `_carica_istanze_ciclo`).
         instance_name = nome
-        truppe        = _ovr("truppe",      ist.get("truppe",      12000))
-        max_squadre   = _ovr("max_squadre", ist.get("max_squadre", 4))
-        livello       = _ovr("livello",     ist.get("livello",     gcfg.livello_nodo))
-        profilo       = _ovr("profilo",     ist.get("profilo",     "full"))
-        fascia_oraria = _ovr("fascia_oraria", ist.get("fascia_oraria", ""))
+        truppe        = _ovr("truppe",      12000)
+        max_squadre   = _ovr("max_squadre", 4)
+        livello       = _ovr("livello",     gcfg.livello_nodo)
+        profilo       = _ovr("profilo",     "full")
+        fascia_oraria = _ovr("fascia_oraria", "")
         abilitata     = ist.get("abilitata", True)
         tipologia     = _tipologia
 

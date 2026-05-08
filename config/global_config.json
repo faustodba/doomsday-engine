@@ -1,7 +1,7 @@
 {
   "_note": "Doomsday Engine V6 — Configurazione globale STATICA (baseline reset). Letto ad ogni tick. Override applicati da runtime_overrides.json (modificati dalla dashboard). Default: tutti i task DISATTIVATI per partenza neutra.",
   "sistema": {
-    "tick_sleep": 60,
+    "tick_sleep_min": 1,
     "max_parallel": 1
   },
   "mumu": {
@@ -93,14 +93,12 @@
   },
   "raccolta_ocr_debug": false,
   "auto_learn_banner": false,
-  "skip_predictor_enabled": false,
-  "skip_predictor_shadow_only": true,
   "adaptive_scheduler_enabled": false,
   "adaptive_scheduler_shadow_only": true,
   "adaptive_scheduler_thresholds": {
-    "drl_residuo_pct": 30,
     "pct_istanze_sat": 50,
-    "spedizioni_oggi": 100
+    "spedizioni_oggi": 100,
+    "drl_residuo_m": 50
   },
   "notifications": {
     "enabled": true,
