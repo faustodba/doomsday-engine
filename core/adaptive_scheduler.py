@@ -483,15 +483,54 @@ def _empty_score(istanza: str) -> dict:
 
 # ─── Ordinamento adattivo greedy ───────────────────────────────────────────
 
+_cycle_pred_cache: dict = {"ts": 0.0, "data": None}
+_CYCLE_PRED_TTL_S = 60   # ammortizza chiamate multiple in un greedy
+
+
 def _stima_durata_istanza_min(istanza: str) -> float:
-    """T_predicted per istanza dal cycle predictor. Default 8min se non noto."""
+    """T_predicted per istanza schedule-aware. Default 8min se non noto.
+
+    08/05: refactor da `predict_istanza_duration(scheduled_tasks=[])` (sovrastima:
+    sommava la mediana di TUTTI i task storici, anche quelli NON dovuti nel
+    prossimo tick) a `predict_cycle_from_config(strict_schedule=True)` che
+    filtra i task per `state[ist].schedule[task]` + `interval_hours` + edge
+    cases (es. main_mission UTC≥20). Stima molto più aderente alla realtà.
+
+    Cache TTL 60s: il greedy chiama `_stima_durata_istanza_min` 1×/istanza
+    (~12 volte) entro pochi secondi → senza cache ricalcoleremmo la stessa
+    pipeline (state + config) ad ogni iterazione.
+    """
+    import time as _t
+    global _cycle_pred_cache
+
     try:
+        # Cache hit per chiamate consecutive nello stesso greedy
+        now_ts = _t.time()
+        cached = _cycle_pred_cache.get("data")
+        if cached is None or (now_ts - _cycle_pred_cache.get("ts", 0)) > _CYCLE_PRED_TTL_S:
+            from core.cycle_duration_predictor import predict_cycle_from_config
+            res = predict_cycle_from_config(strict_schedule=True) or {}
+            _cycle_pred_cache = {"ts": now_ts, "data": res}
+            cached = res
+
+        per_ist = (cached.get("per_istanza") or {})
+        pred = per_ist.get(istanza)
+        if pred and pred.get("T_s") is not None:
+            return float(pred["T_s"]) / 60.0
+
+        # Fallback (istanza assente in predict_cycle_from_config — raro):
+        # `predict_istanza_duration([])` = media tutti i task storici.
         from core.cycle_duration_predictor import predict_istanza_duration
-        # No scheduled tasks specifici → media completa
-        pred = predict_istanza_duration(istanza, scheduled_tasks=[])
-        return float(pred.get("T_s", 480.0)) / 60.0   # default 8min
+        pred2 = predict_istanza_duration(istanza, scheduled_tasks=[])
+        return float(pred2.get("T_s", 480.0)) / 60.0
     except Exception:
         return 8.0
+
+
+def _invalidate_cycle_pred_cache() -> None:
+    """Forza ricalcolo al prossimo `_stima_durata_istanza_min`. Utile per test."""
+    global _cycle_pred_cache
+    _cycle_pred_cache = {"ts": 0.0, "data": None}
 
 
 def ordina_istanze_adaptive(istanze: list[str],
