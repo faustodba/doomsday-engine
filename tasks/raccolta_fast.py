@@ -275,9 +275,13 @@ class RaccoltaFastTask(Task):
                     try:
                         from core.istanza_metrics import aggiungi_invio_raccolta
                         from datetime import datetime as _dt, timezone as _tz
-                        # LIVELLO_NODO non è in _DEFAULTS → uso getattr/ctx.config.get
-                        # che attinge agli attributi di _InstanceCfg.
-                        livello_cfg = int(ctx.config.get("LIVELLO_NODO", 7) or 7)
+                        # 08/05: usa `livello` per-istanza (cfg.livello, override
+                        # da runtime_overrides) invece di `LIVELLO_NODO` globale.
+                        # Il bot effettivamente cerca a `cfg.livello`.
+                        livello_cfg = int(ctx.config.get(
+                            "livello",
+                            ctx.config.get("LIVELLO_NODO", 6) or 6,
+                        ) or 6)
                         aggiungi_invio_raccolta(
                             ctx.instance_name, tipo, livello_cfg,
                             cap_nodo=-1, eta_marcia_s=-1,
