@@ -596,13 +596,25 @@ def _stima_durata_istanza_min(istanza: str) -> float:
         per_ist = (cached.get("per_istanza") or {})
         pred = per_ist.get(istanza)
         if pred and pred.get("T_s") is not None:
-            return float(pred["T_s"]) / 60.0
+            t_min = float(pred["T_s"]) / 60.0
+        else:
+            # Fallback (istanza assente in predict_cycle_from_config — raro):
+            # `predict_istanza_duration([])` = media tutti i task storici.
+            from core.cycle_duration_predictor import predict_istanza_duration
+            pred2 = predict_istanza_duration(istanza, scheduled_tasks=[])
+            t_min = float(pred2.get("T_s", 480.0)) / 60.0
 
-        # Fallback (istanza assente in predict_cycle_from_config — raro):
-        # `predict_istanza_duration([])` = media tutti i task storici.
-        from core.cycle_duration_predictor import predict_istanza_duration
-        pred2 = predict_istanza_duration(istanza, scheduled_tasks=[])
-        return float(pred2.get("T_s", 480.0)) / 60.0
+        # Proposta D 08/05 — calibrazione closed-loop:
+        # applica factor moltiplicativo basato su bias storico actual/predicted.
+        # Default 1.0 (no calibrazione) se insufficienti samples o bias < trigger.
+        try:
+            from core.cycle_predictor_calibration import get_calibration_factor
+            factor = get_calibration_factor()
+            t_min *= factor
+        except Exception:
+            pass
+
+        return t_min
     except Exception:
         return 8.0
 
