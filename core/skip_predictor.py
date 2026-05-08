@@ -1,8 +1,21 @@
 # ==============================================================================
 #  DOOMSDAY ENGINE V6 — core/skip_predictor.py
+#
+#  ⚠ DEPRECATO 08/05/2026 — Regola architetturale: NESSUN sistema di
+#  predizione può saltare l'esecuzione di un'istanza nel ciclo. Tutte le
+#  istanze processate ad ogni tick. Riordino consentito (Adaptive Scheduler
+#  WU138) ma mai skip totale. Vedi memoria `feedback_no_skip_istanza.md`.
+#
+#  Hook live in `main.py::_thread_istanza` rimosso. Flag di config
+#  `skip_predictor_enabled` / `skip_predictor_shadow_only` rimossi.
+#
+#  Modulo lasciato in repo per:
+#    - git history / referenza progettuale
+#    - eventuale uso offline via tool CLI per analisi storica
+#  Non importarlo da hot-path di produzione.
 # ==============================================================================
 #
-#  WU89 Step 3 — Skip Predictor (no side-effect, flag-driven).
+#  WU89 Step 3 — Skip Predictor (no side-effect, flag-driven). [DEPRECATO]
 #
 #  Modulo standalone che predice se un'istanza dovrebbe essere skippata al
 #  prossimo tick, basandosi su metriche storiche (data/istanza_metrics.jsonl)

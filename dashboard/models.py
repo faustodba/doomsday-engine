@@ -291,9 +291,9 @@ class GlobaliOverride(BaseModel):
     raccolta_ocr_debug:   bool                       = False
     # WU93 — BannerLearner auto-apprendimento banner non catalogati
     auto_learn_banner:    bool                       = False  # WU110: deprecato, default disable
-    # WU89 Step 3 — Skip Predictor (default OFF, shadow first)
-    skip_predictor_enabled:     bool                 = False
-    skip_predictor_shadow_only: bool                 = True
+    # 08/05 — WU89 Skip Predictor RIMOSSO (regola "no skip istanza"). I flag
+    # `skip_predictor_*` non sono più definiti nello schema. Lasciati in
+    # runtime_overrides legacy verranno ignorati silenziosamente.
     # 08/05 — Adaptive Scheduler ordine istanze (default OFF + shadow first).
     # Se enabled=True, calcola ordine adattivo. Se shadow_only=True, logga
     # ma NON riordina il ciclo (osservabilità senza side-effect).
@@ -502,8 +502,9 @@ class PayloadGlobals(BaseModel):
     """
     task:    TaskFlags      = Field(default_factory=TaskFlags)
     sistema: SistemaOverride = Field(default_factory=SistemaOverride)
-    skip_predictor_enabled:     Optional[bool] = None
-    skip_predictor_shadow_only: Optional[bool] = None
+    # 08/05: skip_predictor_* RIMOSSI (regola "no skip istanza"). PayloadGlobals
+    # non li accetta più — il payload ignora silenziosamente eventuali residui
+    # client-side.
 
 
 class PayloadRifornimento(BaseModel):

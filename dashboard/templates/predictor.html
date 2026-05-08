@@ -5,100 +5,11 @@
 <div class="page-layout">
   <div class="main-col" style="width:100%">
 
-    <!-- ──────────────────────────────────────────────────────
-         SEZIONE CONFIGURAZIONE — sopra a tutto (08/05)
-         ────────────────────────────────────────────────────── -->
-    <div class="section">
-      <div class="sec-label">⚙ configurazione predictor (WU89)</div>
-      <div style="background:var(--bg2);border:0.5px solid var(--border);border-radius:6px;padding:12px">
-        <div style="display:flex;flex-direction:column;gap:8px;font-size:12px">
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-            <input type="checkbox" id="p-pred-enabled"
-                   {% if cfg.get('skip_predictor_enabled') %}checked{% endif %}
-                   style="accent-color:var(--accent)">
-            <b style="color:var(--text)">abilitato</b>
-            <span style="color:var(--text-dim);font-size:10px">— se OFF, no-op completo</span>
-          </label>
-          <label style="display:flex;align-items:center;gap:8px;cursor:pointer"
-                 title="se attivo: predict + log + telemetria, MA NON skippa cicli">
-            <input type="checkbox" id="p-pred-shadow"
-                   {% if cfg.get('skip_predictor_shadow_only', True) %}checked{% endif %}
-                   style="accent-color:var(--accent)">
-            <b style="color:var(--text)">solo shadow (log no skip)</b>
-            <span style="color:var(--text-dim);font-size:10px">— modalità test sicura</span>
-          </label>
-        </div>
-        <div style="margin-top:12px;display:flex;align-items:center;gap:10px">
-          <button class="btn btn-primary" onclick="salvaPredictor()">⬡ salva predictor</button>
-          <span class="save-ok" id="p-pred-ok" style="opacity:0;color:#0a8000">✓ salvato</span>
-          <span class="save-err" id="p-pred-err" style="opacity:0;color:#c00"></span>
-        </div>
-
-        <details style="font-size:10px;color:var(--text-dim);margin-top:14px;line-height:1.5">
-          <summary style="cursor:pointer;color:var(--accent);font-size:11px">guida utilizzo</summary>
-          <div style="padding:6px 0 0 8px">
-            <b style="color:var(--text)">cosa fa</b>: prima di avviare ogni istanza,
-            analizza la cronologia ultimi 20 cicli e decide se skippare (saving
-            stimato ~600s per skip applicato). Regola attiva: <i>squadre_fuori</i>.
-            <br><br>
-            <b style="color:var(--text)">3 stati</b>:
-            <ul style="margin:2px 0 4px 16px;padding:0">
-              <li><code style="color:var(--text)">abilitato=OFF</code> → no-op, bot identico (default deploy)</li>
-              <li><code style="color:var(--text)">abilitato=ON, shadow=ON</code> → predict + log + telemetria, <b>nessuno skip applicato</b> (test sicuro)</li>
-              <li><code style="color:var(--text)">abilitato=ON, shadow=OFF</code> → attivo: skippa realmente cicli inefficaci</li>
-            </ul>
-            <b style="color:var(--text)">workflow consigliato</b>:
-            <ol style="margin:2px 0 4px 16px;padding:0">
-              <li>attiva <i>shadow</i> → osserva log <code>[PREDICTOR-SHADOW]</code> per 6-12 cicli</li>
-              <li>analizza <code>data/predictor_decisions.jsonl</code> per precision/recall</li>
-              <li>se OK → disattiva shadow per applicare skip live</li>
-            </ol>
-            <b style="color:var(--text)">guardrail</b>: max 3 skip consecutivi → forza retry; cooldown 2 cicli post-retry; istanze master e in growth phase mai skippate.
-            <br><br>
-            <b style="color:var(--text)">hot-reload</b>: cambio attivo al prossimo tick istanza, no restart bot.
-            <br><br>
-            <b style="color:var(--text)">altri tool</b>:
-            <ul style="margin:2px 0 0 16px;padding:0">
-              <li>Modifica T_L_max per istanza/livello: <code>config/predictor_t_l_max.json</code></li>
-              <li>Backtest storico: <code>python tools/predictor_backtest.py --prod --days 7</code></li>
-              <li>CLI cycle predict: <code>python tools/predict_cycle.py --prod [--verbose]</code></li>
-            </ul>
-          </div>
-        </details>
-      </div>
-    </div>
-
-    <div class="divider"></div>
-
-    <script>
-    async function salvaPredictor() {
-      const okEl  = document.getElementById('p-pred-ok');
-      const errEl = document.getElementById('p-pred-err');
-      const payload = {
-        skip_predictor_enabled:     document.getElementById('p-pred-enabled').checked,
-        skip_predictor_shadow_only: document.getElementById('p-pred-shadow').checked,
-      };
-      try {
-        const r = await fetch('/api/config/globals', {
-          method: 'PUT',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(payload),
-        });
-        const j = await r.json().catch(() => ({}));
-        if (r.ok) {
-          okEl.style.opacity='1'; setTimeout(()=>okEl.style.opacity='0', 3000);
-          errEl.style.opacity='0';
-        } else {
-          errEl.textContent = '✗ ' + (j.detail || 'errore');
-          errEl.style.opacity='1'; setTimeout(()=>errEl.style.opacity='0', 5000);
-          okEl.style.opacity='0';
-        }
-      } catch (e) {
-        errEl.textContent = '✗ ' + e.message;
-        errEl.style.opacity='1';
-      }
-    }
-    </script>
+    {# 08/05: sezione "configurazione predictor (WU89)" RIMOSSA. Regola
+       architetturale: nessun sistema di predizione può saltare l'esecuzione
+       di un'istanza nel ciclo. Riordino consentito (Adaptive Scheduler in
+       /ui/config/global), mai skip totale. Gli endpoint cycle predictor +
+       distribuzione empirica restano (no skip, solo analisi). #}
 
     <!-- ──────────────────────────────────────────────────────
          SEZIONE 1 — CYCLE DURATION PREDICTOR
@@ -193,48 +104,10 @@
 
     <div class="divider"></div>
 
-    <!-- ──────────────────────────────────────────────────────
-         SEZIONE 2 — SKIP PREDICTOR (squadre fuori)
-         ────────────────────────────────────────────────────── -->
-    <div class="section">
-      <div class="sec-label">🛡 skip predictor — squadre fuori</div>
-      <div class="tel-grid">
-
-        <div class="tel-card tel-full">
-          <div class="tel-head">🤖 ultime 30 decisioni (live, refresh 15s)</div>
-          <div id="predictor-decisions"
-               hx-get="/ui/partial/predictor-decisions"
-               hx-trigger="load, every 15s"
-               hx-swap="innerHTML">
-            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
-          </div>
-          <div class="tel-foot">
-            data/predictor_decisions.jsonl · 🔴 SKIP LIVE · 🟠 SKIP SHADOW · 🟣 guardrail · grigio PROCEED · 🟢 GROWTH ·
-            <b>nota</b>: ts = momento decisione (pre-boot ~6-9min)
-          </div>
-        </div>
-
-        {# Placeholder per accuracy skip predictor (futuro, richiede tracking ground truth slot) #}
-        <div class="tel-card tel-full" style="opacity:0.6">
-          <div class="tel-head">📈 accuracy skip predictor (in sviluppo)</div>
-          <div style="color:var(--text-dim);padding:8px;font-size:11px;line-height:1.5">
-            Confronterà le decisioni predictor con il ground truth osservato:<br>
-            <ul style="margin:6px 0 0 18px">
-              <li><b>TP</b>: predicted_skip=True AND attive_pre[next_tick] = totali (skip giusto)</li>
-              <li><b>FP</b>: predicted_skip=True AND attive_pre[next_tick] &lt; totali (skip non necessario)</li>
-              <li><b>FN</b>: predicted_skip=False AND attive_pre[next_tick] = totali (skip mancato)</li>
-              <li><b>TN</b>: predicted_skip=False AND attive_pre[next_tick] &lt; totali (proceed giusto)</li>
-            </ul>
-            Disponibile dopo accumulo 50+ decisioni shadow per istanza.
-          </div>
-          <div class="tel-foot">precision/recall + matrice di confusione per istanza</div>
-        </div>
-
-      </div>
-    </div>
-
-    {# 08/05: sezione "configurazione predictor (WU89)" spostata in cima
-       (sopra a tutto). Vedi inizio file. #}
+    {# 08/05: SEZIONE "🛡 skip predictor — squadre fuori" RIMOSSA.
+       Regola "no skip istanza": nessun sistema di predizione può saltare
+       l'esecuzione di un'istanza. Le decisioni storiche restano in
+       data/predictor_decisions.jsonl per analisi offline. #}
 
   </div>
 </div>
