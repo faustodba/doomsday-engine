@@ -2199,10 +2199,15 @@ class RaccoltaTask(Task):
                               totali: int) -> None:
         try:
             from core.istanza_metrics import imposta_raccolta_slot
+            # 09/05: propaga squad_states se calcolato (read-only, additiva)
+            sq_states = getattr(ctx, "_squad_states", None)
+            sq_agg    = getattr(ctx, "_squad_states_agg", None)
             imposta_raccolta_slot(ctx.instance_name,
                                   attive_pre=int(attive_pre),
                                   attive_post=int(attive_post),
-                                  totali=int(totali))
+                                  totali=int(totali),
+                                  squad_states=sq_states,
+                                  squad_states_agg=sq_agg)
         except Exception:
             pass
 
@@ -2332,6 +2337,30 @@ class RaccoltaTask(Task):
                             f"Raccolta: slot OCR — attive={attive_inizio}/{obiettivo} "
                             f"libere={libere}"
                         )
+                        # 09/05 — telemetria stato slot squadra (read-only, additiva).
+                        # Analizza ogni slot e produce composizione: gather/march/
+                        # return/idle/vuoti. NON usato dal bot per decisioni; serve
+                        # come dato per dashboard + futura integrazione adaptive.
+                        try:
+                            from shared.squad_state import (
+                                analizza_slot_squadre, conta_per_stato,
+                            )
+                            _sq_slots = analizza_slot_squadre(
+                                screen_home, max_squadre=totale_noto)
+                            _sq_agg = conta_per_stato(_sq_slots)
+                            _sq_states = [s.get("stato") or "-"
+                                          for s in _sq_slots]
+                            ctx.log_msg(
+                                f"[SQUAD-STATE] {_sq_states} "
+                                f"gather={_sq_agg['gather']} march={_sq_agg['march']} "
+                                f"return={_sq_agg['return']} idle={_sq_agg['idle']} "
+                                f"vuoti={_sq_agg['vuoti']}"
+                            )
+                            # Stash su ctx per consumo successivo (telemetria)
+                            ctx._squad_states = _sq_states
+                            ctx._squad_states_agg = _sq_agg
+                        except Exception as exc:
+                            ctx.log_msg(f"[SQUAD-STATE-FAIL] {type(exc).__name__}: {exc}")
                         # WU55 — data collection HOME (ground truth)
                         if bool(_cfg(ctx, "RACCOLTA_OCR_DEBUG")):
                             try:

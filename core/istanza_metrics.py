@@ -92,8 +92,15 @@ def imposta_boot_home(instance: str, secondi: float) -> None:
 
 
 def imposta_raccolta_slot(instance: str, attive_pre: int = -1,
-                          attive_post: int = -1, totali: int = -1) -> None:
-    """Hook raccolta: imposta contatori slot pre/post tick."""
+                          attive_post: int = -1, totali: int = -1,
+                          squad_states: list | None = None,
+                          squad_states_agg: dict | None = None) -> None:
+    """Hook raccolta: imposta contatori slot pre/post tick.
+
+    09/05: aggiunti `squad_states` (lista per slot: 'gather'/'march'/'return'/
+    'idle'/'-') e `squad_states_agg` (conteggio aggregato). Telemetria
+    additiva (proposta squad_state.py).
+    """
     with _lock:
         buf = _BUFFER_PER_INSTANCE.get(instance)
         if buf is None:
@@ -105,6 +112,10 @@ def imposta_raccolta_slot(instance: str, attive_pre: int = -1,
             rac["attive_post"] = int(attive_post)
         if totali >= 0:
             rac["totali"] = int(totali)
+        if squad_states is not None:
+            rac["squad_states"] = list(squad_states)
+        if squad_states_agg is not None:
+            rac["squad_states_agg"] = dict(squad_states_agg)
 
 
 def get_raccolta_attive_pre(instance: str):
