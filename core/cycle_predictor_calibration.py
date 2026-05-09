@@ -37,7 +37,11 @@ from typing import Optional
 _log = logging.getLogger(__name__)
 
 CALIBRATION_TTL_S = 30 * 60   # rebuild ogni 30min
-WINDOW_DEFAULT    = 10        # ultimi N cicli
+WINDOW_DEFAULT    = 20        # ultimi N cicli (09/05: 10→20 per ridurre
+                              # sensibilità a outlier; ogni anomalia conta
+                              # 1/20 invece di 1/10. Trade-off: reagisce più
+                              # lentamente a cambi sistemici, ma sistema ora
+                              # ha 30+ cicli accumulati = fedeltà mantenuta)
 MIN_SAMPLES       = 5         # serve almeno 5 cicli per calibrare
 FACTOR_MIN        = 0.5       # clamp [0.5, 2.0]
 FACTOR_MAX        = 2.0
