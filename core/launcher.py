@@ -1018,20 +1018,23 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
                 or getattr(getattr(ctx, "config", None), "profilo", None)
                 or "full"
             )
+            # 09/05: `_sctx` definito SEMPRE (anche per raccolta_only) per
+            # essere riusato da `leggi_truppe_se_necessario` sotto. Pre-fix:
+            # _sctx era nello scope dell'`else`, quindi su raccolta_only
+            # (FauMorfeus master) NameError "cannot access local variable
+            # '_sctx'" → troops reader skippato silenziosamente.
+            class _SettingsCtx:
+                pass
+            _sctx = _SettingsCtx()
+            _sctx.device        = device
+            _sctx.matcher       = getattr(nav, "matcher", None)
+            _sctx.navigator     = nav
+            _sctx.instance_name = nome
             if str(_tipologia_inst) == "raccolta_only":
                 _log(f"[{nome}] settings lightweight SKIP (tipologia=raccolta_only)", log_fn)
             else:
                 try:
                     from core.settings_helper import imposta_settings_lightweight
-
-                    class _SettingsCtx:
-                        pass
-                    _sctx = _SettingsCtx()
-                    _sctx.device        = device
-                    _sctx.matcher       = getattr(nav, "matcher", None)
-                    _sctx.navigator     = nav
-                    _sctx.instance_name = nome  # WU64 — necessario per cache_state.json
-
                     _t_set = time.time()
                     _ok_set = imposta_settings_lightweight(_sctx, log_fn=log_fn)
                     _dt_set = time.time() - _t_set
