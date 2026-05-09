@@ -576,24 +576,45 @@ def ui_config(request: Request):
 @app.get("/ui/advanced", include_in_schema=False)
 def ui_advanced(request: Request):
     """08/05: pagina advanced — operazioni bulk istanze + truppe.
-    Estrae da config_global le 2 sezioni che servivano "configurazione veloce".
-    Restart bot e mail rimangono in /ui/config/global.
+
+    09/05 fix: la pagina opera su DYNAMIC (come la home, non come
+    /ui/config/global). `cfg` è ora `runtime_overrides.json::globali`
+    con fallback a `global_config.json` per chiavi mancanti. Save delle
+    truppe va su nuovi endpoint `/api/config/truppe-{globali,istanze}`
+    che scrivono dynamic (hot-reload). Restart bot e mail restano in
+    /ui/config/global che invece resta su static.
     """
     import json
     from dashboard.services.config_manager import (
         _GLOBAL_CONFIG_PATH, get_instances, get_overrides,
     )
     from shared.instance_meta import get_master_instances
+
+    # Static fallback (per chiavi che possono non esistere ancora in dynamic)
     try:
         with open(_GLOBAL_CONFIG_PATH, "r", encoding="utf-8") as f:
-            cfg_raw = json.load(f)
+            static_raw = json.load(f)
     except Exception:
-        cfg_raw = {}
+        static_raw = {}
+
+    # Dynamic primary
+    overrides = get_overrides() or {}
+    globali = overrides.get("globali") or {}
+    # Merge: dynamic overrides static (campo per campo top-level, sub-merge truppe)
+    cfg_raw = dict(static_raw)
+    for k, v in globali.items():
+        if isinstance(v, dict) and isinstance(cfg_raw.get(k), dict):
+            merged = dict(cfg_raw[k])
+            merged.update(v)
+            cfg_raw[k] = merged
+        else:
+            cfg_raw[k] = v
+
     return templates.TemplateResponse(request, "advanced.html", {
         "active":       "advanced",
         "cfg":          cfg_raw,
         "instances":    get_instances(),
-        "overrides":    get_overrides(),
+        "overrides":    overrides,
         "master_names": set(get_master_instances()),
         **_env_label(),
     })

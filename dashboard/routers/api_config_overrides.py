@@ -362,6 +362,95 @@ async def save_allocazione(request: Request):
 
 
 # ==============================================================================
+# PUT /api/truppe-globali — default caserme globale (DYNAMIC, hot-reload)
+# ==============================================================================
+
+@router.put("/truppe-globali")
+async def save_truppe_globali(request: Request):
+    """Aggiorna caserme di default in `runtime_overrides.json::globali.truppe.caserme`.
+
+    09/05: la pagina /ui/advanced opera su DYNAMIC (come gli altri controlli
+    real-time della home), non su STATIC. Effetto al prossimo tick istanza.
+
+    Payload atteso: `{caserme: {infantry: bool, rider: bool, ranged: bool, engine: bool}}`
+    Tutti i campi opzionali — merge incrementale solo sulle chiavi inviate.
+    """
+    try:
+        raw = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"JSON non valido: {e}")
+    if not isinstance(raw, dict):
+        raise HTTPException(status_code=400, detail="payload deve essere un oggetto JSON")
+
+    cas_payload = raw.get("caserme")
+    if not isinstance(cas_payload, dict):
+        raise HTTPException(status_code=400, detail="caserme dict richiesto")
+
+    ov = _load_ov()
+    cur = ov.globali.truppe.caserme
+    changed: list[str] = []
+    for k in ("infantry", "rider", "ranged", "engine"):
+        if k in cas_payload:
+            setattr(cur, k, bool(cas_payload[k]))
+            changed.append(k)
+    _save_ov(ov)
+    return {"ok": True, "restart_required": False, "sezione": "truppe-globali",
+            "changed": changed}
+
+
+# ==============================================================================
+# PUT /api/truppe-istanze — override per-istanza caserme (DYNAMIC, hot-reload)
+# ==============================================================================
+
+@router.put("/truppe-istanze")
+async def save_truppe_istanze(request: Request):
+    """Aggiorna `runtime_overrides.json::istanze.<nome>.truppe_override.caserme`
+    per ogni istanza listata. Hot-reload al prossimo tick.
+
+    Payload: `{istanze: {<nome>: {truppe_override: {caserme: {...}} | None}}}`
+    None = elimina override (eredita default globale).
+    """
+    try:
+        raw = await request.json()
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"JSON non valido: {e}")
+    ist_payload = (raw.get("istanze") or {})
+    if not isinstance(ist_payload, dict):
+        raise HTTPException(status_code=400, detail="istanze dict richiesto")
+
+    ov = _load_ov()
+    raw_ovr = get_overrides() or {}
+    ist_raw = raw_ovr.setdefault("istanze", {})
+
+    n_changed = 0
+    for nome, body in ist_payload.items():
+        if not isinstance(body, dict):
+            continue
+        cur = ist_raw.setdefault(nome, {})
+        if not isinstance(cur, dict):
+            cur = {}
+            ist_raw[nome] = cur
+        if "truppe_override" in body:
+            tov = body["truppe_override"]
+            if tov is None:
+                cur["truppe_override"] = None
+            elif isinstance(tov, dict):
+                cas = (tov.get("caserme") or {})
+                if isinstance(cas, dict):
+                    cur["truppe_override"] = {
+                        "caserme": {
+                            k: bool(cas[k]) for k in ("infantry","rider","ranged","engine") if k in cas
+                        }
+                    }
+            n_changed += 1
+
+    # Save raw (preserva altri campi istanza)
+    save_overrides(raw_ovr)
+    return {"ok": True, "restart_required": False, "sezione": "truppe-istanze",
+            "n_changed": n_changed}
+
+
+# ==============================================================================
 # PUT /api/config/istanze — override per-istanza
 # ==============================================================================
 

@@ -184,21 +184,19 @@ async function advSalvaIstanze() {
   }
 }
 
-// ── Truppe default globale (CONFIG → static) ────────────────────────────────
+// ── Truppe default globale (DYNAMIC, hot-reload — fix 09/05) ────────────────
 async function advSalvaTruppeGlobali() {
   const payload = {
-    truppe: {
-      caserme: {
-        infantry: advGb('adv-truppe-g-infantry'),
-        rider:    advGb('adv-truppe-g-rider'),
-        ranged:   advGb('adv-truppe-g-ranged'),
-        engine:   advGb('adv-truppe-g-engine'),
-      },
+    caserme: {
+      infantry: advGb('adv-truppe-g-infantry'),
+      rider:    advGb('adv-truppe-g-rider'),
+      ranged:   advGb('adv-truppe-g-ranged'),
+      engine:   advGb('adv-truppe-g-engine'),
     },
   };
   try {
-    const r = await fetch('/api/config/global', {
-      method: 'PATCH',
+    const r = await fetch('/api/config/truppe-globali', {
+      method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload),
     });
@@ -209,7 +207,7 @@ async function advSalvaTruppeGlobali() {
   }
 }
 
-// ── Truppe override per istanza (CONFIG → instances.json) ───────────────────
+// ── Truppe override per istanza (DYNAMIC, hot-reload — fix 09/05) ───────────
 async function advSalvaTruppeIstanze() {
   const istanze = {};
   document.querySelectorAll('tr.adv-truppe-row[data-nome]').forEach(tr => {
@@ -234,7 +232,7 @@ async function advSalvaTruppeIstanze() {
     }
   });
   try {
-    const r = await fetch('/api/config/istanze/truppe', {
+    const r = await fetch('/api/config/truppe-istanze', {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ istanze }),
