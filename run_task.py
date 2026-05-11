@@ -35,6 +35,14 @@ import sys
 import time
 from datetime import datetime
 
+# Force UTF-8 su stdout/stderr — evita charmap error su caratteri Unicode (->, --, ✓)
+# nei log dei task quando lanciati su console Windows cp1252.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 ROOT = os.path.dirname(os.path.abspath(__file__))
 if ROOT not in sys.path:
     sys.path.insert(0, ROOT)
