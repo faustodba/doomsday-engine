@@ -58,6 +58,64 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 11/05/2026 (pomeriggio) — WU150 (radar_actions dispatcher + handler card)
+
+#### WU150 — Radar Actions: dispatcher post-pallini + handler card (GO+RESCUE)
+
+Nuovo modulo `tasks/radar_actions.py` che orchestra il flusso completo del radar dopo l'apertura della mappa. Sostituisce il vecchio `_loop_pallini` standalone + census opzionale con un loop unico che integra il dispatch handler per categoria.
+
+**Architettura**:
+- `process_radar_actions(ctx, log_fn)` → orchestratore loop (max 10 iter safety)
+- `HANDLERS: dict[str, Callable]` → mappa `{categoria → handler}` con 1 categoria attiva (`card`) + 10 placeholder
+- `dispatch_record(ctx, record, log_fn)` → invoca handler se `ready=True` e categoria nota
+- `_run_census_actionable(ctx)` → invoca `RadarCensusTask` e filtra record con handler disponibile
+
+**Loop unico**:
+```
+For iter in 1..10:
+  1. _loop_pallini (radar.py esistente, tappa tutti i pallini rossi)
+  2. wait 10s (animazioni gioco / nuovi pallini possono comparire)
+  3. _run_census_actionable -> filtra record ready + categoria in HANDLERS
+  4. For record: dispatch_record -> handler specifico
+  5. Stop se 0 pallini AND 0 record processati
+```
+
+**Handler `card`** (Protect Survivors — survivor da salvare):
+```
+TAP pin card (cx,cy) -> SLEEP 2.5s
+TAP GO (90, 465)     -> SLEEP 2.5s
+TAP RESCUE (233,386) -> SLEEP 2.5s
+TAP RADAR_ICON (78,315) -> SLEEP 2.5s (ritorno mappa radar per prossimo loop)
+```
+
+**Coord fisse validate live su FAU_01 11/05**:
+- GO bottone (90, 465) — stima visuale popup "Protect Survivors"
+- RESCUE bottone (233, 386) — coord fornita dall'utente
+- RADAR_ICON (78, 315) — già esistente in radar.py (V5 legacy)
+
+**Validation end-to-end (3 cicli debug)**:
+- 1ª card (391, 305) ready=True → processata → scomparsa dal census
+- 2ª card (731, 282) ready=False (sotto soglia) → processata manualmente → degradata a `sconosciuto`
+- 2 pallini ricomparsi su (747, 263) + (406, 287) → `_loop_pallini` standard li smaltisce → 0 pallini
+- iter 3: radar pulito → exit
+
+**File modificati**:
+- `tasks/radar_actions.py` (NEW ~210 righe)
+- `tasks/radar.py::run()` → sostituito blocco `_loop_pallini` + census standalone con `process_radar_actions()`. Mantenuto blocco census legacy opzionale (`RADAR_CENSUS_ABILITATO`) per compat. `_data()` esteso con campo `card_processate` per telemetria.
+
+**Test live**: `py -3.14 run_task.py --istanza FAU_01 --task radar --force` → ESITO OK 50.8s, iter=1, 0 pallini + 0 actionable (radar già pulito dai test debug precedenti) → exit pulito.
+
+**Cosmetic charmap errors** in console Windows (cp1252) su caratteri Unicode `→`/`✓` di `run_task.py` + `radar.py` legacy + `radar_census.py` (RF caricato): non bloccanti (fail-safe True), fuori scope WU150.
+
+**Sync prod**: cp diretto di `tasks/radar.py` + `tasks/radar_actions.py` in `C:/doomsday-engine-prod/tasks/`. Effetto al prossimo restart bot prod.
+
+**Categorie residue per iterazione futura**:
+`skull, pedone, soldati, avatar, paracadute, camion, fiamma, bottiglia, numero, auto` — handler placeholder pronti in `HANDLERS` dict, basta riempire la function quando si avranno screenshot/azioni live dell'utente.
+
+**Commit**: `bf1dbcd` — `feat(radar): WU150 - radar_actions dispatcher + handler card`.
+
+---
+
 ### Sessione 11/05/2026 (mattina) — WU147 + WU148 + WU149 (pin rifugio + scheduler flag fix + AB test page)
 
 #### WU149 — Dashboard: pagina dedicata "AB test adaptive scheduler"
