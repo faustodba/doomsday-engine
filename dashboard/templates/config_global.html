@@ -120,6 +120,13 @@ async function promoteRuntimeToStatic() {
                  min="1" max="1440" step="1" style="width:60px"
                  title="intervallo tra cicli bot in minuti (1-1440)">
         </div>
+        <div class="p-row">
+          <span class="p-lbl">timeout boot HOME (s)</span>
+          <input class="p-inp" id="gc-timeout-boot" type="number"
+                 value="{{ sis.get('timeout_carica_s', cfg.get('mumu',{}).get('timeout_carica_s', 300))|int }}"
+                 min="30" max="900" step="30" style="width:60px"
+                 title="timeout polling HOME dopo avvio gioco (30-900s, default 300)">
+        </div>
         <div class="col-sep"></div>
         <div class="col-sub">task baseline (default reset)</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px">
@@ -659,7 +666,8 @@ async function gcSalvaSistema() {
   const payload = {
     // 08/05: tick_sleep_min uniforma static col dynamic (runtime_overrides).
     // Loader converte ×60 → tick_sleep secondi internamente.
-    sistema: { max_parallel: gcGi('gc-parallel'), tick_sleep_min: gcGi('gc-sleep') },
+    sistema: { max_parallel: gcGi('gc-parallel'), tick_sleep_min: gcGi('gc-sleep'),
+               timeout_carica_s: gcGi('gc-timeout-boot') },
     task: task,
     auto_learn_banner: gcGb('gc-auto-learn'),
     raccolta_ocr_debug: gcGb('gc-ocr-debug'),

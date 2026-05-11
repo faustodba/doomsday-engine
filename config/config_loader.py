@@ -560,6 +560,12 @@ def merge_config(gcfg: dict, overrides: dict) -> dict:
                     merged["sistema"]["tick_sleep"] = int(v) * 60
                 else:
                     merged["sistema"][k] = v
+            # WU155 — sistema.timeout_carica_s (path canonico dashboard) propaga
+            # a mumu.timeout_carica_s (path canonico bot). Bot legge da mumu.*
+            if "timeout_carica_s" in ov_sistema:
+                if "mumu" not in merged:
+                    merged["mumu"] = {}
+                merged["mumu"]["timeout_carica_s"] = int(ov_sistema["timeout_carica_s"])
     except Exception:
         pass
 
@@ -665,7 +671,7 @@ class MumuConfig:
         r"C:\Program Files\Netease\MuMuPlayer\nx_main\adb.exe"
     )
     timeout_adb_s:       int = 120
-    timeout_carica_s:    int = 180
+    timeout_carica_s:    int = 300
     delay_carica_iniz_s: int = 45
     n_back_pulizia:      int = 5
     player_exe:          str = ""
@@ -882,6 +888,14 @@ class GlobalConfig:
         _al_max = max((float(v) for v in al.values()), default=0.0) if al else 0.0
         _al_div = 100.0 if _al_max > 1.0 else 1.0
 
+        # WU155 — timeout_carica_s: priorita' sistema.timeout_carica_s (path nuovo
+        # esposto in dashboard sezione sistema) > mumu.timeout_carica_s (legacy)
+        # > default 300.
+        _timeout_carica = int(
+            s.get("timeout_carica_s",
+                  m.get("timeout_carica_s", 300))
+        )
+
         return cls(
             # MuMu
             mumu = MumuConfig(
@@ -890,7 +904,7 @@ class GlobalConfig:
                 adb                 = str(m.get("adb",
                     r"C:\Program Files\Netease\MuMuPlayer\nx_main\adb.exe")),
                 timeout_adb_s       = int(m.get("timeout_adb_s",       120)),
-                timeout_carica_s    = int(m.get("timeout_carica_s",    180)),
+                timeout_carica_s    = _timeout_carica,
                 delay_carica_iniz_s = int(m.get("delay_carica_iniz_s", 45)),
                 n_back_pulizia      = int(m.get("n_back_pulizia",      5)),
             ),
@@ -1029,8 +1043,11 @@ class GlobalConfig:
         runtime_overrides; il campo interno resta `tick_sleep` (secondi)."""
         return {
             "sistema": {
-                "tick_sleep_min": int(self.tick_sleep // 60),
-                "max_parallel":   self.max_parallel,
+                "tick_sleep_min":   int(self.tick_sleep // 60),
+                "max_parallel":     self.max_parallel,
+                # WU155 — path canonico dashboard. mumu.timeout_carica_s rimane
+                # come backward compat per chi legge da quel path (V5 legacy).
+                "timeout_carica_s": self.mumu.timeout_carica_s,
             },
             "mumu": {
                 "manager":             self.mumu.manager,

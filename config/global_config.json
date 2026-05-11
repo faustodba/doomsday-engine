@@ -2,13 +2,14 @@
   "_note": "Doomsday Engine V6 — Configurazione globale STATICA (baseline reset). Letto ad ogni tick. Override applicati da runtime_overrides.json (modificati dalla dashboard). Default: tutti i task DISATTIVATI per partenza neutra.",
   "sistema": {
     "tick_sleep_min": 1,
-    "max_parallel": 1
+    "max_parallel": 1,
+    "timeout_carica_s": 300
   },
   "mumu": {
     "manager": "C:\\Program Files\\Netease\\MuMuPlayer\\nx_main\\MuMuManager.exe",
     "adb": "C:\\Program Files\\Netease\\MuMuPlayer\\nx_main\\adb.exe",
     "timeout_adb_s": 120,
-    "timeout_carica_s": 180,
+    "timeout_carica_s": 300,
     "delay_carica_iniz_s": 60,
     "n_back_pulizia": 5,
     "player_exe": "",

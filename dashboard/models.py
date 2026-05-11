@@ -76,8 +76,12 @@ class TaskFlags(BaseModel):
 
 class SistemaOverride(BaseModel):
     """Parametri globali di esecuzione. Scritti su runtime_overrides.json."""
-    max_parallel:    int = Field(default=1, ge=1, le=12)
-    tick_sleep_min:  int = Field(default=30, ge=0, le=1440)
+    max_parallel:      int = Field(default=1, ge=1, le=12)
+    tick_sleep_min:    int = Field(default=30, ge=0, le=1440)
+    # WU155 — timeout polling HOME dopo avvio gioco (in secondi). Default 300
+    # (era 180 hardcoded in mumu.timeout_carica_s). Path canonico legacy:
+    # mumu.timeout_carica_s. Se presente in sistema.timeout_carica_s, prevale.
+    timeout_carica_s:  int = Field(default=300, ge=30, le=900)
 
 
 # ==============================================================================
