@@ -193,26 +193,31 @@ class RadarTask(Task):
         time.sleep(10.0)  # intenzionale — attesa notifiche
         debug.snap("01_post_open_radar", ctx.device.screenshot())
 
-        # 3. Loop pallini
+        # 3. Loop completo: pallini + census + dispatch handler per categoria
+        #    (sostituisce il vecchio _loop_pallini standalone + census opzionale)
+        card_processate = 0
         try:
-            pallini_tappati = self._loop_pallini(ctx, log)
+            from tasks.radar_actions import process_radar_actions
+            totals = process_radar_actions(ctx, log)
+            pallini_tappati = totals.get("pallini_tappati", 0)
+            card_processate = totals.get("card_processate", 0)
+            log(f"Loop completato — iter={totals.get('loops', 0)} "
+                f"pallini={pallini_tappati} card={card_processate}")
         except Exception as exc:
             errore = str(exc)
-            log(f"ERRORE loop pallini: {exc}")
+            log(f"ERRORE process_radar_actions: {exc}")
             debug.snap("99_exception_loop", ctx.device.screenshot())
 
-        # 4. Census opzionale
+        # 4. Census legacy opzionale (mantenuto per compat — sconsigliato dopo loop unico)
         if _cfg(ctx, "RADAR_CENSUS_ABILITATO"):
-            log("Census abilitato — avvio RadarCensusTask...")
+            log("Census legacy abilitato (post-loop) — avvio RadarCensusTask...")
             try:
                 census_task = RadarCensusTask()
                 res = census_task.run(ctx)
                 census_icone = res.data.get("icone_rilevate", 0)
-                log(f"Census completato — icone={census_icone}")
+                log(f"Census legacy completato — icone={census_icone}")
             except Exception as exc:
-                log(f"Census non bloccante — errore: {exc}")
-        else:
-            log("Census disabilitato (RADAR_CENSUS_ABILITATO=False)")
+                log(f"Census legacy non bloccante — errore: {exc}")
 
         debug.snap("02_post_loop", ctx.device.screenshot())
 
@@ -220,13 +225,14 @@ class RadarTask(Task):
         ctx.device.back()
         time.sleep(1.0)
 
-        log(f"Completato — pallini={pallini_tappati} census={census_icone}")
-        # Anomalia: badge rilevato ma 0 pallini tappati (badge falso o UI errata)
-        anomalia = (pallini_tappati == 0 and errore is None)
+        log(f"Completato — pallini={pallini_tappati} card={card_processate} census={census_icone}")
+        # Anomalia: 0 pallini + 0 card → badge falso o UI errata
+        anomalia = (pallini_tappati == 0 and card_processate == 0 and errore is None)
         debug.flush(success=(errore is None), force=anomalia, log_fn=log)
         return TaskResult(
             success=errore is None,
-            data=self._data(True, pallini_tappati, census_icone, errore),
+            data=self._data(True, pallini_tappati, census_icone,
+                            errore, card_processate=card_processate),
         )
 
     # ── Badge detection ───────────────────────────────────────────────────────
@@ -386,11 +392,13 @@ class RadarTask(Task):
     def _data(skip_ok: bool,
               pallini: int,
               census: int,
-              errore: str | None) -> dict:
+              errore: str | None,
+              card_processate: int = 0) -> dict:
         return {
             "skip_ok":         skip_ok,
             "pallini_tappati": pallini,
             "census_icone":    census,
+            "card_processate": card_processate,
             "errore":          errore,
         }
 
