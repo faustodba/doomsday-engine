@@ -539,21 +539,25 @@ def _apri_resource_supply(ctx: TaskContext) -> bool:
 
 
 def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
-                      nome_rifugio: str) -> tuple[bool, int, bool, int, int, int]:
+                      nome_rifugio: str) -> tuple[bool, int, bool, int, int, int, bool]:
     """
     Legge la maschera di invio, compila la risorsa e preme VAI.
 
-    Ritorna: (ok, eta_sec, quota_esaurita, qta_effettiva, qta_lordo, provviste_lette)
+    Ritorna: (ok, eta_sec, quota_esaurita, qta_effettiva, qta_lordo, provviste_lette, master_saturo)
       ok=True          → spedizione inviata
       quota_esaurita   → provviste=0, non rientrare nel ciclo oggi
       qta_effettiva    → quantità NETTA arrivata al destinatario (clamped × (1-tassa))
       qta_lordo        → quantità LORDA uscita dal castello (OCR campo input,
                           fallback al valore nominale `qta` se OCR fallisce)
       provviste_lette  → provviste rimanenti lette dalla maschera (-1 se OCR fallito)
+      master_saturo    → True se DRL del rifugio destinatario letto =0 in questa
+                          maschera. Caller deve BREAK loop spedizioni (inutile
+                          provare altre risorse, VAI sara' disabilitato per tutte).
+                          WU154 (11/05 sera).
     """
     screen = ctx.device.screenshot()
     if not screen:
-        return False, 0, False, 0, 0, -1
+        return False, 0, False, 0, 0, -1, False
 
     # Verifica nome destinatario (come V5 _compila_e_invia in rifornimento_base.py)
     # Retry una volta se OCR restituisce stringa vuota (popup ancora in rendering)
@@ -571,7 +575,7 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
             )
             ctx.device.back()
             time.sleep(0.8)
-            return False, 0, False, 0, 0, -1
+            return False, 0, False, 0, 0, -1, False
 
     vai_zona     = _cfg(ctx, "VAI_ZONA")
     soglia_vai   = _cfg(ctx, "VAI_SOGLIA_GIALLI")
@@ -608,6 +612,16 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
                 letto_da=ctx.instance_name,
                 tassa_pct=tassa_pct,
             )
+            # WU154 (11/05): se master saturo (DRL=0), inutile procedere con
+            # compila+VAI — il pulsante VAI sara' disabilitato per qualsiasi
+            # risorsa. BACK + segnale al caller per BREAK del loop spedizioni.
+            if recv_limit == 0:
+                ctx.log_msg(
+                    f"Rifornimento: master saturo (DRL=0) — interrompo loop spedizioni"
+                )
+                ctx.device.key("KEYCODE_BACK")
+                time.sleep(0.8)
+                return False, 0, False, 0, 0, provviste, True
         else:
             ctx.log_msg("Rifornimento: Daily Receiving Limit OCR fallito — skip salvataggio")
     except Exception as exc:
@@ -617,7 +631,7 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
         ctx.log_msg("Rifornimento: provviste esaurite → stop")
         ctx.device.key("KEYCODE_BACK")
         time.sleep(0.8)
-        return False, 0, True, 0, 0, 0
+        return False, 0, True, 0, 0, 0, False
 
     eta_sec = _leggi_eta(screen, ocr_tempo)
     ctx.log_msg(f"Rifornimento: ETA viaggio={eta_sec}s")
@@ -626,7 +640,7 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
     coord = coord_campo.get(risorsa)
     if not coord:
         ctx.log_msg(f"Rifornimento: campo {risorsa} non configurato")
-        return False, 0, False, 0, 0, provviste
+        return False, 0, False, 0, 0, provviste, False
 
     ctx.log_msg(f"Rifornimento: compila {risorsa}={qta:,}")
 
@@ -658,9 +672,9 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
         if provviste2 == 0:
             ctx.device.key("KEYCODE_BACK")
             time.sleep(0.8)
-            return False, 0, True, 0, 0, 0
+            return False, 0, True, 0, 0, 0, False
         ctx.device.key("KEYCODE_BACK")
-        return False, 0, False, 0, 0, provviste
+        return False, 0, False, 0, 0, provviste, False
 
     # auto-WU12: leggi valore reale CLAMPED dal campo input + applica tassa.
     # User: "L'input 999_999_999 il sistema auto-aggiusta sul max, e il valore
@@ -710,7 +724,7 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
     except Exception as exc:
         ctx.log_msg(f"[PROD] hook rifornimento: {exc}")
 
-    return True, eta_sec, False, qta_effettiva, qta_clamped_real, provviste
+    return True, eta_sec, False, qta_effettiva, qta_clamped_real, provviste, False
 
 
 # ------------------------------------------------------------------------------
@@ -1139,13 +1153,19 @@ def _esegui_via_membri(ctx: TaskContext, risorse_config: dict,
         # compila quantità + tap VAI richiedono ~15-20s; se ts_invio fosse preso
         # prima, la coda_volo sottostimerebbe il tempo residuo delle spedizioni
         # in corso, causando uscite "nessun slot dopo attesa" sbagliate.
-        ok, eta_sec, quota_esaurita, qta_effettiva, qta_lordo, provviste_lette = _compila_e_invia(
+        ok, eta_sec, quota_esaurita, qta_effettiva, qta_lordo, provviste_lette, master_saturo = _compila_e_invia(
             ctx, risorsa_scelta, qta, nome_rifugio
         )
         ts_invio = time.time()
 
         if quota_esaurita:
             ctx.log_msg("Rifornimento membri: quota giornaliera esaurita — stop")
+            break
+
+        # WU154 (11/05): master saturo letto mid-task -> break loop spedizioni
+        # (inutile provare altre risorse, VAI disabilitato per tutte).
+        if master_saturo:
+            ctx.log_msg("Rifornimento membri: master saturo (DRL=0) — stop loop")
             break
 
         if not ok:
@@ -1651,7 +1671,7 @@ class RifornimentoTask(Task):
                 # di OCR + compila + tap VAI). Prima era PRIMA, causando coda_volo
                 # ottimistica → "nessun slot dopo attesa" sbagliato (FAU_01 tick
                 # 2/5 sped con slot=0 dopo attesa 55s, ma sped 1 ancora in volo).
-                ok, eta_sec, quota_esaurita, qta_effettiva, qta_lordo, provviste_lette = _compila_e_invia(
+                ok, eta_sec, quota_esaurita, qta_effettiva, qta_lordo, provviste_lette, master_saturo = _compila_e_invia(
                     ctx, risorsa_scelta, qta, nome_rifugio
                 )
                 ts_invio = time.time()
@@ -1661,6 +1681,11 @@ class RifornimentoTask(Task):
                     if ctx.state is not None:
                         ctx.state.rifornimento.segna_provviste_esaurite()
                         ctx.log_msg("Rifornimento: RifornimentoState.provviste_esaurite=True")
+                    break
+                # WU154 (11/05): master saturo letto mid-task -> break loop spedizioni
+                # (inutile provare altre risorse, VAI disabilitato per tutte).
+                if master_saturo:
+                    ctx.log_msg("Rifornimento: master saturo (DRL=0) — stop loop")
                     break
                 if not ok:
                     # 05/05: pre-fix `break` cieco bloccava tutto il loop al primo
