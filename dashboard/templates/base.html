@@ -5,6 +5,33 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Doomsday V6{% endblock %}</title>
   <link rel="stylesheet" href="/static/style.css">
+  <style>
+    /* WU153 — pannelli collapsable (click su header per toggle, stato in localStorage) */
+    .tel-card.panel-collapsed > *:not(.tel-head),
+    .col-box.panel-collapsed  > *:not(.col-head),
+    .section.panel-collapsed  > *:not(.sec-label) {
+      display: none !important;
+    }
+    .panel-chev {
+      display: inline-block;
+      margin-left: 6px;
+      font-size: 10px;
+      color: var(--text-dim, #888);
+      transition: transform 0.15s ease;
+      user-select: none;
+    }
+    .tel-head[data-collapsible-head],
+    .col-head[data-collapsible-head],
+    .sec-label[data-collapsible-head] {
+      cursor: pointer;
+      user-select: none;
+    }
+    .tel-head[data-collapsible-head]:hover .panel-chev,
+    .col-head[data-collapsible-head]:hover .panel-chev,
+    .sec-label[data-collapsible-head]:hover .panel-chev {
+      color: var(--text, #ddd);
+    }
+  </style>
   <script src="https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js" defer></script>
   <!-- json-enc inline: parse 'sezione[campo]' → nested object + coerce + JSON serialize
        per form con hx-ext="json-enc" (l'estensione non è shipped, ricostruiamo qui) -->
@@ -190,6 +217,78 @@
         }
       } catch (e) { /* failsafe — non bloccare htmx */ }
     });
+
+    // WU153 — collapsible panels (tel-card / col-box / section)
+    // Click su header (.tel-head/.col-head/.sec-label) -> toggle visibilita' body.
+    // Stato persistito in localStorage. Re-applicato dopo ogni HTMX swap.
+    (function() {
+      const SELECTORS = [
+        { panel: '.tel-card', head: '.tel-head' },
+        { panel: '.col-box',  head: '.col-head' },
+        { panel: '.section',  head: '.sec-label' },
+      ];
+
+      function slug(text) {
+        return (text || '').trim().toLowerCase()
+          .replace(/[^\w\s-]/g, '')
+          .replace(/\s+/g, '-')
+          .substring(0, 50);
+      }
+
+      function applyState(panel, head) {
+        const s = slug(head.textContent);
+        if (!s) return;
+        const key = 'panel-collapsed:' + s;
+        const collapsed = localStorage.getItem(key) === '1';
+        panel.classList.toggle('panel-collapsed', collapsed);
+        let chev = head.querySelector('.panel-chev');
+        if (!chev) {
+          chev = document.createElement('span');
+          chev.className = 'panel-chev';
+          head.appendChild(chev);
+        }
+        chev.textContent = collapsed ? ' ▶' : ' ▼';
+      }
+
+      function setupPanel(panel, head) {
+        if (head.dataset.collapsibleHead) {
+          // gia' inizializzato — ri-applica solo lo stato (es. dopo HTMX swap)
+          applyState(panel, head);
+          return;
+        }
+        head.dataset.collapsibleHead = '1';
+        head.addEventListener('click', function(evt) {
+          // Non triggerare se il click e' su input/button/select/label/a
+          if (evt.target.closest('input, button, select, label, a')) return;
+          const s = slug(head.textContent);
+          if (!s) return;
+          const key = 'panel-collapsed:' + s;
+          const now = localStorage.getItem(key) === '1';
+          localStorage.setItem(key, now ? '0' : '1');
+          applyState(panel, head);
+        });
+        applyState(panel, head);
+      }
+
+      function setupAll() {
+        SELECTORS.forEach(({ panel, head }) => {
+          document.querySelectorAll(panel).forEach(p => {
+            // primo head diretto figlio
+            const h = Array.from(p.children).find(c => c.matches(head));
+            if (h) setupPanel(p, h);
+          });
+        });
+      }
+
+      // Setup iniziale + dopo ogni HTMX swap (re-init nuovi pannelli + ri-applica stato)
+      if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', setupAll);
+      } else {
+        setupAll();
+      }
+      document.addEventListener('htmx:afterSwap', setupAll);
+      document.addEventListener('htmx:afterSettle', setupAll);
+    })();
 
     // 06/05 — toggle richiesta restart bot
     async function restartBotToggle(request) {
