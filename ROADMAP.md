@@ -58,6 +58,50 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 11/05/2026 (mattina) — WU147 + WU148 + WU149 (pin rifugio + scheduler flag fix + AB test page)
+
+#### WU149 — Dashboard: pagina dedicata "AB test adaptive scheduler"
+
+Nuova pagina `/ui/ab-test` per visualizzare e analizzare lo storico A/B `adaptive vs naive` ordering scheduler (proposta E 08/05 — `record_ab_test()` in `core/adaptive_scheduler.py` riga 956+).
+
+**Sorgente dati**: `data/predictions/scheduler_ab.jsonl` (31 record validati prod 08-11/05).
+- delta_slot medio: **+2.94 slot/ciclo**
+- win rate adaptive: **80.6%** (25/31)
+- best/worst: +14 / -2
+
+**File modificati/creati**:
+- NEW `dashboard/templates/ab_test.html` (66 righe, extends `base.html`, 3 sezioni HTMX polling 60s)
+- MOD `dashboard/templates/base.html` — voce nav "ab test" inserita tra "predictor istanze" e "config"
+- MOD `dashboard/app.py` — 4 endpoint dopo `ui_predictor_redirect` (riga 304+):
+  - `GET /ui/ab-test` (route principale, render template)
+  - `GET /ui/partial/ab-test-summary` (card riepilogo)
+  - `GET /ui/partial/ab-test-trend` (SVG inline 860×160)
+  - `GET /ui/partial/ab-test-detail` (tabella ultimi 15)
+  - helper `_load_ab_records()` (parser JSONL failsafe)
+
+**3 sezioni UI**:
+1. **Riepilogo sintetico**: N cicli registrati, delta medio/best/worst, vince/tie/perde, barra win rate colorata (verde≥70%, arancio≥50%, rosso<50%), top 3 trigger frequenti.
+2. **Trend SVG**: punto per ciclo colorato verde (delta>0) / rosso (delta<0) / grigio (tie), linea trend semitrasparente, baseline `naive=0` tratteggiata, etichette assi.
+3. **Tabella ultimi 15 cicli**: colonne ora locale / trigger / n_istanze / Σadaptive / Σnaive / delta (✅/❌/—) / ordine adaptive (top 5).
+
+**Correzioni codice ricevuto vs file esistente** (necessarie per evitare bug runtime):
+- `_data_path(...)` non esisteva in `app.py` → sostituito con `Path("C:/doomsday-engine-prod") / "data" / ...` (pattern coerente con righe 1938/1953/2387/2730 dello stesso file)
+- `_env_css()` non esisteva → `_env_label()` ritorna già dict con `env_css` dentro → uso `**_env_label()` per unpack
+- `async def` → `def` sincrono per coerenza con altre route UI dello stesso file
+- `include_in_schema=False` aggiunto per coerenza
+- `import json as _json` locale (top-level non importa json)
+
+**Validazione**:
+- `ast.parse` dev → syntax OK
+- Sync prod via `sync_prod.bat` (348 file copiati) → ab_test.html + app.py + base.html arrivati in prod
+- Verifica HTTP curl prod: `/ui/ab-test → 404` perché dashboard prod gira con codice vecchio in memoria — restart dashboard prod necessario per attivare (uvicorn non ha `--reload`)
+
+**Effetto attivazione**: al prossimo restart dashboard prod (`run_dashboard_prod.bat` o equivalente). Bot prod NON impattato (la WU149 tocca solo UI, non main loop).
+
+Commit dev: `2bb12b3` "Add AB test adaptive scheduler page WU149" (+369 righe, 1 nuovo file).
+
+---
+
 ### Sessione 11/05/2026 (mattina) — WU147 (nuovo pin centratura mappa rifornimento + ROI dinamica + tap su centro pin)
 
 #### WU147 — Rifornimento: nuovo template centratura mappa `pin_rifugio.png` + ROI 2-step + tap dinamico
