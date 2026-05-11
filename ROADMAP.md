@@ -58,6 +58,41 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 11/05/2026 (notte) — WU155 (timeout boot HOME + dashboard sistema)
+
+#### WU155 — Timeout boot HOME 180→300s + esposto in dashboard sezione sistema
+
+**Richiesta utente**: aumentare il timeout di polling HOME post-avvio gioco da 180 a 300 secondi, renderlo configurabile dalla dashboard sia in HOME (DYNAMIC) che in CONFIG (STATIC), posizionato accanto a `max_parallel`+`tick_sleep_min` nella sezione "sistema".
+
+**Contesto**: parametro originale in `config_loader.py::MumuConfig.timeout_carica_s = 180` (storage `global_config.json::mumu.timeout_carica_s`). Letto da `core/launcher.py::_cfg.timeout_carica_s` durante stab HOME loop (vedi `[NAV] score home=...`). Su istanze lente la stab supera spesso i 180s (issue #12, [[WU-012-Stabilizzazione-HOME|WU-012]] mitigato 30→60s ma non risolto def).
+
+**Modifiche**:
+
+1. **Default**: `MumuConfig.timeout_carica_s = 300` (era 180)
+2. **Nuovo path canonico** `sistema.timeout_carica_s`:
+   - Priorità lettura: `sistema.timeout_carica_s` > `mumu.timeout_carica_s` (legacy) > default 300
+   - Bot continua a leggere `mumu.timeout_carica_s` (path interno invariato)
+3. **`_merge_globali`** in `config_loader.py`: se `globali.sistema.timeout_carica_s` presente in `runtime_overrides.json`, propaga a `merged["mumu"]["timeout_carica_s"]` finale
+4. **Pydantic `SistemaOverride`** (dashboard/models.py):
+   ```python
+   timeout_carica_s: int = Field(default=300, ge=30, le=900)
+   ```
+   Endpoint PUT/PATCH accetta automatic via setattr field-by-field pattern ([[WU-139-Dashboard-PUT-Merge-Bug|WU139]])
+5. **UI**:
+   - `index.html` (HOME) sezione sistema → nuova riga "timeout boot HOME (s)" id `g-timeout-boot` range 30-900 step 30
+   - `config_global.html` (CONFIG) idem id `gc-timeout-boot`
+   - Payload JS `salvaGlobals` + `gcSalvaSistema` include `sistema.timeout_carica_s`
+6. **`to_dict`**: esporta `sistema.timeout_carica_s` per coerenza lettura dashboard
+7. **`global_config.json` prod+dev**: aggiornato `mumu.timeout_carica_s = 300` + nuovo `sistema.timeout_carica_s = 300`. Backup `.bak.20260511_wu155_timeout`
+
+**Architettura**: HOME (`/ui`) scrive DYNAMIC (`runtime_overrides.json`) → attivo al prossimo `build_instance_cfg`. CONFIG (`/ui/config/global`) scrive STATIC (`global_config.json`) → baseline per bootstrap/reset. Coerente con regola [[Config-Static-vs-Dynamic]].
+
+**Backward compat**: chi ha solo `mumu.timeout_carica_s` continua a funzionare (fallback nella priorità lettura).
+
+**Commit**: `22560d6`. **Effetto attivazione**: restart bot prod (config_loader) + restart dashboard uvicorn (Pydantic schema) + refresh browser (template HTML).
+
+---
+
 ### Sessione 11/05/2026 (sera tardi) — WU152 + WU153 + WU154
 
 #### WU152 — Dashboard adaptive scheduler PATCH dual-write static+dynamic
