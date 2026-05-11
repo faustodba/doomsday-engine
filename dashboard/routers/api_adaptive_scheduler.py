@@ -141,54 +141,76 @@ def _global_config_path() -> Path:
 
 @router.patch("/adaptive-scheduler")
 def patch_adaptive_scheduler(payload: AdaptiveSchedulerPatch) -> dict:
-    """Merge superficiale dei field non-None su `global_config.json` (STATIC).
+    """Merge superficiale dei field non-None su STATIC + DYNAMIC.
 
-    08/05: regola architetturale "config modifica solo static". Questa card è
-    in `/ui/config/global` → scrive su global_config.json. Le modifiche diventano
-    attive al prossimo bootstrap o reset (banner UI lo specifica).
+    WU152 (11/05 sera): dual-write per allineare scrittura/lettura.
+
+    Motivazione: `core.adaptive_scheduler._flags_status` (post-WU148) legge
+    DYNAMIC > STATIC. Pre-fix il PATCH scriveva solo STATIC → GET status leggeva
+    DYNAMIC (con valori vecchi) → UI mostrava "salvataggio perso".
+
+    Dual-write:
+      - STATIC (`global_config.json`)        — regola WU140 (config baseline + bootstrap)
+      - DYNAMIC (`runtime_overrides.json::globali`) — attivazione immediata a runtime
     """
     gc_path = _global_config_path()
     gc = _read_json(gc_path)
+    ov_path = _runtime_overrides_path()
+    ov = _read_json(ov_path)
+    globali = ov.setdefault("globali", {})
     changed: dict = {}
 
     if payload.enabled is not None:
-        gc["adaptive_scheduler_enabled"] = bool(payload.enabled)
-        changed["enabled"] = bool(payload.enabled)
+        v = bool(payload.enabled)
+        gc["adaptive_scheduler_enabled"] = v
+        globali["adaptive_scheduler_enabled"] = v
+        changed["enabled"] = v
     if payload.shadow_only is not None:
-        gc["adaptive_scheduler_shadow_only"] = bool(payload.shadow_only)
-        changed["shadow_only"] = bool(payload.shadow_only)
+        v = bool(payload.shadow_only)
+        gc["adaptive_scheduler_shadow_only"] = v
+        globali["adaptive_scheduler_shadow_only"] = v
+        changed["shadow_only"] = v
 
     # Thresholds (validati). 08/05: drl_residuo_m sostituisce drl_residuo_pct.
     # Cleanup automatico: se la chiave legacy è ancora presente, rimossa.
-    th = gc.setdefault("adaptive_scheduler_thresholds", {})
+    th_gc = gc.setdefault("adaptive_scheduler_thresholds", {})
+    th_ov = globali.setdefault("adaptive_scheduler_thresholds", {})
     if payload.threshold_drl_residuo_m is not None:
         v = int(payload.threshold_drl_residuo_m)
         if not (0 <= v <= 10000):
             raise HTTPException(status_code=400,
                                 detail="drl_residuo_m fuori 0-10000 (M)")
-        th["drl_residuo_m"] = v
+        th_gc["drl_residuo_m"] = v
+        th_ov["drl_residuo_m"] = v
         changed["drl_residuo_m"] = v
-        if "drl_residuo_pct" in th:
-            del th["drl_residuo_pct"]
+        for legacy_dict in (th_gc, th_ov):
+            if "drl_residuo_pct" in legacy_dict:
+                del legacy_dict["drl_residuo_pct"]
     if payload.threshold_pct_istanze_sat is not None:
         v = int(payload.threshold_pct_istanze_sat)
         if not (0 <= v <= 100):
             raise HTTPException(status_code=400, detail="pct_istanze_sat fuori 0-100")
-        th["pct_istanze_sat"] = v
+        th_gc["pct_istanze_sat"] = v
+        th_ov["pct_istanze_sat"] = v
         changed["pct_istanze_sat"] = v
     if payload.threshold_spedizioni_oggi is not None:
         v = int(payload.threshold_spedizioni_oggi)
         if v < 0:
             raise HTTPException(status_code=400, detail="spedizioni_oggi < 0")
-        th["spedizioni_oggi"] = v
+        th_gc["spedizioni_oggi"] = v
+        th_ov["spedizioni_oggi"] = v
         changed["spedizioni_oggi"] = v
 
     if not changed:
         return {"ok": True, "changed": {}, "msg": "nessuna modifica"}
 
-    if not _write_json_atomic(gc_path, gc):
-        raise HTTPException(status_code=500,
-                            detail="scrittura global_config.json fallita")
+    ok_gc = _write_json_atomic(gc_path, gc)
+    ok_ov = _write_json_atomic(ov_path, ov)
+    if not (ok_gc and ok_ov):
+        raise HTTPException(
+            status_code=500,
+            detail=f"scrittura fallita static={ok_gc} dynamic={ok_ov}",
+        )
 
     return {"ok": True, "changed": changed,
-            "target": "static", "applies_after": "bootstrap_or_reset"}
+            "target": "static+dynamic", "applies_immediately": True}
