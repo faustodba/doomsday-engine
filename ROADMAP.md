@@ -58,6 +58,52 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 11/05/2026 (mattina) — WU147 (nuovo pin centratura mappa rifornimento + ROI dinamica + tap su centro pin)
+
+#### WU147 — Rifornimento: nuovo template centratura mappa `pin_rifugio.png` + ROI 2-step + tap dinamico
+
+**Razionale**: il template precedente per centratura mappa (`pin/avatar.png`) era un avatar generico, soggetto a falsi positivi sui castelli alleati limitrofi. Utente fornisce nuovo template specifico `pin_rifugio.png` (27×28, avatar con cappello blu su sfondo dorato dorato) estratto da `c:/radar_tool/templates/`.
+
+**Modifiche**:
+1. **Template**: copia `pin_rifugio.png` in `templates/pin/` (dev + prod, md5 identici).
+2. **Config schema** in `tasks/rifornimento.py::_DEFAULTS`:
+   - `AVATAR_MAPPA_TEMPLATE = "pin/pin_rifugio.png"` (NEW, separato da `AVATAR_TEMPLATE` che resta `pin/avatar.png` per ramo MEMBRI).
+   - `AVATAR_MAPPA_ROI = (380, 170, 580, 370)` — quadrato **200×200** centrato su centro mappa (480, 270).
+   - `AVATAR_MAPPA_ROI_RETRY = (330, 120, 630, 420)` — fallback **300×300** stesso centro.
+3. **`_centra_mappa` refactor**: match in 2 step. Tentativo 1 ROI primaria; se `score < 0.75` retry su ROI 300×300. Logging dettagliato per ROI usata.
+4. **Tap castello dinamico**: `(r.cx, r.cy)` = centro template matchato (no più `OFFSET_Y` hardcoded). L'avatar stesso è cliccabile e apre il popup castello.
+5. **`AVATAR_MAPPA_OFFSET_Y` legacy**: marcato deprecato nel commento, non più usato dal codice.
+
+**Diagnostica (3 iterazioni di ROI)**:
+- Iter 50×50 al centro mappa → score 0.452 (vuota di pin, contiene solo banner nome `LND_FauMorfeus / 25`).
+- Iter 100×100 al centro mappa → score 0.560, ancora insufficiente.
+- Best-match globale `cv2.matchTemplate` (no ROI) → **score=1.000 a (487, 199)** → il pin sta **71 px SOPRA il centro mappa**, fuori dalle ROI piccole.
+- ROI 200×200 contiene il pin con margine; ROI 300×300 garantisce robustezza se centratura del game è imprecisa di ±30-50 px.
+
+**Validazione live FAU_00 (11/05/2026 08:46 UTC)**:
+| Step | Risultato |
+|------|-----------|
+| Match pin ROI primaria 200×200 | score=1.000 found=True |
+| Tap castello dinamico | (487, 199) — centro pin matchato |
+| RESOURCE SUPPLY | score=0.999 (era 0.387 con tap fisso 480,270) |
+| Provviste OCR | 65,000,000 |
+| Daily Recv Limit | 200,000,000 |
+| ETA viaggio | 28s |
+| Spedizione pomodoro | lordo **3.977M** / netto **3.499M** (tassa ~12%) |
+| Durata totale pipeline | 35.9s |
+
+**Bug collaterale**: `_compila_e_invia(nome_rifugio="placeholder")` triggera DEST MISMATCH OCR → BACK silenzioso + return `(False, 0, False, 0, 0, -1)`. È **feature di sicurezza** del prod (evita rifornimenti a destinatari sbagliati); nello script test passare `nome_rifugio=""` per skip.
+
+**File modificati**:
+- `templates/pin/pin_rifugio.png` (NEW dev + prod, 2018 bytes)
+- `tasks/rifornimento.py` (dev + prod): `_DEFAULTS` + `_centra_mappa`
+- `.claude/CLAUDE.md` (dev + prod): riga WU147 in tabella issues
+- `c:/tmp/test_rifornimento_pin_rifugio.py` (NEW): script test live standalone
+
+**Effetto attivazione**: al prossimo restart bot. Monitorare nei log `Rifornimento: pin destinatario [ROI primaria] score=X.XXX found=True`. Se `[ROI retry]` viene invocata >10% dei tick, allargare primaria a 250×250.
+
+---
+
 ### Sessione 08/05/2026 (pomeriggio/sera) — WU140..WU142 (architettura static/dynamic + cleanup + dashboard refactor UI)
 
 #### WU140 — Architettura config STATICA vs DINAMICA + bootstrap/reset

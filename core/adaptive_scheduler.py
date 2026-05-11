@@ -254,15 +254,44 @@ def _spedizioni_oggi_totali() -> int:
 def _flags_status() -> tuple[bool, bool]:
     """Legge `adaptive_scheduler_enabled` + `_shadow_only` da config.
 
-    Returns: (enabled, shadow_only). Default (False, True) — sicuro.
+    Priorità: DYNAMIC (`runtime_overrides.json::globali`) > STATIC
+    (`global_config.json`). Coerente con architecture_config_static_dynamic.md:
+    DYNAMIC modificato da HOME prevale sullo STATIC a runtime.
+    Default (False, True) — sicuro.
+
+    Bug fix 11/05 (WU148): pre-fix usava `load_global()` che legge SOLO static
+    → flag disabilitato in dashboard veniva ignorato dal bot. Ora pattern
+    uguale a `_rifornimento_abilitato` (sopra in questo stesso modulo).
     """
+    enabled = None
+    shadow  = None
     try:
-        from config.config_loader import load_global
-        gc = load_global()
-        return (bool(getattr(gc, "adaptive_scheduler_enabled", False)),
-                bool(getattr(gc, "adaptive_scheduler_shadow_only", True)))
+        # 1) DYNAMIC (runtime_overrides) — prevale se presente
+        ov_path = _root() / "config" / "runtime_overrides.json"
+        if ov_path.exists():
+            ov = json.loads(ov_path.read_text(encoding="utf-8"))
+            globali = (ov.get("globali") or {})
+            if "adaptive_scheduler_enabled" in globali:
+                enabled = bool(globali["adaptive_scheduler_enabled"])
+            if "adaptive_scheduler_shadow_only" in globali:
+                shadow = bool(globali["adaptive_scheduler_shadow_only"])
+        # 2) STATIC fallback per i campi non override-ati
+        if enabled is None or shadow is None:
+            gc_path = _root() / "config" / "global_config.json"
+            if gc_path.exists():
+                gc = json.loads(gc_path.read_text(encoding="utf-8"))
+                if enabled is None:
+                    enabled = bool(gc.get("adaptive_scheduler_enabled", False))
+                if shadow is None:
+                    shadow = bool(gc.get("adaptive_scheduler_shadow_only", True))
     except Exception:
-        return (False, True)
+        pass
+    # 3) Default safe
+    if enabled is None:
+        enabled = False
+    if shadow is None:
+        shadow = True
+    return (enabled, shadow)
 
 
 def should_activate_scheduler() -> tuple[bool, list[str]]:
@@ -782,11 +811,14 @@ def save_planned_order(ordine: list[dict],
 
 
 def load_planned_order() -> Optional[dict]:
-    """Carica ordine pianificato se fresh (< TTL_MIN).
+    """Carica ordine pianificato se fresh (< TTL_MIN) E stesso giorno UTC.
 
     Returns: dict con `ordine` + `completate` + `reasons`, oppure None se:
         - file non esiste
         - ordine stantio (ts_saved > TTL_MIN fa)
+        - **ts_saved giorno UTC diverso da oggi** (reset cross-mezzanotte UTC,
+          WU148 11/05: il gioco resetta DRL master + spedizioni + arena a 00:00
+          UTC → planned order pre-mezzanotte è obsoleto anche se entro 4h)
         - parse error
     """
     p = _PLANNED_ORDER_PATH()
@@ -795,10 +827,17 @@ def load_planned_order() -> Optional[dict]:
     try:
         data = json.loads(p.read_text(encoding="utf-8"))
         ts_saved = datetime.fromisoformat(data.get("ts_saved", ""))
-        age_min = (datetime.now(timezone.utc) - ts_saved).total_seconds() / 60
+        now_utc = datetime.now(timezone.utc)
+        age_min = (now_utc - ts_saved).total_seconds() / 60
         if age_min > PLANNED_ORDER_TTL_MIN:
             _log.info("[ADAPT-SCHED] planned order stale (%.0f min) — ignored",
                       age_min)
+            return None
+        # WU148: reset cross-mezzanotte UTC — contatori di gioco si azzerano
+        if ts_saved.date() != now_utc.date():
+            _log.info("[ADAPT-SCHED] planned order cross-mezzanotte UTC "
+                      "(saved=%s vs now=%s) — ignored (reset 00:00 UTC)",
+                      ts_saved.date().isoformat(), now_utc.date().isoformat())
             return None
         return data
     except Exception as exc:

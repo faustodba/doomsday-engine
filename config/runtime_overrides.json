@@ -35,7 +35,13 @@
       "campo_abilitato": true,
       "legno_abilitato": true,
       "petrolio_abilitato": true,
-      "acciaio_abilitato": false
+      "acciaio_abilitato": true,
+      "allocazione": {
+        "pomodoro": 0.25,
+        "legno": 0.25,
+        "petrolio": 0.25,
+        "acciaio": 0.25
+      }
     },
     "rifornimento": {
       "soglia_campo_m": 5.0,
@@ -48,7 +54,7 @@
       "usa_pomodoro": true,
       "usa_legno": true,
       "usa_petrolio": true,
-      "usa_acciaio": false,
+      "usa_acciaio": true,
       "soglia_pomodoro_m": 20.0,
       "soglia_legno_m": 20.0,
       "soglia_petrolio_m": 5.0,

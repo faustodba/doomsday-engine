@@ -100,12 +100,40 @@ def save(daily_recv_limit: int,
 def load() -> Optional[dict]:
     """
     Legge data/morfeus_state.json. Ritorna None se file mancante o corrotto.
+
+    10/05: auto-reset valore STALE post-mezzanotte UTC. Il DRL del gioco si
+    auto-resetta a 00:00 UTC; se l'ultima lettura OCR è di un giorno UTC
+    diverso da quello corrente, il `daily_recv_limit` è stale (il bot non ha
+    ancora ri-letto). Per evitare false saturazioni in dashboard/alert/adaptive
+    scheduler, ritorniamo `daily_recv_limit_max` (cap stimato dal max monotone
+    osservato il giorno precedente) finché OCR non aggiorna. Il file su disco
+    NON viene modificato — la prossima `save()` da OCR rilettura riallineerà.
     """
     try:
         path = _state_path()
         if not path.exists():
             return None
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
     except Exception:
         return None
+
+    # Detect stale: ts day != today UTC
+    try:
+        ts_str = data.get("ts", "")
+        if not ts_str:
+            return data
+        ts = datetime.fromisoformat(ts_str)
+        now_utc = datetime.now(timezone.utc)
+        if ts.astimezone(timezone.utc).date() == now_utc.date():
+            return data   # fresh, no reset
+        # Stale: nuovo giorno UTC. Sostituisci daily_recv_limit con il max
+        # monotone (cap stimato) — è la migliore stima del residuo post-reset
+        # del gioco finché OCR non rilegge.
+        cap_max = int(data.get("daily_recv_limit_max", 0) or 0)
+        if cap_max > 0:
+            data["daily_recv_limit"] = cap_max
+            data["_stale_reset_applied"] = True   # marker diagnostic
+        return data
+    except Exception:
+        return data

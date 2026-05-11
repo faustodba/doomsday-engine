@@ -281,7 +281,16 @@ def check_master_saturo(soglia_s: int = 3600) -> bool:
     ts = _parse_iso(ms.get("ts", ""))
     if ts is None:
         return False
-    elapsed_s = (_now() - ts).total_seconds()
+    now = _now()
+    # FIX: il DRL del gioco si auto-resetta a 00:00 UTC. Se l'ultima lettura
+    # OCR è di un giorno UTC diverso dal corrente, il valore=0 è STALE — il
+    # gioco lo ha già resettato e il bot non ha ancora ri-letto (es. master
+    # disabilitato o ultimo nel ciclo). No alert: aspettiamo prima rilettura.
+    if ts.astimezone(timezone.utc).date() != now.astimezone(timezone.utc).date():
+        _log.info("[ALERTS] master_saturo: DRL=0 STALE (ts=%s, oggi=%s) — skip",
+                  ts.date(), now.date())
+        return False
+    elapsed_s = (now - ts).total_seconds()
     if elapsed_s < soglia_s:
         return False
 

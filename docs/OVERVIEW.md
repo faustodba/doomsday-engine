@@ -334,7 +334,7 @@ con state persistente `data/alerts_state.json`. 5 event_type configurati:
 |---|---|---|---|
 | `cascade_adb` | ≥3 cascade in 1h per istanza | error | 1h |
 | `heartbeat_cicli` | 0 cicli in 1h | critical | 30min |
-| `master_saturo_long` | DRL=0 da >1h | warn | 2h |
+| `master_saturo_long` | DRL=0 da >1h (escl. stato stale post-mezzanotte UTC, WU144) | warn | 2h |
 | `maintenance_long` | maintenance.flag >2h | warn | 4h |
 | `bot_unexpected_restart` | restart senza exit pulito | critical | 15min |
 
@@ -347,6 +347,52 @@ API:
 
 Master toggle `globali.notifications.alerts_enabled` (default False) +
 lista `alerts_disabled` per silenziare singoli event_type.
+
+**WU144 (10/05) DRL stale fix**: il check `master_saturo_long` ora skippa
+se `morfeus_state.ts.date() != today UTC` (il gioco resetta DRL a 00:00
+UTC, evita falsi alert finché il bot non rilegge OCR). Auto-reset duale
+in `shared/morfeus_state.py::load` ritorna in memoria
+`daily_recv_limit_max` come cap stimato — beneficia tutti i consumer
+(adaptive scheduler `_master_drl_residuo_m`, dashboard, daily_report).
+
+### 4.17 `core/daily_report.py` (WU137 fase 1 + revisione 10/05)
+
+Daily report email costruito ogni mattina (default 07:35 UTC) tramite
+`maybe_send_daily_report()` chiamato post-ciclo dal main loop.
+Architettura: 11 funzioni `_section_*` indipendenti aggregano da
+diverse sources, due render text/html separate dalla logica dati.
+
+**11 sezioni del report** (ordine fisso, rev 10/05):
+
+| # | Sezione | Source | Contenuto chiave |
+|---|---|---|---|
+| 1 | CICLI | `cicli.json` + events | cicli completati/in_corso, durata media+range, uptime%, produttività (marce/spedizioni/sfide) |
+| 2 | PRODUZIONE INTERNA RIFUGIO | `state/<ist>.json::produzione_storico[]` | produzione effettiva castello aggregata per istanza nel giorno, throughput/h |
+| 3 | RISORSE INVIATE AL MASTER | `storico_farm.json` | netto post-tassa per risorsa, totale + tassa scartata |
+| 4 | TREND vs media 7gg | `storico_farm.json` | confronto inviato vs media settimana precedente, ▲▼= per risorsa |
+| 5 | RIFORNIMENTO | events_jsonl + storico_farm | dettaglio per istanza: invii/netto/v_invio/tassa/residuo, range tassa, saturazione |
+| 6 | TRUPPE | `storico_truppe.json` | totale master separata, Δ giorno + Δ 7gg per istanza |
+| 7 | PERFORMANCE TASK | events_jsonl | per task: n, avg, p95, max, outliers IQR % |
+| 8 | BOOT HOME → READY | `istanza_metrics.jsonl::boot_home_s` | per istanza: avg/min/max boot fino a tick pronto (include settings+troops post-HOME, WU127) |
+| 9 | COPERTURA SQUADRE | `cap_nodi_dataset.jsonl` | load_squadra/cap_nodo per istanza, summary 100%, dettaglio underprov |
+| 10 | EVENTI RILEVANTI | cicli + mail_queue + logs + restart_state | esiti tick, alert email, rifornimento skip master, HOME stab timeout, bot restart |
+| 11 | ANOMALIE TASK | events_jsonl | aggregato per task con fail_rate%, lista istanze, causa principale (top msg) |
+
+**Regole applicate** (rev 10/05):
+- **No duplicazione dati** tra sezioni: stress test eseguito su tutte le 11
+- **`_fmt_dur_s`** segue regola memoria `feedback_format_durata`: durate
+  ≥60s mai con secondi (`1h38m`, `5m`, `46s`)
+- **Throughput su `denom_s`** coerente tra sezioni 1/2/3 (24h o
+  elapsed if oggi)
+- **Master FauMorfeus** sempre separato da ordinarie nei totali (sez 6)
+- **Tabelle**: tutte le 12 istanze mostrate, no top-N truncato
+- **Marker visivi**: ✓ ok · ⚠ critico · · marginale · ▲▼= delta
+
+**Schedulazione**: `maybe_send_daily_report()` legge
+`globali.notifications.daily_report_hour_utc` (default 07:35) + verifica
+`last_sent_date` in `data/daily_report_state.json` per idempotenza
+giornaliera. Se ora UTC ≥ schedule AND `last_sent_date < today` → builds
+report, enqueue email, aggiorna state.
 
 ---
 

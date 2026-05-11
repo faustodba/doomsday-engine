@@ -90,6 +90,15 @@ _DEFAULTS: dict = {
     "TAP_CAMPO_Y":          (601, 135),
     "TAP_CONFERMA_LENTE":   (670, 135),
     "TAP_CASTELLO_CENTER":  (480, 270),
+    # Match dinamico avatar destinatario su mappa dopo centramento.
+    # ROI primaria = quadrato 200x200 centrato sul centro mappa (480, 270);
+    # se score < soglia, retry su ROI 300x300 stesso centro.
+    # Tap castello = (pin.cx, 270): X dinamica del pin trovato, Y = centro mappa
+    # (il game centra il castello sulla Y del centro screen post-coord).
+    "AVATAR_MAPPA_ROI":         (380, 170, 580, 370),
+    "AVATAR_MAPPA_ROI_RETRY":   (330, 120, 630, 420),
+    "AVATAR_MAPPA_SOGLIA":      0.75,
+    "AVATAR_MAPPA_OFFSET_Y":    35,  # legacy, non più usato (tap = centro pin matchato)
     # Maschera invio
     "COORD_VAI":            (480, 448),
     "COORD_CAMPO": {
@@ -121,6 +130,7 @@ _DEFAULTS: dict = {
     "RIFORNIMENTO_MAPPA_ABILITATO":     False,
     "RIFORNIMENTO_MEMBRI_ABILITATO":    False,
     "AVATAR_TEMPLATE":                  "pin/avatar.png",
+    "AVATAR_MAPPA_TEMPLATE":            "pin/pin_rifugio.png",
     "RIFORNIMENTO_CAMPO_ABILITATO":     True,
     "RIFORNIMENTO_LEGNO_ABILITATO":     True,
     "RIFORNIMENTO_ACCIAIO_ABILITATO":   False,
@@ -373,7 +383,82 @@ def _centra_mappa(ctx: TaskContext) -> None:
     ctx.device.tap(_cfg(ctx, "TAP_CONFERMA_LENTE"))
     time.sleep(2.5)
 
-    ctx.device.tap(_cfg(ctx, "TAP_CASTELLO_CENTER"))
+    # Match dinamico avatar destinatario: la game-engine non centra
+    # perfettamente sulla coordinata richiesta, il castello può cadere off-pixel
+    # da TAP_CASTELLO_CENTER. Cerchiamo il pin_rifugio.png prima nella ROI
+    # primaria 200x200, poi (se fail) nella ROI di retry 300x300 — entrambe
+    # centrate sul centro mappa (480, 270). Tap castello = (pin.cx, 270):
+    # X dinamica dal pin trovato (allineata sul castello sottostante),
+    # Y = centro mappa fissa (il game centra il castello a Y=270 post-coord).
+    # Fallback: tap hardcoded TAP_CASTELLO_CENTER se entrambi i match falliscono.
+    tap_x, tap_y = _cfg(ctx, "TAP_CASTELLO_CENTER")
+    used_avatar = False
+    last_score = -1.0
+    last_screen_post = None
+    try:
+        screen_post = ctx.device.screenshot()
+        last_screen_post = screen_post
+        if screen_post is not None and ctx.matcher is not None:
+            avatar_tpl = _cfg(ctx, "AVATAR_MAPPA_TEMPLATE")
+            soglia     = _cfg(ctx, "AVATAR_MAPPA_SOGLIA")
+            roi_pri    = _cfg(ctx, "AVATAR_MAPPA_ROI")
+            roi_retry  = _cfg(ctx, "AVATAR_MAPPA_ROI_RETRY")
+            # Tentativo 1: ROI primaria 200x200
+            r = ctx.matcher.find_one(screen_post, avatar_tpl,
+                                     threshold=soglia, zone=roi_pri)
+            last_score = r.score
+            ctx.log_msg(
+                f"Rifornimento: pin destinatario [ROI primaria] "
+                f"score={r.score:.3f} soglia={soglia} found={r.found} "
+                f"roi={roi_pri}"
+            )
+            # Tentativo 2 (retry): ROI 300x300 se primo fallisce
+            if not r.found:
+                r = ctx.matcher.find_one(screen_post, avatar_tpl,
+                                         threshold=soglia, zone=roi_retry)
+                last_score = r.score
+                ctx.log_msg(
+                    f"Rifornimento: pin destinatario [ROI retry] "
+                    f"score={r.score:.3f} soglia={soglia} found={r.found} "
+                    f"roi={roi_retry}"
+                )
+            if r.found:
+                # Tap dinamico: direttamente sul pin avatar (cx, cy).
+                # L'avatar stesso è cliccabile e apre il popup castello.
+                tap_x = int(r.cx)
+                tap_y = int(r.cy)
+                used_avatar = True
+            else:
+                # Calibrazione: dump screenshot post-centramento quando il
+                # match fallisce su entrambe le ROI. Filename:
+                # data/rifornimento_debug/<istanza>_<ts>_score<score>.png
+                try:
+                    import os, cv2
+                    from datetime import datetime
+                    debug_dir = os.path.join("data", "rifornimento_debug")
+                    os.makedirs(debug_dir, exist_ok=True)
+                    ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    fname = (
+                        f"{ctx.instance_name}_{ts_str}_"
+                        f"score{last_score:.3f}.png"
+                    )
+                    fpath = os.path.join(debug_dir, fname)
+                    cv2.imwrite(fpath, screen_post.frame)
+                    ctx.log_msg(f"Rifornimento: debug screenshot → {fpath}")
+                except Exception as exc_dbg:
+                    ctx.log_msg(f"Rifornimento: debug dump fallito: {exc_dbg}")
+    except Exception as exc:
+        ctx.log_msg(f"Rifornimento: match avatar fallito: {exc} — uso fallback")
+
+    if used_avatar:
+        ctx.log_msg(
+            f"Rifornimento: tap castello dinamico via avatar ({tap_x},{tap_y})"
+        )
+    else:
+        ctx.log_msg(
+            f"Rifornimento: tap castello fallback hardcoded ({tap_x},{tap_y})"
+        )
+    ctx.device.tap(tap_x, tap_y)
     time.sleep(2.0)  # attesa apertura popup castello (da V5)
     ctx.log_msg("Rifornimento: mappa centrata e castello tappato")
 

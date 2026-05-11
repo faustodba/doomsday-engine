@@ -2,8 +2,10 @@
 """
 Step 16 — Arena of Glory.
 
-Scheduling : always-run (interval=0.0), priority=50
-Guard      : ctx.state.arena.should_run() — skip se sfide esaurite oggi
+Scheduling : daily (interval=24h), priority=50
+Guard      : (1) gate orario UTC>=10 (10/05, evita picco notturno cumulato
+             col reset rifornimento a 00:00 UTC) + (2) ctx.state.arena.should_run()
+             (skip se sfide già esaurite oggi)
 Reset      : automatico a mezzanotte UTC via ArenaState._controlla_reset()
 Template dir: templates/pin/  (prefisso "pin/")
 
@@ -232,6 +234,16 @@ class ArenaTask(Task):
         if hasattr(ctx.config, "task_abilitato"):
             if not ctx.config.task_abilitato("arena"):
                 return False
+        # 10/05 — gate orario UTC: posticipa arena al ciclo dopo le 10:00 UTC
+        # per evitare il picco di carico cumulato col reset rifornimento del
+        # master a 00:00 UTC (il primo ciclo notturno faceva +30min di arena
+        # × 11 istanze sopra il rifornimento, gonfiando il ciclo a 217min).
+        # Trade-off: se bot fermo 00→10 UTC arena è ritardata; se bot fermo
+        # tutta la finestra 10→24 UTC il giorno viene saltato (accettato,
+        # finestra ampia 14h).
+        if datetime.now(timezone.utc).hour < 10:
+            ctx.log_msg("[ARENA] gate orario UTC<10 → posticipata, no skip esecuzione")
+            return False
         # Guard ArenaState: skip se sfide già esaurite oggi
         stato = ctx.state.arena.log_stato()
         if not ctx.state.arena.should_run():
