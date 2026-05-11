@@ -58,6 +58,148 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 11/05/2026 (sera tardi) — WU152 + WU153 + WU154
+
+#### WU152 — Dashboard adaptive scheduler PATCH dual-write static+dynamic
+
+**Sintomo utente**: card adaptive scheduler in `/ui/config/global` non mantiene lo stato di salvataggio. Modifica enabled/shadow/soglie → bottone "salva" risponde OK → ricarico → valori vecchi.
+
+**Root cause**: mismatch scrittura/lettura introdotto da [[WU-148-Adaptive-Scheduler-Flags|WU148]] senza adeguamento del PATCH endpoint:
+- `PATCH /api/adaptive-scheduler` scriveva SOLO STATIC (`global_config.json`, regola [[WU-140-Bootstrap-Reset|WU140]] "config modifica solo static")
+- `GET /api/adaptive-scheduler::get_status` → `_flags_status()` legge DYNAMIC > STATIC (priorità post-WU148)
+- DYNAMIC con valori vecchi → UI mostra vecchi → utente vede "salvataggio perso"
+
+**Fix**: dual-write su entrambi i file in `dashboard/routers/api_adaptive_scheduler.py::patch_adaptive_scheduler`:
+- STATIC (`global_config.json`) → regola WU140 + bootstrap futuro
+- DYNAMIC (`runtime_overrides.json::globali`) → attivazione immediata + coerenza con `_flags_status` priorità dynamic
+
+Modifiche:
+- `adaptive_scheduler_enabled` / `shadow_only`: dual-write
+- `adaptive_scheduler_thresholds.{drl_residuo_m, pct_istanze_sat, spedizioni_oggi}`: dual-write
+- Cleanup legacy `drl_residuo_pct`: rimosso da ENTRAMBI i dict
+- Response: `target="static+dynamic", applies_immediately=True` (era `target="static", applies_after="bootstrap_or_reset"`)
+
+**Commit**: `a30c786`. **Effetto attivazione**: restart dashboard uvicorn richiesto (no `--reload`).
+
+#### WU153 — Pannelli dashboard collapsable con persistenza localStorage
+
+Feature richiesta utente: poter aprire/chiudere i pannelli della dashboard per ridurre clutter visivo.
+
+**Implementazione** in `dashboard/templates/base.html` (CSS+JS inline, caricato da tutte le pagine):
+
+- **Selettori**: `.tel-card` (telemetria/predictor/preview), `.col-box` (cfg4 layout: sistema/rifornimento/zaino/allocazione), `.section` (sezioni con `.sec-label`)
+- **Trigger**: click sull'header (`.tel-head`/`.col-head`/`.sec-label`) → toggle `panel-collapsed`
+- **CSS**: `.panel-collapsed > *:not(.tel-head/.col-head/.sec-label)` → `display:none !important`
+- **Chevron**: `▼` (aperto) / `▶` (chiuso) appended all'header con `cursor:pointer`
+- **Persistenza**: `localStorage.setItem('panel-collapsed:<slug>', '1'|'0')`. Slug = testo header lowercased no-emoji max 50 char
+- **Re-init**: listener `htmx:afterSwap` + `htmx:afterSettle` riapplica stato dopo partial refresh
+- **Click safe**: ignora target = `input/button/select/label/a` per non rompere controlli dentro header
+
+**Commit**: `2feaf85`. **Effetto attivazione**: refresh browser (`F5`) — la dashboard uvicorn serve `base.html` come template Jinja2.
+
+#### WU154 — Rifornimento: stop loop spedizioni su DRL=0 mid-task
+
+**Sintomo prod su FAU_10** (19:27-19:29):
+
+```
+spedizione 2 - petrolio netto=871,480, provviste=5,256,419
+... apre RESOURCE SUPPLY ...
+Daily Receiving Limit FauMorfeus=0           <- LEGGE saturo
+ETA viaggio=17s
+compila pomodoro=999,000,000                  <- procede!
+VAI non abilitato dopo compilazione           <- fail
+escludi pomodoro, prova legno
+... (3 cicli identici: pomodoro, legno, acciaio) ...
+tutte le risorse sotto soglia - stop
+completato - 2 spedizioni
+```
+
+La 2ª spedizione ha saturato il master (DRL→0); il bot ha letto correttamente `DRL=0` ma ha continuato il loop tentando 3 risorse residue, ciascuna fallita per VAI disabilitato. **~60s sprecati**.
+
+**Bug**: `should_run()` controlla DRL=0 PRE-task ma non c'è check DURING-task. Quando una spedizione DEL TASK CORRENTE satura il master, il bot non se ne accorge nello stesso task.
+
+**Fix in `_compila_e_invia`** (`tasks/rifornimento.py`):
+- Subito dopo lettura `recv_limit` via OCR, se `==0` → `KEYCODE_BACK` + return `master_saturo=True`
+- Tupla di ritorno estesa da 6 a 7 campi (aggiunto `master_saturo: bool`)
+- Tutti i return interni aggiornati con 7° campo (default False)
+
+**Caller** (`_esegui_mappa` + `_esegui_membri`):
+- Unpack a 7 campi
+- Nuovo branch `if master_saturo: break` (interrompe loop spedizioni, no continue)
+- Posizionato DOPO `quota_esaurita` ma PRIMA di `not ok` (semantica diversa: master saturo vs errore generico risorsa)
+
+**Effetto**: istanza che satura master mid-task esce in ~5s invece di ~60s.
+
+**Commit**: `10fda02`. **Effetto attivazione**: restart bot prod richiesto (moduli Python caricati al boot).
+
+---
+
+### Sessione 11/05/2026 (sera) — WU151 (popup pre-detect + safety break + UTF-8)
+
+#### WU151 — Radar: popup pre-detect + safety break loop sterile + UTF-8 run_task
+
+**Sintomo prod su FAU_02 (ciclo 18:01-18:06)**: il nuovo `process_radar_actions` (WU150) ha contato `pallini=52 card=0` in 8 iter — apparente successo ma in realtà **loop sterile** senza progresso.
+
+**Diagnosi via `map_full.png` iter 1**: popup card "Assist Ally" era già aperto sullo schermo all'apertura del task radar (residuo da ciclo precedente o tap radar_icon su istanza non in HOME).
+
+**Cosa è successo**:
+1. Bot tap icona radar (78,315) — popup era già aperto
+2. `_loop_pallini` cerca pixel rossi → trova FALSI POSITIVI dentro il popup (timer "21:38:34" arancione/rosso, UI elements rossi)
+3. Tap "pallini" → intercettati dal popup, no effetto utile
+4. Wait 10s → census su schermata con popup ancora aperto
+5. Census riconosce le icone SOTTO il popup (pedone=3, avatar=2, paracadute=1, skull=1) ma NON riconosce il popup grosso come "card"
+6. 0 actionable → iter 2 → stesso loop → 8 iter sterili in totale → max_loops blocca
+
+**Bug 1**: nessuna verifica stato pre-loop (popup aperto vs mappa radar pulita).
+**Bug 2**: nessuna safety contro loop con `pallini>0 AND processed==0` ripetuto.
+
+**Fix A — popup pre-detect**:
+- `_is_card_popup_open(ctx)`: pixel test ROI 11×11 attorno a `RADAR_GO_TAP=(90,465)`. Se mean BGR ha `R>140 AND (R-B)>50` (arancione/giallo brillante del bottone GO vs terreno marrone della mappa pulita) → popup OPEN
+- All'inizio di `process_radar_actions`, se popup detect → chiama `_resolve_card_popup()` (GO + RESCUE + tap RADAR_ICON) PRIMA del loop
+- Refactor `handle_card`: split in `tap_card + _resolve_card_popup` per riuso
+
+**Fix B — safety break**:
+```python
+last_pallini = -1
+stagnant_iter = 0
+MAX_STAGNANT = 2
+
+for i in range(1, RADAR_MAX_LOOPS + 1):
+    # ... loop pallini + census + dispatch ...
+    if n_pallini > 0 and n_processed == 0:
+        if n_pallini == last_pallini:
+            stagnant_iter += 1
+            if stagnant_iter >= MAX_STAGNANT:
+                log_fn("[SAFETY] abort iter stagnanti")
+                # Recovery: se popup detected -> resolve
+                if _is_card_popup_open(ctx, log_fn):
+                    _resolve_card_popup(ctx, log_fn)
+                break
+        else:
+            stagnant_iter = 0
+    else:
+        stagnant_iter = 0
+    last_pallini = n_pallini
+```
+
+**Bonus fix `run_task.py`**: `sys.stdout.reconfigure('utf-8')` + `sys.stderr.reconfigure('utf-8')` all'inizio. Risolve charmap errors su Unicode (`→` `—` `✓`) nei log dei task quando lanciati su console Windows cp1252.
+
+- Origine bug: nel log di FAU_02 `[PALLINI] errore loop: 'charmap' codec can't encode character '→' in position 43` veniva da `_loop_pallini` riga 297 `log(f"{scan_vuoti} scan vuoti consecutivi — completato")` — em-dash a posizione 26 del messaggio, +11 prefix datetime +6 prefix `[CTX]` = 43.
+
+**Telemetria estesa**: dict result include nuovi campi:
+- `popup_pre_resolved: bool` — True se popup detected e risolto pre-loop
+- `stagnant_abort: bool` — True se loop interrotto da safety break
+
+**File modificati**:
+- `tasks/radar_actions.py` — aggiunto `_is_card_popup_open` + `_resolve_card_popup` (split da `handle_card`), modificato `process_radar_actions` con pre-check + safety counter
+- `run_task.py` — aggiunto force UTF-8 stdout/stderr
+
+**Sync prod**: cp diretto entrambi i file in `C:/doomsday-engine-prod/`. **Effetto attivazione**: al prossimo restart bot prod (Python carica moduli al boot, no hot-reload). Le istanze del ciclo corrente con popup residuo continueranno a fare loop sterile fino a restart.
+
+**Commit**: `a636706` — `fix(radar): WU151 - popup pre-check + safety break + UTF-8 run_task`.
+
+---
+
 ### Sessione 11/05/2026 (pomeriggio) — WU150 (radar_actions dispatcher + handler card)
 
 #### WU150 — Radar Actions: dispatcher post-pallini + handler card (GO+RESCUE)
