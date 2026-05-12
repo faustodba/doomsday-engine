@@ -58,6 +58,7 @@ import cv2
 import numpy as np
 
 from core.task import Task, TaskContext, TaskResult
+from shared.task_scheduling import time_gate_arena
 from shared.ui_helpers import attendi_template
 
 
@@ -234,14 +235,12 @@ class ArenaTask(Task):
         if hasattr(ctx.config, "task_abilitato"):
             if not ctx.config.task_abilitato("arena"):
                 return False
-        # 10/05 — gate orario UTC: posticipa arena al ciclo dopo le 10:00 UTC
-        # per evitare il picco di carico cumulato col reset rifornimento del
-        # master a 00:00 UTC (il primo ciclo notturno faceva +30min di arena
-        # × 11 istanze sopra il rifornimento, gonfiando il ciclo a 217min).
-        # Trade-off: se bot fermo 00→10 UTC arena è ritardata; se bot fermo
-        # tutta la finestra 10→24 UTC il giorno viene saltato (accettato,
-        # finestra ampia 14h).
-        if datetime.now(timezone.utc).hour < 10:
+        # WU157 — gate centralizzato (shared/task_scheduling.time_gate_arena).
+        # Razionale: posticipa arena al ciclo dopo le 10:00 UTC per evitare
+        # picco notturno cumulato col reset rifornimento master 00:00 UTC.
+        # Cambiare strategia gate → 1 sola modifica in shared/task_scheduling.py
+        # (predictor introspection automatica via can_run_by_time_gate).
+        if not time_gate_arena():
             ctx.log_msg("[ARENA] gate orario UTC<10 → posticipata, no skip esecuzione")
             return False
         # Guard ArenaState: skip se sfide già esaurite oggi

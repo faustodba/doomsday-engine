@@ -31,6 +31,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
+from shared.task_scheduling import can_run_by_time_gate
+
 # ──────────────────────────────────────────────────────────────────────────────
 # Config rolling stats
 # ──────────────────────────────────────────────────────────────────────────────
@@ -835,6 +837,10 @@ def _is_task_due(task_name: str,
     True se il task girerà al prossimo tick di questa istanza.
 
     Logica:
+      - Gate orari centralizzati (WU157): se task ha un gate orario in
+        `shared/task_scheduling.TIME_GATES` e il gate blocca → skip.
+        Aggiungere nuovi gate non richiede modifiche qui — introspection
+        automatica via `can_run_by_time_gate(task_name, now=now_utc)`.
       - schedule == "always" / interval_hours == 0 → sempre, MA con guard di
         stato `_task_will_be_noop` per boost/rifornimento (e futuri)
       - schedule == "daily" → coerente con orchestrator `_e_dovuto_daily`:
@@ -844,13 +850,17 @@ def _is_task_due(task_name: str,
         < 24h). Tipici task daily: vip, arena, arena_mercato, main_mission.
       - schedule == "periodic" → elapsed_h >= interval_hours
       - last_run None → primo run, gira
-      - main_mission edge: hour gate UTC >= 20 (WU91)
-      - arena edge: hour gate UTC < 10 (WU145) — finestra utile 10:00-24:00 UTC
 
     Args:
         istanza, tick_sleep_s: opzionali. Se forniti, abilitano i guard di
         stato per task con interval=0 (boost active / rifornimento bloccato).
     """
+    # WU157 — gate orari centralizzati. Single source of truth condivisa con
+    # i task live (tasks/<task>.py::should_run). Cambio strategia gate → 1
+    # sola modifica in shared/task_scheduling.py.
+    if not can_run_by_time_gate(task_name, now=now_utc):
+        return False
+
     schedule    = task_setup_entry.get("schedule", "periodic")
     interval_h  = float(task_setup_entry.get("interval_hours", 0) or 0)
 
@@ -884,16 +894,7 @@ def _is_task_due(task_name: str,
         is_due = last_dt < reset_oggi
         if not is_due:
             return False
-        # Edge case main_mission: gate UTC >= 20 (WU91)
-        if task_name == "main_mission" and now_utc.hour < 20:
-            return False
-        # Edge case arena: gate UTC < 10 (WU145)
-        # arena.should_run() ritorna False se hour < 10 → predictor deve coerentemente
-        # escludere arena dal compute T_ciclo nelle finestre 00:00-10:00 UTC.
-        # Sintomo pre-fix WU156 (12/05): predictor includeva arena in cicli che
-        # non l'avrebbero eseguita, sovrastimando T_ciclo notturno di ~3-5 min.
-        if task_name == "arena" and now_utc.hour < 10:
-            return False
+        # Gate orari centralizzati gestiti early (WU157), nessun edge qui.
         return True
 
     # Branch schedule "periodic"

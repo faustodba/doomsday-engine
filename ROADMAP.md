@@ -58,6 +58,63 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 12/05/2026 (pomeriggio) — WU157 (sistema centralizzato regole scheduling live ↔ predictor)
+
+#### WU157 — Single source of truth per gate orari task
+
+**Richiesta utente**: "implementa un sistema centralizzato di regole condiviso tra il live ed il predictor in modo tale che ad un cambio di strategia del live non è necessario modificare l'interfaccia del predictor".
+
+**Razionale**: il pattern pre-WU157 richiedeva 2 modifiche per ogni cambio gate orario — una in `tasks/<task>.py::should_run` (bot live), una in `core/cycle_duration_predictor.py::_is_task_due` (predictor T_ciclo). Drift osservato: arena gate UTC<10 (WU145, 10/05) è restato 2 giorni solo nel live, il predictor sovrastimava T_ciclo notturno di 3-5 min finché WU156 non ha sincronizzato manualmente. Il rischio cresce con ogni nuovo gate.
+
+**Implementazione**: nuovo modulo `shared/task_scheduling.py` come single source of truth.
+
+```python
+# shared/task_scheduling.py
+def time_gate_arena(now=None) -> bool:
+    """WU145: arena gira solo UTC>=10."""
+    return _now_utc(now).hour >= 10
+
+def time_gate_main_mission(now=None) -> bool:
+    """WU91: main_mission gira solo UTC>=20."""
+    return _now_utc(now).hour >= 20
+
+TIME_GATES: dict[str, Callable[[Optional[datetime]], bool]] = {
+    "arena":         time_gate_arena,
+    "main_mission":  time_gate_main_mission,
+}
+
+def can_run_by_time_gate(task_name: str, now=None) -> bool:
+    """True se task non ha gate, o se il gate permette esecuzione ora."""
+    gate = TIME_GATES.get(task_name)
+    if gate is None:
+        return True
+    try:
+        return gate(now)
+    except Exception:
+        return True  # failsafe conservativo
+```
+
+**Modifiche file**:
+
+1. `shared/task_scheduling.py` (NUOVO) — registry + funzioni gate
+2. `tasks/arena.py` — import `time_gate_arena`, sostituito `if datetime.now(timezone.utc).hour < 10` con `if not time_gate_arena()`
+3. `tasks/main_mission.py` — import `time_gate_main_mission`, stessa sostituzione
+4. `core/cycle_duration_predictor.py` — import `can_run_by_time_gate`, chiamata `if not can_run_by_time_gate(task_name, now=now_utc): return False` all'inizio di `_is_task_due` (introspection automatica), rimossi i 2 edge case hardcoded WU91+WU145+WU156
+
+**Aggiungere nuovo gate in futuro**:
+1. Definire `time_gate_<task>(now=None) -> bool` in `shared/task_scheduling.py`
+2. Registrare in `TIME_GATES` dict
+3. `tasks/<task>.py::should_run()` chiama la funzione gate
+4. **Predictor coerente automaticamente** — nessuna modifica a `_is_task_due`
+
+**Smoke test**:
+- 11/11 gate function (`time_gate_arena` + `time_gate_main_mission` + `can_run_by_time_gate`) su 6 orari diversi
+- 6/6 integrazione `_is_task_due` su daily/periodic + tutti i casi limite
+
+**Effetto attivazione**: restart bot prod (Python non hot-reload moduli `shared/tasks/core`). La dashboard ricarica il modulo `cycle_duration_predictor` at-call (no restart uvicorn richiesto).
+
+---
+
 ### Sessione 12/05/2026 (mattina) — WU156 (predictor sync arena gate UTC<10)
 
 #### WU156 — Predictor: arena gate UTC<10 in `_is_task_due` (sync WU145)

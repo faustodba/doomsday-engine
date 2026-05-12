@@ -44,6 +44,7 @@ import cv2
 import numpy as np
 
 from core.task import Task as BaseTask, TaskContext, TaskResult
+from shared.task_scheduling import time_gate_main_mission
 
 
 # ---------------------------------------------------------------------------
@@ -233,12 +234,11 @@ class MainMissionTask(BaseTask):
         if hasattr(ctx.config, "task_abilitato"):
             if not ctx.config.task_abilitato("main_mission"):
                 return False
-        # Gate orario WU91: esegui solo dopo le 20:00 UTC. Razionale: le ricompense
-        # missioni si accumulano durante il giorno, raccoglierle a fine giornata
-        # massimizza i chest milestone (piu' AP accumulati -> piu' chest). Reset
-        # missioni gioco: 00:00 UTC (le daily si azzerano). Finestra utile bot:
-        # 20:00 -> 00:00 UTC (4h, ~2-3 tick disponibili).
-        if datetime.now(timezone.utc).hour < 20:
+        # WU157 — gate centralizzato (shared/task_scheduling.time_gate_main_mission).
+        # Razionale: esegui solo dopo 20:00 UTC per massimizzare chest milestone
+        # (AP accumulato durante il giorno). Cambiare strategia gate → 1 sola
+        # modifica in shared/task_scheduling.py (predictor introspection auto).
+        if not time_gate_main_mission():
             return False
         return True
 
