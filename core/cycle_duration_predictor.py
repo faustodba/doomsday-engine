@@ -844,7 +844,8 @@ def _is_task_due(task_name: str,
         < 24h). Tipici task daily: vip, arena, arena_mercato, main_mission.
       - schedule == "periodic" → elapsed_h >= interval_hours
       - last_run None → primo run, gira
-      - main_mission edge: hour gate UTC ≥ 20 (WU91)
+      - main_mission edge: hour gate UTC >= 20 (WU91)
+      - arena edge: hour gate UTC < 10 (WU145) — finestra utile 10:00-24:00 UTC
 
     Args:
         istanza, tick_sleep_s: opzionali. Se forniti, abilitano i guard di
@@ -885,6 +886,13 @@ def _is_task_due(task_name: str,
             return False
         # Edge case main_mission: gate UTC >= 20 (WU91)
         if task_name == "main_mission" and now_utc.hour < 20:
+            return False
+        # Edge case arena: gate UTC < 10 (WU145)
+        # arena.should_run() ritorna False se hour < 10 → predictor deve coerentemente
+        # escludere arena dal compute T_ciclo nelle finestre 00:00-10:00 UTC.
+        # Sintomo pre-fix WU156 (12/05): predictor includeva arena in cicli che
+        # non l'avrebbero eseguita, sovrastimando T_ciclo notturno di ~3-5 min.
+        if task_name == "arena" and now_utc.hour < 10:
             return False
         return True
 
