@@ -58,6 +58,34 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 12/05/2026 (mattina) — WU156 (predictor sync arena gate UTC<10)
+
+#### WU156 — Predictor: arena gate UTC<10 in `_is_task_due` (sync WU145)
+
+**Sintomo utente**: il predictor mostra ancora la vecchia schedulazione arena. Confronto con runtime (`tasks/arena.py::should_run()`) rivela mismatch: il bot a 00:00-10:00 UTC NON esegue arena (gate UTC<10 di [[WU-145-Arena-Gate-UTC10|WU145]]), ma il predictor la conta nel T_ciclo notturno → sovrastima ~3-5 min.
+
+**Root cause**: WU145 (10/05) ha aggiunto gate `if now_utc.hour < 10: return False` a `ArenaTask.should_run()`, ma `_is_task_due()` in `core/cycle_duration_predictor.py` riconosceva solo l'edge `main_mission` (gate UTC≥20 da [[WU-091-MainMission-Gate-UTC20|WU91]]). Pattern noto: ogni cambio scheduling/gate in `tasks/` richiede sync nel predictor (memoria [[Cycle-Predictor-Sync]]).
+
+**Fix**: aggiunto edge case nel branch `schedule == "daily"` di `_is_task_due`:
+
+```python
+if task_name == "main_mission" and now_utc.hour < 20:
+    return False
+# WU156 — Edge case arena: gate UTC < 10 (WU145)
+if task_name == "arena" and now_utc.hour < 10:
+    return False
+```
+
+**Logica simmetrica a WU91**:
+- main_mission: gira solo `hour >= 20` → escluso da T_ciclo per `hour < 20`
+- arena: gira solo `hour >= 10` → escluso da T_ciclo per `hour < 10`
+
+**Effetto**: predictor T_ciclo notturno (00:00-10:00 UTC) ora esclude arena correttamente → stima coerente con bot live.
+
+**Commit**: `c740683`. **Restart**: dashboard prod **non richiesto** (la funzione `_is_task_due` è importata at-call dal predictor — i bytecode `.pyc` non vengono cachati tra sessioni). Refresh browser sufficiente per vedere predizioni aggiornate.
+
+---
+
 ### Sessione 11/05/2026 (notte) — WU155 (timeout boot HOME + dashboard sistema)
 
 #### WU155 — Timeout boot HOME 180→300s + esposto in dashboard sezione sistema
