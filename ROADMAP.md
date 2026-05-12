@@ -58,6 +58,118 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 12/05/2026 (sera) — WU158 (anagrafe avatar membri alleanza, POC validato)
+
+#### WU158 — Anagrafe avatar membri alleanza
+
+**Obiettivo**: costruire una banca dati visiva di tutti gli avatar (icone) dei membri della propria alleanza. Da usare nel task `radar` per match avatar sulla mappa → identificare se chi vediamo è un membro dell'alleanza vs player esterno.
+
+**Razionale**: il task radar deve attualmente classificare gli avatar dei player vicini sulla mappa. Senza database di membri noti, identificare "uno della propria alleanza" richiederebbe template matching su un set aperto. Con anagrafe pre-calcolata = closed-set match (N ≈ 103 template).
+
+**POC validato 12/05** ma **non ancora integrato nel bot V6**. Script standalone in `c:/tmp/test_anagrafe_*.py`. Validazione end-to-end su FAU_05 = 104/103 avatar catturati (99% accuracy) e FAU_04 = 102/103 (con drift su R3).
+
+**Procedura per sezione**:
+
+```
+HOME → tap Alliance (760, 505) → tap Members (46, 188)
+
+Per ogni sezione [R4, R3, R2, R1]:
+  1. SCROLL-TO-TOP (15+ swipe down per riallineare tab a baseline)
+     - R4=194, R3=240, R2=286, R1=332 a tab chiusi
+  2. CHIUDI tutti i tab aperti
+  3. APRI sezione target (tap 480, badge_y)
+  4. Loop scansione con scroll incrementale:
+     - Leggi N_righe entro screen
+     - Slow_drag(N_righe × stride) duration 1500ms
+     - Detect badge sezione SUCCESSIVA: se visibile (sc≥0.85)
+       → leggi TUTTE righe valide entro screen + STOP
+     - Backup: no_new ≥ 3 → STOP
+```
+
+**Calibrazione per sezione** (risoluzione 960×540):
+
+| Sezione | Cap | Cols | Cols X (TL) | Box | Stride | Y_TL R1 | Scroll px |
+|---------|-----|------|-------------|-----|--------|---------|-----------|
+| **R4**  | 8 max | 3 | 130, 401, 670 | 60×60 | 77 | 232 | 0 (1 frame) |
+| **R3**  | libero | 2 | 149, 547 | 60×60 | 68 | 272 | 204 (3 stride) |
+| **R2**  | libero | 2 | 150, 550 | 52×52 | 65 | 323 | 130 (2 stride) |
+| **R1**  | libero | 2 | 150, 550 | 52×52 | 65 | 369 | 130 (2 stride) |
+
+Y_TL anchored dinamicamente: `Y_TL = badge_sezione_y + offset_calibrato` (R4+38, R3+32, R2+37, R1+37).
+
+**Slow_drag 1500ms**: necessario per scroll lineare 1:1. Con duration <500ms → momentum/inertia → scroll non lineare → drift.
+
+**OCR contatori pre-scansione** (opzionale):
+- ROI `(780, badge_y-15, 860, badge_y+15)` — escluso icona people a sx + freccia a dx
+- Preprocessing: Otsu inverso + upscale 3x + Tesseract PSM 7 whitelist `0123456789/`
+- Parsing: regex `(\d+)` → numeratore
+- Risultato: R4=8/8, R3=17, R2=30, R1=48 (totale 103) ✓
+
+**Filtro avatar valido**:
+```python
+edge_density = (cv2.Canny(gray, 50, 150) > 0).mean()
+std_dev = gray.std()
+return edge_density > 0.08 and std_dev > 25
+```
+
+Discrimina avatar (edge density alta + variazione) da testo (bassa) da bg vuoto (no edge).
+
+**Dedup pHash**:
+- pHash 64-bit DCT-based (gray 32x32 → DCT → 8x8 low-freq → bit hash vs mediana)
+- Hamming distance ≤ 6 → duplicato visivo
+- Avatar default condivisi tra player vengono unificati (1 entry visuale)
+
+**Stop condition critica** (lezione FAU_04 v1):
+- Quando tab sezione successiva visibile → leggere TUTTE righe entro screen, NO filtro "bottom box completamente sopra y_next - margine"
+- Su FAU_04 v1 con filtro margine: R3 = 15/17 (perso Luigi1978bis a riga 3 con bottom coincidente con tab R2 y=468). Con TUTTE righe: 17/17.
+
+**Casi limite gestiti**:
+- Tap accidentale apre popup "Resource Supply / Mark Position" → `keyevent 4` (BACK) per chiudere
+- Lista scrollata in basso post-scansione → scroll-to-top obbligatorio tra sezioni
+- Disconnessione ADB intermittente FAU_04 → retry `adb connect`
+
+**Output banca dati**:
+```
+data/avatar_registry/
+├── state.json              # {ultimo_refresh_date, n_membri, durata_s}
+├── index.jsonl             # 1 riga per avatar: {id, phash_hex, rango, frame}
+└── templates/
+    ├── R4_001.png ... R4_008.png   (60×60)
+    ├── R3_001.png ... R3_017.png   (60×60)
+    ├── R2_001.png ... R2_031.png   (52×52)
+    └── R1_001.png ... R1_048.png   (52×52)
+```
+
+**Design trigger** (non ancora implementato):
+- Flag `globali.radar_anagrafe_pending: bool` (DYNAMIC, autocancellante post-esecuzione)
+- Pattern come "riavvia bot ciclo": utente attiva da dashboard, prima istanza ordinaria del ciclo che vede flag ON lo esegue
+- FauMorfeus master escluso via filtro `tipologia=raccolta_only`
+- Bottone UI in `/ui/config/global`: "🪪 Anagrafa membri alleanza"
+
+**Validazione**:
+
+| Istanza | R4 | R3 | R2 | R1 | Tot | Atteso | Accuracy |
+|---------|-----|-----|-----|-----|-----|--------|----------|
+| FAU_05 | 8/8 | 17/17 | 31/30 (+1 falso) | 48/48 | 104 | 103 | 99% |
+| FAU_04 | 8/8 | 17/17 | (interrotto) | — | — | — | — |
+
+**Pending integrazione bot V6**:
+1. Modulo `shared/avatar_registry.py` (load/save/match con template matching)
+2. Task `tasks/radar_anagrafe.py` (orchestra navigazione + scansione)
+3. Pydantic `GlobaliOverride.radar_anagrafe_pending: bool`
+4. Endpoint API `POST /api/radar-anagrafe/trigger`
+5. UI bottone in `/ui/config/global`
+6. Match runtime in `tasks/radar_actions.py` per categoria "avatar" del census
+
+**Memoria dettagliata**: `project_anagrafe_membri.md` con tutte le coord, ROI, parametri, casi limite.
+
+**Script POC riferimento**:
+- `c:/tmp/test_anagrafe_v6.py` — prima validazione FAU_08 (R4=8/8, R3=17/17)
+- `c:/tmp/test_anagrafe_v2.py` — anchoring dinamico + stop dinamico (FAU_05 = 104/103)
+- `c:/tmp/test_R2_open.py` — processo step-by-step HOME → R2 aperto (validato FAU_04)
+
+---
+
 ### Sessione 12/05/2026 (pomeriggio) — WU157 (sistema centralizzato regole scheduling live ↔ predictor)
 
 #### WU157 — Single source of truth per gate orari task
