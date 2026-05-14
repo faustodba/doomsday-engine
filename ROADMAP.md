@@ -58,6 +58,56 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 14/05/2026 — Verifica allocazione raccolta + revert WU151 FIX A radar
+
+#### Verifica sistema allocazione raccolta (analisi, nessun bug)
+
+Analisi end-to-end del sistema allocazione raccolta e rifornimento, con traccia del flusso completo dashboard → disco → bot.
+
+**Raccolta allocazione** (`raccolta.allocazione` in `runtime_overrides.json`):
+- Formato su disco: percentuali 0-100 (`{pomodoro: 60.0, legno: 20.0, petrolio: 10.0, acciaio: 10.0}`)
+- Dashboard display: `alloc.get(r, default) | round | int` → mostra direttamente come %
+- JS save (`salvaAllocazione`): invia percentuali as-is
+- Endpoint `PUT /api/config/allocazione`: merge incrementale WU139, scrive su disco as-is
+- Bot (`GlobalConfig._from_raw`): rileva `max(values) > 1` → `_al_div = 100` → divide automaticamente → usa come frazioni 0-1
+
+**Rifornimento allocazione** (`rifornimento_comune.allocazione`):
+- Formato su disco: frazioni 0-1 (`{pomodoro: 0.25, ...}`)
+- Dashboard display: check `<= 1` → moltiplica ×100 → mostra %
+- JS save (`salvaRifornimento`): divide per 100 prima di inviare
+- Bot: legge frazioni direttamente senza conversione
+
+**Design inconsistency (documentata, non bug)**: raccolta salva percentuali su disco, rifornimento salva frazioni. Entrambi i pipeline gestiscono il proprio formato correttamente.
+
+**Fragilità teorica**: se `raccolta.allocazione` mancasse dagli overrides (es. reset parziale manuale), `get_merged_config()` partirebbe da `GlobalConfig.to_dict()` che emette frazioni (0.35) → template mostrerebbe `0%`. Non un problema operativo con overrides presenti.
+
+**Algoritmo allocazione raccolta** (`_calcola_sequenza_allocation` in `tasks/raccolta.py`): weighted-deficit — confronta composizione attuale castello (OCR risorse) con target; assegna più slot ai tipi sotto-rappresentati. Ricalcolato ad ogni iterazione del loop interno. Il `deposito_ocr` esclude risorse "in volo" (squadre non ancora rientrate) — limitazione accettata, non risolvibile senza tracking ETA per-risorsa.
+
+---
+
+#### Revert WU151 FIX A — `tasks/radar_actions.py`
+
+**Motivazione**: WU151 FIX A (pre-check popup card all'inizio di `process_radar_actions` via pixel test su `(90,465)`) causava falsi positivi su elementi mappa luminosi → `_resolve_card_popup` cieco inviava GO+RESCUE su UI sbagliata → bloccava i tap pallini successivi.
+
+**Fix rimosso** (commit `1aa637a`):
+```python
+# RIMOSSO:
+if _is_card_popup_open(ctx, log_fn):
+    _resolve_card_popup(ctx, log_fn)  # cieco -> falsi positivi su mappa luminosa
+```
+
+**Gestione caso popup residuo con FIX B (rimasto)**:
+- Se popup blocca `_loop_pallini` → stesso `n_pallini` per 2 iter con `n_processed == 0`
+- → `stagnant_iter >= MAX_STAGNANT(2)` → abort + recovery via `_is_card_popup_open`
+- Overhead: ~30s (3 iter × 10s wait) vs intercetto immediato di FIX A
+- `_is_card_popup_open` in FIX B è più sicuro perché scatta DOPO la stagnazione confermata (non come pre-check cieco)
+
+**File**: `tasks/radar_actions.py` (dev = prod, entrambi aggiornati)
+**Commit**: `1aa637a` — `revert(radar): WU151 FIX A pre-check popup rimosso`
+**Verifica prevista**: monitorare log domani, cercare `[SAFETY] iter stagnante` per confermare che FIX B intercetta popup residui.
+
+---
+
 ### Sessione 12/05/2026 (sera) — WU158 (anagrafe avatar membri alleanza, POC validato)
 
 #### WU158 — Anagrafe avatar membri alleanza
