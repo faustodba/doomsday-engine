@@ -87,21 +87,18 @@ Boot bot (main.py)
 
 Per ogni TICK (ogni `tick_sleep_min` minuti):
   Apri nuovo ciclo (numero globale crescente)
-  Per ogni ISTANZA in ordine:
+  Per ogni ISTANZA in ordine (adaptive scheduler se abilitato):
      Thread _thread_istanza(istanza):
        1. inizia_tick(metrics buffer in-memory)
-       2. ── WU89-Step4: SKIP PREDICTOR HOOK (flag-driven) ──
-          Se enabled: predict() → SkipDecision
-          Se applied (LIVE+should_skip): early return, no avvio MuMu
-       3. avvia_istanza(MuMu boot via MuMuManager)
-       4. attendi_home (loop polling + dismiss banners + settings cleanup)
-       5. ── core/troops_reader: snapshot Total Squads (1×/die UTC) ──
-       6. Build TaskContext + Orchestrator
-       7. Registra task da task_setup.json (filtrati per tipologia istanza)
-       8. orc.tick() → esegue ogni task con priority + scheduling
+       2. avvia_istanza(MuMu boot via MuMuManager)
+       3. attendi_home (loop polling + dismiss banners + settings cleanup)
+       4. ── core/troops_reader: snapshot Total Squads (1×/die UTC) ──
+       5. Build TaskContext + Orchestrator
+       6. Registra task da task_setup.json (filtrati per tipologia istanza)
+       7. orc.tick() → esegue ogni task con priority + scheduling
           Per ogni task: should_run() guard → run() → save state
-       9. chiudi_tick(persisti metriche + telemetry events + cicli.json)
-       10. chiudi_istanza(MuMu shutdown clean)
+       8. chiudi_tick(persisti metriche + telemetry events + cicli.json)
+       9. chiudi_istanza(MuMu shutdown clean)
   Chiudi ciclo (write cicli.json, durata, completato)
   Sleep tick_sleep_s
 ```
@@ -693,26 +690,35 @@ BACK + ripristina banner.
 ### 5.15 RadarTask (priority 90, periodic 12h)
 
 [tasks/radar.py](../tasks/radar.py) — Raccolta pallini rossi sulla
-mappa Radar Station.
+mappa Radar Station + dispatch azioni per categoria icona.
 
-**Flusso**:
+**Flusso** (post-WU150):
 1. Verifica badge rosso icona Radar (pixel check numpy)
-2. Tap icona → attesa apertura mappa + notifiche
-3. Loop raccolta:
-   - screenshot
-   - find pallini rossi (connected components BFS numpy)
-   - tap su ognuno
-4. 2 scan vuoti consecutivi → exit
-5. Census icone (RadarCensusTask opzionale)
+2. Tap icona → attesa apertura mappa + notifiche (10s)
+3. `process_radar_actions(ctx, log_fn)` — loop integrato (max 10 iter):
+   - `_loop_pallini`: screenshot → find pallini rossi (BFS numpy) → tap ognuno
+   - wait 10s (animazioni gioco)
+   - `RadarCensusTask` → legge `census.json` → filtra `actionable`
+   - dispatch per categoria → `handle_card` (GO + RESCUE + RADAR_ICON)
+   - exit se 0 pallini + 0 actionable
+   - FIX B safety break: 2 iter consecutive con stesso n_pallini e 0 processed → abort + recovery popup (revert WU151 FIX A — 14/05)
+
+**Handler attivi**: solo `card` (Protect Survivors/Assist Ally). Placeholder
+presenti per skull/pedone/soldati/avatar/paracadute/camion/fiamma/bottiglia/numero/auto.
 
 ### 5.16 RadarCensusTask (priority 100, periodic 12h)
 
-[tasks/radar_census.py](../tasks/radar_census.py) — Training data
-collection per classifier RF (icone radar).
+[tasks/radar_census.py](../tasks/radar_census.py) — Classificazione
+icone sulla mappa radar via template matching + RF classifier.
 
 **Flusso**: dalla schermata radar aperta → screenshot → detector
-icone (radar_tool) → crops → classify RF → cataloga in
-`radar_archive/census/YYYYMMDD_HHMMSS_<istanza>/`.
+icone (radar_tool, 47 template) → crops → classify RF + heuristic
+fallback → cataloga in `radar_archive/census/YYYYMMDD_HHMMSS_<istanza>/`
+con `census.json` (cx, cy, categoria, ready).
+
+**Uso in produzione**: chiamato da `process_radar_actions()` come step
+3 del loop integrato. Il census standalone (`RADAR_CENSUS_ABILITATO`) è
+mantenuto per compat ma sconsigliato (post-WU150).
 
 ### 5.17 RaccoltaChiusuraTask (priority 200, always 0h)
 
@@ -920,7 +926,7 @@ Snapshot ogni 15min auto-correlato con cycle in corso. A fine ciclo:
 error% per ogni snapshot vs actual_min. Pannello
 `/ui/predictor-istanze` ⏱ mostra storia.
 
-### 8.1 Allineamento bot ↔ predictor (sweep 05/05/2026)
+### 8.5 Allineamento bot ↔ predictor (sweep 05/05/2026)
 
 Il bot e il predictor devono concordare su 4 livelli per ogni task:
 
@@ -990,7 +996,7 @@ Avvio: `run_dashboard_prod.bat` → uvicorn su `:8765`.
 |-----|-------------|
 | `/ui` | **Home**: card produzione istanze (con controlli inline post-WU142), configurazione 4-card (sistema · rifornimento · zaino · allocazione raccolta), sidebar farm (trend7gg + risorse + ora-tbl) |
 | `/ui/advanced` | Bulk istanze + addestramento truppe (default globale + override per istanza) |
-| `/ui/telemetria` | Tel-card: telemetria task, storico cicli, health 24h, trend 7gg, storico truppe, debug screenshot |
+| `/ui/telemetria` | Tel-card: telemetria task, storico cicli, health 24h, trend 7gg, storico truppe, debug screenshot (pannello storico eventi rimosso in WU142) |
 | `/ui/predictor-istanze` | Adaptive scheduler config + 🧮 simulazione greedy + cycle predictor + distribuzione empirica slot |
 | `/ui/predictor` | redirect 302 → `/ui/predictor-istanze` (legacy) |
 | `/ui/config/global` | Configurazione baseline (global_config.json) + bottone "↺ reset runtime" + "⬆ runtime → static" (promote) |

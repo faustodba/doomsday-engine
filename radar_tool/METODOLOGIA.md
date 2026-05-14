@@ -16,29 +16,36 @@ Eseguita dal bot ad ogni esecuzione di `RadarTask`. **Non richiede intervento
 manuale.**
 
 ```
-RadarTask (priority 90, intervallo 12h)
+RadarTask (priority 90, intervallo 12h)         [post-WU150, 11/05/2026]
   │
-  ├── tap icona Radar Station + apri mappa radar
-  ├── loop pallini (tap pin notifiche)
-  └── se RADAR_CENSUS_ABILITATO=True
+  ├── tap icona Radar Station + apri mappa radar (10s wait)
+  └── process_radar_actions(ctx, log_fn)         ← loop integrato max 10 iter
       │
-      └── RadarCensusTask
-          │
-          ├── load_templates(radar_tool/templates/)        ← 47 PNG
-          ├── detect(map_img, templates, threshold=0.65)   ← TM_CCOEFF_NORMED + NMS
-          ├── classifier RF.predict(crop)                  ← classifier.pkl
-          ├── _catalogo_finale()                           ← RF + heuristic fallback
-          └── salva radar_archive/census/<ts>_<istanza>/
-              ├── map_full.png                             ← screenshot raw
-              ├── map_annotated.png                        ← bbox colorati
-              ├── census.json                              ← record con cx/cy/categoria
-              └── crops/                                   ← 64×64 per ogni icona
+      ├── _loop_pallini                          ← BFS numpy, tap pallini rossi
+      ├── wait 10s (animazioni gioco)
+      ├── RadarCensusTask (census integrato)
+      │     ├── load_templates(radar_tool/templates/)        ← 47 PNG
+      │     ├── detect(map_img, templates, threshold=0.65)   ← TM_CCOEFF_NORMED + NMS
+      │     ├── classifier RF.predict(crop)                  ← classifier.pkl
+      │     ├── _catalogo_finale()                           ← RF + heuristic fallback
+      │     └── salva radar_archive/census/<ts>_<istanza>/
+      │           ├── map_full.png                           ← screenshot raw
+      │           ├── map_annotated.png                      ← bbox colorati
+      │           ├── census.json                            ← record con cx/cy/categoria
+      │           └── crops/                                 ← 64×64 per ogni icona
+      ├── filtra actionable (ready=True AND categoria in HANDLERS)
+      ├── dispatch per categoria → handler(cx, cy)
+      │     card → GO(90,465) + RESCUE(233,386) + RADAR_ICON(78,315)
+      └── exit se 0 pallini AND 0 actionable
+          (safety break FIX B: 2 iter stagnanti → abort + recovery popup)
 ```
 
 **Output utile per task derivati**: `census.json` ha per ogni icona
-`(cx, cy, categoria, categoria_conf, ready)`. Task downstream (caccia
-mostri, raccolta auto, eliminazione skull) leggono questo JSON e tappano
-le coordinate per categoria.
+`(cx, cy, categoria, categoria_conf, ready)`. Handler nella pipeline
+leggono questo JSON e tappano le coordinate per categoria.
+
+**Nota**: `RADAR_CENSUS_ABILITATO` abilita un census standalone legacy
+post-loop — sconsigliato post-WU150 (il census è già integrato nel loop).
 
 **Logica `_catalogo_finale()`** (in `tasks/radar_census.py`):
 1. Se RF predice una `OFFICIAL_LABELS` con `rf_conf >= RF_READY_MIN (0.70)` → primario RF
