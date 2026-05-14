@@ -207,7 +207,11 @@ def process_radar_actions(ctx: TaskContext, log_fn) -> dict:
     """
     Loop principale azioni radar.
 
-    Pre-step: detect popup card aperto (residuo ciclo precedente) -> risolvi.
+    Ordine vincolante (regola utente, revert WU151 FIX A pre-check):
+    PRIMA tap pallini rossi, POI census + handler card. Il pre-check popup
+    via pixel test (90,465) era fallibile (falsi positivi su elementi mappa
+    luminosi) -> _resolve_card_popup cieco apriva/chiudeva pannelli a caso
+    e bloccava i tap pallini successivi.
 
     Itera:
       1. _loop_pallini (tappa tutti i pallini rossi visibili)
@@ -219,6 +223,7 @@ def process_radar_actions(ctx: TaskContext, log_fn) -> dict:
 
     Ritorna dict con totali per telemetria:
       {pallini_tappati: int, card_processate: int, loops: int, popup_pre_resolved: bool, stagnant_abort: bool}
+    Il campo popup_pre_resolved resta nel dict per compat ma e' sempre False.
     """
     from tasks.radar import RadarTask
 
@@ -230,19 +235,6 @@ def process_radar_actions(ctx: TaskContext, log_fn) -> dict:
         "popup_pre_resolved":  False,
         "stagnant_abort":      False,
     }
-
-    # FIX A: pre-check popup card (residuo da ciclo precedente o stato iniziale)
-    log_fn("[FIX-A] pre-check popup card aperto...")
-    if _is_card_popup_open(ctx, log_fn):
-        log_fn("[FIX-A] popup card aperto - risolvo prima del loop")
-        try:
-            _resolve_card_popup(ctx, log_fn)
-            totals["popup_pre_resolved"] = True
-            totals["card_processate"] += 1
-        except Exception as exc:
-            log_fn(f"[FIX-A] errore resolve popup: {exc}")
-    else:
-        log_fn("[FIX-A] no popup aperto, procedo con loop normale")
 
     # FIX B safety state
     last_pallini = -1
