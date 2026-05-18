@@ -97,7 +97,7 @@ _DEFAULTS: dict = {
     # (il game centra il castello sulla Y del centro screen post-coord).
     "AVATAR_MAPPA_ROI":         (380, 170, 580, 370),
     "AVATAR_MAPPA_ROI_RETRY":   (330, 120, 630, 420),
-    "AVATAR_MAPPA_SOGLIA":      0.75,
+    "AVATAR_MAPPA_SOGLIA":      0.55,
     "AVATAR_MAPPA_OFFSET_Y":    35,  # legacy, non più usato (tap = centro pin matchato)
     # Maschera invio
     "COORD_VAI":            (480, 448),
