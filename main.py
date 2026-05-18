@@ -737,6 +737,7 @@ def _thread_istanza(ist, tasks_cls, dry_run):
     if not dry_run:
         if not _launcher.avvia_istanza(ist, _log_fn):
             _log(nome, "[ERRORE] avvia_istanza() fallito")
+            _launcher.chiudi_istanza(ist, porta, _log_fn)  # WU163: evita zombie MuMu su timeout boot
             _aggiorna_stato_istanza(nome, {"stato": "idle"})
             return
         if not _launcher.attendi_home(ctx, _log_fn):

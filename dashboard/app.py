@@ -11,11 +11,15 @@ from __future__ import annotations
 
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 _ROOT = Path(__file__).parent.parent
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
+
+def _ts() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
 
 from contextlib import asynccontextmanager
 from typing import Optional
@@ -94,7 +98,7 @@ async def _predictor_recorder_loop():
         record_snapshot, evaluate_cycles, SNAPSHOT_INTERVAL_MIN,
         _read_cicli_in_corso, read_recent_snapshots,
     )
-    print(f"[DASHBOARD] predictor recorder avviato (snapshot ogni {SNAPSHOT_INTERVAL_MIN}min + reset on new cycle)")
+    print(f"[DASHBOARD] {_ts()} predictor recorder avviato (snapshot ogni {SNAPSHOT_INTERVAL_MIN}min + reset on new cycle)")
     POLL_GRANULAR_S = 30
     while True:
         try:
@@ -159,12 +163,12 @@ async def _predictor_recorder_loop():
                         extra=extra,
                     )
                     if is_new_cycle:
-                        print(f"[DASHBOARD] new cycle #{cycle_now} → forced immediate snapshot (reset 15min timer)")
+                        print(f"[DASHBOARD] {_ts()} new cycle #{cycle_now} → forced immediate snapshot (reset 15min timer)")
                 n_eval = evaluate_cycles()
                 if n_eval > 0:
-                    print(f"[DASHBOARD] cycle accuracy evaluated: {n_eval} cicli")
+                    print(f"[DASHBOARD] {_ts()} cycle accuracy evaluated: {n_eval} cicli")
         except Exception as exc:
-            print(f"[DASHBOARD] predictor recorder errore: {exc}")
+            print(f"[DASHBOARD] {_ts()} predictor recorder errore: {exc}")
         await asyncio.sleep(POLL_GRANULAR_S)
 
 
@@ -185,7 +189,7 @@ async def lifespan(app: FastAPI):
     global _predictor_recorder_task
     _predictor_recorder_task = asyncio.create_task(_predictor_recorder_loop())
     yield
-    print("[DASHBOARD] shutdown.")
+    print(f"[DASHBOARD] {_ts()} shutdown.")
     if _predictor_recorder_task and not _predictor_recorder_task.done():
         _predictor_recorder_task.cancel()
 
