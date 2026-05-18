@@ -566,6 +566,11 @@ def merge_config(gcfg: dict, overrides: dict) -> dict:
                 if "mumu" not in merged:
                     merged["mumu"] = {}
                 merged["mumu"]["timeout_carica_s"] = int(ov_sistema["timeout_carica_s"])
+            # timeout_adb_s: stesso pattern — propaga da sistema a mumu
+            if "timeout_adb_s" in ov_sistema:
+                if "mumu" not in merged:
+                    merged["mumu"] = {}
+                merged["mumu"]["timeout_adb_s"] = int(ov_sistema["timeout_adb_s"])
     except Exception:
         pass
 

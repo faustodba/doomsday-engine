@@ -8,7 +8,7 @@
   "mumu": {
     "manager": "C:\\Program Files\\Netease\\MuMuPlayer\\nx_main\\MuMuManager.exe",
     "adb": "C:\\Program Files\\Netease\\MuMuPlayer\\nx_main\\adb.exe",
-    "timeout_adb_s": 120,
+    "timeout_adb_s": 300,
     "timeout_carica_s": 300,
     "delay_carica_iniz_s": 60,
     "n_back_pulizia": 5,

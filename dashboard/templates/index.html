@@ -53,6 +53,13 @@
                      min="30" max="900" step="30" style="width:60px"
                      title="timeout polling HOME dopo avvio gioco (30-900s, default 300)">
             </div>
+            <div class="p-row">
+              <span class="p-lbl">timeout boot Android (s)</span>
+              <input class="p-inp" id="g-timeout-adb" type="number"
+                     value="{{ cfg.get('sistema',{}).get('timeout_adb_s', cfg.get('mumu',{}).get('timeout_adb_s', 300))|int }}"
+                     min="60" max="600" step="30" style="width:60px"
+                     title="timeout avvio Android VM MuMu prima di dichiarare istanza non avviata (60-600s, default 300)">
+            </div>
             <div class="col-sep"></div>
             <div class="col-sub">task flags</div>
             <div id="task-flags"
@@ -443,7 +450,7 @@ async function salvaGlobals() {
   // 08/05: skip_predictor_* spostati in /ui/predictor (pagina dedicata)
   const {ok,data} = await apiPut('/api/config/globals', {
     sistema: {max_parallel: gi('g-parallel'), tick_sleep_min: gi('g-sleep'),
-              timeout_carica_s: gi('g-timeout-boot')},
+              timeout_carica_s: gi('g-timeout-boot'), timeout_adb_s: gi('g-timeout-adb')},
     task: {},
   });
   showMsg('g-ok','g-err', ok, data.detail||'');
