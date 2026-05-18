@@ -381,7 +381,7 @@ def _centra_mappa(ctx: TaskContext) -> None:
     time.sleep(0.4)
 
     ctx.device.tap(_cfg(ctx, "TAP_CONFERMA_LENTE"))
-    time.sleep(2.5)
+    time.sleep(5.0)  # WU162: 2.5→5.0s — PC carico + Optimize mode variabile
 
     # Match dinamico avatar destinatario: la game-engine non centra
     # perfettamente sulla coordinata richiesta, il castello può cadere off-pixel
@@ -1555,10 +1555,11 @@ class RifornimentoTask(Task):
         UNA SOLA volta all'inizio (se non passato), poi tracciamento via
         `coda_volo`. Saving: ~30-40s per ciclo con max_sped=5.
         """
-        spedizioni  = 0
-        idx_risorsa = 0
+        spedizioni   = 0
+        idx_risorsa  = 0
         coda_volo: deque = deque()
-        in_mappa    = False
+        in_mappa     = False
+        stato_banner = "sconosciuto"  # WU162: traccia stato per ripristino
         # 05/05: copia mutabile delle risorse abilitate. Se _compila_e_invia
         # fallisce per una risorsa (campo greyed-out, coord errata, ecc.),
         # la rimuoviamo da questo set per non ritentarla nello stesso tick.
@@ -1621,6 +1622,13 @@ class RifornimentoTask(Task):
                         ctx.device.key("KEYCODE_MAP")
                     in_mappa = True
                     time.sleep(1.5)
+                    # WU162: collassa banner eventi per massimizzare visibilità
+                    # mappa durante ricerca pin_rifugio (stessa logica store task).
+                    try:
+                        from shared.ui_helpers import comprimi_banner_home
+                        stato_banner = comprimi_banner_home(ctx, ctx.log_msg)
+                    except Exception as _exc_b:
+                        ctx.log_msg(f"Rifornimento: comprimi_banner skip: {_exc_b}")
 
                 # ── 3. Leggi deposito OCR ───────────────────────────────────
                 if deposito_da_ocr:
@@ -1763,6 +1771,15 @@ class RifornimentoTask(Task):
                 time.sleep(0.5)
 
         finally:
+            # WU162: ripristina banner se era aperto prima del task
+            if stato_banner == "aperto":
+                try:
+                    from shared.ui_helpers import _BANNER_TAP_X, _BANNER_TAP_Y
+                    ctx.device.tap(_BANNER_TAP_X, _BANNER_TAP_Y)
+                    time.sleep(0.5)
+                    ctx.log_msg("Rifornimento: banner ripristinato")
+                except Exception:
+                    pass
             ctx.log_msg("Rifornimento: ritorno in home")
             if ctx.navigator is not None:
                 ctx.navigator.vai_in_home()
