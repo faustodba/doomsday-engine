@@ -403,16 +403,20 @@ def _centra_mappa(ctx: TaskContext) -> None:
             soglia     = _cfg(ctx, "AVATAR_MAPPA_SOGLIA")
             roi_pri    = _cfg(ctx, "AVATAR_MAPPA_ROI")
             roi_retry  = _cfg(ctx, "AVATAR_MAPPA_ROI_RETRY")
-            # Tentativo 1: ROI primaria 200x200
+            # Tentativo 1: ROI primaria 200x200 — soglia alta per evitare
+            # falsi positivi (score < 0.70 su elemento sbagliato passa
+            # soglia=0.55 ma fallisce il tap castello → RESOURCE SUPPLY 0).
+            # WU161: primaria richiede ≥ 0.70, retry permissivo a soglia=0.55.
+            _SOGLIA_PRI = 0.70
             r = ctx.matcher.find_one(screen_post, avatar_tpl,
-                                     threshold=soglia, zone=roi_pri)
+                                     threshold=_SOGLIA_PRI, zone=roi_pri)
             last_score = r.score
             ctx.log_msg(
                 f"Rifornimento: pin destinatario [ROI primaria] "
-                f"score={r.score:.3f} soglia={soglia} found={r.found} "
+                f"score={r.score:.3f} soglia={_SOGLIA_PRI} found={r.found} "
                 f"roi={roi_pri}"
             )
-            # Tentativo 2 (retry): ROI 300x300 se primo fallisce
+            # Tentativo 2 (retry): ROI 300x300 se primo fallisce o bassa confidenza
             if not r.found:
                 r = ctx.matcher.find_one(screen_post, avatar_tpl,
                                          threshold=soglia, zone=roi_retry)
