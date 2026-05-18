@@ -1576,18 +1576,15 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
 
     Ritorna (marcia_ok, tipo_bloccato, skip_neutro).
     """
-    # 08/05: rispetta livello configurato — niente fallback "verso l'alto".
-    # Pre-fix: `base=6 → [6, 7]` (se non trova L6 cerca L7 = ignora config utente).
-    # Post-fix: `base=6 → [6]`, `base=7 → [7, 6]` (L7 max, fallback L6 ammesso).
-    # Razionale: l'utente imposta `livello=N` per scegliere quel livello, non
-    # per accettare livelli più alti come fallback.
     livello_base = max(1, min(7, int(
         ctx.config.get("livello", _cfg(ctx, "RACCOLTA_LIVELLO"))
     )))
     if livello_base == 7:
-        sequenza_livelli = [7, 6]   # L7 max → fallback a L6 ammesso
+        sequenza_livelli = [7, 6]   # L7 primary → fallback L6
+    elif livello_base == 6:
+        sequenza_livelli = [6, 7]   # L6 primary → fallback L7
     else:
-        sequenza_livelli = [livello_base]   # rispetta config strict
+        sequenza_livelli = [livello_base]
 
     # ─── Step 1-2: CERCA + leggi coord + check blacklist ──────────────────
     chiave: Optional[str] = None
