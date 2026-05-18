@@ -58,6 +58,42 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 18/05/2026 — WU159 + WU160 (rifornimento pin soglia + raccolta fallback livello)
+
+#### WU159 — rifornimento AVATAR_MAPPA_SOGLIA 0.75→0.55
+
+**Sintomo**: 6/11 istanze con 0 spedizioni nel primo ciclo di rifornimento post-riattivazione (FAU_01/03/05/06/07/08). Output `provviste_residue=-1` = popup RESOURCE SUPPLY mai aperto.
+
+**Root cause**: `pin_rifugio.png` (27×28) score 0.558-0.685 su quelle istanze — sotto soglia `AVATAR_MAPPA_SOGLIA=0.75` → fallback tap hardcoded (480,270) che mancava il castello. Score variabile per rendering del pin nel momento dello screenshot: truppe in marcia / testo nome sovrapposto al pin abbassano il match TM_CCOEFF_NORMED. Istanze con score ~1.000 (FAU_00/02/04/09/10) avevano il pin "pulito" al momento del test — template estratto da FAU_00 in WU147.
+
+**Fix** (`tasks/rifornimento.py:100`, commit `4fa9a1b`): `AVATAR_MAPPA_SOGLIA` 0.75→0.55. La ROI di ricerca è ristretta (200×200 centrata post-navigazione lente), quindi 0.55 in quell'area è sufficiente per identificare il rifugio senza rischio falsi positivi.
+
+**Attivo dal**: prossimo restart bot.
+
+---
+
+#### WU160 — raccolta fallback livello 6→7 ripristinato
+
+**Sintomo**: istanze con `livello=6` (FAU_01..FAU_08) non tentavano nodi L7 quando il territorio L6 era saturo — bloccavano o inviavano 0 marce.
+
+**Root cause**: modifica 08/05 aveva cambiato `livello=6 → [6]` (strict, nessun fallback) motivata da "rispettare config utente". L'utente ha confermato che la logica corretta è simmetrica: L6 come default → cerca L6 prima, L7 come fallback (lo stesso principio già applicato a L7→[7,6]).
+
+**Fix** (`tasks/raccolta.py:1579`, commit `75473af`):
+```python
+if livello_base == 7:
+    sequenza_livelli = [7, 6]   # L7 primary → fallback L6
+elif livello_base == 6:
+    sequenza_livelli = [6, 7]   # L6 primary → fallback L7
+else:
+    sequenza_livelli = [livello_base]
+```
+
+**Razionale gameplay**: con 11 istanze sulla stessa mappa, i nodi L6 di un territorio si saturano rapidamente. Il fallback a L7 permette di continuare a raccogliere invece di bloccarsi.
+
+**Attivo dal**: prossimo restart bot.
+
+---
+
 ### Sessione 14/05/2026 — Verifica allocazione raccolta + revert WU151 FIX A radar
 
 #### Verifica sistema allocazione raccolta (analisi, nessun bug)
