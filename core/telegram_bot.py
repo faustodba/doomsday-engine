@@ -232,6 +232,10 @@ def _build_status() -> str:
         n_ok = sum(1 for v in istanze_st.values() if v.get("abilitata", True))
         lines.append(f"Istanze: {n_tot} totali, {n_ok} abilitate")
 
+    # Dashboard
+    dash_ok = _check_dashboard_running()
+    lines.append("🟢 Dashboard: ATTIVA" if dash_ok else "🔴 Dashboard: non avviata")
+
     # DRL master
     morf = _read_morfeus_state()
     drl = morf.get("daily_recv_limit", -1)
@@ -240,6 +244,11 @@ def _build_status() -> str:
         drl_pct = int((drl / drl_max * 100)) if drl_max > 0 else 0
         icon = "🔴" if drl == 0 else ("🟡" if drl_pct < 20 else "🟢")
         lines.append(f"DRL master: {icon} {drl/1e6:.0f}M / {drl_max/1e6:.0f}M ({drl_pct}%)")
+
+    # Suggerimento avvio rapido se qualcosa è spento
+    if not _check_bot_running() or not dash_ok:
+        lines.append("")
+        lines.append("Usa /avvia_tutto per avviare i servizi spenti")
 
     return "\n".join(lines)
 
@@ -336,13 +345,20 @@ def _handle_command(text: str, chat_id: str) -> str:
 
     if cmd == "/help":
         msg_icon = "🔔" if _tg_enabled() else "🔕"
+        bot_icon  = "🟢" if _check_bot_running()       else "🔴"
+        dash_icon = "🟢" if _check_dashboard_running() else "🔴"
         return (
             "<b>Comandi disponibili</b>\n"
             "\n"
             "<b>Informazioni</b>\n"
-            "/status — stato ciclo, istanze e messaggi\n"
+            "/status — stato completo (bot, dashboard, ciclo, DRL)\n"
             "/istanze — dettaglio per istanza (tipologia, invii)\n"
             "/rifornimento — DRL master FauMorfeus + spedizioni oggi\n"
+            "\n"
+            f"<b>Avvio sistema</b> (bot {bot_icon}  dashboard {dash_icon})\n"
+            "/avvia_bot — avvia il bot (run_prod.bat)\n"
+            "/avvia_dashboard — avvia la dashboard (uvicorn)\n"
+            "/avvia_tutto — avvia bot + dashboard\n"
             "\n"
             "<b>Bot management</b>\n"
             "/stop — attiva maintenance mode (bot in pausa)\n"
@@ -404,6 +420,45 @@ def _handle_command(text: str, chat_id: str) -> str:
         if ok:
             return "🔔 Notifiche proattive abilitate.\nRiceverai: ciclo completato, cascade ADB, DRL saturo, daily report."
         return "⚠ Errore durante l'abilitazione. Controlla i log."
+
+    if cmd == "/avvia_bot":
+        if _check_bot_running():
+            return "🟢 Bot già in esecuzione. Usa /status per i dettagli."
+        ok, msg = _launch_bat(_BAT_BOT, "Bot")
+        if ok:
+            return f"▶ Bot avviato — {msg}\nFinestra console aperta sul server.\nUsa /status tra 60s per verificare."
+        return f"⚠ Avvio bot fallito: {msg}"
+
+    if cmd == "/avvia_dashboard":
+        if _check_dashboard_running():
+            return "🟢 Dashboard già in esecuzione su http://localhost:8765"
+        ok, msg = _launch_bat(_BAT_DASHBOARD, "Dashboard")
+        if ok:
+            return f"▶ Dashboard avviata — {msg}\nDisponibile su http://localhost:8765"
+        return f"⚠ Avvio dashboard fallito: {msg}"
+
+    if cmd == "/avvia_tutto":
+        lines: list[str] = ["<b>Avvio sistema</b>"]
+        bot_era_ok  = _check_bot_running()
+        dash_era_ok = _check_dashboard_running()
+
+        if bot_era_ok and dash_era_ok:
+            return "🟢 Bot e Dashboard già in esecuzione. Usa /status per i dettagli."
+
+        if not bot_era_ok:
+            ok, msg = _launch_bat(_BAT_BOT, "Bot")
+            lines.append(f"{'▶' if ok else '⚠'} Bot: {msg if ok else 'avvio fallito — ' + msg}")
+        else:
+            lines.append("🟢 Bot: già attivo")
+
+        if not dash_era_ok:
+            ok, msg = _launch_bat(_BAT_DASHBOARD, "Dashboard")
+            lines.append(f"{'▶' if ok else '⚠'} Dashboard: {msg if ok else 'avvio fallito — ' + msg}")
+        else:
+            lines.append("🟢 Dashboard: già attiva")
+
+        lines.append("\nUsa /status tra 60s per verificare i servizi.")
+        return "\n".join(lines)
 
     return f"Comando non riconosciuto: <code>{cmd}</code>\nUsa /help per la lista comandi."
 
@@ -577,6 +632,116 @@ def notify_daily_report(report_text: str) -> bool:
     return _send_notify(header + body)
 
 
+# ─── System info helpers ─────────────────────────────────────────────────────
+
+def _get_uptime_s() -> int:
+    """Uptime sistema in secondi. Windows: GetTickCount64. Fallback: -1."""
+    try:
+        import ctypes
+        return int(ctypes.windll.kernel32.GetTickCount64()) // 1000
+    except Exception:
+        return -1
+
+
+def _check_dashboard_running() -> bool:
+    """True se uvicorn risponde su localhost:8765."""
+    try:
+        import urllib.request
+        urllib.request.urlopen("http://localhost:8765/", timeout=2)
+        return True
+    except Exception:
+        return False
+
+
+def _check_bot_running() -> bool:
+    """True se engine_status.json aggiornato negli ultimi 10 minuti."""
+    es = _read_engine_status()
+    if not es:
+        return False
+    ts_raw = es.get("ts_update", "")
+    if not ts_raw:
+        return False
+    try:
+        dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - dt).total_seconds() < 600
+    except Exception:
+        return False
+
+
+# ─── Process launcher ─────────────────────────────────────────────────────────
+
+_ROOT_PROD = Path("C:/doomsday-engine-prod")
+_BAT_BOT        = _ROOT_PROD / "run_prod.bat"
+_BAT_DASHBOARD  = _ROOT_PROD / "run_dashboard_prod.bat"
+
+
+def _launch_bat(bat_path: Path, label: str) -> tuple[bool, str]:
+    """Lancia un bat file in una nuova finestra console indipendente."""
+    import subprocess
+    CREATE_NEW_CONSOLE = 0x00000010
+    if not bat_path.exists():
+        return False, f"{bat_path.name} non trovato in {bat_path.parent}"
+    try:
+        proc = subprocess.Popen(
+            str(bat_path),
+            creationflags=CREATE_NEW_CONSOLE,
+            close_fds=True,
+        )
+        return True, f"avviato (PID {proc.pid})"
+    except Exception as exc:
+        return False, str(exc)
+
+
+# ─── Notifica di avvio sistema ────────────────────────────────────────────────
+
+def _send_system_alert(text: str) -> bool:
+    """Invia messaggio di sistema (sempre, ignora il flag enabled)."""
+    try:
+        from shared.telegram_client import send_message, load_chat_id
+        chat_id = load_chat_id()
+        if not chat_id:
+            return False
+        return send_message(chat_id, text[:_MAX_MSG_LEN])
+    except Exception as exc:
+        _log.warning("[TG-BOT] system alert fallita: %s", exc)
+        return False
+
+
+def _notify_startup() -> None:
+    """Invia notifica di avvio al boot. Chiamata dopo 8s per dare tempo alla rete."""
+    uptime = _get_uptime_s()
+    bot_ok  = _check_bot_running()
+    dash_ok = _check_dashboard_running()
+
+    # Determina contesto avvio
+    if 0 < uptime < 300:
+        ctx = f"⚡ <b>Riavvio PC rilevato</b> (uptime {_fmt_dur(uptime)})"
+    else:
+        ctx = f"▶ Telegram bot avviato"
+        if uptime > 0:
+            ctx += f" (uptime PC {_fmt_dur(uptime)})"
+
+    bot_line  = "🟢 Bot: ATTIVO"      if bot_ok  else "🔴 Bot: non avviato"
+    dash_line = "🟢 Dashboard: ATTIVA" if dash_ok else "🔴 Dashboard: non avviata"
+
+    azioni: list[str] = []
+    if not bot_ok and not dash_ok:
+        azioni = ["/avvia_tutto — avvia bot + dashboard"]
+    else:
+        if not bot_ok:
+            azioni.append("/avvia_bot — avvia il bot")
+        if not dash_ok:
+            azioni.append("/avvia_dashboard — avvia la dashboard")
+
+    lines = [ctx, "", bot_line, dash_line]
+    if azioni:
+        lines.append("")
+        lines.append("<b>Avvio rapido:</b>")
+        lines.extend(azioni)
+
+    _send_system_alert("\n".join(lines))
+
+
 # ─── Entry point standalone ────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -615,6 +780,16 @@ if __name__ == "__main__":
     signal.signal(signal.SIGTERM, _on_signal)
 
     start()
+
+    # Notifica di avvio in background dopo 8s (attende inizializzazione rete)
+    def _delayed_startup_notify():
+        time.sleep(8)
+        _log.info("[TG-BOT] invio notifica startup...")
+        _notify_startup()
+
+    threading.Thread(target=_delayed_startup_notify, daemon=True,
+                     name="TgStartupNotify").start()
+
     _svc_stop.wait()   # blocca fino a SIGINT / SIGTERM
     stop(timeout_s=5)
     _log.info("=== Telegram bot service terminato ===")
