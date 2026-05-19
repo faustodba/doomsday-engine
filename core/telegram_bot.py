@@ -137,8 +137,8 @@ def _set_istanza_abilitata(nome: str, abilitata: bool) -> tuple[bool, str]:
     return ok, nome_up
 
 
-def _set_all_tasks(enabled: bool) -> tuple[bool, dict, dict]:
-    """Imposta tutti i task in globali.task a enabled.
+def _set_task(nome: Optional[str], enabled: bool) -> tuple[bool, dict, dict]:
+    """Imposta un task specifico (nome) o tutti (nome=None) in globali.task.
 
     Ritorna (ok, stato_prima, stato_dopo).
     """
@@ -148,8 +148,10 @@ def _set_all_tasks(enabled: bool) -> tuple[bool, dict, dict]:
     def patch(ov):
         task_dict = ov.setdefault("globali", {}).setdefault("task", {})
         before.update(task_dict)
-        for k in list(task_dict):
-            task_dict[k] = enabled
+        targets = [nome] if nome else list(task_dict)
+        for k in targets:
+            if k in task_dict:
+                task_dict[k] = enabled
         after.update(task_dict)
 
     ok = _patch_runtime(patch)
@@ -665,8 +667,9 @@ def _handle_command(text: str, chat_id: str) -> str:
             "/abilita FAU_03 — abilita istanza (hot-reload)\n"
             "\n"
             "<b>Task globali</b>\n"
-            "/disabilita_task — disabilita tutti i task (hot-reload)\n"
-            "/abilita_task — abilita tutti i task (hot-reload)\n"
+            "/task — stato ON/OFF di ogni task\n"
+            "/disabilita_task arena — disabilita task singolo\n"
+            "/abilita_task arena — abilita task singolo\n"
             "\n"
             f"<b>Notifiche proattive</b> (ora: {msg_icon})\n"
             "/stop_messaggi — disabilita notifiche automatiche\n"
@@ -748,34 +751,41 @@ def _handle_command(text: str, chat_id: str) -> str:
         stato = "abilitata" if abilitata else "disabilitata"
         return f"{icona} Istanza <b>{msg}</b> {stato}.\nEffetto al prossimo tick del bot."
 
-    if cmd == "/disabilita_task":
-        ok, before, after = _set_all_tasks(False)
-        if not ok:
-            return "⚠ Errore scrittura runtime_overrides.json"
-        erano_on = sorted(k for k, v in before.items() if v)
-        if not erano_on:
-            return "⚠ Nessun task era abilitato — nessuna modifica."
-        lista = "\n".join(f"  🔴 {t}" for t in erano_on)
-        return (
-            f"🔴 <b>Tutti i task disabilitati</b> ({len(erano_on)} task OFF)\n\n"
-            f"{lista}\n\n"
-            "Effetto al prossimo tick del bot.\n"
-            "Usa /abilita_task per ripristinare."
-        )
+    if cmd == "/task":
+        ov = _read_runtime_overrides()
+        task_dict = ov.get("globali", {}).get("task", {})
+        if not task_dict:
+            return "⚠ Nessun task configurato in runtime_overrides.json"
+        lines = ["📋 <b>Task globali</b>", ""]
+        for nome_t, stato in sorted(task_dict.items()):
+            icona = "🟢" if stato else "🔴"
+            lines.append(f"{icona} {nome_t}")
+        lines += ["", "Usa /disabilita_task &lt;nome&gt; o /abilita_task &lt;nome&gt;"]
+        return "\n".join(lines)
 
-    if cmd == "/abilita_task":
-        ok, before, after = _set_all_tasks(True)
+    if cmd in ("/disabilita_task", "/abilita_task"):
+        abilitata = (cmd == "/abilita_task")
+        parts = text.split()
+        if len(parts) < 2:
+            return (
+                f"⚠ Uso: {cmd} &lt;nome_task&gt;  (es. {cmd} arena)\n"
+                "Usa /task per vedere la lista dei task e il loro stato."
+            )
+        nome_task = parts[1].lower()
+        ov_now = _read_runtime_overrides()
+        task_dict = ov_now.get("globali", {}).get("task", {})
+        if nome_task not in task_dict:
+            validi = ", ".join(sorted(task_dict))
+            return f"⚠ Task '<b>{nome_task}</b>' non trovato.\nTask disponibili: {validi}"
+        if task_dict[nome_task] == abilitata:
+            stato_str = "già abilitato" if abilitata else "già disabilitato"
+            return f"ℹ️ Task <b>{nome_task}</b> {stato_str}."
+        ok, _, _ = _set_task(nome_task, abilitata)
         if not ok:
             return "⚠ Errore scrittura runtime_overrides.json"
-        erano_off = sorted(k for k, v in before.items() if not v)
-        if not erano_off:
-            return "🟢 Tutti i task erano già abilitati — nessuna modifica."
-        lista = "\n".join(f"  🟢 {t}" for t in erano_off)
-        return (
-            f"🟢 <b>Tutti i task abilitati</b> ({len(erano_off)} task riattivati)\n\n"
-            f"{lista}\n\n"
-            "Effetto al prossimo tick del bot."
-        )
+        icona = "🟢" if abilitata else "🔴"
+        stato = "abilitato" if abilitata else "disabilitato"
+        return f"{icona} Task <b>{nome_task}</b> {stato}.\nEffetto al prossimo tick del bot."
 
     if cmd == "/avvia_bot":
         if _check_bot_running():
