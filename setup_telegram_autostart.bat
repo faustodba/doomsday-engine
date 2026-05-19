@@ -2,11 +2,12 @@
 :: ============================================================
 ::  Doomsday Engine V6 — Setup avvio automatico Telegram Bot
 ::
-::  Registra il Telegram bot nel Task Scheduler di Windows:
-::  - Trigger: all'avvio del sistema (onstart) — NO login richiesto
-::  - Delay:   60 secondi dopo l'avvio (attende rete)
-::  - Utente:  SYSTEM (processo in background, sempre attivo)
-::  - Restart: automatico su fallimento (ogni 30s, max 3 volte)
+::  Crea il task in \DoomsDayScheduler\DoomsdayTelegramBot con:
+::  - Trigger:   avvio sistema (onstart) — NO login richiesto
+::  - Delay:     60 secondi dopo l'avvio
+::  - Utente:    Fausto (S4U — no password, accesso risorse locali)
+::  - Privilegi: massimi (RunLevel Highest)
+::  - Restart:   automatico su crash (3x ogni 1 min)
 ::
 ::  ESEGUIRE UNA SOLA VOLTA come amministratore.
 ::  Per rimuovere:  setup_telegram_autostart.bat --remove
@@ -14,17 +15,17 @@
 setlocal
 
 set TASK_NAME=DoomsdayTelegramBot
+set TASK_PATH=\DoomsDayScheduler\
 set BAT_PATH=C:\doomsday-engine-prod\run_telegram_prod.bat
 
 if "%1"=="--remove" goto remove
 
 echo.
-echo === Registrazione Task Scheduler: %TASK_NAME% ===
+echo === Registrazione Task Scheduler: %TASK_PATH%%TASK_NAME% ===
 echo Bat: %BAT_PATH%
-echo Utente: SYSTEM (avvio senza login)
+echo Utente: Fausto (S4U - no login richiesto)
 echo.
 
-:: Verifica che il bat esista
 if not exist "%BAT_PATH%" (
     echo ERRORE: %BAT_PATH% non trovato.
     echo Esegui prima sync_prod.bat per copiare i file in produzione.
@@ -32,44 +33,45 @@ if not exist "%BAT_PATH%" (
     exit /b 1
 )
 
-:: Crea il task (onstart, delay 1 min, utente SYSTEM, no login richiesto)
-schtasks /create ^
-    /tn "%TASK_NAME%" ^
-    /tr "\"%BAT_PATH%\"" ^
-    /sc onstart ^
-    /delay 0001:00 ^
-    /ru SYSTEM ^
-    /f
+powershell -NoProfile -ExecutionPolicy Bypass -Command ^
+    "$action   = New-ScheduledTaskAction -Execute '%BAT_PATH%' -WorkingDirectory 'C:\doomsday-engine-prod';" ^
+    "$trigger  = New-ScheduledTaskTrigger -AtStartup;" ^
+    "$trigger.Delay = 'PT1M';" ^
+    "$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable $true;" ^
+    "$principal = New-ScheduledTaskPrincipal -UserId 'Fausto' -LogonType S4U -RunLevel Highest;" ^
+    "Register-ScheduledTask -TaskName '%TASK_NAME%' -TaskPath '%TASK_PATH%' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force;" ^
+    "Write-Output 'Task registrato OK'"
 
 if %ERRORLEVEL% NEQ 0 (
     echo.
-    echo ERRORE nella creazione del task. Riprova come amministratore.
+    echo ERRORE. Assicurati di eseguire come amministratore.
     pause
     exit /b 1
 )
 
 echo.
 echo === Task creato con successo ===
+echo Percorso: %TASK_PATH%%TASK_NAME%
 echo Il Telegram bot si avviera' automaticamente al prossimo avvio del PC.
-echo NON richiede login utente (gira come SYSTEM).
+echo NON richiede login utente.
 echo.
-echo Per avviarlo subito senza riavviare:
-echo   schtasks /run /tn "%TASK_NAME%"
+echo Per avviarlo subito:
+echo   schtasks /run /tn "%TASK_PATH%%TASK_NAME%"
 echo.
-echo Per verificare lo stato:
-echo   schtasks /query /tn "%TASK_NAME%" /fo LIST
+echo Per verificare:
+echo   schtasks /query /tn "%TASK_PATH%%TASK_NAME%" /fo LIST
 echo.
 pause
 exit /b 0
 
 :remove
 echo.
-echo === Rimozione Task Scheduler: %TASK_NAME% ===
-schtasks /delete /tn "%TASK_NAME%" /f
+echo === Rimozione: %TASK_PATH%%TASK_NAME% ===
+schtasks /delete /tn "%TASK_PATH%%TASK_NAME%" /f
 if %ERRORLEVEL% EQU 0 (
-    echo Task rimosso con successo.
+    echo Task rimosso.
 ) else (
-    echo Task non trovato o errore durante la rimozione.
+    echo Task non trovato o errore.
 )
 echo.
 pause
