@@ -281,54 +281,133 @@ def _read_instances_cfg() -> list:
     return []
 
 
-def _build_istanze() -> str:
-    """Risposta al comando /istanze — lista completa con stato ON/OFF e istanza live."""
-    instances = _read_instances_cfg()
-    ov        = _read_runtime_overrides()
-    es        = _read_engine_status()
+def _read_all_last_metrics() -> dict[str, dict]:
+    """Ritorna {nome: ultimo_record} da istanza_metrics.jsonl."""
+    p = _root() / "data" / "istanza_metrics.jsonl"
+    last: dict[str, dict] = {}
+    try:
+        if p.exists():
+            for line in p.read_text(encoding="utf-8").splitlines():
+                try:
+                    r = json.loads(line)
+                    nome = r.get("instance", "")
+                    if nome:
+                        last[nome] = r
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return last
 
-    ist_ov     = ov.get("istanze", {})
-    ist_status = es.get("istanze", {}) if es else {}
-    ciclo_n    = es.get("ciclo", "?") if es else "?"
+
+def _parse_dt(ts: str) -> Optional[datetime]:
+    try:
+        dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt
+    except Exception:
+        return None
+
+
+def _build_istanze() -> str:
+    """Risposta al comando /istanze.
+
+    Mostra modalità adaptive scheduler, ordina le istanze per sequenza
+    di ultima esecuzione, indica l'istanza LIVE e il tempo dall'ultima run.
+    Funziona anche con bot spento (dati da istanza_metrics.jsonl).
+    """
+    instances   = _read_instances_cfg()
+    ov          = _read_runtime_overrides()
+    es          = _read_engine_status()
+    all_metrics = _read_all_last_metrics()
 
     if not instances:
         return "⚠ instances.json non disponibile"
 
-    lines: list[str] = [f"<b>Istanze</b> — ciclo #{ciclo_n}", ""]
+    ist_ov     = ov.get("istanze", {})
+    ist_status = es.get("istanze", {}) if es else {}
+    ciclo_n    = es.get("ciclo", "?") if es else "?"
+    now        = datetime.now(timezone.utc)
 
-    for cfg in instances:
-        nome = cfg.get("nome", "?")
-        ov_i = ist_ov.get(nome, {})
+    # Modalità adaptive scheduler
+    glob_ov  = ov.get("globali", {})
+    adapt_on = bool(glob_ov.get("adaptive_scheduler_enabled", False))
+    shadow   = bool(glob_ov.get("adaptive_scheduler_shadow_only", True))
+    if adapt_on and not shadow:
+        mode_str = "🎯 Adaptive LIVE"
+    elif adapt_on and shadow:
+        mode_str = "👁 Adaptive SHADOW"
+    else:
+        mode_str = "📋 Sequenza fissa"
 
-        # abilitata: dynamic override prevale su static
+    # Ciclo corrente start time per distinguere "già eseguita" da "attesa"
+    ciclo_start: Optional[datetime] = None
+    cicli = _read_cicli()
+    if cicli:
+        ultimo_ciclo = sorted(cicli, key=lambda c: c.get("start_ts", ""), reverse=True)[0]
+        ciclo_start = _parse_dt(ultimo_ciclo.get("start_ts", ""))
+
+    # Istanza live
+    live_nome = next(
+        (nome for nome, st in ist_status.items() if st.get("stato") == "running"),
+        None,
+    )
+
+    # Ordina per timestamp ultima esecuzione (ascending = ordine esecuzione nel ciclo)
+    def _sort_key(cfg: dict) -> str:
+        nome = cfg.get("nome", "")
+        mx   = all_metrics.get(nome, {})
+        return mx.get("ts", "1970-01-01T00:00:00")
+
+    ordered = sorted(instances, key=_sort_key)
+
+    # Header
+    bot_on = _check_bot_running()
+    bot_str = "🟢 bot attivo" if bot_on else "🔴 bot spento"
+    lines: list[str] = [
+        f"<b>Istanze</b> — ciclo #{ciclo_n} | {mode_str} | {bot_str}",
+        "",
+    ]
+
+    for idx, cfg in enumerate(ordered, 1):
+        nome     = cfg.get("nome", "")
+        ov_i     = ist_ov.get(nome, {})
         abilitata = ov_i.get("abilitata", cfg.get("abilitata", True))
         tipologia = ov_i.get("tipologia", cfg.get("profilo", "full"))
-
-        # stato live da engine_status
-        st     = ist_status.get(nome, {})
-        stato  = st.get("stato", "")          # "running" | "idle" | ""
-        task_c = st.get("task_corrente")      # task in esecuzione ora
-        outcome = st.get("last_outcome", "")  # "ok" | "cascade" | "abort"
-
-        # icone
-        on_icon  = "🟢" if abilitata else "🔴"
         tip_short = {"raccolta_fast": "fast", "raccolta_only": "solo-racc"}.get(tipologia, tipologia)
+        on_icon   = "🟢" if abilitata else "🔴"
 
-        if stato == "running":
-            task_str = f" — <b>▶ LIVE</b>" + (f" ({task_c})" if task_c else "")
-        elif outcome == "ok":
-            invii = st.get("raccolta_last_invii", "")
-            task_str = f" — ✓" + (f" {invii}m" if invii else "")
-        elif outcome == "cascade":
-            task_str = " — ⚡cascade"
-        elif outcome == "abort":
-            task_str = " — ✗abort"
-        elif not abilitata:
-            task_str = ""
+        # Ultima esecuzione da metrics
+        mx         = all_metrics.get(nome, {})
+        mx_ts      = _parse_dt(mx.get("ts", "")) if mx else None
+        mx_outcome = mx.get("outcome", "") if mx else ""
+        out_icon   = {"ok": "✓", "cascade": "⚡", "abort": "✗"}.get(mx_outcome, "—")
+
+        # Tempo fa
+        if mx_ts:
+            ago_s   = int((now - mx_ts).total_seconds())
+            ago_str = _fmt_dur(ago_s) + " fa"
         else:
-            task_str = " — attesa"
+            ago_str = "mai"
 
-        lines.append(f"{on_icon} <b>{nome}</b> [{tip_short}]{task_str}")
+        # Stato: LIVE | già eseguita questo ciclo | attesa | bot off
+        st = ist_status.get(nome, {})
+        if nome == live_nome:
+            task_c    = st.get("task_corrente")
+            stato_str = "<b>▶ LIVE</b>" + (f" ({task_c})" if task_c else "")
+        elif bot_on and ciclo_start and mx_ts and mx_ts >= ciclo_start:
+            stato_str = f"{out_icon} questo ciclo"
+        elif bot_on:
+            stato_str = "⏳ attesa"
+        else:
+            stato_str = f"{out_icon} {ago_str}"
+
+        lines.append(
+            f"{idx:2}. {on_icon} <b>{nome}</b> [{tip_short}]"
+            f"  {stato_str}"
+            + (f"  <i>({ago_str})</i>" if nome == live_nome or (bot_on and ciclo_start and mx_ts and mx_ts >= ciclo_start) else "")
+        )
 
     return "\n".join(lines)
 
