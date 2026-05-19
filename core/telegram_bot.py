@@ -189,38 +189,44 @@ def _build_status() -> str:
         lines.append("⏸ <b>MAINTENANCE MODE</b> attivo")
         lines.append(f"  Motivo: {maint.get('motivo', '—')}")
 
-    # Engine status
+    # Engine status — rileva se bot è fermo (stale > 10 min)
     es = _read_engine_status()
+    _BOT_STALE_S = 600  # 10 minuti senza aggiornamento = bot fermo
     if not es:
-        lines.append("⚠ engine_status.json non disponibile (bot fermo?)")
+        lines.append("🔴 <b>Bot: SPENTO</b> (engine_status.json assente)")
     else:
-        ts = es.get("ts_update", "—")
-        if ts and ts != "—":
+        ts_raw = es.get("ts_update", "")
+        ago_s: int = 0
+        ts_str = "—"
+        if ts_raw:
             try:
-                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
                 ago_s = int((datetime.now(timezone.utc) - dt).total_seconds())
-                ts = f"{_fmt_dur(ago_s)} fa"
+                ts_str = _fmt_dur(ago_s)
             except Exception:
                 pass
-        lines.append(f"Aggiornato: {ts}")
 
-        # Ciclo corrente
-        cicli = _read_cicli()
-        if cicli:
-            ultimo = sorted(cicli, key=lambda c: c.get("start_ts", ""), reverse=True)[0]
-            n = ultimo.get("cycle_n", "?")
-            start = ultimo.get("start_ts", "")
-            if start:
-                try:
-                    dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
-                    dur = (datetime.now(timezone.utc) - dt).total_seconds()
-                    lines.append(f"Ciclo #{n} in corso da {_fmt_dur(dur)}")
-                except Exception:
-                    lines.append(f"Ciclo #{n}")
-            else:
-                lines.append(f"Ciclo #{n}")
+        if ago_s > _BOT_STALE_S:
+            lines.append(f"🔴 <b>Bot: SPENTO</b> (ultimo aggiornamento {ts_str} fa)")
+        else:
+            lines.append(f"🟢 <b>Bot: ATTIVO</b> (aggiornato {ts_str} fa)")
 
-        # Istanze attive
+        # Ciclo corrente (solo se bot attivo)
+        if ago_s <= _BOT_STALE_S:
+            cicli = _read_cicli()
+            if cicli:
+                ultimo = sorted(cicli, key=lambda c: c.get("start_ts", ""), reverse=True)[0]
+                n = ultimo.get("cycle_n", "?")
+                start = ultimo.get("start_ts", "")
+                if start:
+                    try:
+                        dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+                        dur = (datetime.now(timezone.utc) - dt).total_seconds()
+                        lines.append(f"Ciclo #{n} in corso da {_fmt_dur(dur)}")
+                    except Exception:
+                        lines.append(f"Ciclo #{n}")
+
+        # Istanze (sempre mostrate — dati su disco persistono)
         istanze_st = es.get("istanze", {})
         n_tot = len(istanze_st)
         n_ok = sum(1 for v in istanze_st.values() if v.get("abilitata", True))

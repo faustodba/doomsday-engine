@@ -1101,18 +1101,6 @@ def main():
     except Exception as _exc:
         _log("MAIN", f"[WARN] notifier init: {_exc}")
 
-    # WU-Telegram — avvia polling bot Telegram in background (best-effort).
-    # Il bot rimane in standby se telegram.enabled=false e si attiva a caldo
-    # quando l'utente abilita da config (hot-reload ogni 10s nel loop).
-    try:
-        from core.telegram_bot import start as _tg_start, stop as _tg_stop
-        import atexit
-        if _tg_start():
-            _log("MAIN", "[TG-BOT] avviato")
-            atexit.register(lambda: _tg_stop(timeout_s=3))
-    except Exception as _exc:
-        _log("MAIN", f"[WARN] telegram_bot init: {_exc}")
-
     tasks_cls = _import_tasks()
     _log("MAIN", f"Task: {list(tasks_cls.keys())}")
 

@@ -188,10 +188,26 @@ async def lifespan(app: FastAPI):
     # Avvia background task predictor recorder
     global _predictor_recorder_task
     _predictor_recorder_task = asyncio.create_task(_predictor_recorder_loop())
+    # WU-Telegram — avvia thread polling Telegram dalla dashboard (processo
+    # indipendente dal bot main.py). Rimane attivo anche a bot spento.
+    # Legge engine_status.json e state/*.json su disco → risponde ai comandi
+    # con dati aggiornati indipendentemente dallo stato del bot.
+    try:
+        from core.telegram_bot import start as _tg_start
+        if _tg_start():
+            print(f"[DASHBOARD] Telegram bot avviato (thread indipendente dal bot)")
+    except Exception as _exc:
+        print(f"[DASHBOARD] [WARN] telegram_bot init: {_exc}")
     yield
     print(f"[DASHBOARD] {_ts()} shutdown.")
     if _predictor_recorder_task and not _predictor_recorder_task.done():
         _predictor_recorder_task.cancel()
+    # Stop Telegram bot thread
+    try:
+        from core.telegram_bot import stop as _tg_stop
+        _tg_stop(timeout_s=3)
+    except Exception:
+        pass
 
 
 # ==============================================================================
