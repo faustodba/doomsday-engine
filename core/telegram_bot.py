@@ -87,10 +87,10 @@ def _tg_enabled() -> bool:
     return bool(_tg_config().get("enabled", False))
 
 
-def _set_messaggi_enabled(enabled: bool) -> bool:
-    """Scrive telegram.enabled in runtime_overrides.json (DYNAMIC, hot-reload).
+def _patch_runtime(patch_fn) -> bool:
+    """Legge runtime_overrides.json, applica patch_fn(ov: dict) e riscrive atomicamente.
 
-    Ritorna True se scrittura OK.
+    Ritorna True se OK.
     """
     try:
         ov_path = _root() / "config" / "runtime_overrides.json"
@@ -98,15 +98,62 @@ def _set_messaggi_enabled(enabled: bool) -> bool:
             ov = json.loads(ov_path.read_text(encoding="utf-8")) if ov_path.exists() else {}
         except Exception:
             ov = {}
-        tg = ov.setdefault("globali", {}).setdefault("notifications", {}).setdefault("telegram", {})
-        tg["enabled"] = enabled
+        patch_fn(ov)
         tmp = ov_path.with_suffix(ov_path.suffix + ".tmp")
         tmp.write_text(json.dumps(ov, ensure_ascii=False, indent=2), encoding="utf-8")
         os.replace(tmp, ov_path)
         return True
     except Exception as exc:
-        _log.warning("[TG-BOT] _set_messaggi_enabled fallito: %s", exc)
+        _log.warning("[TG-BOT] _patch_runtime fallito: %s", exc)
         return False
+
+
+def _set_messaggi_enabled(enabled: bool) -> bool:
+    """Scrive telegram.enabled in runtime_overrides.json (DYNAMIC, hot-reload).
+
+    Ritorna True se scrittura OK.
+    """
+    def patch(ov):
+        ov.setdefault("globali", {}).setdefault("notifications", {}).setdefault("telegram", {})["enabled"] = enabled
+    return _patch_runtime(patch)
+
+
+def _set_istanza_abilitata(nome: str, abilitata: bool) -> tuple[bool, str]:
+    """Imposta abilitata per l'istanza in runtime_overrides.json.
+
+    Ritorna (ok, messaggio_errore_o_nome_canonico).
+    """
+    instances = _read_instances_cfg()
+    nomi_validi = {c["nome"].upper() for c in instances}
+    nome_up = nome.upper()
+    if nome_up not in nomi_validi:
+        suggerito = ", ".join(sorted(nomi_validi))
+        return False, f"istanza '{nome}' non trovata.\nDisponibili: {suggerito}"
+
+    def patch(ov):
+        ov.setdefault("istanze", {}).setdefault(nome_up, {})["abilitata"] = abilitata
+
+    ok = _patch_runtime(patch)
+    return ok, nome_up
+
+
+def _set_all_tasks(enabled: bool) -> tuple[bool, dict, dict]:
+    """Imposta tutti i task in globali.task a enabled.
+
+    Ritorna (ok, stato_prima, stato_dopo).
+    """
+    before: dict = {}
+    after:  dict = {}
+
+    def patch(ov):
+        task_dict = ov.setdefault("globali", {}).setdefault("task", {})
+        before.update(task_dict)
+        for k in list(task_dict):
+            task_dict[k] = enabled
+        after.update(task_dict)
+
+    ok = _patch_runtime(patch)
+    return ok, before, after
 
 
 def _notify_cycle_every_n() -> int:
@@ -613,6 +660,14 @@ def _handle_command(text: str, chat_id: str) -> str:
             "/stop — attiva maintenance mode (bot in pausa)\n"
             "/avvia — disattiva maintenance mode (bot riprende)\n"
             "\n"
+            "<b>Istanze</b>\n"
+            "/disabilita FAU_03 — disabilita istanza (hot-reload)\n"
+            "/abilita FAU_03 — abilita istanza (hot-reload)\n"
+            "\n"
+            "<b>Task globali</b>\n"
+            "/disabilita_task — disabilita tutti i task (hot-reload)\n"
+            "/abilita_task — abilita tutti i task (hot-reload)\n"
+            "\n"
             f"<b>Notifiche proattive</b> (ora: {msg_icon})\n"
             "/stop_messaggi — disabilita notifiche automatiche\n"
             "/start_messaggi — abilita notifiche automatiche\n"
@@ -679,6 +734,48 @@ def _handle_command(text: str, chat_id: str) -> str:
         if ok:
             return "🔔 Notifiche proattive abilitate.\nRiceverai: ciclo completato, cascade ADB, DRL saturo, daily report."
         return "⚠ Errore durante l'abilitazione. Controlla i log."
+
+    if cmd in ("/disabilita", "/abilita"):
+        abilitata = (cmd == "/abilita")
+        parts = text.split()
+        if len(parts) < 2:
+            return f"⚠ Uso: {cmd} NOME_ISTANZA  (es. {cmd} FAU_03)"
+        nome = parts[1]
+        ok, msg = _set_istanza_abilitata(nome, abilitata)
+        if not ok:
+            return f"⚠ {msg}"
+        icona = "🟢" if abilitata else "🔴"
+        stato = "abilitata" if abilitata else "disabilitata"
+        return f"{icona} Istanza <b>{msg}</b> {stato}.\nEffetto al prossimo tick del bot."
+
+    if cmd == "/disabilita_task":
+        ok, before, after = _set_all_tasks(False)
+        if not ok:
+            return "⚠ Errore scrittura runtime_overrides.json"
+        erano_on = sorted(k for k, v in before.items() if v)
+        if not erano_on:
+            return "⚠ Nessun task era abilitato — nessuna modifica."
+        lista = "\n".join(f"  🔴 {t}" for t in erano_on)
+        return (
+            f"🔴 <b>Tutti i task disabilitati</b> ({len(erano_on)} task OFF)\n\n"
+            f"{lista}\n\n"
+            "Effetto al prossimo tick del bot.\n"
+            "Usa /abilita_task per ripristinare."
+        )
+
+    if cmd == "/abilita_task":
+        ok, before, after = _set_all_tasks(True)
+        if not ok:
+            return "⚠ Errore scrittura runtime_overrides.json"
+        erano_off = sorted(k for k, v in before.items() if not v)
+        if not erano_off:
+            return "🟢 Tutti i task erano già abilitati — nessuna modifica."
+        lista = "\n".join(f"  🟢 {t}" for t in erano_off)
+        return (
+            f"🟢 <b>Tutti i task abilitati</b> ({len(erano_off)} task riattivati)\n\n"
+            f"{lista}\n\n"
+            "Effetto al prossimo tick del bot."
+        )
 
     if cmd == "/avvia_bot":
         if _check_bot_running():
