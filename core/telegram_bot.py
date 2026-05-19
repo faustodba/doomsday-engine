@@ -954,6 +954,48 @@ def _notify_startup() -> None:
     _send_system_alert("\n".join(lines))
 
 
+# ─── Instance lock (evita doppio polling → errore 409) ───────────────────────
+
+_PID_FILE: Optional[Path] = None
+
+
+def _acquire_lock() -> bool:
+    """Scrive data/telegram_bot.pid. Ritorna False se un'altra istanza è attiva."""
+    global _PID_FILE
+    pid_path = _root() / "data" / "telegram_bot.pid"
+    my_pid   = os.getpid()
+
+    if pid_path.exists():
+        try:
+            old_pid = int(pid_path.read_text(encoding="utf-8").strip())
+            if old_pid != my_pid:
+                import subprocess
+                r = subprocess.run(
+                    ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                     f"(Get-Process -Id {old_pid} -ErrorAction SilentlyContinue) -ne $null"],
+                    capture_output=True, text=True, timeout=5,
+                )
+                if r.stdout.strip() == "True":
+                    _log.warning("[TG-BOT] Altra istanza in esecuzione (PID %d) — uscita per evitare 409.", old_pid)
+                    return False
+                _log.info("[TG-BOT] PID file stale (PID %d) — sovrascrittura.", old_pid)
+        except Exception:
+            pass
+
+    pid_path.parent.mkdir(parents=True, exist_ok=True)
+    pid_path.write_text(str(my_pid), encoding="utf-8")
+    _PID_FILE = pid_path
+    return True
+
+
+def _release_lock() -> None:
+    if _PID_FILE and _PID_FILE.exists():
+        try:
+            _PID_FILE.unlink()
+        except Exception:
+            pass
+
+
 # ─── Entry point standalone ────────────────────────────────────────────────────
 
 if __name__ == "__main__":
@@ -982,6 +1024,11 @@ if __name__ == "__main__":
 
     _log.info("=== Telegram bot service avviato (standalone, root=%s) ===", _root())
 
+    # Lock istanza singola — previene doppio polling (errore 409)
+    if not _acquire_lock():
+        _log.error("[TG-BOT] Uscita: istanza già in esecuzione.")
+        sys.exit(1)
+
     _svc_stop = threading.Event()
 
     def _on_signal(sig, frame):
@@ -1004,4 +1051,5 @@ if __name__ == "__main__":
 
     _svc_stop.wait()   # blocca fino a SIGINT / SIGTERM
     stop(timeout_s=5)
+    _release_lock()
     _log.info("=== Telegram bot service terminato ===")
