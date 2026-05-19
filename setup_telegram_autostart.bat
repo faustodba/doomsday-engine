@@ -43,7 +43,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$action   = New-ScheduledTaskAction -Execute '%BAT_PATH%' -WorkingDirectory 'C:\doomsday-engine-prod';" ^
     "$trigger  = New-ScheduledTaskTrigger -AtLogOn -User 'Fausto';" ^
     "$trigger.Delay = 'PT1M';" ^
-    "$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable $true;" ^
+    "$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Seconds 0) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable;" ^
     "$principal = New-ScheduledTaskPrincipal -UserId 'Fausto' -LogonType Interactive -RunLevel Highest;" ^
     "Register-ScheduledTask -TaskName '%TASK_NAME%' -TaskPath '%TASK_PATH%' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force;" ^
     "Write-Output 'Task registrato OK'"
