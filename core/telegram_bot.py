@@ -959,22 +959,20 @@ _BAT_DASHBOARD  = _ROOT_PROD / "run_dashboard_prod.bat"
 def _launch_bat(bat_path: Path, label: str) -> tuple[bool, str]:
     """Lancia un bat file in una nuova finestra console indipendente.
 
-    Usa 'cmd /c start' per garantire che il .bat sia eseguito correttamente
-    anche quando Python non ha shell=True (Task Scheduler, processo standalone).
+    Usa CREATE_NEW_CONSOLE invece di 'cmd /c start' perché la forma list[]
+    di subprocess causa double-escaping delle virgolette nel titolo, portando
+    cmd.exe a misparsare gli argomenti e ignorare silenziosamente il bat.
     """
     import subprocess
     if not bat_path.exists():
         return False, f"{bat_path.name} non trovato in {bat_path.parent}"
     try:
-        # cmd /c start apre una nuova finestra console indipendente.
-        # Il titolo è il label (primo argomento di start con virgolette).
-        proc = subprocess.Popen(
-            ["cmd", "/c", "start", f'"{label}"', str(bat_path)],
+        subprocess.Popen(
+            ["cmd", "/c", str(bat_path)],
+            creationflags=subprocess.CREATE_NEW_CONSOLE,
+            cwd=str(bat_path.parent),
             close_fds=True,
         )
-        proc.wait(timeout=2)  # cmd /c start ritorna subito (non aspetta il bat)
-        return True, f"console aperta ('{label}')"
-    except subprocess.TimeoutExpired:
         return True, f"console aperta ('{label}')"
     except Exception as exc:
         return False, str(exc)
