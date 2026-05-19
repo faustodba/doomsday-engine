@@ -154,6 +154,30 @@ def _read_cicli() -> list:
     return d.get("cicli", [])
 
 
+def _read_last_metrics(instance: str) -> dict:
+    """Ultimo record istanza_metrics.jsonl per l'istanza specificata."""
+    p = _root() / "data" / "istanza_metrics.jsonl"
+    last: dict = {}
+    try:
+        if p.exists():
+            tag = f'"{instance}"'
+            for line in p.read_text(encoding="utf-8").splitlines():
+                if tag in line:
+                    try:
+                        last = json.loads(line)
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+    return last
+
+
+def _read_truppe_storico(instance: str) -> list:
+    p = _root() / "data" / "storico_truppe.json"
+    d = _read_json_safe(p)
+    return d.get(instance, [])
+
+
 def _maintenance_info() -> Optional[dict]:
     try:
         from core.maintenance import get_maintenance_info
@@ -360,6 +384,131 @@ def _build_rifornimento() -> str:
     return "\n".join(lines)
 
 
+def _build_istanza_detail(nome: str) -> str:
+    """Risposta al comando /istanza XXX — card dettaglio singola istanza."""
+    # Config
+    instances = _read_instances_cfg()
+    cfg_map      = {c["nome"]: c for c in instances}
+    cfg_map_low  = {k.lower(): k for k in cfg_map}
+    nome_resolved = cfg_map_low.get(nome.lower())
+    if not nome_resolved:
+        available = ", ".join(sorted(cfg_map.keys()))
+        return f"⚠ Istanza <code>{nome}</code> non trovata.\nDisponibili: {available}"
+    nome = nome_resolved
+
+    cfg = cfg_map[nome]
+    ov  = _read_runtime_overrides()
+    ov_i = ov.get("istanze", {}).get(nome, {})
+
+    abilitata = ov_i.get("abilitata", cfg.get("abilitata", True))
+    tipologia = ov_i.get("tipologia", cfg.get("profilo", "full"))
+    max_sq    = ov_i.get("max_squadre", cfg.get("max_squadre", "?"))
+    livello   = ov_i.get("livello", cfg.get("livello", "?"))
+
+    on_icon   = "🟢" if abilitata else "🔴"
+    tip_short = {"raccolta_fast": "fast", "raccolta_only": "solo-racc"}.get(tipologia, tipologia)
+
+    lines: list[str] = [
+        f"{on_icon} <b>{nome}</b> [{tip_short}]  sq={max_sq}  lv={livello}"
+    ]
+
+    # Stato live da engine_status
+    es       = _read_engine_status()
+    ist_live = (es.get("istanze", {}) if es else {}).get(nome, {})
+    stato    = ist_live.get("stato", "")
+    task_c   = ist_live.get("task_corrente")
+    if stato == "running":
+        lines.append("▶ <b>LIVE</b>" + (f" — {task_c}" if task_c else ""))
+
+    # Ultimo ciclo da istanza_metrics
+    mx = _read_last_metrics(nome)
+    if mx:
+        outcome   = mx.get("outcome", "")
+        boot_s    = mx.get("boot_home_s", 0)
+        tick_s    = mx.get("tick_total_s", 0)
+        out_icon  = {"ok": "✓", "cascade": "⚡", "abort": "✗"}.get(outcome, "—")
+        lines.append(
+            f"\n🔄 <b>Ultimo ciclo</b>: {out_icon} {outcome}"
+            + (f"  durata {_fmt_dur(tick_s)}" if tick_s else "")
+            + (f"  boot {_fmt_dur(boot_s)}" if boot_s else "")
+        )
+
+        # Raccolta
+        racc = mx.get("raccolta", {})
+        invii_list = racc.get("invii", [])
+        n_invii   = len(invii_list)
+        att_pre   = racc.get("attive_pre", "?")
+        att_post  = racc.get("attive_post", "?")
+        tot       = racc.get("totali", "?")
+        if n_invii or att_pre != "?":
+            tipi = {}
+            for inv in invii_list:
+                t = inv.get("tipo", "?")
+                tipi[t] = tipi.get(t, 0) + 1
+            tipi_str = " ".join(f"{v}×{k}" for k, v in tipi.items()) if tipi else "0 marce"
+            lines.append(
+                f"\n📦 <b>Raccolta</b>: {n_invii} marce  [{tipi_str}]"
+                f"\n   slot: {att_pre}→{att_post}/{tot}"
+            )
+
+        # Task durations
+        td = mx.get("task_durations_s", {})
+        if td:
+            sorted_td = sorted(td.items(), key=lambda x: -x[1])[:6]
+            td_str = "  ".join(f"{k} {_fmt_dur(v)}" for k, v in sorted_td)
+            lines.append(f"\n⏱ <b>Task</b>: {td_str}")
+
+    # Rifornimento da state
+    st  = _read_state(nome)
+    rif = st.get("rifornimento", {})
+    sped = rif.get("spedizioni_oggi", 0)
+    if sped or nome != "FauMorfeus":
+        inv_oggi = rif.get("inviato_oggi", {})
+        _RES = [("pomodoro","🍅"),("legno","🪵"),("acciaio","⚙"),("petrolio","🛢")]
+        tot_m = sum(inv_oggi.values()) / 1e6 if inv_oggi else 0
+        res_str = "  ".join(
+            f"{icon}{v/1e6:.1f}M" for r, icon in _RES
+            if (v := inv_oggi.get(r, 0)) > 0
+        ) if inv_oggi else "—"
+        prov = rif.get("provviste_residue", -1)
+        prov_str = f"  provviste {prov/1e6:.1f}M" if prov >= 0 else ""
+        lines.append(
+            f"\n🚚 <b>Rifornimento</b>: {sped} sped  {tot_m:.1f}M netti{prov_str}"
+            + (f"\n   {res_str}" if res_str != "—" else "")
+        )
+
+    # Arena
+    arena = st.get("arena", {})
+    if arena:
+        esaurite = arena.get("esaurite", False)
+        lines.append(f"\n🏟 <b>Arena</b>: {'✓ esaurita' if esaurite else '⏳ disponibile'}")
+
+    # Truppe
+    tr_list = _read_truppe_storico(nome)
+    if tr_list:
+        last_tr = tr_list[-1]
+        squads  = last_tr.get("total_squads", 0)
+        delta   = 0
+        if len(tr_list) >= 2:
+            delta = squads - tr_list[-2].get("total_squads", squads)
+        delta_str = f"  Δ{delta:+,}" if delta else ""
+        lines.append(f"\n🪖 <b>Truppe</b>: {squads:,}{delta_str}")
+
+    # Produzione/ora da metrics state
+    met = st.get("metrics", {})
+    _RES_KEYS = [("pomodoro","🍅"),("legno","🪵"),("acciaio","⚙"),("petrolio","🛢")]
+    prod_parts = []
+    for r, icon in _RES_KEYS:
+        val = met.get(f"{r}_per_ora", 0)
+        if val and abs(val) > 100:
+            sign = "+" if val > 0 else ""
+            prod_parts.append(f"{icon}{sign}{val/1e3:.0f}K/h")
+    if prod_parts:
+        lines.append(f"\n📈 <b>Prod/h</b>: {' '.join(prod_parts)}")
+
+    return "\n".join(lines)
+
+
 # ─── Command dispatcher ───────────────────────────────────────────────────────
 
 def _handle_command(text: str, chat_id: str) -> str:
@@ -375,7 +524,8 @@ def _handle_command(text: str, chat_id: str) -> str:
             "\n"
             "<b>Informazioni</b>\n"
             "/status — stato completo (bot, dashboard, ciclo, DRL)\n"
-            "/istanze — dettaglio per istanza (tipologia, invii)\n"
+            "/istanze — lista istanze ON/OFF con istanza live\n"
+            "/istanza FAU_03 — card dettaglio singola istanza\n"
             "/rifornimento — DRL master FauMorfeus + spedizioni oggi\n"
             "\n"
             f"<b>Avvio sistema</b> (bot {bot_icon}  dashboard {dash_icon})\n"
@@ -411,6 +561,16 @@ def _handle_command(text: str, chat_id: str) -> str:
             return _build_rifornimento()
         except Exception as exc:
             return f"⚠ Errore /rifornimento: {exc}"
+
+    if cmd == "/istanza":
+        parts = text.split()
+        if len(parts) < 2:
+            return "⚠ Uso: /istanza NOME  (es. /istanza FAU_03)"
+        nome = parts[1].upper()
+        try:
+            return _build_istanza_detail(nome)
+        except Exception as exc:
+            return f"⚠ Errore /istanza: {exc}"
 
     if cmd == "/stop":
         try:
