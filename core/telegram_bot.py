@@ -83,7 +83,30 @@ def _tg_config() -> dict:
 
 
 def _tg_enabled() -> bool:
+    """True se le notifiche proattive sono abilitate."""
     return bool(_tg_config().get("enabled", False))
+
+
+def _set_messaggi_enabled(enabled: bool) -> bool:
+    """Scrive telegram.enabled in runtime_overrides.json (DYNAMIC, hot-reload).
+
+    Ritorna True se scrittura OK.
+    """
+    try:
+        ov_path = _root() / "config" / "runtime_overrides.json"
+        try:
+            ov = json.loads(ov_path.read_text(encoding="utf-8")) if ov_path.exists() else {}
+        except Exception:
+            ov = {}
+        tg = ov.setdefault("globali", {}).setdefault("notifications", {}).setdefault("telegram", {})
+        tg["enabled"] = enabled
+        tmp = ov_path.with_suffix(ov_path.suffix + ".tmp")
+        tmp.write_text(json.dumps(ov, ensure_ascii=False, indent=2), encoding="utf-8")
+        os.replace(tmp, ov_path)
+        return True
+    except Exception as exc:
+        _log.warning("[TG-BOT] _set_messaggi_enabled fallito: %s", exc)
+        return False
 
 
 def _notify_cycle_every_n() -> int:
@@ -154,6 +177,11 @@ def _fmt_dur(s: float) -> str:
 def _build_status() -> str:
     """Risposta al comando /status."""
     lines: list[str] = ["<b>Stato Doomsday Engine</b>"]
+
+    # Stato messaggi proattivi (on/off)
+    msg_on = _tg_enabled()
+    lines.append(f"Messaggi: {'🔔 ON' if msg_on else '🔕 OFF'} "
+                 f"({'usa /stop_messaggi per disabilitare' if msg_on else 'usa /start_messaggi per abilitare'})")
 
     # Maintenance mode
     maint = _maintenance_info()
@@ -301,14 +329,24 @@ def _handle_command(text: str, chat_id: str) -> str:
     cmd = text.split()[0].lower().rstrip("@")
 
     if cmd == "/help":
+        msg_icon = "🔔" if _tg_enabled() else "🔕"
         return (
             "<b>Comandi disponibili</b>\n"
-            "/status — stato ciclo e istanze\n"
-            "/istanze — dettaglio per istanza\n"
-            "/rifornimento — DRL master e spedizioni\n"
-            "/stop — attiva maintenance mode\n"
-            "/avvia — disattiva maintenance mode\n"
-            "/help — questa lista"
+            "\n"
+            "<b>Informazioni</b>\n"
+            "/status — stato ciclo, istanze e messaggi\n"
+            "/istanze — dettaglio per istanza (tipologia, invii)\n"
+            "/rifornimento — DRL master FauMorfeus + spedizioni oggi\n"
+            "\n"
+            "<b>Bot management</b>\n"
+            "/stop — attiva maintenance mode (bot in pausa)\n"
+            "/avvia — disattiva maintenance mode (bot riprende)\n"
+            "\n"
+            f"<b>Notifiche proattive</b> (ora: {msg_icon})\n"
+            "/stop_messaggi — disabilita notifiche automatiche\n"
+            "/start_messaggi — abilita notifiche automatiche\n"
+            "\n"
+            "/help — questo messaggio"
         )
 
     if cmd == "/status":
@@ -345,23 +383,45 @@ def _handle_command(text: str, chat_id: str) -> str:
         except Exception as exc:
             return f"⚠ Errore /avvia: {exc}"
 
-    return f"Comando non riconosciuto: {cmd}\nUsa /help per la lista comandi."
+    if cmd == "/stop_messaggi":
+        if not _tg_enabled():
+            return "🔕 Notifiche già disabilitate. Usa /start_messaggi per riattivarle."
+        ok = _set_messaggi_enabled(False)
+        if ok:
+            return "🔕 Notifiche proattive disabilitate.\nUsa /start_messaggi per riattivarle."
+        return "⚠ Errore durante la disabilitazione. Controlla i log."
+
+    if cmd == "/start_messaggi":
+        if _tg_enabled():
+            return "🔔 Notifiche già abilitate. Usa /stop_messaggi per disabilitarle."
+        ok = _set_messaggi_enabled(True)
+        if ok:
+            return "🔔 Notifiche proattive abilitate.\nRiceverai: ciclo completato, cascade ADB, DRL saturo, daily report."
+        return "⚠ Errore durante l'abilitazione. Controlla i log."
+
+    return f"Comando non riconosciuto: <code>{cmd}</code>\nUsa /help per la lista comandi."
 
 
 # ─── Polling loop ─────────────────────────────────────────────────────────────
 
 def _polling_loop(stop: threading.Event) -> None:
+    """Loop polling principale.
+
+    Nota: i comandi sono sempre attivi indipendentemente da `telegram.enabled`.
+    Il flag `enabled` controlla SOLO le notifiche proattive (in _send_notify).
+    Il polling gira se il token è configurato, anche con messaggi OFF.
+    """
     global _update_offset
 
-    from shared.telegram_client import get_updates, send_message, load_chat_id
+    from shared.telegram_client import get_updates, send_message, load_chat_id, has_token
 
     _log.info("[TG-BOT] polling loop avviato")
     authorized_chat = load_chat_id()
 
     while not stop.is_set():
-        if not _tg_enabled():
-            time.sleep(10)
-            # rileggi chat_id in caso sia cambiato
+        # Senza token non possiamo fare niente — attendi che l'utente lo configuri
+        if not has_token():
+            time.sleep(15)
             authorized_chat = load_chat_id()
             continue
 
