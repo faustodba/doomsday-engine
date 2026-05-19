@@ -575,3 +575,46 @@ def notify_daily_report(report_text: str) -> bool:
     available = _MAX_MSG_LEN - len(header)
     body = report_text[:available]
     return _send_notify(header + body)
+
+
+# ─── Entry point standalone ────────────────────────────────────────────────────
+
+if __name__ == "__main__":
+    """Avvio come processo standalone indipendente.
+
+    Usato da run_telegram_prod.bat (auto-restart loop).
+    Logging su stdout + logs/telegram_service.log.
+    Blocca fino a SIGINT/SIGTERM.
+    """
+    import signal
+    import sys
+
+    # Setup logging su stdout + file
+    _logs_dir = _root() / "logs"
+    _logs_dir.mkdir(parents=True, exist_ok=True)
+    _log_file = _logs_dir / "telegram_service.log"
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[
+            logging.StreamHandler(sys.stdout),
+            logging.FileHandler(str(_log_file), encoding="utf-8"),
+        ],
+    )
+
+    _log.info("=== Telegram bot service avviato (standalone, root=%s) ===", _root())
+
+    _svc_stop = threading.Event()
+
+    def _on_signal(sig, frame):
+        _log.info("Segnale %s ricevuto — stop", sig)
+        _svc_stop.set()
+
+    signal.signal(signal.SIGINT,  _on_signal)
+    signal.signal(signal.SIGTERM, _on_signal)
+
+    start()
+    _svc_stop.wait()   # blocca fino a SIGINT / SIGTERM
+    stop(timeout_s=5)
+    _log.info("=== Telegram bot service terminato ===")
