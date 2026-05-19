@@ -44,7 +44,7 @@ _DEFAULTS_FAST: dict = {
     "FAST_DELAY_CERCA":         0.8,   # standard 1.5 (-47%)
     "FAST_DELAY_TAP_NODO":      1.5,   # standard 1.5 (uguale, popup essenziale)
     "FAST_DELAY_RACCOGLI":      0.8,   # standard 0.8 (uguale)
-    "FAST_DELAY_SQUADRA":       1.2,   # standard 1.8 (-33%)
+    "FAST_DELAY_SQUADRA":       2.0,   # WU164: 1.2→2.0 (DELAY UI vincolante: tap apre panel truppe)
     "FAST_DELAY_MARCIA":        1.2,   # standard 1.5 (-20%)
     "FAST_DELAY_POST_MARCIA":   2.5,   # nuovo: stabilizzazione UI post-MARCIA
     "FAST_RECOVERY_RETRY":      1,     # max 1 retry recovery per marcia
