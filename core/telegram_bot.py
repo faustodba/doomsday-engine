@@ -254,35 +254,65 @@ def _build_status() -> str:
     return "\n".join(lines)
 
 
+def _read_instances_cfg() -> list:
+    """Legge instances.json (lista completa istanze configurate)."""
+    p = _root() / "config" / "instances.json"
+    try:
+        if p.exists():
+            return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return []
+
+
 def _build_istanze() -> str:
-    """Risposta al comando /istanze."""
-    es = _read_engine_status()
-    ov = _read_runtime_overrides()
-    istanze_ov = ov.get("istanze", {})
+    """Risposta al comando /istanze — lista completa con stato ON/OFF e istanza live."""
+    instances = _read_instances_cfg()
+    ov        = _read_runtime_overrides()
+    es        = _read_engine_status()
 
-    if not es:
-        return "⚠ engine_status.json non disponibile (bot fermo?)"
+    ist_ov     = ov.get("istanze", {})
+    ist_status = es.get("istanze", {}) if es else {}
+    ciclo_n    = es.get("ciclo", "?") if es else "?"
 
-    ist_status = es.get("istanze", {})
-    lines: list[str] = ["<b>Istanze</b>"]
+    if not instances:
+        return "⚠ instances.json non disponibile"
 
-    for nome in sorted(ist_status.keys()):
-        ist_ov = istanze_ov.get(nome, {})
-        abilitata = ist_ov.get("abilitata", True)
-        tipologia = ist_ov.get("tipologia", "full")
-        max_sq = ist_ov.get("max_squadre", "?")
+    lines: list[str] = [f"<b>Istanze</b> — ciclo #{ciclo_n}", ""]
 
-        st = ist_status.get(nome, {})
-        outcome = st.get("last_outcome", "—")
-        raccolta_invii = st.get("raccolta_last_invii", "?")
+    for cfg in instances:
+        nome = cfg.get("nome", "?")
+        ov_i = ist_ov.get(nome, {})
 
-        icon = "✅" if abilitata else "❌"
-        icon_out = {"ok": "✓", "cascade": "⚡", "abort": "✗"}.get(outcome, "—")
+        # abilitata: dynamic override prevale su static
+        abilitata = ov_i.get("abilitata", cfg.get("abilitata", True))
+        tipologia = ov_i.get("tipologia", cfg.get("profilo", "full"))
 
-        lines.append(
-            f"{icon} <b>{nome}</b> [{tipologia}] sq={max_sq}"
-            f"  {icon_out} invii={raccolta_invii}"
-        )
+        # stato live da engine_status
+        st     = ist_status.get(nome, {})
+        stato  = st.get("stato", "")          # "running" | "idle" | ""
+        task_c = st.get("task_corrente")      # task in esecuzione ora
+        outcome = st.get("last_outcome", "")  # "ok" | "cascade" | "abort"
+
+        # icone
+        on_icon  = "🟢" if abilitata else "🔴"
+        tip_short = {"raccolta_fast": "fast", "raccolta_only": "solo-racc"}.get(tipologia, tipologia)
+
+        if stato == "running":
+            task_str = f" — <b>▶ LIVE</b>" + (f" ({task_c})" if task_c else "")
+        elif outcome == "ok":
+            invii = st.get("raccolta_last_invii", "")
+            task_str = f" — ✓" + (f" {invii}m" if invii else "")
+        elif outcome == "cascade":
+            task_str = " — ⚡cascade"
+        elif outcome == "abort":
+            task_str = " — ✗abort"
+        elif not abilitata:
+            task_str = ""
+        else:
+            task_str = " — attesa"
+
+        lines.append(f"{on_icon} <b>{nome}</b> [{tip_short}]{task_str}")
 
     return "\n".join(lines)
 
