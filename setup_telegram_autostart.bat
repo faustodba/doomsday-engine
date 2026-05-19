@@ -3,11 +3,17 @@
 ::  Doomsday Engine V6 — Setup avvio automatico Telegram Bot
 ::
 ::  Crea il task in \DoomsDayScheduler\DoomsdayTelegramBot con:
-::  - Trigger:   avvio sistema (onstart) — NO login richiesto
-::  - Delay:     60 secondi dopo l'avvio
-::  - Utente:    Fausto (S4U — no password, accesso risorse locali)
+::  - Trigger:   accesso utente Fausto (AtLogOn)
+::  - Delay:     60 secondi dopo il login
+::  - Utente:    Fausto (Interactive — sessione utente, no password)
 ::  - Privilegi: massimi (RunLevel Highest)
 ::  - Restart:   automatico su crash (3x ogni 1 min)
+::
+::  NOTA IMPORTANTE: LogonType=Interactive (era S4U) e trigger AtLogOn
+::  (era AtStartup). Questo garantisce che il bot giri in Session 1
+::  (desktop interattivo) e possa aprire console visibili — necessario
+::  per /avvia_tutto che lancia run_prod.bat e run_dashboard_prod.bat.
+::  Con S4U/Session 0 i processi figli non potevano interagire col desktop.
 ::
 ::  ESEGUIRE UNA SOLA VOLTA come amministratore.
 ::  Per rimuovere:  setup_telegram_autostart.bat --remove
@@ -23,7 +29,7 @@ if "%1"=="--remove" goto remove
 echo.
 echo === Registrazione Task Scheduler: %TASK_PATH%%TASK_NAME% ===
 echo Bat: %BAT_PATH%
-echo Utente: Fausto (S4U - no login richiesto)
+echo Utente: Fausto (Interactive - sessione desktop, avvio al login)
 echo.
 
 if not exist "%BAT_PATH%" (
@@ -35,10 +41,10 @@ if not exist "%BAT_PATH%" (
 
 powershell -NoProfile -ExecutionPolicy Bypass -Command ^
     "$action   = New-ScheduledTaskAction -Execute '%BAT_PATH%' -WorkingDirectory 'C:\doomsday-engine-prod';" ^
-    "$trigger  = New-ScheduledTaskTrigger -AtStartup;" ^
+    "$trigger  = New-ScheduledTaskTrigger -AtLogOn -User 'Fausto';" ^
     "$trigger.Delay = 'PT1M';" ^
     "$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1) -StartWhenAvailable $true;" ^
-    "$principal = New-ScheduledTaskPrincipal -UserId 'Fausto' -LogonType S4U -RunLevel Highest;" ^
+    "$principal = New-ScheduledTaskPrincipal -UserId 'Fausto' -LogonType Interactive -RunLevel Highest;" ^
     "Register-ScheduledTask -TaskName '%TASK_NAME%' -TaskPath '%TASK_PATH%' -Action $action -Trigger $trigger -Settings $settings -Principal $principal -Force;" ^
     "Write-Output 'Task registrato OK'"
 
@@ -52,8 +58,7 @@ if %ERRORLEVEL% NEQ 0 (
 echo.
 echo === Task creato con successo ===
 echo Percorso: %TASK_PATH%%TASK_NAME%
-echo Il Telegram bot si avviera' automaticamente al prossimo avvio del PC.
-echo NON richiede login utente.
+echo Il Telegram bot si avviera' automaticamente al login dell'utente Fausto.
 echo.
 echo Per avviarlo subito:
 echo   schtasks /run /tn "%TASK_PATH%%TASK_NAME%"
