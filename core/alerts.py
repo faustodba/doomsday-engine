@@ -253,6 +253,17 @@ def trigger_alert(event_type: str,
 
         _log.info("[ALERTS] enqueued %s sev=%s inst=%s",
                   event_type, sev_lc, instance or "-")
+
+        # Forward a Telegram per event_type rilevanti (best-effort, no eccezioni)
+        try:
+            from core.telegram_bot import notify_cascade_adb, notify_drl_saturo
+            if event_type == "cascade_adb" and instance:
+                notify_cascade_adb(instance, body[:200])
+            elif event_type in ("master_saturo_long", "master_saturo"):
+                notify_drl_saturo(0.0)
+        except Exception:
+            pass
+
         return True
 
 

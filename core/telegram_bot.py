@@ -1,0 +1,511 @@
+"""core/telegram_bot.py — Telegram bot loop + comandi + notifiche proattive.
+
+Architettura:
+  - Thread daemon in background che fa long-polling getUpdates ogni 20s
+  - Solo messaggi dal chat_id configurato vengono processati (security gate)
+  - Notifiche proattive: chiamate esterne che inviano messaggi al chat_id
+
+Comandi supportati:
+  /help         — lista comandi
+  /status       — stato ciclo corrente + istanze attive
+  /istanze      — dettaglio per istanza (tipologia, task, raccolta)
+  /rifornimento — DRL master + spedizioni oggi
+  /stop         — attiva maintenance mode
+  /avvia        — disattiva maintenance mode
+
+Config (runtime_overrides.json::globali.notifications.telegram):
+  {
+    "enabled":              bool   (master toggle, default False)
+    "notify_cycle_every_n": int    (notifica ogni N cicli completati, default 5)
+    "notify_cascade":       bool   (notifica cascade ADB, default True)
+    "notify_drl":           bool   (notifica DRL saturato, default True)
+    "notify_daily_report":  bool   (forward daily report, default True)
+  }
+
+Token e chat_id: in data/secrets.json via shared.telegram_client.
+"""
+
+from __future__ import annotations
+
+import json
+import logging
+import os
+import threading
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Optional
+
+_log = logging.getLogger(__name__)
+
+# ─── Constants ────────────────────────────────────────────────────────────────
+
+_POLL_TIMEOUT_S   = 20   # long-polling timeout
+_POLL_RETRY_SLEEP = 5    # sleep su errore prima di riprovare
+_MAX_MSG_LEN      = 4000 # limite caratteri per messaggio TG
+
+# ─── Stato globale thread ─────────────────────────────────────────────────────
+
+_bot_thread: Optional[threading.Thread] = None
+_stop_event: Optional[threading.Event]  = None
+_update_offset: int = 0
+_running_lock = threading.Lock()
+
+
+# ─── Path helpers ─────────────────────────────────────────────────────────────
+
+def _root() -> Path:
+    env = os.environ.get("DOOMSDAY_ROOT")
+    if env and Path(env).exists():
+        return Path(env)
+    return Path(__file__).resolve().parents[1]
+
+
+def _read_json_safe(p: Path) -> dict:
+    try:
+        if p.exists():
+            return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        pass
+    return {}
+
+
+# ─── Config helpers ───────────────────────────────────────────────────────────
+
+def _tg_config() -> dict:
+    """Ritorna config telegram da runtime_overrides (DYNAMIC, hot-reload)."""
+    try:
+        ov_path = _root() / "config" / "runtime_overrides.json"
+        ov = _read_json_safe(ov_path)
+        return ov.get("globali", {}).get("notifications", {}).get("telegram", {})
+    except Exception:
+        return {}
+
+
+def _tg_enabled() -> bool:
+    return bool(_tg_config().get("enabled", False))
+
+
+def _notify_cycle_every_n() -> int:
+    return int(_tg_config().get("notify_cycle_every_n", 5))
+
+
+def _notify_cascade() -> bool:
+    return bool(_tg_config().get("notify_cascade", True))
+
+
+def _notify_drl() -> bool:
+    return bool(_tg_config().get("notify_drl", True))
+
+
+def _notify_daily_report() -> bool:
+    return bool(_tg_config().get("notify_daily_report", True))
+
+
+# ─── Data readers (per comandi /status /istanze /rifornimento) ────────────────
+
+def _read_engine_status() -> dict:
+    """Legge engine_status.json dal ROOT del bot."""
+    p = _root() / "engine_status.json"
+    return _read_json_safe(p)
+
+
+def _read_morfeus_state() -> dict:
+    p = _root() / "data" / "morfeus_state.json"
+    return _read_json_safe(p)
+
+
+def _read_runtime_overrides() -> dict:
+    p = _root() / "config" / "runtime_overrides.json"
+    return _read_json_safe(p)
+
+
+def _read_state(instance: str) -> dict:
+    p = _root() / "state" / f"{instance}.json"
+    return _read_json_safe(p)
+
+
+def _read_cicli() -> list:
+    p = _root() / "data" / "telemetry" / "cicli.json"
+    d = _read_json_safe(p)
+    return d.get("cicli", [])
+
+
+def _maintenance_info() -> Optional[dict]:
+    try:
+        from core.maintenance import get_maintenance_info
+        return get_maintenance_info()
+    except Exception:
+        return None
+
+
+def _fmt_dur(s: float) -> str:
+    """Formatta durata in min o h/min."""
+    s = int(s)
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        return f"{s // 60}m"
+    return f"{s // 3600}h{(s % 3600) // 60:02d}m"
+
+
+# ─── Formatters comandi ───────────────────────────────────────────────────────
+
+def _build_status() -> str:
+    """Risposta al comando /status."""
+    lines: list[str] = ["<b>Stato Doomsday Engine</b>"]
+
+    # Maintenance mode
+    maint = _maintenance_info()
+    if maint and maint.get("active"):
+        lines.append("⏸ <b>MAINTENANCE MODE</b> attivo")
+        lines.append(f"  Motivo: {maint.get('motivo', '—')}")
+
+    # Engine status
+    es = _read_engine_status()
+    if not es:
+        lines.append("⚠ engine_status.json non disponibile (bot fermo?)")
+    else:
+        ts = es.get("ts_update", "—")
+        if ts and ts != "—":
+            try:
+                dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                ago_s = int((datetime.now(timezone.utc) - dt).total_seconds())
+                ts = f"{_fmt_dur(ago_s)} fa"
+            except Exception:
+                pass
+        lines.append(f"Aggiornato: {ts}")
+
+        # Ciclo corrente
+        cicli = _read_cicli()
+        if cicli:
+            ultimo = sorted(cicli, key=lambda c: c.get("start_ts", ""), reverse=True)[0]
+            n = ultimo.get("cycle_n", "?")
+            start = ultimo.get("start_ts", "")
+            if start:
+                try:
+                    dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
+                    dur = (datetime.now(timezone.utc) - dt).total_seconds()
+                    lines.append(f"Ciclo #{n} in corso da {_fmt_dur(dur)}")
+                except Exception:
+                    lines.append(f"Ciclo #{n}")
+            else:
+                lines.append(f"Ciclo #{n}")
+
+        # Istanze attive
+        istanze_st = es.get("istanze", {})
+        n_tot = len(istanze_st)
+        n_ok = sum(1 for v in istanze_st.values() if v.get("abilitata", True))
+        lines.append(f"Istanze: {n_tot} totali, {n_ok} abilitate")
+
+    # DRL master
+    morf = _read_morfeus_state()
+    drl = morf.get("daily_recv_limit", -1)
+    drl_max = morf.get("daily_recv_limit_max", -1)
+    if drl >= 0:
+        drl_pct = int((drl / drl_max * 100)) if drl_max > 0 else 0
+        icon = "🔴" if drl == 0 else ("🟡" if drl_pct < 20 else "🟢")
+        lines.append(f"DRL master: {icon} {drl/1e6:.0f}M / {drl_max/1e6:.0f}M ({drl_pct}%)")
+
+    return "\n".join(lines)
+
+
+def _build_istanze() -> str:
+    """Risposta al comando /istanze."""
+    es = _read_engine_status()
+    ov = _read_runtime_overrides()
+    istanze_ov = ov.get("istanze", {})
+
+    if not es:
+        return "⚠ engine_status.json non disponibile (bot fermo?)"
+
+    ist_status = es.get("istanze", {})
+    lines: list[str] = ["<b>Istanze</b>"]
+
+    for nome in sorted(ist_status.keys()):
+        ist_ov = istanze_ov.get(nome, {})
+        abilitata = ist_ov.get("abilitata", True)
+        tipologia = ist_ov.get("tipologia", "full")
+        max_sq = ist_ov.get("max_squadre", "?")
+
+        st = ist_status.get(nome, {})
+        outcome = st.get("last_outcome", "—")
+        raccolta_invii = st.get("raccolta_last_invii", "?")
+
+        icon = "✅" if abilitata else "❌"
+        icon_out = {"ok": "✓", "cascade": "⚡", "abort": "✗"}.get(outcome, "—")
+
+        lines.append(
+            f"{icon} <b>{nome}</b> [{tipologia}] sq={max_sq}"
+            f"  {icon_out} invii={raccolta_invii}"
+        )
+
+    return "\n".join(lines)
+
+
+def _build_rifornimento() -> str:
+    """Risposta al comando /rifornimento."""
+    lines: list[str] = ["<b>Rifornimento</b>"]
+
+    # DRL master
+    morf = _read_morfeus_state()
+    drl = morf.get("daily_recv_limit", -1)
+    drl_max = morf.get("daily_recv_limit_max", -1)
+    ts_drl = morf.get("ts_ultima_lettura", "")
+    if drl >= 0:
+        drl_pct = int((drl / drl_max * 100)) if drl_max > 0 else 0
+        icon = "🔴" if drl == 0 else ("🟡" if drl_pct < 20 else "🟢")
+        ts_str = ""
+        if ts_drl:
+            try:
+                dt = datetime.fromisoformat(ts_drl.replace("Z", "+00:00"))
+                ago = int((datetime.now(timezone.utc) - dt).total_seconds())
+                ts_str = f" ({_fmt_dur(ago)} fa)"
+            except Exception:
+                pass
+        lines.append(f"DRL FauMorfeus: {icon} {drl/1e6:.0f}M / {drl_max/1e6:.0f}M ({drl_pct}%){ts_str}")
+    else:
+        lines.append("DRL FauMorfeus: non disponibile")
+
+    # Spedizioni per istanza (oggi)
+    ov = _read_runtime_overrides()
+    istanze_ov = ov.get("istanze", {})
+    tot_sped = 0
+    righe_ist: list[str] = []
+    for nome in sorted(istanze_ov.keys()):
+        if nome == "FauMorfeus":
+            continue
+        st = _read_state(nome)
+        rif = st.get("rifornimento", {})
+        sped_oggi = rif.get("spedizioni_oggi", 0)
+        tot_sped += sped_oggi
+        if sped_oggi > 0:
+            # Calcola netto totale oggi
+            det = rif.get("dettaglio_oggi", {})
+            netto_tot = sum(v.get("qta_inviata", 0) for v in det.values()) / 1e6
+            righe_ist.append(f"  {nome}: {sped_oggi} sped, {netto_tot:.1f}M netti")
+
+    lines.append(f"Spedizioni totali oggi: {tot_sped}")
+    if righe_ist:
+        lines.extend(righe_ist[:10])  # max 10 istanze mostrate
+    elif tot_sped == 0:
+        lines.append("  (nessuna spedizione ancora oggi)")
+
+    return "\n".join(lines)
+
+
+# ─── Command dispatcher ───────────────────────────────────────────────────────
+
+def _handle_command(text: str, chat_id: str) -> str:
+    """Processa un comando e ritorna la risposta da inviare."""
+    cmd = text.split()[0].lower().rstrip("@")
+
+    if cmd == "/help":
+        return (
+            "<b>Comandi disponibili</b>\n"
+            "/status — stato ciclo e istanze\n"
+            "/istanze — dettaglio per istanza\n"
+            "/rifornimento — DRL master e spedizioni\n"
+            "/stop — attiva maintenance mode\n"
+            "/avvia — disattiva maintenance mode\n"
+            "/help — questa lista"
+        )
+
+    if cmd == "/status":
+        try:
+            return _build_status()
+        except Exception as exc:
+            return f"⚠ Errore /status: {exc}"
+
+    if cmd == "/istanze":
+        try:
+            return _build_istanze()
+        except Exception as exc:
+            return f"⚠ Errore /istanze: {exc}"
+
+    if cmd == "/rifornimento":
+        try:
+            return _build_rifornimento()
+        except Exception as exc:
+            return f"⚠ Errore /rifornimento: {exc}"
+
+    if cmd == "/stop":
+        try:
+            from core.maintenance import enable_maintenance
+            enable_maintenance(motivo="Telegram /stop", set_da="telegram")
+            return "⏸ Maintenance mode attivato. Bot in pausa tra un'istanza e la successiva."
+        except Exception as exc:
+            return f"⚠ Errore /stop: {exc}"
+
+    if cmd == "/avvia":
+        try:
+            from core.maintenance import disable_maintenance
+            disable_maintenance()
+            return "▶ Maintenance mode disattivato. Bot riprende."
+        except Exception as exc:
+            return f"⚠ Errore /avvia: {exc}"
+
+    return f"Comando non riconosciuto: {cmd}\nUsa /help per la lista comandi."
+
+
+# ─── Polling loop ─────────────────────────────────────────────────────────────
+
+def _polling_loop(stop: threading.Event) -> None:
+    global _update_offset
+
+    from shared.telegram_client import get_updates, send_message, load_chat_id
+
+    _log.info("[TG-BOT] polling loop avviato")
+    authorized_chat = load_chat_id()
+
+    while not stop.is_set():
+        if not _tg_enabled():
+            time.sleep(10)
+            # rileggi chat_id in caso sia cambiato
+            authorized_chat = load_chat_id()
+            continue
+
+        try:
+            updates = get_updates(offset=_update_offset, timeout_s=_POLL_TIMEOUT_S)
+        except Exception as exc:
+            _log.warning("[TG-BOT] get_updates errore: %s", exc)
+            time.sleep(_POLL_RETRY_SLEEP)
+            continue
+
+        # aggiorna chat_id in caso sia cambiato a caldo
+        authorized_chat = load_chat_id()
+
+        for upd in updates:
+            _update_offset = upd.get("update_id", _update_offset) + 1
+            msg = upd.get("message")
+            if not msg:
+                continue
+            chat = str(msg.get("chat", {}).get("id", ""))
+            text = (msg.get("text") or "").strip()
+
+            # Security gate: solo chat_id configurato
+            if not authorized_chat:
+                _log.warning("[TG-BOT] chat_id non configurato — messaggio ignorato da %s", chat)
+                continue
+            if chat != authorized_chat:
+                _log.warning("[TG-BOT] messaggio da chat non autorizzato: %s", chat)
+                continue
+
+            if not text.startswith("/"):
+                continue  # ignora messaggi non-comando
+
+            _log.info("[TG-BOT] comando da %s: %s", chat, text[:80])
+            try:
+                reply = _handle_command(text, chat)
+            except Exception as exc:
+                reply = f"⚠ Errore interno: {exc}"
+            send_message(chat, reply[:_MAX_MSG_LEN])
+
+    _log.info("[TG-BOT] polling loop terminato")
+
+
+# ─── Lifecycle ────────────────────────────────────────────────────────────────
+
+def start() -> bool:
+    """Avvia il bot thread in background. Idempotente.
+
+    Returns: True se avviato ora, False se già running.
+    """
+    global _bot_thread, _stop_event
+
+    with _running_lock:
+        if _bot_thread and _bot_thread.is_alive():
+            return False
+
+        _stop_event = threading.Event()
+        _bot_thread = threading.Thread(
+            target=_polling_loop,
+            args=(_stop_event,),
+            name="TelegramBot",
+            daemon=True,
+        )
+        _bot_thread.start()
+        _log.info("[TG-BOT] avviato")
+        return True
+
+
+def stop(timeout_s: float = 3.0) -> None:
+    """Segnala stop al bot thread. Non bloccante se timeout."""
+    global _stop_event
+    if _stop_event:
+        _stop_event.set()
+    if _bot_thread:
+        _bot_thread.join(timeout=timeout_s)
+    _log.info("[TG-BOT] fermato")
+
+
+def is_running() -> bool:
+    return bool(_bot_thread and _bot_thread.is_alive())
+
+
+# ─── Notifiche proattive ──────────────────────────────────────────────────────
+
+def _send_notify(text: str) -> bool:
+    """Invia notifica al chat_id configurato. No-op se TG non abilitato."""
+    if not _tg_enabled():
+        return False
+    try:
+        from shared.telegram_client import send_message, load_chat_id
+        chat_id = load_chat_id()
+        if not chat_id:
+            _log.warning("[TG-BOT] notify: chat_id non configurato")
+            return False
+        return send_message(chat_id, text[:_MAX_MSG_LEN])
+    except Exception as exc:
+        _log.warning("[TG-BOT] notify fallita: %s", exc)
+        return False
+
+
+def notify_cycle_complete(ciclo_n: int,
+                          n_istanze: int,
+                          tot_marce: int,
+                          tot_sped: int,
+                          durata_s: float) -> bool:
+    """Invia notifica ciclo completato ogni N cicli (config notify_cycle_every_n).
+
+    Returns: True se il messaggio è stato inviato.
+    """
+    every_n = _notify_cycle_every_n()
+    if every_n <= 0 or (ciclo_n % every_n) != 0:
+        return False
+
+    text = (
+        f"♻ <b>Ciclo #{ciclo_n} completato</b>\n"
+        f"Istanze: {n_istanze}  |  Marce: {tot_marce}  |  Spedizioni: {tot_sped}\n"
+        f"Durata: {_fmt_dur(durata_s)}"
+    )
+    return _send_notify(text)
+
+
+def notify_cascade_adb(instance: str, details: str = "") -> bool:
+    """Notifica cascade ADB su un'istanza."""
+    if not _notify_cascade():
+        return False
+    text = f"⚡ <b>Cascade ADB</b> — {instance}"
+    if details:
+        text += f"\n{details[:200]}"
+    return _send_notify(text)
+
+
+def notify_drl_saturo(residuo_m: float = 0.0) -> bool:
+    """Notifica DRL master saturo o quasi."""
+    if not _notify_drl():
+        return False
+    text = f"🔴 <b>DRL FauMorfeus saturo</b> — residuo {residuo_m:.0f}M\nRifornimento bloccato fino a reset (00:00 UTC)"
+    return _send_notify(text)
+
+
+def notify_daily_report(report_text: str) -> bool:
+    """Forward del daily report via Telegram (versione abbreviata)."""
+    if not _notify_daily_report():
+        return False
+    # Limita a max_len — il report completo è via email
+    header = "📊 <b>Daily Report</b>\n"
+    available = _MAX_MSG_LEN - len(header)
+    body = report_text[:available]
+    return _send_notify(header + body)

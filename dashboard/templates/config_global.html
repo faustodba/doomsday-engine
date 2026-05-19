@@ -482,6 +482,17 @@ async function promoteRuntimeToStatic() {
   </div>
 </div>
 
+<!-- ── TELEGRAM BOT ────────────────────────────────── -->
+<div class="section">
+  <div class="sec-label">💬 telegram bot · comandi + notifiche proattive</div>
+  <div id="tg-card"
+       hx-get="/ui/partial/telegram"
+       hx-trigger="load, refresh, every 60s"
+       hx-swap="innerHTML">
+    <div style="padding:14px;color:#888;font-size:12px">caricamento…</div>
+  </div>
+</div>
+
 <div class="divider"></div>
 
 {# 08/05: sezione "🎯 adaptive scheduler" SPOSTATA in /ui/predictor-istanze

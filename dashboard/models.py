@@ -258,6 +258,15 @@ class NotificationsSmtp(BaseModel):
     port: int = 465
 
 
+class TelegramOverride(BaseModel):
+    """Telegram bot config (WU-Telegram)."""
+    enabled:              bool = False
+    notify_cycle_every_n: int  = 5     # notifica ciclo completato ogni N cicli
+    notify_cascade:       bool = True  # notifica cascade ADB
+    notify_drl:           bool = True  # notifica DRL master saturo
+    notify_daily_report:  bool = True  # forward daily report
+
+
 class NotificationsOverride(BaseModel):
     """Email notifier config (memoria `project_email_notifier.md`).
 
@@ -278,6 +287,8 @@ class NotificationsOverride(BaseModel):
     # Destinatari — vuoto = NON configurato (richiesto per abilitare invio)
     recipients:             List[str]           = Field(default_factory=list)
     smtp:                   NotificationsSmtp   = Field(default_factory=NotificationsSmtp)
+    # Telegram bot (WU-Telegram)
+    telegram:               TelegramOverride    = Field(default_factory=TelegramOverride)
 
 
 class GlobaliOverride(BaseModel):

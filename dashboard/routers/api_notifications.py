@@ -384,3 +384,161 @@ def dispatch_now() -> dict:
         return {"ok": True, "stats": stats}
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"dispatch error: {exc}")
+
+
+# ─── Telegram Bot endpoints (WU-Telegram) ─────────────────────────────────────
+
+class TelegramTokenPut(BaseModel):
+    token: str
+
+
+class TelegramConfigPatch(BaseModel):
+    enabled:              Optional[bool] = None
+    notify_cycle_every_n: Optional[int]  = None
+    notify_cascade:       Optional[bool] = None
+    notify_drl:           Optional[bool] = None
+    notify_daily_report:  Optional[bool] = None
+
+
+@router.put("/notifications/telegram-token")
+def put_telegram_token(payload: TelegramTokenPut) -> dict:
+    """Salva Telegram bot token in `data/secrets.json` (write-only).
+
+    Il token NON è MAI esposto dalle API. Solo flag `has_token` in GET.
+    """
+    tok = (payload.token or "").strip()
+    if not tok:
+        raise HTTPException(status_code=400, detail="token vuoto")
+    if ":" not in tok or len(tok) < 10:
+        raise HTTPException(status_code=400,
+                            detail="token non valido (formato atteso: 123456:ABC...)")
+    try:
+        from shared.telegram_client import save_token, get_me
+        ok = save_token(tok)
+        if not ok:
+            raise HTTPException(status_code=500, detail="scrittura secrets fallita")
+        info = get_me(token=tok)
+        bot_name = f"@{info.get('username')}" if info else "non raggiungibile (verifica token)"
+        return {"ok": True, "bot": bot_name, "has_token": True}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"errore: {exc}")
+
+
+@router.delete("/notifications/telegram-token")
+def delete_telegram_token() -> dict:
+    """Rimuove bot token da secrets.json."""
+    try:
+        from shared.telegram_client import save_token
+        save_token("")
+        return {"ok": True, "has_token": False}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"errore: {exc}")
+
+
+@router.get("/notifications/telegram-status")
+def get_telegram_status() -> dict:
+    """Stato configurazione Telegram (token, chat_id, bot info)."""
+    try:
+        from shared.telegram_client import has_token, load_chat_id, get_me
+        tok_ok = has_token()
+        chat_id = load_chat_id()
+        bot_info = None
+        if tok_ok:
+            info = get_me()
+            if info:
+                bot_info = {"username": info.get("username"),
+                            "first_name": info.get("first_name")}
+    except Exception as exc:
+        return {"error": str(exc)}
+
+    try:
+        from core.telegram_bot import is_running
+        running = is_running()
+    except Exception:
+        running = False
+
+    # Config da runtime_overrides
+    ov_path = _root() / "config" / "runtime_overrides.json"
+    ov = _read_json(ov_path)
+    tg_cfg = ov.get("globali", {}).get("notifications", {}).get("telegram", {})
+
+    return {
+        "has_token":  tok_ok,
+        "has_chat_id": bool(chat_id),
+        "bot_info":   bot_info,
+        "running":    running,
+        "config":     tg_cfg,
+    }
+
+
+@router.patch("/notifications/telegram")
+def patch_telegram(payload: TelegramConfigPatch) -> dict:
+    """Aggiorna config Telegram in runtime_overrides.json (DYNAMIC, hot-reload).
+
+    Segue pattern WU139: parse raw + setattr field-by-field (mai sovrascrive
+    campi non inviati).
+    """
+    ov_path = _root() / "config" / "runtime_overrides.json"
+    ov = _read_json(ov_path)
+    tg = ov.setdefault("globali", {}).setdefault(
+        "notifications", {}).setdefault("telegram", {})
+
+    changed: dict = {}
+    data = payload.model_dump(exclude_none=True)
+    for field, value in data.items():
+        tg[field] = value
+        changed[field] = value
+
+    if not changed:
+        return {"ok": True, "changed": {}, "msg": "nessuna modifica"}
+
+    if not _write_json_atomic(ov_path, ov):
+        raise HTTPException(status_code=500,
+                            detail="scrittura runtime_overrides.json fallita")
+
+    return {"ok": True, "changed": changed,
+            "target": "dynamic", "applies_immediately": True}
+
+
+@router.post("/notifications/telegram-test")
+def telegram_test_send() -> dict:
+    """Invia messaggio di test al chat_id configurato."""
+    try:
+        from shared.telegram_client import has_token, load_chat_id, send_message
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"import fallito: {exc}")
+
+    if not has_token():
+        raise HTTPException(status_code=400,
+                            detail="token non configurato. Inseriscilo prima.")
+    chat_id = load_chat_id()
+    if not chat_id:
+        raise HTTPException(status_code=400,
+                            detail="chat_id non configurato. Avvia il bot e invia /start.")
+
+    ts = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    ok = send_message(chat_id, f"<b>Doomsday Engine</b> — test send dashboard\n{ts}")
+    if not ok:
+        raise HTTPException(status_code=502,
+                            detail="invio fallito (token errato o chat_id non valido?)")
+    return {"ok": True, "chat_id": chat_id, "ts": ts}
+
+
+@router.put("/notifications/telegram-chat")
+def put_telegram_chat(payload: dict) -> dict:
+    """Salva chat_id Telegram (auto-detect da /start oppure manuale)."""
+    chat_id = str(payload.get("chat_id") or "").strip()
+    if not chat_id:
+        raise HTTPException(status_code=400, detail="chat_id vuoto")
+    try:
+        from shared.telegram_client import save_chat_id
+        ok = save_chat_id(chat_id)
+        if not ok:
+            raise HTTPException(status_code=500, detail="scrittura secrets fallita")
+        return {"ok": True, "chat_id": chat_id}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"errore: {exc}")

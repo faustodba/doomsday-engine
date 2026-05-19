@@ -1101,6 +1101,18 @@ def main():
     except Exception as _exc:
         _log("MAIN", f"[WARN] notifier init: {_exc}")
 
+    # WU-Telegram — avvia polling bot Telegram in background (best-effort).
+    # Il bot rimane in standby se telegram.enabled=false e si attiva a caldo
+    # quando l'utente abilita da config (hot-reload ogni 10s nel loop).
+    try:
+        from core.telegram_bot import start as _tg_start, stop as _tg_stop
+        import atexit
+        if _tg_start():
+            _log("MAIN", "[TG-BOT] avviato")
+            atexit.register(lambda: _tg_stop(timeout_s=3))
+    except Exception as _exc:
+        _log("MAIN", f"[WARN] telegram_bot init: {_exc}")
+
     tasks_cls = _import_tasks()
     _log("MAIN", f"Task: {list(tasks_cls.keys())}")
 
@@ -1413,8 +1425,46 @@ def main():
             if res.get("sent"):
                 _log("MAIN", f"[REPORT] daily report enqueued date={res.get('date')} "
                              f"id={res.get('enqueue_id')}")
+                # Forward daily report a Telegram (versione abbreviata)
+                try:
+                    from core.telegram_bot import notify_daily_report as _tg_report
+                    _tg_report(res.get("text_summary", "Daily report inviato via email."))
+                except Exception:
+                    pass
         except Exception as _exc:
             _log("MAIN", f"[WARN] maybe_send_daily_report: {_exc}")
+
+        # WU-Telegram — notifica ciclo completato ogni N cicli (config-driven).
+        try:
+            from core.telegram_bot import notify_cycle_complete as _tg_cycle
+            # Calcola metriche ciclo per il messaggio
+            _es = {}
+            try:
+                import json as _json
+                _es_p = os.path.join(ROOT, "engine_status.json")
+                if os.path.exists(_es_p):
+                    with open(_es_p, encoding="utf-8") as _f:
+                        _es = _json.load(_f)
+            except Exception:
+                pass
+            _n_ist = len(_es.get("istanze", {}))
+            _tot_marce = 0
+            _tot_sped = 0
+            _ciclo_dur = 0.0
+            try:
+                from core.telemetry import get_cicli_stats
+                _stats = get_cicli_stats(n=1)
+                if _stats:
+                    _tot_marce = _stats[0].get("marce_tot", 0)
+                    _tot_sped  = _stats[0].get("sped_tot", 0)
+                    _ciclo_dur = _stats[0].get("durata_s", 0.0)
+            except Exception:
+                pass
+            _tg_cycle(ciclo_n=ciclo, n_istanze=_n_ist,
+                      tot_marce=_tot_marce, tot_sped=_tot_sped,
+                      durata_s=_ciclo_dur)
+        except Exception as _exc:
+            _log("MAIN", f"[WARN] telegram notify_cycle: {_exc}")
 
         # WU137 fase 2 — alert real-time check post-ciclo. Ogni check è
         # rate-limited per event_type → no-op silenzioso se in cooldown.

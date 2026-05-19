@@ -1,0 +1,213 @@
+{# WU-Telegram — Telegram Bot card (HTMX partial)
+   Endpoint: /ui/partial/telegram  (refresh ogni 60s)
+   PUT:      /api/notifications/telegram-token
+   PUT:      /api/notifications/telegram-chat
+   PATCH:    /api/notifications/telegram
+   POST:     /api/notifications/telegram-test
+   GET:      /api/notifications/telegram-status
+#}
+{% set d = data %}
+{% set cfg = d.config or {} %}
+{% set enabled = cfg.get('enabled', false) %}
+
+<div class="tel-card" id="tg-card-inner" style="padding:14px">
+  <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+    <span style="font-size:18px">💬</span>
+    <b>Telegram bot</b>
+    <span style="margin-left:auto">
+      {% if enabled %}
+        <span style="color:#0a8000">● ATTIVO</span>
+      {% else %}
+        <span style="color:#c00">○ DISABILITATO</span>
+      {% endif %}
+      {% if d.running %}
+        <span style="color:#888;font-size:11px;margin-left:8px">thread ●</span>
+      {% endif %}
+    </span>
+  </div>
+
+  <!-- Token -->
+  <div style="margin-bottom:10px;padding:8px;border-radius:4px;
+              background:{{ '#e8f5e9' if d.has_token else '#fff3cd' }};
+              color:{{ '#0a5d11' if d.has_token else '#856404' }};font-size:12px">
+    <div style="margin-bottom:6px">
+      🔑 <b>bot token</b>
+      {% if d.has_token %}
+        — configurato
+        {% if d.bot_info %}
+          <span style="color:#0a5d11;font-size:11px">(@{{ d.bot_info.username }})</span>
+        {% endif %}
+      {% else %}
+        — <b>NON CONFIGURATO</b>
+        <div style="font-size:11px;margin-top:4px">
+          Crea un bot su @BotFather → /newbot → copia il token qui sotto.
+        </div>
+      {% endif %}
+    </div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <input id="tg-token-input" type="password" placeholder="123456:ABC..."
+             style="flex:1;padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:12px">
+      <button onclick="tgSaveToken()"
+              style="padding:5px 12px;background:#ff9800;color:#fff;border:none;
+                     border-radius:4px;cursor:pointer;font-size:12px">
+        salva token
+      </button>
+      {% if d.has_token %}
+      <button onclick="tgDeleteToken()"
+              style="padding:5px 8px;background:#e53935;color:#fff;border:none;
+                     border-radius:4px;cursor:pointer;font-size:12px">
+        elimina
+      </button>
+      {% endif %}
+    </div>
+    <div id="tg-token-status" style="font-size:11px;margin-top:4px"></div>
+  </div>
+
+  <!-- Chat ID -->
+  <div style="margin-bottom:10px;padding:8px;border-radius:4px;
+              background:{{ '#e8f5e9' if d.has_chat_id else '#fff3cd' }};
+              color:{{ '#0a5d11' if d.has_chat_id else '#856404' }};font-size:12px">
+    <div style="margin-bottom:6px">
+      💬 <b>chat ID</b>
+      {% if d.has_chat_id %}
+        — configurato
+      {% else %}
+        — <b>NON CONFIGURATO</b>
+        <div style="font-size:11px;margin-top:4px">
+          Invia <code>/start</code> al tuo bot per ottenere il chat_id,
+          poi inseriscilo qui sotto.
+        </div>
+      {% endif %}
+    </div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <input id="tg-chat-input" type="text" placeholder="987654321"
+             style="flex:1;padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:12px">
+      <button onclick="tgSaveChat()"
+              style="padding:5px 12px;background:#ff9800;color:#fff;border:none;
+                     border-radius:4px;cursor:pointer;font-size:12px">
+        salva chat ID
+      </button>
+    </div>
+    <div id="tg-chat-status" style="font-size:11px;margin-top:4px"></div>
+  </div>
+
+  <!-- Config: enable + notifiche -->
+  <div style="padding:8px;border:1px solid #ddd;border-radius:4px;font-size:12px;margin-bottom:10px">
+    <div style="margin-bottom:6px;font-weight:bold">configurazione notifiche</div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px 16px;margin-bottom:8px">
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+        <input type="checkbox" id="tg-enabled"
+               {{ 'checked' if enabled else '' }}
+               onchange="tgPatch({'enabled': this.checked})">
+        <span>abilitato</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+        <input type="checkbox" id="tg-cascade"
+               {{ 'checked' if cfg.get('notify_cascade', true) else '' }}
+               onchange="tgPatch({'notify_cascade': this.checked})">
+        <span>cascade ADB</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+        <input type="checkbox" id="tg-drl"
+               {{ 'checked' if cfg.get('notify_drl', true) else '' }}
+               onchange="tgPatch({'notify_drl': this.checked})">
+        <span>DRL saturato</span>
+      </label>
+      <label style="display:flex;align-items:center;gap:5px;cursor:pointer">
+        <input type="checkbox" id="tg-report"
+               {{ 'checked' if cfg.get('notify_daily_report', true) else '' }}
+               onchange="tgPatch({'notify_daily_report': this.checked})">
+        <span>daily report</span>
+      </label>
+    </div>
+    <div style="display:flex;align-items:center;gap:8px">
+      <label style="font-size:12px">notifica ciclo ogni
+        <input type="number" id="tg-cycle-n" min="0" max="100"
+               value="{{ cfg.get('notify_cycle_every_n', 5) }}"
+               style="width:48px;padding:3px 5px;border:1px solid #ccc;
+                      border-radius:3px;font-size:12px">
+        cicli (0 = mai)
+      </label>
+      <button onclick="tgPatch({'notify_cycle_every_n': parseInt(document.getElementById('tg-cycle-n').value)||0})"
+              style="padding:4px 10px;background:#607d8b;color:#fff;border:none;
+                     border-radius:4px;cursor:pointer;font-size:12px">
+        salva
+      </button>
+    </div>
+  </div>
+
+  <!-- Actions -->
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <button onclick="tgTestSend()"
+            style="padding:6px 14px;background:#1976d2;color:#fff;border:none;
+                   border-radius:4px;cursor:pointer;font-size:12px">
+      📤 invia messaggio test
+    </button>
+    <button onclick="htmx.trigger('#tg-card','refresh')"
+            style="padding:6px 14px;background:#607d8b;color:#fff;border:none;
+                   border-radius:4px;cursor:pointer;font-size:12px">
+      ↺ aggiorna
+    </button>
+  </div>
+  <div id="tg-action-status" style="font-size:11px;margin-top:6px;color:#555"></div>
+</div>
+
+<script>
+(function(){
+  function tgSetStatus(elId, msg, ok){
+    var el = document.getElementById(elId);
+    if(el){ el.textContent = msg; el.style.color = ok ? '#0a8000' : '#c00'; }
+  }
+
+  window.tgSaveToken = function(){
+    var tok = (document.getElementById('tg-token-input').value||'').trim();
+    if(!tok){ tgSetStatus('tg-token-status','token vuoto',''); return; }
+    fetch('/api/notifications/telegram-token', {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({token: tok})
+    }).then(r=>r.json()).then(d=>{
+      tgSetStatus('tg-token-status', d.ok ? ('salvato — bot: '+(d.bot||'ok')) : ('errore: '+(d.detail||'?')), d.ok);
+      if(d.ok){ document.getElementById('tg-token-input').value=''; htmx.trigger('#tg-card','refresh'); }
+    }).catch(e=>tgSetStatus('tg-token-status','errore rete: '+e,false));
+  };
+
+  window.tgDeleteToken = function(){
+    if(!confirm('Eliminare il token Telegram?')) return;
+    fetch('/api/notifications/telegram-token', {method:'DELETE'})
+      .then(r=>r.json()).then(d=>{
+        tgSetStatus('tg-token-status', d.ok ? 'eliminato' : 'errore', d.ok);
+        if(d.ok) htmx.trigger('#tg-card','refresh');
+      });
+  };
+
+  window.tgSaveChat = function(){
+    var cid = (document.getElementById('tg-chat-input').value||'').trim();
+    if(!cid){ tgSetStatus('tg-chat-status','chat_id vuoto',''); return; }
+    fetch('/api/notifications/telegram-chat', {
+      method:'PUT', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({chat_id: cid})
+    }).then(r=>r.json()).then(d=>{
+      tgSetStatus('tg-chat-status', d.ok ? 'chat_id salvato' : ('errore: '+(d.detail||'?')), d.ok);
+      if(d.ok){ document.getElementById('tg-chat-input').value=''; htmx.trigger('#tg-card','refresh'); }
+    }).catch(e=>tgSetStatus('tg-chat-status','errore rete: '+e,false));
+  };
+
+  window.tgPatch = function(patch){
+    fetch('/api/notifications/telegram', {
+      method:'PATCH', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(patch)
+    }).then(r=>r.json()).then(d=>{
+      tgSetStatus('tg-action-status', d.ok ? ('salvato: '+JSON.stringify(d.changed)) : ('errore: '+(d.detail||'?')), d.ok);
+    }).catch(e=>tgSetStatus('tg-action-status','errore rete: '+e,false));
+  };
+
+  window.tgTestSend = function(){
+    tgSetStatus('tg-action-status','invio in corso…',true);
+    fetch('/api/notifications/telegram-test', {method:'POST'})
+      .then(r=>r.json()).then(d=>{
+        tgSetStatus('tg-action-status',
+          d.ok ? ('✓ inviato a chat_id '+d.chat_id) : ('errore: '+(d.detail||'?')), d.ok);
+      }).catch(e=>tgSetStatus('tg-action-status','errore rete: '+e,false));
+  };
+})();
+</script>

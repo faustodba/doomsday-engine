@@ -1029,6 +1029,15 @@ def ui_partial_notifications(request: Request):
     })
 
 
+@app.get("/ui/partial/telegram", include_in_schema=False)
+def ui_partial_telegram(request: Request):
+    """WU-Telegram — card Telegram bot in /ui/config/global."""
+    from dashboard.routers.api_notifications import get_telegram_status
+    return templates.TemplateResponse(request, "partials/telegram_card.html", {
+        "data": get_telegram_status(),
+    })
+
+
 @app.get("/ui/partial/adaptive-scheduler-preview", include_in_schema=False)
 def ui_partial_adaptive_scheduler_preview(request: Request):
     """08/05 — pannello simulazione ordine adattivo (greedy live + persisted)."""
