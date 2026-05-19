@@ -316,6 +316,7 @@ def _avvia_gioco(porta: int, adb_exe: str,
 
 _PLAYER_PROCESS_NAME = "MuMuNxMain.exe"
 _PLAYER_POLL_S: float = 3.0
+_player_proc: Optional[subprocess.Popen] = None  # reference tenuta per evitare ResourceWarning GC Python 3.14+
 
 
 def _is_player_running() -> bool:
@@ -368,9 +369,10 @@ def avvia_player(log_fn: Optional[Callable] = None) -> bool:
         _log(f"ERRORE: {player_path} non trovato", log_fn)
         return False
 
-    # Avvio non bloccante
+    # Avvio non bloccante — proc tenuto in modulo per evitare ResourceWarning GC Python 3.14+
+    global _player_proc
     try:
-        subprocess.Popen([player_path])
+        _player_proc = subprocess.Popen([player_path])
     except Exception as exc:
         _log(f"ERRORE avvio MuMuPlayer: {exc}", log_fn)
         return False
