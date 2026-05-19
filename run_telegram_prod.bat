@@ -12,6 +12,7 @@
 setlocal
 
 set ROOT=C:\doomsday-engine-prod
+set PYTHON=C:\Python314\python.exe
 set PYTHONPATH=%ROOT%
 set DOOMSDAY_ROOT=%ROOT%
 set PYTHONUNBUFFERED=1
@@ -23,7 +24,7 @@ if not exist logs mkdir logs
 :loop
 echo.
 echo [%DATE% %TIME%] Avvio Telegram bot service...
-python -u core\telegram_bot.py
+"%PYTHON%" -u core\telegram_bot.py
 set EXIT_CODE=%ERRORLEVEL%
 echo [%DATE% %TIME%] Telegram bot terminato (exit=%EXIT_CODE%). Riavvio in 10s...
 timeout /t 10 /nobreak > nul

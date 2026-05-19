@@ -69,6 +69,7 @@ xcopy /Y /Q "%SRC%\ROADMAP.md"                 "%DST%\"            || goto :err
 REM --- Launcher produzione ---
 xcopy /Y /Q "%SRC%\run_prod.bat"               "%DST%\"            || goto :err
 xcopy /Y /Q "%SRC%\run_dashboard_prod.bat"     "%DST%\"            || goto :err
+xcopy /Y /Q "%SRC%\run_telegram_prod.bat"      "%DST%\"            || goto :err
 
 echo [sync] OK — ricorda di riavviare il bot in prod
 exit /b 0

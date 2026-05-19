@@ -676,18 +676,25 @@ _BAT_DASHBOARD  = _ROOT_PROD / "run_dashboard_prod.bat"
 
 
 def _launch_bat(bat_path: Path, label: str) -> tuple[bool, str]:
-    """Lancia un bat file in una nuova finestra console indipendente."""
+    """Lancia un bat file in una nuova finestra console indipendente.
+
+    Usa 'cmd /c start' per garantire che il .bat sia eseguito correttamente
+    anche quando Python non ha shell=True (Task Scheduler, processo standalone).
+    """
     import subprocess
-    CREATE_NEW_CONSOLE = 0x00000010
     if not bat_path.exists():
         return False, f"{bat_path.name} non trovato in {bat_path.parent}"
     try:
+        # cmd /c start apre una nuova finestra console indipendente.
+        # Il titolo è il label (primo argomento di start con virgolette).
         proc = subprocess.Popen(
-            str(bat_path),
-            creationflags=CREATE_NEW_CONSOLE,
+            ["cmd", "/c", "start", f'"{label}"', str(bat_path)],
             close_fds=True,
         )
-        return True, f"avviato (PID {proc.pid})"
+        proc.wait(timeout=2)  # cmd /c start ritorna subito (non aspetta il bat)
+        return True, f"console aperta ('{label}')"
+    except subprocess.TimeoutExpired:
+        return True, f"console aperta ('{label}')"
     except Exception as exc:
         return False, str(exc)
 
