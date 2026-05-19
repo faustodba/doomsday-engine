@@ -195,13 +195,14 @@ def _build_status() -> str:
     if not es:
         lines.append("🔴 <b>Bot: SPENTO</b> (engine_status.json assente)")
     else:
-        ts_raw = es.get("ts_update", "")
+        ts_raw = es.get("ts_update") or es.get("ts", "")
         ago_s: int = 0
         ts_str = "—"
         if ts_raw:
             try:
                 dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
-                ago_s = int((datetime.now(timezone.utc) - dt).total_seconds())
+                now = datetime.now(timezone.utc) if dt.tzinfo else datetime.now()
+                ago_s = int((now - dt).total_seconds())
                 ts_str = _fmt_dur(ago_s)
             except Exception:
                 pass
@@ -658,12 +659,13 @@ def _check_bot_running() -> bool:
     es = _read_engine_status()
     if not es:
         return False
-    ts_raw = es.get("ts_update", "")
+    ts_raw = es.get("ts_update") or es.get("ts", "")
     if not ts_raw:
         return False
     try:
         dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
-        return (datetime.now(timezone.utc) - dt).total_seconds() < 600
+        now = datetime.now(timezone.utc) if dt.tzinfo else datetime.now()
+        return (now - dt).total_seconds() < 600
     except Exception:
         return False
 
