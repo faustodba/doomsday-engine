@@ -189,49 +189,41 @@ def _build_status() -> str:
         lines.append("⏸ <b>MAINTENANCE MODE</b> attivo")
         lines.append(f"  Motivo: {maint.get('motivo', '—')}")
 
-    # Engine status — rileva se bot è fermo (stale > 10 min)
-    es = _read_engine_status()
-    _BOT_STALE_S = 600  # 10 minuti senza aggiornamento = bot fermo
-    if not es:
-        lines.append("🔴 <b>Bot: SPENTO</b> (engine_status.json assente)")
+    # Bot running — controllo processo (primario) + engine_status (info ciclo)
+    bot_ok = _check_bot_running()
+    es     = _read_engine_status()
+
+    if bot_ok:
+        lines.append("🟢 <b>Bot: ATTIVO</b>")
     else:
-        ts_raw = es.get("ts_update") or es.get("ts", "")
-        ago_s: int = 0
-        ts_str = "—"
-        if ts_raw:
-            try:
-                dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
-                now = datetime.now(timezone.utc) if dt.tzinfo else datetime.now()
-                ago_s = int((now - dt).total_seconds())
-                ts_str = _fmt_dur(ago_s)
-            except Exception:
-                pass
+        lines.append("🔴 <b>Bot: SPENTO</b>")
 
-        if ago_s > _BOT_STALE_S:
-            lines.append(f"🔴 <b>Bot: SPENTO</b> (ultimo aggiornamento {ts_str} fa)")
-        else:
-            lines.append(f"🟢 <b>Bot: ATTIVO</b> (aggiornato {ts_str} fa)")
+    # Ciclo corrente da cicli.json
+    if bot_ok:
+        cicli = _read_cicli()
+        if cicli:
+            ultimo = sorted(cicli, key=lambda c: c.get("start_ts", ""), reverse=True)[0]
+            n     = ultimo.get("cycle_n", "?")
+            start = ultimo.get("start_ts", "")
+            if start:
+                try:
+                    dt  = datetime.fromisoformat(start.replace("Z", "+00:00"))
+                    now = datetime.now(timezone.utc) if dt.tzinfo else datetime.now()
+                    dur = (now - dt).total_seconds()
+                    lines.append(f"Ciclo #{n} in corso da {_fmt_dur(dur)}")
+                except Exception:
+                    lines.append(f"Ciclo #{n}")
 
-        # Ciclo corrente (solo se bot attivo)
-        if ago_s <= _BOT_STALE_S:
-            cicli = _read_cicli()
-            if cicli:
-                ultimo = sorted(cicli, key=lambda c: c.get("start_ts", ""), reverse=True)[0]
-                n = ultimo.get("cycle_n", "?")
-                start = ultimo.get("start_ts", "")
-                if start:
-                    try:
-                        dt = datetime.fromisoformat(start.replace("Z", "+00:00"))
-                        dur = (datetime.now(timezone.utc) - dt).total_seconds()
-                        lines.append(f"Ciclo #{n} in corso da {_fmt_dur(dur)}")
-                    except Exception:
-                        lines.append(f"Ciclo #{n}")
-
-        # Istanze (sempre mostrate — dati su disco persistono)
-        istanze_st = es.get("istanze", {})
-        n_tot = len(istanze_st)
-        n_ok = sum(1 for v in istanze_st.values() if v.get("abilitata", True))
-        lines.append(f"Istanze: {n_tot} totali, {n_ok} abilitate")
+    # Istanze da instances.json (lista completa configurata)
+    instances = _read_instances_cfg()
+    ov        = _read_runtime_overrides()
+    ist_ov    = ov.get("istanze", {})
+    n_tot     = len(instances)
+    n_ok      = sum(
+        1 for cfg in instances
+        if ist_ov.get(cfg["nome"], {}).get("abilitata", cfg.get("abilitata", True))
+    )
+    lines.append(f"Istanze: {n_tot} configurate, {n_ok} abilitate")
 
     # Dashboard
     dash_ok = _check_dashboard_running()
@@ -685,7 +677,28 @@ def _check_dashboard_running() -> bool:
 
 
 def _check_bot_running() -> bool:
-    """True se engine_status.json aggiornato negli ultimi 10 minuti."""
+    """True se il processo main.py Python è in esecuzione.
+
+    Metodo primario: interroga Win32_Process via PowerShell per trovare
+    python.exe con 'main.py' nella command line.
+    Fallback: freschezza engine_status.json (< 10 min).
+    """
+    import subprocess
+    try:
+        r = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+             "Get-CimInstance Win32_Process -Filter \"name='python.exe'\" "
+             "| Where-Object { $_.CommandLine -like '*main.py*' "
+             "  -and $_.CommandLine -notlike '*-m uvicorn*' } "
+             "| Measure-Object | Select-Object -ExpandProperty Count"],
+            capture_output=True, text=True, timeout=8,
+        )
+        count = r.stdout.strip()
+        if count.isdigit() and int(count) > 0:
+            return True
+    except Exception:
+        pass
+    # Fallback: engine_status.json freschezza
     es = _read_engine_status()
     if not es:
         return False
