@@ -12,6 +12,7 @@ Comandi supportati:
   /rifornimento — DRL master + spedizioni oggi
   /stop         — attiva maintenance mode
   /avvia        — disattiva maintenance mode
+  /restart_bot_telegram — riavvia il processo Telegram bot (~15s downtime)
 
 Config (runtime_overrides.json::globali.notifications.telegram):
   {
@@ -661,6 +662,7 @@ def _handle_command(text: str, chat_id: str) -> str:
             "<b>Bot management</b>\n"
             "/stop — attiva maintenance mode (bot in pausa)\n"
             "/avvia — disattiva maintenance mode (bot riprende)\n"
+            "/restart_bot_telegram — riavvia questo bot Telegram (~15s downtime)\n"
             "\n"
             "<b>Istanze</b>\n"
             "/disabilita FAU_03 — disabilita istanza (hot-reload)\n"
@@ -825,6 +827,15 @@ def _handle_command(text: str, chat_id: str) -> str:
 
         lines.append("\nUsa /status tra 60s per verificare i servizi.")
         return "\n".join(lines)
+
+    if cmd == "/restart_bot_telegram":
+        _schedule_self_restart(delay_s=5)
+        return (
+            "🔄 <b>Riavvio bot Telegram in 5s…</b>\n"
+            "Il processo si spegne e <code>run_telegram_prod.bat</code> lo riavvia "
+            "automaticamente dopo ~10s.\n"
+            "Downtime totale: ~15s."
+        )
 
     return f"Comando non riconosciuto: <code>{cmd}</code>\nUsa /help per la lista comandi."
 
@@ -1061,6 +1072,21 @@ def _check_bot_running() -> bool:
 _ROOT_PROD = Path("C:/doomsday-engine-prod")
 _BAT_BOT        = _ROOT_PROD / "run_prod.bat"
 _BAT_DASHBOARD  = _ROOT_PROD / "run_dashboard_prod.bat"
+
+
+def _schedule_self_restart(delay_s: int = 5) -> None:
+    """Spegne il processo bot Telegram dopo delay_s secondi.
+
+    Il bat run_telegram_prod.bat rileva l'uscita e riavvia automaticamente
+    il Python dopo 10s (loop :loop con timeout /t 10). Downtime totale ~15s.
+    Usa os._exit (hard exit) per evitare hang su thread join del polling loop.
+    """
+    def _do():
+        time.sleep(delay_s)
+        _log.info("[TG-BOT] restart programmato — os._exit(0)")
+        os._exit(0)
+    t = threading.Thread(target=_do, daemon=True, name="tg-self-restart")
+    t.start()
 
 
 def _launch_bat(bat_path: Path, label: str) -> tuple[bool, str]:
