@@ -277,7 +277,7 @@ def _build_status() -> str:
         cicli = _read_cicli()
         if cicli:
             ultimo = sorted(cicli, key=lambda c: c.get("start_ts", ""), reverse=True)[0]
-            n     = ultimo.get("cycle_n", "?")
+            n     = ultimo.get("numero", ultimo.get("cycle_n", "?"))
             start = ultimo.get("start_ts", "")
             if start:
                 try:
