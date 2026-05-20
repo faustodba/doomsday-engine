@@ -13,6 +13,11 @@ Comandi supportati:
   /stop         — attiva maintenance mode
   /avvia        — disattiva maintenance mode
   /restart_bot_telegram — riavvia il processo Telegram bot (~15s downtime)
+  /rif_risorsa  — abilita/disabilita risorsa rifornimento
+  /rif_modo     — cambia modalità (mappa/membri/entrambi/nessuno)
+  /rif_soglia   — cambia soglia deposito per risorsa
+  /rif_provviste — cambia provviste_max
+  /rif_reset    — azzera stato giornaliero rifornimento per istanza
 
 Config (runtime_overrides.json::globali.notifications.telegram):
   {
@@ -157,6 +162,103 @@ def _set_task(nome: Optional[str], enabled: bool) -> tuple[bool, dict, dict]:
 
     ok = _patch_runtime(patch)
     return ok, before, after
+
+
+# ─── Rifornimento helpers (config + state) ────────────────────────────────────
+
+# Mappa nome utente → chiave interna config (pomodoro = "campo" storicamente)
+_RIF_RISORSA_MAP: dict[str, str] = {
+    "pomodoro": "campo",
+    "campo":    "campo",
+    "legno":    "legno",
+    "acciaio":  "acciaio",
+    "petrolio": "petrolio",
+}
+_RIF_RISORSE_VALIDE = ("pomodoro", "legno", "acciaio", "petrolio")
+
+
+def _set_rif_risorsa(risorsa: str, abilitata: bool) -> tuple[bool, str]:
+    """Abilita/disabilita risorsa in globali.rifornimento_comune."""
+    nome_int = _RIF_RISORSA_MAP.get(risorsa.lower())
+    if not nome_int:
+        return False, f"risorsa '{risorsa}' non valida. Usa: {', '.join(_RIF_RISORSE_VALIDE)}"
+    campo = f"{nome_int}_abilitato"
+    def patch(ov):
+        ov.setdefault("globali", {}).setdefault("rifornimento_comune", {})[campo] = abilitata
+    ok = _patch_runtime(patch)
+    return ok, campo
+
+
+def _set_rif_modo(modo: str) -> tuple[bool, str]:
+    """Imposta modalità rifornimento (mappa/membri/entrambi/nessuno)."""
+    modo = modo.lower()
+    _validi = ("mappa", "membri", "entrambi", "nessuno")
+    if modo not in _validi:
+        return False, f"modo non valido. Usa: {', '.join(_validi)}"
+    mappa_on  = modo in ("mappa",  "entrambi")
+    membri_on = modo in ("membri", "entrambi")
+    def patch(ov):
+        rif = ov.setdefault("globali", {}).setdefault("rifornimento", {})
+        rif["mappa_abilitata"]  = mappa_on
+        rif["membri_abilitati"] = membri_on
+    ok = _patch_runtime(patch)
+    return ok, f"mappa={'on' if mappa_on else 'off'}  membri={'on' if membri_on else 'off'}"
+
+
+def _set_rif_soglia(risorsa: str, valore_m: float) -> tuple[bool, str]:
+    """Cambia soglia deposito per risorsa in globali.rifornimento_comune."""
+    nome_int = _RIF_RISORSA_MAP.get(risorsa.lower())
+    if not nome_int:
+        return False, f"risorsa '{risorsa}' non valida. Usa: {', '.join(_RIF_RISORSE_VALIDE)}"
+    campo = f"soglia_{nome_int}_m"
+    def patch(ov):
+        ov.setdefault("globali", {}).setdefault("rifornimento_comune", {})[campo] = valore_m
+    ok = _patch_runtime(patch)
+    return ok, campo
+
+
+def _set_rif_provviste(valore: int) -> tuple[bool, str]:
+    """Cambia provviste_max in globali.rifornimento."""
+    def patch(ov):
+        ov.setdefault("globali", {}).setdefault("rifornimento", {})["provviste_max"] = valore
+    ok = _patch_runtime(patch)
+    return ok, f"provviste_max={valore}M"
+
+
+def _reset_rif_stato(nome_ist: Optional[str]) -> tuple[int, int]:
+    """Azzera spedizioni_oggi + provviste_esaurite nello state file.
+
+    nome_ist=None → tutte le istanze (eccetto FauMorfeus).
+    Ritorna (n_ok, n_err).
+    """
+    instances = _read_instances_cfg()
+    tutti = [c["nome"] for c in instances if c["nome"] != "FauMorfeus"]
+    if nome_ist:
+        up = nome_ist.upper()
+        if up not in {t.upper() for t in tutti}:
+            return 0, 1
+        targets = [up]
+    else:
+        targets = tutti
+
+    today = datetime.now(timezone.utc).date().isoformat()
+    n_ok = n_err = 0
+    for ist in targets:
+        p = _root() / "state" / f"{ist}.json"
+        try:
+            st = json.loads(p.read_text(encoding="utf-8")) if p.exists() else {}
+            rif = st.setdefault("rifornimento", {})
+            rif["spedizioni_oggi"]    = 0
+            rif["provviste_esaurite"] = False
+            rif["data_riferimento"]   = today
+            tmp = p.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps(st, ensure_ascii=False, indent=2), encoding="utf-8")
+            os.replace(tmp, p)
+            n_ok += 1
+        except Exception as exc:
+            _log.warning("[TG-BOT] reset rif stato %s fallito: %s", ist, exc)
+            n_err += 1
+    return n_ok, n_err
 
 
 def _notify_cycle_every_n() -> int:
@@ -503,9 +605,48 @@ def _build_rifornimento() -> str:
 
     lines.append(f"Spedizioni totali oggi: {tot_sped}")
     if righe_ist:
-        lines.extend(righe_ist[:10])  # max 10 istanze mostrate
+        lines.extend(righe_ist[:10])
     elif tot_sped == 0:
         lines.append("  (nessuna spedizione ancora oggi)")
+
+    # Config attuale (hot-reload da runtime_overrides)
+    lines.append("")
+    lines.append("<b>Config attuale</b>")
+    rc  = ov.get("globali", {}).get("rifornimento_comune", {})
+    rif = ov.get("globali", {}).get("rifornimento", {})
+    # Modalità
+    mappa_on  = rif.get("mappa_abilitata",  False)
+    membri_on = rif.get("membri_abilitati", False)
+    if mappa_on and membri_on:
+        modo_str = "entrambi"
+    elif mappa_on:
+        modo_str = "mappa"
+    elif membri_on:
+        modo_str = "membri"
+    else:
+        modo_str = "⚠ nessuna"
+    lines.append(f"Modalità: {modo_str}")
+    # Risorse
+    ris_labels = [
+        ("pomodoro", rc.get("campo_abilitato",    True)),
+        ("legno",    rc.get("legno_abilitato",    True)),
+        ("acciaio",  rc.get("acciaio_abilitato",  True)),
+        ("petrolio", rc.get("petrolio_abilitato", True)),
+    ]
+    ris_str = "  ".join(f"{'🟢' if on else '🔴'}{r}" for r, on in ris_labels)
+    lines.append(f"Risorse: {ris_str}")
+    # Soglie deposito
+    soglie = [
+        ("pom", rc.get("soglia_campo_m",    5.0)),
+        ("leg", rc.get("soglia_legno_m",    5.0)),
+        ("acc", rc.get("soglia_acciaio_m",  3.5)),
+        ("pet", rc.get("soglia_petrolio_m", 2.5)),
+    ]
+    s_str = "  ".join(f"{k}={v:.1f}M" for k, v in soglie)
+    lines.append(f"Soglie: {s_str}")
+    # Provviste max
+    prov_max = rif.get("provviste_max", 100)
+    lines.append(f"Provviste max: {prov_max}M")
 
     return "\n".join(lines)
 
@@ -673,6 +814,15 @@ def _handle_command(text: str, chat_id: str) -> str:
             "/disabilita_task arena — disabilita task singolo\n"
             "/abilita_task arena — abilita task singolo\n"
             "\n"
+            "<b>Rifornimento</b>\n"
+            "/rifornimento — DRL + spedizioni oggi + config\n"
+            "/rif_risorsa acciaio off — abilita/disabilita risorsa\n"
+            "/rif_modo mappa — modalità: mappa|membri|entrambi|nessuno\n"
+            "/rif_soglia acciaio 3.5 — soglia deposito (M)\n"
+            "/rif_provviste 80 — provviste_max (M)\n"
+            "/rif_reset FAU_03 — azzera stato giornaliero istanza\n"
+            "/rif_reset — azzera stato giornaliero tutte le istanze\n"
+            "\n"
             f"<b>Notifiche proattive</b> (ora: {msg_icon})\n"
             "/stop_messaggi — disabilita notifiche automatiche\n"
             "/start_messaggi — abilita notifiche automatiche\n"
@@ -788,6 +938,91 @@ def _handle_command(text: str, chat_id: str) -> str:
         icona = "🟢" if abilitata else "🔴"
         stato = "abilitato" if abilitata else "disabilitato"
         return f"{icona} Task <b>{nome_task}</b> {stato}.\nEffetto al prossimo tick del bot."
+
+    # ── Rifornimento — comandi di modifica ───────────────────────────────────
+
+    if cmd == "/rif_risorsa":
+        parts = text.split()
+        if len(parts) < 3:
+            return (
+                "⚠ Uso: /rif_risorsa &lt;risorsa&gt; on|off\n"
+                "Risorse: pomodoro, legno, acciaio, petrolio\n"
+                "Es: /rif_risorsa acciaio off"
+            )
+        risorsa, stato_s = parts[1].lower(), parts[2].lower()
+        if stato_s not in ("on", "off"):
+            return "⚠ Stato non valido. Usa: on oppure off"
+        abilitata = stato_s == "on"
+        ok, msg = _set_rif_risorsa(risorsa, abilitata)
+        if not ok:
+            return f"⚠ {msg}"
+        icona = "🟢" if abilitata else "🔴"
+        return (
+            f"{icona} Risorsa <b>{risorsa}</b> {'abilitata' if abilitata else 'disabilitata'}.\n"
+            f"Effetto al prossimo tick. Usa /rifornimento per verificare."
+        )
+
+    if cmd == "/rif_modo":
+        parts = text.split()
+        if len(parts) < 2:
+            return (
+                "⚠ Uso: /rif_modo &lt;mappa|membri|entrambi|nessuno&gt;\n"
+                "Es: /rif_modo mappa"
+            )
+        ok, msg = _set_rif_modo(parts[1])
+        if not ok:
+            return f"⚠ {msg}"
+        return f"✅ Modalità impostata: <b>{msg}</b>\nEffetto al prossimo tick."
+
+    if cmd == "/rif_soglia":
+        parts = text.split()
+        if len(parts) < 3:
+            return (
+                "⚠ Uso: /rif_soglia &lt;risorsa&gt; &lt;M&gt;\n"
+                "Risorse: pomodoro, legno, acciaio, petrolio\n"
+                "Es: /rif_soglia acciaio 3.5"
+            )
+        risorsa = parts[1].lower()
+        try:
+            valore_m = float(parts[2].replace(",", "."))
+        except ValueError:
+            return "⚠ Valore non valido. Usa un numero in milioni (es. 3.5)"
+        if valore_m < 0 or valore_m > 500:
+            return "⚠ Valore fuori range (0–500 M)"
+        ok, campo = _set_rif_soglia(risorsa, valore_m)
+        if not ok:
+            return f"⚠ {campo}"
+        return f"✅ Soglia <b>{risorsa}</b> impostata a <b>{valore_m:.1f}M</b>.\nEffetto al prossimo tick."
+
+    if cmd == "/rif_provviste":
+        parts = text.split()
+        if len(parts) < 2:
+            return "⚠ Uso: /rif_provviste &lt;M&gt;  Es: /rif_provviste 80"
+        try:
+            valore = int(float(parts[1]))
+        except ValueError:
+            return "⚠ Valore non valido. Usa un numero intero in milioni."
+        if valore < 1 or valore > 9999:
+            return "⚠ Valore fuori range (1–9999 M)"
+        ok, msg = _set_rif_provviste(valore)
+        if not ok:
+            return "⚠ Errore scrittura runtime_overrides.json"
+        return f"✅ {msg}\nEffetto al prossimo tick. Usa /rifornimento per verificare."
+
+    if cmd == "/rif_reset":
+        parts = text.split()
+        nome_ist = parts[1] if len(parts) > 1 else None
+        n_ok, n_err = _reset_rif_stato(nome_ist)
+        if n_ok == 0 and n_err > 0:
+            target = nome_ist or "tutte le istanze"
+            return f"⚠ Reset fallito per <b>{target}</b>. Controlla i log."
+        target_str = f"<b>{nome_ist.upper()}</b>" if nome_ist else f"<b>{n_ok} istanze</b>"
+        err_str = f"  ({n_err} errori)" if n_err else ""
+        return (
+            f"✅ Stato rifornimento azzerato per {target_str}{err_str}.\n"
+            "spedizioni_oggi=0 · provviste_esaurite=False\n"
+            "⚠ Effetto al prossimo tick dell'istanza (non retroattivo se tick in corso)."
+        )
 
     if cmd == "/avvia_bot":
         if _check_bot_running():
