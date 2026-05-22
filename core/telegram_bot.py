@@ -946,7 +946,6 @@ def _handle_command(text: str, chat_id: str) -> str:
             "/status — stato completo (bot, dashboard, ciclo, DRL)\n"
             "/istanze — lista istanze ON/OFF con istanza live\n"
             "/istanza FAU_03 — card dettaglio singola istanza\n"
-            "/rifornimento — DRL master FauMorfeus + spedizioni oggi\n"
             "/cicli — ultimi 5 cicli (in corso + 4 completati)\n"
             "/ciclo 184 — dettaglio ciclo #184 (ometti N per l'ultimo)\n"
             "\n"
