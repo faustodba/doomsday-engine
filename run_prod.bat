@@ -62,15 +62,15 @@ set DOOMSDAY_ROOT=C:\doomsday-engine-prod
 
 
 REM --- PRE-KILL: bot main.py orfani da lanci precedenti ---------------------
-REM   Killa python.exe con "main.py" nel command line. Eseguito PRIMA del
-REM   lancio nuovo bot per evitare sovrapposizioni su engine_status.json,
-REM   state/, logs/. Il nuovo python.exe non e' ancora stato spawnato quindi
-REM   l'inclusione di tutti i match e' safe (no PID corrente da escludere).
-REM   Esclude esplicitamente "-m uvicorn" per non killare la dashboard.
+REM   Meccanismo 1: PID file (data\bot.pid) — kill diretto, piu' affidabile.
+REM   Meccanismo 2: CIM query su python.exe + py.exe con 'main.py' in cmdline.
+REM   Eseguito PRIMA del lancio nuovo bot per evitare sovrapposizioni.
+REM   Esclude "-m uvicorn" per non killare la dashboard.
 REM   Doppia rete: main.py contiene anche _cleanup_orfani_processi_startup
-REM   che killa cmd.exe + python.exe orfani al primo tick (preserva PID corrente).
-echo [run_prod] Pre-kill bot main.py orfani...
-powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -like '*main.py*' -and $_.CommandLine -notlike '*-m uvicorn*' } | ForEach-Object { Write-Host ('  kill PID=' + $_.ProcessId); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+REM   che killa cmd.exe + python.exe + py.exe orfani al boot (preserva PID corrente).
+echo [run_prod] Pre-kill bot orfani (PID-file + CIM)...
+powershell -NoProfile -Command "if (Test-Path 'data\bot.pid') { try { $p=[int](Get-Content 'data\bot.pid'); Stop-Process -Id $p -Force -ErrorAction SilentlyContinue; Write-Host ('  kill PID=' + $p + ' (bot.pid)') } catch {} }"
+powershell -NoProfile -Command "@('python.exe','py.exe') | ForEach-Object { $n=$_; try { Get-CimInstance Win32_Process -Filter ('Name=''' + $n + '''') | Where-Object { $_.CommandLine -like '*main.py*' -and $_.CommandLine -notlike '*-m uvicorn*' } | ForEach-Object { Write-Host ('  kill PID=' + $_.ProcessId + ' (' + $n + ')'); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } } catch {} }"
 timeout /t 2 /nobreak >nul
 
 

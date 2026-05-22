@@ -208,20 +208,21 @@ def _cleanup_globale_startup(log_fn=None) -> None:
 
 def _cleanup_orfani_processi_startup(log_fn=None) -> None:
     """
-    Kill processi cmd.exe + python.exe orfani da sessioni precedenti del bot,
+    Kill processi cmd.exe + python.exe/py.exe orfani da sessioni precedenti,
     PRESERVANDO il bot corrente.
 
-    Tipi di orfani gestiti:
-      - cmd.exe con cmdline matching run_prod.bat o run_dashboard_prod.bat
-        e PID diverso dal cmd parent del bot corrente
-      - python.exe con cmdline 'main.py' e PID != current process
+    Meccanismi (in ordine di affidabilità):
+      0. PID file (data/bot.pid): kill diretto del PID salvato dalla sessione
+         precedente — indipendente da WMI/nomi processo. Più affidabile.
+      1. cmd.exe con cmdline matching run_prod.bat o run_dashboard_prod.bat
+         e PID diverso dal cmd parent del bot corrente
+      2. python.exe con cmdline 'main.py' (NON il bot corrente)
+      2b. py.exe con cmdline 'main.py' (launcher Python, avviato via py -3.14)
 
     Da chiamare all'avvio bot, DOPO _cleanup_globale_startup (MuMu),
-    PRIMA del loop principale. Risolve il problema delle finestre cmd
-    orfane accumulate (vedi WU19) e dei python.exe duplicati lasciati
-    da kill brutali precedenti.
+    PRIMA del loop principale.
 
-    Safe: usa CommandLine matching specifico, non killa altri python/cmd.
+    Note: usa Get-CimInstance (non Get-WmiObject, deprecato in PS7+).
     """
     import subprocess
     import os as _os
@@ -236,17 +237,29 @@ def _cleanup_orfani_processi_startup(log_fn=None) -> None:
 
     log = log_fn or (lambda _msg: None)
 
-    # Helper: get processes via PowerShell WMI
-    def _wmi_query(name: str, pattern: str) -> list[tuple[int, int, str]]:
+    # ── 0. PID file: kill old bot by saved PID (più affidabile di WMI) ───────
+    _pid_file = _os.path.join(ROOT, "data", "bot.pid")
+    try:
+        if _os.path.exists(_pid_file):
+            with open(_pid_file) as _pf:
+                old_pid = int(_pf.read().strip())
+            if old_pid != current_pid:
+                r = subprocess.run(
+                    ["taskkill", "/F", "/PID", str(old_pid)],
+                    capture_output=True, timeout=5,
+                )
+                if r.returncode == 0:
+                    log(f"[CLEANUP-ORFANI] PID-file: killed old bot PID={old_pid}")
+                else:
+                    log(f"[CLEANUP-ORFANI] PID-file: old bot PID={old_pid} non trovato (già uscito)")
+    except Exception as exc:
+        log(f"[CLEANUP-ORFANI] PID-file kill errore: {exc}")
+
+    # Helper: get processes via PowerShell CIM (Get-CimInstance, non WMI deprecato)
+    def _cim_query(name: str, pattern: str) -> list[tuple[int, int, str]]:
         try:
             ps_cmd = (
-                f"Get-WmiObject Win32_Process -Filter \"Name='{name}'\" | "
-                f"Where-Object {{ $_.CommandLine -like '*{pattern}*' }} | "
-                f"ForEach-Object {{ '{{0}}|{{1}}'.f($_.ProcessId, $_.ParentProcessId) }}"
-            )
-            # Usa formato JSON via PowerShell per evitare parsing fragile
-            ps_cmd = (
-                f"Get-WmiObject Win32_Process -Filter \"Name='{name}'\" | "
+                f"Get-CimInstance Win32_Process -Filter \"Name='{name}'\" | "
                 f"Where-Object {{ $_.CommandLine -like '*{pattern}*' }} | "
                 f"Select-Object ProcessId,ParentProcessId,CommandLine | "
                 f"ConvertTo-Json -Compress"
@@ -255,7 +268,11 @@ def _cleanup_orfani_processi_startup(log_fn=None) -> None:
                 ["powershell", "-NoProfile", "-Command", ps_cmd],
                 capture_output=True, text=True, timeout=15,
             )
-            if r.returncode != 0 or not r.stdout.strip():
+            if r.returncode != 0:
+                log(f"[CLEANUP-ORFANI] CIM query {name} rc={r.returncode} "
+                    f"stderr={r.stderr.strip()[:120]}")
+                return []
+            if not r.stdout.strip():
                 return []
             data = _json.loads(r.stdout)
             if isinstance(data, dict):
@@ -263,7 +280,7 @@ def _cleanup_orfani_processi_startup(log_fn=None) -> None:
             return [(int(d["ProcessId"]), int(d.get("ParentProcessId") or 0),
                      str(d.get("CommandLine") or "")) for d in data]
         except Exception as exc:
-            log(f"[CLEANUP-ORFANI] WMI query {name} errore: {exc}")
+            log(f"[CLEANUP-ORFANI] CIM query {name} errore: {exc}")
             return []
 
     killed_cmd = []
@@ -271,7 +288,7 @@ def _cleanup_orfani_processi_startup(log_fn=None) -> None:
 
     # 1. cmd.exe orfani con cmdline run_prod.bat o run_dashboard_prod.bat
     for pattern in ("run_prod.bat", "run_dashboard_prod.bat"):
-        for pid, ppid, cmdline in _wmi_query("cmd.exe", pattern):
+        for pid, ppid, cmdline in _cim_query("cmd.exe", pattern):
             if pid in (current_pid, parent_pid):
                 continue
             try:
@@ -284,7 +301,21 @@ def _cleanup_orfani_processi_startup(log_fn=None) -> None:
                 pass
 
     # 2. python.exe orfani con cmdline 'main.py' (NON il bot corrente)
-    for pid, ppid, cmdline in _wmi_query("python.exe", "main.py"):
+    for pid, ppid, cmdline in _cim_query("python.exe", "main.py"):
+        if pid == current_pid:
+            continue
+        try:
+            subprocess.run(
+                ["taskkill", "/F", "/PID", str(pid)],
+                capture_output=True, timeout=5,
+            )
+            killed_py.append(pid)
+        except Exception:
+            pass
+
+    # 2b. py.exe orfani (Python Launcher) con cmdline 'main.py'
+    #     Il bat usa `py -3.14 main.py` — py.exe può restare vivo come parent
+    for pid, ppid, cmdline in _cim_query("py.exe", "main.py"):
         if pid == current_pid:
             continue
         try:
@@ -299,6 +330,14 @@ def _cleanup_orfani_processi_startup(log_fn=None) -> None:
     log(f"cleanup orfani: cmd killed={len(killed_cmd)} {killed_cmd if killed_cmd else ''} | "
         f"python killed={len(killed_py)} {killed_py if killed_py else ''} | "
         f"current_pid={current_pid} parent={parent_pid}")
+
+    # ── Fine: scrivi PID corrente su file (per kill ad avvio successivo) ─────
+    try:
+        _os.makedirs(_os.path.join(ROOT, "data"), exist_ok=True)
+        with open(_pid_file, "w") as _pf:
+            _pf.write(str(current_pid))
+    except Exception as exc:
+        log(f"[CLEANUP-ORFANI] PID-file write errore: {exc}")
 
 
 def _cleanup_tutti_emulator(istanze: list[dict], dry_run: bool) -> None:
