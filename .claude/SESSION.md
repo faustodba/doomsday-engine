@@ -1,5 +1,30 @@
 # SESSION.md — Handoff Doomsday Engine V6
 
+## Sessione 22/05/2026 (aggiornamento 2) — validazione fix + Telegram 409 risolto
+
+### Stato corrente
+
+- **Bot prod**: IN ESECUZIONE (ciclo in corso, FAU_05 a 22:20 UTC)
+- **WU162 double-thread**: ✅ CONFERMATO RISOLTO — nessun log doppio dopo reboot PC (UN solo "in attesa" sequenziale per istanza)
+- **Fix raccolta livello (e7421c5)**: ✅ VALIDATO — 0 NON selezionato, 0 tipo_bloccato su FAU_01/02/03/05 nei log odierni (34 eventi raccolta puliti)
+- **Telegram bot 409**: ✅ RISOLTO — processo concorrente sparito durante indagine; aggiunto sleep 5s su risposta vuota rapida (commit `0d09018`)
+- **Telegram bot**: NON in esecuzione — PID file assente. Richiede avvio manuale `run_telegram_prod.bat`
+
+### Commit questa sessione
+
+| Hash | Fix |
+|------|-----|
+| `e7421c5` | fix(raccolta): delay reset 0.3→0.8s + rilettura livello + verifica pre-CERCA |
+| `1cd2337` | fix(telegram): rimuovi /rifornimento duplicato da /help |
+| `0d09018` | fix(telegram): sleep 5s su risposta vuota rapida (409) nel polling loop |
+
+### Prossimo step
+
+1. Avviare `run_telegram_prod.bat` (1 sola finestra) → verificare `telegram_service.log` polling normale senza 409
+2. Monitorare raccolta nelle prossime ore: confermare 0 NON selezionato su tutte le 11 istanze
+
+---
+
 ## Sessione 22/05/2026 — WU162 startup double-thread fix (PID file + CIM)
 
 ### Problema risolto

@@ -58,6 +58,51 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 22/05/2026 — Validazione fix raccolta livello + Telegram 409
+
+#### Raccolta livello nodo — validazione fix (commit `e7421c5`)
+
+**Fix applicato in sessione precedente** (delay reset 0.3→0.8s + rilettura livello post-reset + tap delay 0.25→0.4s + verifica pre-CERCA), **validato oggi**:
+
+| Istanza | NON selezionato | tipo_bloccato | Marce OK | CERCA OK |
+|---------|----------------|---------------|----------|----------|
+| FAU_01 | 0 | 0 | 10+ | 34 eventi puliti |
+| FAU_02 | 0 | 0 | 16 | 13 |
+| FAU_03 | 0 | 0 | 16 | 14 |
+| FAU_05 | 0 | 0 | 8 | 9 |
+
+**Stato**: ✅ CHIUSO — fix confermato funzionante su FAU_01..FAU_10.
+
+---
+
+#### WU162 double-thread startup — confermato risolto
+
+**WU162** (commit `0cd2562`, sessione 22/05 mattina) confermato dopo reboot PC. Log bot: UN solo "in attesa" sequenziale per istanza, nessun interleaving doppio su FAU_08/FAU_10.
+
+**Stato**: ✅ CHIUSO.
+
+---
+
+#### Telegram bot 409 Conflict — fix rapid-retry (commit `0d09018`)
+
+**Sintomo**: bot Telegram in log con cascata 409 "Conflict: terminated by other getUpdates request" ad alta frequenza (centinaia/minuto). Causa principale: due finestre `run_telegram_prod.bat` aperte contemporaneamente → due processi python concorrenti sullo stesso token.
+
+**Fix codice** (`core/telegram_bot.py::_polling_loop`): aggiunto timer sul polling — se la risposta vuota torna in meno di 5s (segnale di errore swallowed tipo 409, poiché il long-poll normale dura ~20s), dorme `_POLL_RETRY_SLEEP = 5s` prima di riprovare. Pre-fix: loop immediato → centinaia di richieste al secondo all'API Telegram.
+
+**Indagine token**: il token doomsday (`8644025293`) è presente **solo** in `data/secrets.json`. Il trading-engine usa token diverso (`8925003631`). Nessun webhook configurato (`getWebhookInfo::url = ''`).
+
+**Stato**: ✅ RISOLTO. Token risponde `ok=True`. Telegram bot non in esecuzione — avviare `run_telegram_prod.bat` (1 sola finestra).
+
+---
+
+#### Telegram bot /rifornimento duplicato in /help (commit `1cd2337`)
+
+**Fix**: rimossa entry duplicata del comando `/rifornimento` dalla sezione "Informazioni" di `/help`. Il comando era listato due volte — una nella sezione comandi corretta e una spuriosa nella sezione info.
+
+**Stato**: ✅ CHIUSO.
+
+---
+
 ### Sessione 18/05/2026 — WU159 + WU160 (rifornimento pin soglia + raccolta fallback livello)
 
 #### WU159 — rifornimento AVATAR_MAPPA_SOGLIA 0.75→0.55
