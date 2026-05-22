@@ -286,10 +286,31 @@ def _cleanup_orfani_processi_startup(log_fn=None) -> None:
     killed_cmd = []
     killed_py = []
 
+    # Costruisce insieme antenati (current → py.exe → cmd.exe → ...) per
+    # evitare di killare il cmd.exe che ha lanciato il bot corrente.
+    # parent_pid = py.exe; grandparent = cmd.exe (run_prod.bat) → da escludere.
+    _ancestor_pids: set[int] = {current_pid}
+    if parent_pid:
+        _ancestor_pids.add(parent_pid)
+    if parent_pid:
+        try:
+            ps_gp = (
+                f"(Get-CimInstance Win32_Process -Filter "
+                f"\"ProcessId={parent_pid}\").ParentProcessId"
+            )
+            r_gp = subprocess.run(
+                ["powershell", "-NoProfile", "-Command", ps_gp],
+                capture_output=True, text=True, timeout=8,
+            )
+            if r_gp.returncode == 0 and r_gp.stdout.strip().isdigit():
+                _ancestor_pids.add(int(r_gp.stdout.strip()))
+        except Exception:
+            pass
+
     # 1. cmd.exe orfani con cmdline run_prod.bat o run_dashboard_prod.bat
     for pattern in ("run_prod.bat", "run_dashboard_prod.bat"):
         for pid, ppid, cmdline in _cim_query("cmd.exe", pattern):
-            if pid in (current_pid, parent_pid):
+            if pid in _ancestor_pids:
                 continue
             try:
                 subprocess.run(
