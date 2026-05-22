@@ -11,6 +11,7 @@ Comandi supportati:
   /istanze      — dettaglio per istanza (tipologia, task, raccolta)
   /rifornimento — DRL master + spedizioni oggi
   /cicli        — ultimi 5 cicli (in corso + 4 completati)
+  /ciclo [N]    — dettaglio ciclo #N (ometti N per l'ultimo)
   /stop         — attiva maintenance mode
   /avvia        — disattiva maintenance mode
   /restart_bot_telegram — riavvia il processo Telegram bot (~15s downtime)
@@ -562,6 +563,91 @@ def _build_istanze() -> str:
     return "\n".join(lines)
 
 
+def _build_ciclo_detail(numero: Optional[int]) -> str:
+    """Risposta a /ciclo [N] — dettaglio singolo ciclo.
+
+    Se numero=None mostra il ciclo più recente.
+    """
+    cicli = _read_cicli()
+    if not cicli:
+        return "Nessun ciclo disponibile in data/telemetry/cicli.json"
+
+    if numero is None:
+        c = sorted(cicli, key=lambda x: x.get("start_ts", ""), reverse=True)[0]
+    else:
+        matches = [x for x in cicli if x.get("numero") == numero]
+        if not matches:
+            nums = sorted({x.get("numero") for x in cicli if x.get("numero")}, reverse=True)
+            recenti = ", ".join(f"#{n}" for n in nums[:8])
+            return f"⚠ Ciclo #{numero} non trovato.\nDisponibili (recenti): {recenti}"
+        c = matches[0]
+
+    n          = c.get("numero", "?")
+    completato = c.get("completato", False)
+    start_ts   = c.get("start_ts", "")
+    end_ts     = c.get("end_ts", "")
+    durata_s   = c.get("durata_s", 0)
+    istanze    = c.get("istanze", {})
+    now        = datetime.now(timezone.utc)
+
+    # Header
+    if not completato:
+        dt_start = _parse_dt(start_ts)
+        elapsed = _fmt_dur((now - dt_start).total_seconds()) if dt_start else "?"
+        avv_str = dt_start.astimezone().strftime("%d/%m %H:%M") if dt_start else "?"
+        n_done  = sum(1 for v in istanze.values() if v.get("end_ts"))
+        n_tot   = len(istanze)
+        header  = f"🔄 <b>Ciclo #{n}</b>  —  in corso da {elapsed}\n{avv_str} → in corso  |  {n_done}/{n_tot}"
+    else:
+        dt_start = _parse_dt(start_ts)
+        dt_end   = _parse_dt(end_ts)
+        avv_str  = dt_start.astimezone().strftime("%d/%m %H:%M") if dt_start else "?"
+        fine_str = dt_end.astimezone().strftime("%H:%M") if dt_end else "?"
+        dur_str  = _fmt_dur(durata_s) if durata_s else "?"
+        n_ok     = sum(1 for v in istanze.values() if v.get("esito") == "ok")
+        n_tot    = len(istanze)
+        esiti_extra = ""
+        n_cas = sum(1 for v in istanze.values() if v.get("esito") == "cascade")
+        n_ab  = sum(1 for v in istanze.values() if v.get("esito") == "abort")
+        if n_cas: esiti_extra += f"  ⚡{n_cas}"
+        if n_ab:  esiti_extra += f"  ✂{n_ab}"
+        stato_icon = "✅" if n_ok == n_tot else ("⚠" if n_ok > 0 else "❌")
+        header = (
+            f"{stato_icon} <b>Ciclo #{n}</b>  —  {dur_str}\n"
+            f"{avv_str} → {fine_str}  |  {n_ok}/{n_tot} ok{esiti_extra}"
+        )
+
+    # Tabella istanze
+    _ESITO_ICON = {"ok": "✅", "cascade": "⚡", "abort": "✂", "running": "▶"}
+    rows: list[tuple[str, int, str]] = []  # (nome, durata_s, esito)
+    for nome, v in istanze.items():
+        d_s  = v.get("durata_s", 0)
+        esit = v.get("esito", "?")
+        # calcola elapsed per istanza in-progress
+        if esit == "running" and v.get("start_ts"):
+            dt_i = _parse_dt(v["start_ts"])
+            d_s  = int((now - dt_i).total_seconds()) if dt_i else 0
+        rows.append((nome, d_s, esit))
+
+    lines: list[str] = [header, "", "<code>Istanza       durata</code>"]
+    for nome, d_s, esit in rows:
+        icona = _ESITO_ICON.get(esit, "?")
+        dur   = _fmt_dur(d_s) if d_s else "—"
+        if esit == "running":
+            dur += " ▶"
+        lines.append(f"<code>{nome:<12} {dur:>6}</code>  {icona}")
+
+    # Footer min/max solo su cicli con durata valida e almeno 2 istanze
+    durate = [(nome, d_s) for nome, d_s, esit in rows if d_s > 0 and esit != "running"]
+    if len(durate) >= 2:
+        mn = min(durate, key=lambda x: x[1])
+        mx = max(durate, key=lambda x: x[1])
+        lines.append("")
+        lines.append(f"min: {mn[0]} {_fmt_dur(mn[1])}  |  max: {mx[0]} {_fmt_dur(mx[1])}")
+
+    return "\n".join(lines)
+
+
 def _build_cicli() -> str:
     """Risposta al comando /cicli — ultimi 5 cicli (4 completati + 1 in corso)."""
     cicli = _read_cicli()
@@ -859,6 +945,7 @@ def _handle_command(text: str, chat_id: str) -> str:
             "/istanza FAU_03 — card dettaglio singola istanza\n"
             "/rifornimento — DRL master FauMorfeus + spedizioni oggi\n"
             "/cicli — ultimi 5 cicli (in corso + 4 completati)\n"
+            "/ciclo 184 — dettaglio ciclo #184 (ometti N per l'ultimo)\n"
             "\n"
             f"<b>Avvio sistema</b> (bot {bot_icon}  dashboard {dash_icon})\n"
             "/avvia_bot — avvia il bot (run_prod.bat)\n"
@@ -918,6 +1005,20 @@ def _handle_command(text: str, chat_id: str) -> str:
             return _build_cicli()
         except Exception as exc:
             return f"⚠ Errore /cicli: {exc}"
+
+    if cmd == "/ciclo":
+        parts = text.split()
+        numero = None
+        if len(parts) > 1:
+            raw = parts[1].lstrip("#")
+            try:
+                numero = int(raw)
+            except ValueError:
+                return "⚠ Uso: /ciclo [N]  Es: /ciclo 184  oppure /ciclo per il più recente"
+        try:
+            return _build_ciclo_detail(numero)
+        except Exception as exc:
+            return f"⚠ Errore /ciclo: {exc}"
 
     if cmd == "/istanza":
         parts = text.split()
