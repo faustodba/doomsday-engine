@@ -1272,10 +1272,17 @@ def _polling_loop(stop: threading.Event) -> None:
             authorized_chat = load_chat_id()
             continue
 
+        _t_poll = time.time()
         try:
             updates = get_updates(offset=_update_offset, timeout_s=_POLL_TIMEOUT_S)
         except Exception as exc:
             _log.warning("[TG-BOT] get_updates errore: %s", exc)
+            time.sleep(_POLL_RETRY_SLEEP)
+            continue
+
+        # Risposta vuota tornata in <5s = errore (es. 409) — sleep prima di riprovare
+        # In polling normale (timeout 20s) la risposta vuota arriva dopo ~20s → no sleep
+        if not updates and (time.time() - _t_poll) < 5:
             time.sleep(_POLL_RETRY_SLEEP)
             continue
 
