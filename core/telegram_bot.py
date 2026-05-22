@@ -129,20 +129,22 @@ def _set_messaggi_enabled(enabled: bool) -> bool:
 def _set_istanza_abilitata(nome: str, abilitata: bool) -> tuple[bool, str]:
     """Imposta abilitata per l'istanza in runtime_overrides.json.
 
+    Usa il nome canonico da instances.json (case-insensitive input).
     Ritorna (ok, messaggio_errore_o_nome_canonico).
     """
     instances = _read_instances_cfg()
-    nomi_validi = {c["nome"].upper() for c in instances}
-    nome_up = nome.upper()
-    if nome_up not in nomi_validi:
-        suggerito = ", ".join(sorted(nomi_validi))
+    # mappa UPPERCASE → nome canonico (es. "FAUMORFEUS" → "FauMorfeus")
+    nomi_map = {c["nome"].upper(): c["nome"] for c in instances}
+    nome_canonico = nomi_map.get(nome.upper())
+    if not nome_canonico:
+        suggerito = ", ".join(sorted(nomi_map.values()))
         return False, f"istanza '{nome}' non trovata.\nDisponibili: {suggerito}"
 
     def patch(ov):
-        ov.setdefault("istanze", {}).setdefault(nome_up, {})["abilitata"] = abilitata
+        ov.setdefault("istanze", {}).setdefault(nome_canonico, {})["abilitata"] = abilitata
 
     ok = _patch_runtime(patch)
-    return ok, nome_up
+    return ok, nome_canonico
 
 
 def _set_task(nome: Optional[str], enabled: bool) -> tuple[bool, dict, dict]:
