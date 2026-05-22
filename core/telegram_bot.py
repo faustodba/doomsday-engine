@@ -104,8 +104,9 @@ def _patch_runtime(patch_fn) -> bool:
         ov_path = _root() / "config" / "runtime_overrides.json"
         try:
             ov = json.loads(ov_path.read_text(encoding="utf-8")) if ov_path.exists() else {}
-        except Exception:
-            ov = {}
+        except Exception as read_exc:
+            _log.warning("[TG-BOT] _patch_runtime: lettura fallita, abort: %s", read_exc)
+            return False
         patch_fn(ov)
         tmp = ov_path.with_suffix(ov_path.suffix + ".tmp")
         tmp.write_text(json.dumps(ov, ensure_ascii=False, indent=2), encoding="utf-8")
