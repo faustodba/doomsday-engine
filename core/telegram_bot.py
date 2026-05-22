@@ -1241,10 +1241,10 @@ def _handle_command(text: str, chat_id: str) -> str:
     if cmd == "/restart_bot_telegram":
         _schedule_self_restart(delay_s=5)
         return (
-            "🔄 <b>Riavvio bot Telegram in 5s…</b>\n"
-            "Il processo si spegne e <code>run_telegram_prod.bat</code> lo riavvia "
-            "automaticamente dopo ~10s.\n"
-            "Downtime totale: ~15s."
+            "🔄 <b>Riavvio bot in 5s…</b>\n"
+            "Il processo esce con codice 100 → <code>run_prod.bat</code> riparte "
+            "automaticamente dopo 5s.\n"
+            "Downtime totale: ~10-15s."
         )
 
     return f"Comando non riconosciuto: <code>{cmd}</code>\nUsa /help per la lista comandi."
@@ -1493,8 +1493,8 @@ def _schedule_self_restart(delay_s: int = 5) -> None:
     """
     def _do():
         time.sleep(delay_s)
-        _log.info("[TG-BOT] restart programmato — os._exit(0)")
-        os._exit(0)
+        _log.info("[TG-BOT] restart programmato — os._exit(100)")
+        os._exit(100)  # 100 = codice atteso da run_prod.bat :run_loop per auto-restart
     t = threading.Thread(target=_do, daemon=True, name="tg-self-restart")
     t.start()
 
