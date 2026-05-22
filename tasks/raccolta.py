@@ -766,20 +766,10 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
         for _ in range(7):
             ctx.device.tap(coord_lv["meno"])
             time.sleep(0.2)
-        time.sleep(0.8)   # WU-LV-FIX: 0.3→0.8 — UI lag post-reset sequenziale
-        # Rileggi dopo reset per conoscere il livello minimo reale del pannello
-        # (potrebbe essere 1 o un altro valore, non assumiamo 1)
-        livello_dopo_reset = _leggi_livello_panel(ctx, tipo)
-        if livello_dopo_reset == -1:
-            livello_dopo_reset = 1  # fallback conservativo
-        piu_needed = max(0, livello - livello_dopo_reset)
-        ctx.log_msg(
-            f"Raccolta: dopo reset panel Lv.{livello_dopo_reset} → "
-            f"{piu_needed} piu per Lv.{livello}"
-        )
-        for _ in range(piu_needed):
+        time.sleep(0.3)
+        for _ in range(livello - 1):
             ctx.device.tap(coord_lv["piu"])
-            time.sleep(0.4)   # WU-LV-FIX: 0.25→0.4 — registrazione tap sicura
+            time.sleep(0.25)
     else:
         # WU67 (29/04): OCR letto → aggiusta solo del delta (saving 5-12 tap).
         # Pre-fix: SEMPRE 7 meno + N piu (7..13 tap, 1.5-3s).
@@ -792,7 +782,7 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
             )
             for _ in range(delta):
                 ctx.device.tap(coord_lv["piu"])
-                time.sleep(0.35)  # WU-LV-FIX: 0.25→0.35
+                time.sleep(0.25)
         else:  # delta < 0
             ctx.log_msg(
                 f"Raccolta: pannello su Lv.{livello_panel} → {abs(delta)} tap "
@@ -800,29 +790,7 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
             )
             for _ in range(abs(delta)):
                 ctx.device.tap(coord_lv["meno"])
-                time.sleep(0.25)  # WU-LV-FIX: 0.2→0.25
-
-    # WU-LV-FIX: verifica finale livello prima di CERCA — cattura sia il
-    # falso-positivo OCR (skip errato), sia i tap piu non registrati.
-    # Se la lettura mostra un livello diverso dal target → reset forzato.
-    # Se OCR fallisce (-1) → assume OK e procede (fail-safe non bloccante).
-    time.sleep(0.3)
-    livello_final = _leggi_livello_panel(ctx, tipo)
-    if livello_final != -1 and livello_final != livello:
-        ctx.log_msg(
-            f"Raccolta: MISMATCH level finale Lv.{livello_final} ≠ target "
-            f"Lv.{livello} → reset forzato"
-        )
-        for _ in range(7):
-            ctx.device.tap(coord_lv["meno"])
-            time.sleep(0.25)
-        time.sleep(0.8)
-        livello_dopo_reset2 = _leggi_livello_panel(ctx, tipo)
-        if livello_dopo_reset2 == -1:
-            livello_dopo_reset2 = 1
-        for _ in range(max(0, livello - livello_dopo_reset2)):
-            ctx.device.tap(coord_lv["piu"])
-            time.sleep(0.4)
+                time.sleep(0.2)
 
     ctx.device.tap(coord_lv["search"])
     time.sleep(delay_cerca)
