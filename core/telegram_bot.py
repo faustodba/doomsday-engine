@@ -10,6 +10,7 @@ Comandi supportati:
   /status       — stato ciclo corrente + istanze attive
   /istanze      — dettaglio per istanza (tipologia, task, raccolta)
   /rifornimento — DRL master + spedizioni oggi
+  /cicli        — ultimi 5 cicli (in corso + 4 completati)
   /stop         — attiva maintenance mode
   /avvia        — disattiva maintenance mode
   /restart_bot_telegram — riavvia il processo Telegram bot (~15s downtime)
@@ -561,6 +562,69 @@ def _build_istanze() -> str:
     return "\n".join(lines)
 
 
+def _build_cicli() -> str:
+    """Risposta al comando /cicli — ultimi 5 cicli (4 completati + 1 in corso)."""
+    cicli = _read_cicli()
+    if not cicli:
+        return "Nessun ciclo disponibile in data/telemetry/cicli.json"
+
+    # Ordina per start_ts desc, prendi i 5 più recenti
+    sorted_cicli = sorted(cicli, key=lambda c: c.get("start_ts", ""), reverse=True)[:5]
+
+    lines: list[str] = ["<b>Ultimi cicli</b>"]
+
+    for c in sorted_cicli:
+        n          = c.get("numero", "?")
+        completato = c.get("completato", False)
+        start_ts   = c.get("start_ts", "")
+        durata_s   = c.get("durata_s", 0)
+        istanze    = c.get("istanze", {})
+
+        # Orario avvio locale
+        avv_str = ""
+        if start_ts:
+            dt = _parse_dt(start_ts)
+            if dt:
+                avv_str = dt.astimezone().strftime("%d/%m %H:%M")
+
+        if not completato:
+            # Ciclo in corso
+            now = datetime.now(timezone.utc)
+            dur_str = ""
+            if start_ts:
+                dt = _parse_dt(start_ts)
+                if dt:
+                    dur_str = f" — in corso da {_fmt_dur((now - dt).total_seconds())}"
+
+            n_done    = sum(1 for v in istanze.values() if v.get("esito") not in ("running", None) and v.get("end_ts"))
+            n_tot     = len(istanze)
+            running   = next((k for k, v in istanze.items() if v.get("esito") == "running"), None)
+            run_str   = f"  ▶ {running}" if running else ""
+
+            lines.append(f"\n🔄 <b>Ciclo #{n}</b>{dur_str}  [{n_done}/{n_tot}]{run_str}")
+            if avv_str:
+                lines.append(f"   avv. {avv_str}")
+        else:
+            # Ciclo completato
+            n_ok      = sum(1 for v in istanze.values() if v.get("esito") == "ok")
+            n_cascade = sum(1 for v in istanze.values() if v.get("esito") == "cascade")
+            n_abort   = sum(1 for v in istanze.values() if v.get("esito") == "abort")
+            n_tot     = len(istanze)
+
+            esiti_str = f"{n_ok}/{n_tot} ok"
+            if n_cascade:
+                esiti_str += f"  ⚡{n_cascade} cascade"
+            if n_abort:
+                esiti_str += f"  ✂{n_abort} abort"
+
+            dur_str = _fmt_dur(durata_s) if durata_s else "?"
+            lines.append(f"\n✅ <b>Ciclo #{n}</b> — {dur_str}  {esiti_str}")
+            if avv_str:
+                lines.append(f"   avv. {avv_str}")
+
+    return "\n".join(lines)
+
+
 def _build_rifornimento() -> str:
     """Risposta al comando /rifornimento."""
     lines: list[str] = ["<b>Rifornimento</b>"]
@@ -794,6 +858,7 @@ def _handle_command(text: str, chat_id: str) -> str:
             "/istanze — lista istanze ON/OFF con istanza live\n"
             "/istanza FAU_03 — card dettaglio singola istanza\n"
             "/rifornimento — DRL master FauMorfeus + spedizioni oggi\n"
+            "/cicli — ultimi 5 cicli (in corso + 4 completati)\n"
             "\n"
             f"<b>Avvio sistema</b> (bot {bot_icon}  dashboard {dash_icon})\n"
             "/avvia_bot — avvia il bot (run_prod.bat)\n"
@@ -847,6 +912,12 @@ def _handle_command(text: str, chat_id: str) -> str:
             return _build_rifornimento()
         except Exception as exc:
             return f"⚠ Errore /rifornimento: {exc}"
+
+    if cmd == "/cicli":
+        try:
+            return _build_cicli()
+        except Exception as exc:
+            return f"⚠ Errore /cicli: {exc}"
 
     if cmd == "/istanza":
         parts = text.split()
