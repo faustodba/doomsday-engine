@@ -208,21 +208,18 @@ def _cleanup_globale_startup(log_fn=None) -> None:
 
 def _cleanup_orfani_processi_startup(log_fn=None) -> None:
     """
-    Kill processi cmd.exe + python.exe/py.exe orfani da sessioni precedenti,
+    Kill processi python.exe/py.exe orfani da sessioni precedenti del bot,
     PRESERVANDO il bot corrente.
 
-    Meccanismi (in ordine di affidabilità):
+    Meccanismi:
       0. PID file (data/bot.pid): kill diretto del PID salvato dalla sessione
-         precedente — indipendente da WMI/nomi processo. Più affidabile.
-      1. cmd.exe con cmdline matching run_prod.bat o run_dashboard_prod.bat
-         e PID diverso dal cmd parent del bot corrente
-      2. python.exe con cmdline 'main.py' (NON il bot corrente)
-      2b. py.exe con cmdline 'main.py' (launcher Python, avviato via py -3.14)
+         precedente — affidabile indipendentemente da WMI/nomi processo.
+      1. WMI query su python.exe/py.exe con 'main.py' nel CommandLine,
+         escludendo il PID corrente.
 
-    Da chiamare all'avvio bot, DOPO _cleanup_globale_startup (MuMu),
-    PRIMA del loop principale.
-
-    Note: usa Get-CimInstance (non Get-WmiObject, deprecato in PS7+).
+    NOTA: il kill dei cmd.exe è stato rimosso — py.exe (Python Launcher)
+    esegue ed esce prima che la funzione giri, rendendo impossibile
+    risalire al grandparent cmd.exe in modo affidabile.
     """
     import subprocess
     import os as _os
@@ -237,13 +234,13 @@ def _cleanup_orfani_processi_startup(log_fn=None) -> None:
 
     log = log_fn or (lambda _msg: None)
 
-    # ── 0. PID file: kill old bot by saved PID (più affidabile di WMI) ───────
+    # ── 0. PID file: kill old bot by saved PID ───────────────────────────────
     _pid_file = _os.path.join(ROOT, "data", "bot.pid")
     try:
         if _os.path.exists(_pid_file):
             with open(_pid_file) as _pf:
                 old_pid = int(_pf.read().strip())
-            if old_pid != current_pid:
+            if old_pid not in (current_pid, parent_pid):
                 r = subprocess.run(
                     ["taskkill", "/F", "/PID", str(old_pid)],
                     capture_output=True, timeout=5,
@@ -255,11 +252,11 @@ def _cleanup_orfani_processi_startup(log_fn=None) -> None:
     except Exception as exc:
         log(f"[CLEANUP-ORFANI] PID-file kill errore: {exc}")
 
-    # Helper: get processes via PowerShell CIM (Get-CimInstance, non WMI deprecato)
-    def _cim_query(name: str, pattern: str) -> list[tuple[int, int, str]]:
+    # ── 1. WMI query su python.exe / py.exe con 'main.py' nel CommandLine ────
+    def _wmi_query(name: str, pattern: str) -> list[tuple[int, int, str]]:
         try:
             ps_cmd = (
-                f"Get-CimInstance Win32_Process -Filter \"Name='{name}'\" | "
+                f"Get-WmiObject Win32_Process -Filter \"Name='{name}'\" | "
                 f"Where-Object {{ $_.CommandLine -like '*{pattern}*' }} | "
                 f"Select-Object ProcessId,ParentProcessId,CommandLine | "
                 f"ConvertTo-Json -Compress"
@@ -268,88 +265,31 @@ def _cleanup_orfani_processi_startup(log_fn=None) -> None:
                 ["powershell", "-NoProfile", "-Command", ps_cmd],
                 capture_output=True, text=True, timeout=15,
             )
-            if r.returncode != 0:
-                log(f"[CLEANUP-ORFANI] CIM query {name} rc={r.returncode} "
-                    f"stderr={r.stderr.strip()[:120]}")
-                return []
-            if not r.stdout.strip():
+            if r.returncode != 0 or not r.stdout.strip():
                 return []
             data = _json.loads(r.stdout)
             if isinstance(data, dict):
                 data = [data]
             return [(int(d["ProcessId"]), int(d.get("ParentProcessId") or 0),
                      str(d.get("CommandLine") or "")) for d in data]
-        except Exception as exc:
-            log(f"[CLEANUP-ORFANI] CIM query {name} errore: {exc}")
+        except Exception:
             return []
 
-    killed_cmd = []
     killed_py = []
-
-    # Costruisce insieme antenati (current → py.exe → cmd.exe → ...) per
-    # evitare di killare il cmd.exe che ha lanciato il bot corrente.
-    # parent_pid = py.exe; grandparent = cmd.exe (run_prod.bat) → da escludere.
-    _ancestor_pids: set[int] = {current_pid}
-    if parent_pid:
-        _ancestor_pids.add(parent_pid)
-    if parent_pid:
-        try:
-            ps_gp = (
-                f"(Get-CimInstance Win32_Process -Filter "
-                f"\"ProcessId={parent_pid}\").ParentProcessId"
-            )
-            r_gp = subprocess.run(
-                ["powershell", "-NoProfile", "-Command", ps_gp],
-                capture_output=True, text=True, timeout=8,
-            )
-            if r_gp.returncode == 0 and r_gp.stdout.strip().isdigit():
-                _ancestor_pids.add(int(r_gp.stdout.strip()))
-        except Exception:
-            pass
-
-    # 1. cmd.exe orfani con cmdline run_prod.bat o run_dashboard_prod.bat
-    for pattern in ("run_prod.bat", "run_dashboard_prod.bat"):
-        for pid, ppid, cmdline in _cim_query("cmd.exe", pattern):
-            if pid in _ancestor_pids:
+    for exe_name in ("python.exe", "py.exe"):
+        for pid, ppid, cmdline in _wmi_query(exe_name, "main.py"):
+            if pid in (current_pid, parent_pid):
                 continue
             try:
                 subprocess.run(
                     ["taskkill", "/F", "/PID", str(pid)],
                     capture_output=True, timeout=5,
                 )
-                killed_cmd.append(pid)
+                killed_py.append(pid)
             except Exception:
                 pass
 
-    # 2. python.exe orfani con cmdline 'main.py' (NON il bot corrente)
-    for pid, ppid, cmdline in _cim_query("python.exe", "main.py"):
-        if pid == current_pid:
-            continue
-        try:
-            subprocess.run(
-                ["taskkill", "/F", "/PID", str(pid)],
-                capture_output=True, timeout=5,
-            )
-            killed_py.append(pid)
-        except Exception:
-            pass
-
-    # 2b. py.exe orfani (Python Launcher) con cmdline 'main.py'
-    #     Il bat usa `py -3.14 main.py` — py.exe può restare vivo come parent
-    for pid, ppid, cmdline in _cim_query("py.exe", "main.py"):
-        if pid == current_pid:
-            continue
-        try:
-            subprocess.run(
-                ["taskkill", "/F", "/PID", str(pid)],
-                capture_output=True, timeout=5,
-            )
-            killed_py.append(pid)
-        except Exception:
-            pass
-
-    log(f"cleanup orfani: cmd killed={len(killed_cmd)} {killed_cmd if killed_cmd else ''} | "
-        f"python killed={len(killed_py)} {killed_py if killed_py else ''} | "
+    log(f"cleanup orfani: python killed={len(killed_py)} {killed_py if killed_py else ''} | "
         f"current_pid={current_pid} parent={parent_pid}")
 
     # ── Fine: scrivi PID corrente su file (per kill ad avvio successivo) ─────
