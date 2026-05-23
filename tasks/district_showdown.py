@@ -423,11 +423,18 @@ class DistrictShowdownTask(Task):
         ctx.navigator.vai_in_home()
         time.sleep(cfg.delay_dopo_tap_minor)
 
-        # Chiudi banner laterale se aperto: il tab (x≈345) è al bordo sinistro
-        # della roi_barra_eventi e può coprire l'icona DS quando espanso.
+        # Assicura il banner eventi laterale APERTO: l'icona DS è visibile
+        # nella barra top solo quando il pannello è espanso. Se chiuso
+        # (comprimi_banner_home già eseguito da altri task) → riapri.
         try:
-            from shared.ui_helpers import comprimi_banner_home
-            comprimi_banner_home(ctx, ctx.log_msg)
+            from shared.ui_helpers import _BANNER_TMPL_CHIUSO, _BANNER_ROI_PIN, _BANNER_TAP_X, _BANNER_TAP_Y, _BANNER_SOGLIA
+            _sc = ctx.device.screenshot()
+            if _sc is not None:
+                s_ch = ctx.matcher.score(_sc, _BANNER_TMPL_CHIUSO, zone=_BANNER_ROI_PIN)
+                if s_ch >= _BANNER_SOGLIA:
+                    ctx.log_msg(f"[DS] banner chiuso (score={s_ch:.3f}) — tap apri ({_BANNER_TAP_X},{_BANNER_TAP_Y})")
+                    ctx.device.tap(_BANNER_TAP_X, _BANNER_TAP_Y)
+                    time.sleep(1.0)
         except Exception:
             pass
 
