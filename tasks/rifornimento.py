@@ -352,10 +352,11 @@ def _seleziona_risorsa(risorse_reali: dict[str, float],
 # Navigazione mappa UI (via ctx.device)
 # ------------------------------------------------------------------------------
 
-def _centra_mappa(ctx: TaskContext) -> None:
+def _centra_mappa(ctx: TaskContext) -> tuple[int, int]:
     """
     Centra la mappa sul rifugio configurato tramite la lente coordinate.
     Usa ctx.device.tap() — testabile con FakeDevice.
+    Ritorna (tap_x, tap_y) per consentire il tap diretto alle iterazioni successive.
     """
     rx = _cfg(ctx, "RIFUGIO_X")
     ry = _cfg(ctx, "RIFUGIO_Y")
@@ -465,6 +466,7 @@ def _centra_mappa(ctx: TaskContext) -> None:
     ctx.device.tap(tap_x, tap_y)
     time.sleep(2.0)  # attesa apertura popup castello (da V5)
     ctx.log_msg("Rifornimento: mappa centrata e castello tappato")
+    return tap_x, tap_y
 
 
 def _leggi_deposito_ocr(ctx: TaskContext, risorse_lista: list) -> dict[str, float]:
@@ -1570,6 +1572,9 @@ class RifornimentoTask(Task):
         # 06/05: slot iniziale (letto una volta sola, poi tracciato via coda_volo)
         max_sq         = getattr(ctx.config, "max_squadre", 4)
         slot_iniziale  = None   # None = da leggere; int = già noto
+        # cache coordinate tap castello: dopo la prima centratura completa,
+        # le iterazioni successive tappano direttamente queste coord (skip ~8s).
+        _cached_pin: tuple[int, int] | None = None
 
         try:
             # ── Lettura slot iniziale (una volta sola, prima del loop) ─────
@@ -1673,10 +1678,35 @@ class RifornimentoTask(Task):
                 qta = risorse_attive[risorsa_scelta]
 
                 # ── 5. Centra mappa + apri RESOURCE SUPPLY ──────────────────
-                _centra_mappa(ctx)
-                if not _apri_resource_supply(ctx):
-                    ctx.log_msg("Rifornimento: RESOURCE SUPPLY non trovato — stop")
-                    break
+                # Prima spedizione: centratura completa (navigazione lente,
+                # match pin_rifugio, tap). Spedizioni successive: tap diretto
+                # sulle coordinate già trovate (saving ~8s/spedizione).
+                # Se il tap diretto non apre RESOURCE SUPPLY → ri-centratura
+                # completa (fallback) + ultimo retry prima di stop.
+                if _cached_pin is not None:
+                    px, py = _cached_pin
+                    ctx.log_msg(
+                        f"Rifornimento: tap diretto castello cached ({px},{py}) — skip centratura"
+                    )
+                    ctx.device.tap(px, py)
+                    time.sleep(2.0)
+                    if not _apri_resource_supply(ctx):
+                        ctx.log_msg(
+                            "Rifornimento: RESOURCE SUPPLY non trovato su tap cached "
+                            "— ri-centro e riprovo"
+                        )
+                        _cached_pin = _centra_mappa(ctx)
+                        if not _apri_resource_supply(ctx):
+                            ctx.log_msg(
+                                "Rifornimento: RESOURCE SUPPLY non trovato "
+                                "dopo ri-centratura — stop"
+                            )
+                            break
+                else:
+                    _cached_pin = _centra_mappa(ctx)
+                    if not _apri_resource_supply(ctx):
+                        ctx.log_msg("Rifornimento: RESOURCE SUPPLY non trovato — stop")
+                        break
 
                 # ── 6. Compila e invia ──────────────────────────────────────
                 # FIX 23/04: ts_invio catturato DOPO _compila_e_invia (~15-20s
