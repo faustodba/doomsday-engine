@@ -423,6 +423,14 @@ class DistrictShowdownTask(Task):
         ctx.navigator.vai_in_home()
         time.sleep(cfg.delay_dopo_tap_minor)
 
+        # Chiudi banner laterale se aperto: il tab (x≈345) è al bordo sinistro
+        # della roi_barra_eventi e può coprire l'icona DS quando espanso.
+        try:
+            from shared.ui_helpers import comprimi_banner_home
+            comprimi_banner_home(ctx, ctx.log_msg)
+        except Exception:
+            pass
+
         # 2. Cerca e tap icona evento nella barra top
         if not self._apri_evento(ctx):
             ctx.log_msg("[DS] Icona district_showdown non trovata — skip")
