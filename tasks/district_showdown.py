@@ -37,6 +37,15 @@ from core.task import Task, TaskContext, TaskResult
 
 
 # ---------------------------------------------------------------------------
+# Safety: abort automatico dopo N cicli bot consecutivi senza "dadi_esauriti"
+# Reset su restart bot (in-memory). Non richiede modifiche allo state file.
+# ---------------------------------------------------------------------------
+
+_ds_stuck: dict[str, int] = {}   # {instance_name: cicli_consecutivi_non_completati}
+_MAX_DS_STUCK_CICLI = 5
+
+
+# ---------------------------------------------------------------------------
 # Config
 # ---------------------------------------------------------------------------
 
@@ -390,12 +399,23 @@ class DistrictShowdownTask(Task):
 
     def run(self, ctx: TaskContext) -> TaskResult:
         cfg = self._cfg
+        inst = getattr(ctx, "instance_name", "_unknown")
         ctx.log_msg("[DS] Avvio DistrictShowdownTask")
 
-        # WU115 — debug buffer (hot-reload via globali.debug_tasks.district_showdown)
+        # Safety anti-stallo: se questa istanza ha già fatto N cicli bot
+        # consecutivi senza completare "dadi_esauriti" → abort immediato.
+        # Evita che DS blocchi il bot per ~50 min ad ogni ciclo indefinitamente.
+        cicli_bloccati = _ds_stuck.get(inst, 0)
+        if cicli_bloccati >= _MAX_DS_STUCK_CICLI:
+            ctx.log_msg(
+                f"[DS] ABORT — {cicli_bloccati}/{_MAX_DS_STUCK_CICLI} cicli "
+                f"consecutivi senza completamento → skip fino a prossimo restart bot"
+            )
+            return TaskResult(success=False, message="abort_stuck")
+
+        # WU115 — debug buffer
         from shared.debug_buffer import DebugBuffer
-        _dbg = DebugBuffer.for_task("district_showdown",
-                                     getattr(ctx, "instance_name", "_unknown"))
+        _dbg = DebugBuffer.for_task("district_showdown", inst)
         if _dbg.enabled:
             _dbg.snap("00_pre_ds", ctx.device.screenshot())
 
@@ -471,6 +491,18 @@ class DistrictShowdownTask(Task):
         anomalia = esito in ("timeout", "errore")
         _dbg.flush(success=not anomalia, log_fn=ctx.log_msg)
 
+        # Aggiorna counter anti-stallo: reset su completamento, incremento altrimenti.
+        if esito == "dadi_esauriti":
+            if _ds_stuck.get(inst, 0) > 0:
+                ctx.log_msg(f"[DS] completato — reset cicli_bloccati ({_ds_stuck[inst]}→0)")
+            _ds_stuck[inst] = 0
+        else:
+            _ds_stuck[inst] = _ds_stuck.get(inst, 0) + 1
+            ctx.log_msg(
+                f"[DS] esito='{esito}' — cicli_bloccati={_ds_stuck[inst]}/{_MAX_DS_STUCK_CICLI} "
+                f"(abort al {_MAX_DS_STUCK_CICLI}° ciclo consecutivo)"
+            )
+
         # Output telemetria — Issue #53 Step 3
         return TaskResult(
             success=True,
@@ -478,6 +510,7 @@ class DistrictShowdownTask(Task):
             data={
                 "fase1_esito":     esito,
                 "fasi_reward":     esito == "dadi_esauriti",
+                "cicli_bloccati":  _ds_stuck.get(inst, 0),
             },
         )
 
