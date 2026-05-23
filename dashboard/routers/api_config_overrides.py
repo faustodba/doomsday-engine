@@ -688,7 +688,7 @@ def patch_istanza(nome: str, data: dict):
 
     # 08/05: rimosso 'layout' (deprecato WU22)
     allowed = {"abilitata", "truppe", "tipologia", "fascia_oraria",
-               "max_squadre", "livello"}
+               "max_squadre", "livello", "raccolta_fuori_territorio"}
     for k, v in data.items():
         if k in allowed:
             current_dict[k] = v
