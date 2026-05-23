@@ -752,8 +752,8 @@ def _build_rifornimento() -> str:
         tot_sped += sped_oggi
         if sped_oggi > 0:
             # Calcola netto totale oggi
-            det = rif.get("dettaglio_oggi", {})
-            netto_tot = sum(v.get("qta_inviata", 0) for v in det.values()) / 1e6
+            det = rif.get("dettaglio_oggi", [])
+            netto_tot = sum(v.get("qta_inviata", 0) for v in det) / 1e6
             righe_ist.append(f"  {nome}: {sped_oggi} sped, {netto_tot:.1f}M netti")
 
     lines.append(f"Spedizioni totali oggi: {tot_sped}")
