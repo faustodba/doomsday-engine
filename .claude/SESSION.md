@@ -1,27 +1,61 @@
 # SESSION.md — Handoff Doomsday Engine V6
 
-## Sessione 22/05/2026 (aggiornamento 2) — validazione fix + Telegram 409 risolto
+## Sessione 23/05/2026 — WU-RifornimentoCentratura (skip centratura 2ª+ spedizione)
 
 ### Stato corrente
 
-- **Bot prod**: IN ESECUZIONE (ciclo in corso, FAU_05 a 22:20 UTC)
-- **WU162 double-thread**: ✅ CONFERMATO RISOLTO — nessun log doppio dopo reboot PC (UN solo "in attesa" sequenziale per istanza)
-- **Fix raccolta livello (e7421c5)**: ✅ VALIDATO — 0 NON selezionato, 0 tipo_bloccato su FAU_01/02/03/05 nei log odierni (34 eventi raccolta puliti)
-- **Telegram bot 409**: ✅ RISOLTO — processo concorrente sparito durante indagine; aggiunto sleep 5s su risposta vuota rapida (commit `0d09018`)
-- **Telegram bot**: NON in esecuzione — PID file assente. Richiede avvio manuale `run_telegram_prod.bat`
+- **Bot prod**: IN ESECUZIONE (ciclo in corso)
+- **WU-RifornimentoCentratura (da86da0)**: ✅ IMPLEMENTATO + SINCRONIZZATO PROD — schedulato al prossimo fine ciclo; in attesa di validazione log
+- **WU162 double-thread**: ✅ CONFERMATO RISOLTO
+- **Fix raccolta livello (e7421c5)**: ✅ VALIDATO — 0 NON selezionato su tutte le istanze
+- **Telegram bot 409 (0d09018)**: ✅ RISOLTO
+- **Telegram bot**: NON in esecuzione — richiede avvio manuale `run_telegram_prod.bat`
 
 ### Commit questa sessione
+
+| Hash | Fix |
+|------|-----|
+| `da86da0` | perf(rifornimento): skip centratura mappa dopo la prima spedizione |
+
+### Modifica WU-RifornimentoCentratura
+
+**File**: `tasks/rifornimento.py` (dev + prod sincronizzato)
+
+**Logica**: dopo la prima `_centra_mappa` (navigazione lente + match `pin_rifugio.png` + tap), le spedizioni successive tappano direttamente le coordinate già trovate. Se il tap diretto non apre RESOURCE SUPPLY → ri-centratura completa + retry finale.
+
+**3 change**:
+1. `_centra_mappa` ritorna `tuple[int, int]` (erano `-> None`)
+2. `_cached_pin: tuple[int, int] | None = None` prima del `while True` in `_esegui_mappa`
+3. Step 5 del loop: branch cached (tap diretto → fallback ri-centro) vs prima iterazione (centra + store)
+
+**Saving atteso**: ~8s × (N−1) spedizioni × 11 istanze ≈ 6 min/ciclo (con max_sped=5, 4 centrature saltate per istanza)
+
+### Prossimo step — validazione
+
+Nei log del prossimo ciclo rifornimento cercare:
+- `Rifornimento: tap diretto castello cached (487,199) — skip centratura` (spedizione 2ª+)
+- assenza di `RESOURCE SUPPLY non trovato su tap cached` (= tap diretto funziona)
+- eventuale `ri-centro e riprovo` (fallback attivato — se ricorre spesso → indagare)
+- `spedizioni=N` invariato rispetto a prima (no regressione throughput)
+
+---
+
+## Sessione 22/05/2026 (aggiornamento 2) — validazione fix + Telegram 409 risolto
+
+### Stato corrente (al termine della sessione)
+
+- **WU162 double-thread**: ✅ CONFERMATO RISOLTO — nessun log doppio dopo reboot PC
+- **Fix raccolta livello (e7421c5)**: ✅ VALIDATO — 0 NON selezionato, 0 tipo_bloccato su FAU_01/02/03/05
+- **Telegram bot 409**: ✅ RISOLTO — processo concorrente sparito; aggiunto sleep 5s su risposta vuota rapida (commit `0d09018`)
+- **Telegram bot**: NON in esecuzione — richiede avvio manuale `run_telegram_prod.bat`
+
+### Commit sessione 22/05
 
 | Hash | Fix |
 |------|-----|
 | `e7421c5` | fix(raccolta): delay reset 0.3→0.8s + rilettura livello + verifica pre-CERCA |
 | `1cd2337` | fix(telegram): rimuovi /rifornimento duplicato da /help |
 | `0d09018` | fix(telegram): sleep 5s su risposta vuota rapida (409) nel polling loop |
-
-### Prossimo step
-
-1. Avviare `run_telegram_prod.bat` (1 sola finestra) → verificare `telegram_service.log` polling normale senza 409
-2. Monitorare raccolta nelle prossime ore: confermare 0 NON selezionato su tutte le 11 istanze
 
 ---
 

@@ -58,6 +58,31 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 23/05/2026 — WU-RifornimentoCentratura (skip centratura 2ª+ spedizione)
+
+#### WU-RifornimentoCentratura — ottimizzazione loop rifornimento mappa (commit `da86da0`)
+
+**Motivazione**: in `_esegui_mappa`, la funzione `_centra_mappa` (navigazione lente + match `pin_rifugio.png` + tap) veniva chiamata ad **ogni iterazione** del loop di spedizione, anche quando il castello era già correttamente visibile e centrato dalla spedizione precedente. Ogni centratura costa ~8s (input_text X/Y + TAP_CONFERMA_LENTE + sleep 5.0s + screenshot + find_one).
+
+**Fix** (`tasks/rifornimento.py`):
+
+1. `_centra_mappa` firma cambiata da `-> None` a `-> tuple[int, int]`: ritorna le coordinate `(tap_x, tap_y)` effettivamente usate per il tap (dinamiche dal match TM o fallback hardcoded).
+
+2. `_cached_pin: tuple[int, int] | None = None` aggiunto prima del `while True` in `_esegui_mappa`.
+
+3. Step 5 del loop sostituito con logica a due rami:
+   - **Prima spedizione** (`_cached_pin is None`): chiama `_centra_mappa`, salva coordinate in `_cached_pin`.
+   - **Spedizioni successive** (`_cached_pin is not None`): tap diretto su `(px, py)` + sleep 2.0s → se `_apri_resource_supply` fallisce → ri-centratura completa + aggiorna `_cached_pin` + retry finale.
+
+**Saving atteso**: ~8s × (N−1) spedizioni × 11 istanze ≈ **6 min/ciclo** (con max_sped=5, 4 centrature saltate per istanza).
+
+**Stato**: ✅ IMPLEMENTATO — da validare al prossimo ciclo rifornimento. Cercare nei log:
+- `Rifornimento: tap diretto castello cached (487,199) — skip centratura`
+- assenza di `RESOURCE SUPPLY non trovato su tap cached` (tap diretto OK)
+- `spedizioni=N` invariato vs pre-fix (no regressione throughput)
+
+---
+
 ### Sessione 22/05/2026 — Validazione fix raccolta livello + Telegram 409
 
 #### Raccolta livello nodo — validazione fix (commit `e7421c5`)
