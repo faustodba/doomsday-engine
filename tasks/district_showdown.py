@@ -423,20 +423,28 @@ class DistrictShowdownTask(Task):
         ctx.navigator.vai_in_home()
         time.sleep(cfg.delay_dopo_tap_minor)
 
-        # Assicura il banner eventi laterale APERTO: l'icona DS è visibile
-        # nella barra top solo quando il pannello è espanso. Se chiuso
-        # (comprimi_banner_home già eseguito da altri task) → riapri.
-        try:
-            from shared.ui_helpers import _BANNER_TMPL_CHIUSO, _BANNER_ROI_PIN, _BANNER_TAP_X, _BANNER_TAP_Y, _BANNER_SOGLIA
-            _sc = ctx.device.screenshot()
-            if _sc is not None:
-                s_ch = ctx.matcher.score(_sc, _BANNER_TMPL_CHIUSO, zone=_BANNER_ROI_PIN)
-                if s_ch >= _BANNER_SOGLIA:
-                    ctx.log_msg(f"[DS] banner chiuso (score={s_ch:.3f}) — tap apri ({_BANNER_TAP_X},{_BANNER_TAP_Y})")
-                    ctx.device.tap(_BANNER_TAP_X, _BANNER_TAP_Y)
-                    time.sleep(1.0)
-        except Exception:
-            pass
+        # Banner eventi: regola = sempre chiuso. DS è l'unica eccezione:
+        # l'icona DS è visibile nella barra top solo con pannello aperto.
+        # Apri se chiuso → cerca icona → chiudi di nuovo prima di uscire.
+        from shared.ui_helpers import (
+            comprimi_banner_home,
+            _BANNER_TMPL_CHIUSO, _BANNER_ROI_PIN,
+            _BANNER_TAP_X, _BANNER_TAP_Y, _BANNER_SOGLIA,
+        )
+
+        def _chiudi_banner():
+            try:
+                comprimi_banner_home(ctx, ctx.log_msg)
+            except Exception:
+                pass
+
+        _sc = ctx.device.screenshot()
+        if _sc is not None:
+            s_ch = ctx.matcher.score(_sc, _BANNER_TMPL_CHIUSO, zone=_BANNER_ROI_PIN)
+            if s_ch >= _BANNER_SOGLIA:
+                ctx.log_msg(f"[DS] banner chiuso (score={s_ch:.3f}) — tap apri ({_BANNER_TAP_X},{_BANNER_TAP_Y})")
+                ctx.device.tap(_BANNER_TAP_X, _BANNER_TAP_Y)
+                time.sleep(1.0)
 
         # 2. Cerca e tap icona evento nella barra top
         if not self._apri_evento(ctx):
@@ -444,6 +452,7 @@ class DistrictShowdownTask(Task):
             if _dbg.enabled:
                 _dbg.snap("99_icona_non_trovata", ctx.device.screenshot())
             _dbg.flush(success=False, log_fn=ctx.log_msg)
+            _chiudi_banner()
             ctx.navigator.vai_in_home()
             return TaskResult(success=False, message="icona evento non trovata")
 
@@ -455,6 +464,7 @@ class DistrictShowdownTask(Task):
             _dbg.flush(success=False, log_fn=ctx.log_msg)
             ctx.device.back()
             time.sleep(cfg.delay_dopo_tap_minor)
+            _chiudi_banner()
             ctx.navigator.vai_in_home()
             return TaskResult(success=False, message="auto roll non avviato")
 
@@ -498,6 +508,7 @@ class DistrictShowdownTask(Task):
         for _ in range(4):
             ctx.device.back()
             time.sleep(cfg.delay_dopo_tap_minor)
+        _chiudi_banner()
         ctx.navigator.vai_in_home()
 
         # WU115 — flush debug buffer.
