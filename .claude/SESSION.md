@@ -1,42 +1,56 @@
 # SESSION.md — Handoff Doomsday Engine V6
 
-## Sessione 23/05/2026 — WU-RifornimentoCentratura (skip centratura 2ª+ spedizione)
+## Sessione 23/05/2026 — WU-RifCentratura validato + fix Telegram /rifornimento + DS banner aperto
 
 ### Stato corrente
 
-- **Bot prod**: IN ESECUZIONE (ciclo in corso)
-- **WU-RifornimentoCentratura (da86da0)**: ✅ IMPLEMENTATO + SINCRONIZZATO PROD — schedulato al prossimo fine ciclo; in attesa di validazione log
+- **Bot prod**: IN ESECUZIONE (FAU_04 ciclo corrente ~12:00 UTC)
+- **WU-RifornimentoCentratura (da86da0)**: ✅ VALIDATO PROD — 4 "tap diretto castello cached" per istanza su FAU_00/01/02/03. Saving confermato ~6 min/ciclo
+- **Telegram /rifornimento bug (e48d3a8)**: ✅ RISOLTO — bot riavviato (PID 21536)
+- **DS banner fix (adf9008)**: ✅ IMPLEMENTATO — in attesa prossima finestra evento (Ven-Lun UTC)
 - **WU162 double-thread**: ✅ CONFERMATO RISOLTO
-- **Fix raccolta livello (e7421c5)**: ✅ VALIDATO — 0 NON selezionato su tutte le istanze
-- **Telegram bot 409 (0d09018)**: ✅ RISOLTO
-- **Telegram bot**: NON in esecuzione — richiede avvio manuale `run_telegram_prod.bat`
+- **Fix raccolta livello (e7421c5)**: ✅ VALIDATO
+- **Telegram bot**: IN ESECUZIONE (PID 21536)
 
 ### Commit questa sessione
 
 | Hash | Fix |
 |------|-----|
 | `da86da0` | perf(rifornimento): skip centratura mappa dopo la prima spedizione |
+| `e48d3a8` | fix(telegram): /rifornimento — dettaglio_oggi è lista non dict |
+| `adf9008` | fix(district_showdown): apri banner prima di cercare icona, chiudi su tutti i path uscita |
 
-### Modifica WU-RifornimentoCentratura
+### WU-RifCentratura — validazione ✅
 
-**File**: `tasks/rifornimento.py` (dev + prod sincronizzato)
+**Dati prod FAU_00/01/02/03** (ciclo 23/05 08:09-09:37 UTC):
+- Ogni istanza: **4 "tap diretto castello cached"** per ciclo (sped 2-5 skip centratura, solo sped 1 fa centratura completa)
+- Throughput invariato: 5/5 spedizioni per ogni istanza
+- Nessun fallback "ri-centro" → tap diretto sempre funzionante
+- Saving confermato: ~8s × 4 × 11 istanze ≈ **~6 min/ciclo**
 
-**Logica**: dopo la prima `_centra_mappa` (navigazione lente + match `pin_rifugio.png` + tap), le spedizioni successive tappano direttamente le coordinate già trovate. Se il tap diretto non apre RESOURCE SUPPLY → ri-centratura completa + retry finale.
+### Fix Telegram /rifornimento
 
-**3 change**:
-1. `_centra_mappa` ritorna `tuple[int, int]` (erano `-> None`)
-2. `_cached_pin: tuple[int, int] | None = None` prima del `while True` in `_esegui_mappa`
-3. Step 5 del loop: branch cached (tap diretto → fallback ri-centro) vs prima iterazione (centra + store)
+**Bug**: `_build_rifornimento()` in `core/telegram_bot.py:755-756` chiamava `det.values()` ma `dettaglio_oggi` è una **lista** `[{ts, risorsa, qta_inviata, ...}]`, non un dict.
 
-**Saving atteso**: ~8s × (N−1) spedizioni × 11 istanze ≈ 6 min/ciclo (con max_sped=5, 4 centrature saltate per istanza)
+**Fix**: `rif.get("dettaglio_oggi", [])` + iterazione diretta `for v in det` (senza `.values()`).
 
-### Prossimo step — validazione
+**Bot riavviato**: vecchio PID 15028 killato, nuovo PID 21536 attivo con codice corretto.
 
-Nei log del prossimo ciclo rifornimento cercare:
-- `Rifornimento: tap diretto castello cached (487,199) — skip centratura` (spedizione 2ª+)
-- assenza di `RESOURCE SUPPLY non trovato su tap cached` (= tap diretto funziona)
-- eventuale `ri-centro e riprovo` (fallback attivato — se ricorre spesso → indagare)
-- `spedizioni=N` invariato rispetto a prima (no regressione throughput)
+### Fix DS banner aperto per ricerca icona
+
+**Regola**: il tab banner eventi laterale deve essere **sempre chiuso** (icone righe 2/3 si nascondono quando aperto). DS è l'**unica eccezione**: deve aprire il banner prima di cercare `pin_district_showdown`, poi chiuderlo su TUTTI i path di uscita.
+
+**Implementazione** (`tasks/district_showdown.py::run()`):
+1. Pre-`_apri_evento`: screenshot → se score `pin_banner_chiuso ≥ 0.85` → tap `(345,63)` + sleep 1.0s (apre banner)
+2. `_chiudi_banner()` helper locale (chiama `comprimi_banner_home`)
+3. `_chiudi_banner()` su 3 path di uscita: `_apri_evento` fallisce · `_attiva_auto_roll` fallisce · completamento normale
+
+**Da validare**: prossima finestra DS (Ven 00:00 → Lun 00:00 UTC). Log atteso: `[DS] banner chiuso (score=...) — tap apri (345,63)`.
+
+### Prossimo step
+
+- Verificare durante prossima finestra DS: log `[DS] banner chiuso (score=...) — tap apri` nei FAU_*.jsonl
+- Monitorare ri-centratura rifornimento (`ri-centro e riprovo`) — dai dati odierni mai attivata, comportamento atteso
 
 ---
 

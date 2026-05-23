@@ -76,10 +76,50 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 **Saving atteso**: ~8s × (N−1) spedizioni × 11 istanze ≈ **6 min/ciclo** (con max_sped=5, 4 centrature saltate per istanza).
 
-**Stato**: ✅ IMPLEMENTATO — da validare al prossimo ciclo rifornimento. Cercare nei log:
-- `Rifornimento: tap diretto castello cached (487,199) — skip centratura`
-- assenza di `RESOURCE SUPPLY non trovato su tap cached` (tap diretto OK)
-- `spedizioni=N` invariato vs pre-fix (no regressione throughput)
+**Stato**: ✅ VALIDATO PROD 23/05 — FAU_00/01/02/03: 4 "tap diretto castello cached" per istanza, 5/5 spedizioni invariate, nessun fallback ri-centratura attivato. Saving ~6 min/ciclo confermato.
+
+---
+
+#### Fix Telegram /rifornimento — dettaglio_oggi lista non dict (commit `e48d3a8`)
+
+**Sintomo**: comando `/rifornimento` su Telegram ritornava `⚠ Errore /rifornimento: 'list' object has no attribute 'values'`.
+
+**Root cause**: `_build_rifornimento()` in `core/telegram_bot.py:755-756` — `dettaglio_oggi` nello state JSON è una **lista** `[{ts, risorsa, qta_inviata, ...}]` (storico spedizioni), non un dict. Il codice chiamava `det.values()` come se fosse un dict.
+
+**Fix**:
+```python
+# PRIMA (broken):
+det = rif.get("dettaglio_oggi", {})
+netto_tot = sum(v.get("qta_inviata", 0) for v in det.values()) / 1e6
+
+# DOPO (corretto):
+det = rif.get("dettaglio_oggi", [])
+netto_tot = sum(v.get("qta_inviata", 0) for v in det) / 1e6
+```
+
+**Bot Telegram**: PID 15028 (vecchio) killato, nuovo PID 21536 con codice corretto. Dev + prod sincronizzati.
+
+**Stato**: ✅ RISOLTO.
+
+---
+
+#### Fix District Showdown — banner eventi laterale aperto per ricerca icona (commit `adf9008`)
+
+**Regola architetturale**: il tab banner eventi laterale (`pin_banner_aperto.png` / `pin_banner_chiuso.png`, toggle su `(345,63)`) deve essere **sempre chiuso** durante tutti i task. Le icone nelle righe 2 e 3 del pannello eventi vengono nascoste quando il banner è aperto, e altri task (rifornimento, store, etc.) dipendono dalla barra chiusa.
+
+**DS è l'unica eccezione**: la sua icona (`pin_district_showdown.png`) si trova nella `roi_barra_eventi=(350,40,900,110)` che è visibile solo con il banner aperto.
+
+**Implementazione** (`tasks/district_showdown.py::run()`, tra `vai_in_home()` e `_apri_evento()`):
+1. Screenshot → se `score(pin_banner_chiuso, _BANNER_ROI_PIN) ≥ 0.85` → tap `(345,63)` + sleep 1.0s (apre banner)
+2. Helper locale `_chiudi_banner()` = chiama `comprimi_banner_home(ctx, ctx.log_msg)`
+3. `_chiudi_banner()` chiamato su **tutti e 3 i path di uscita** da `run()`:
+   - `_apri_evento()` non trovato → `_chiudi_banner()` → `vai_in_home()` → return
+   - `_attiva_auto_roll()` fallisce → `_chiudi_banner()` → `vai_in_home()` → return
+   - Completamento normale → `_chiudi_banner()` → 4× back() → `vai_in_home()` → return
+
+**Import aggiunti**: `comprimi_banner_home, _BANNER_TMPL_CHIUSO, _BANNER_ROI_PIN, _BANNER_TAP_X, _BANNER_TAP_Y, _BANNER_SOGLIA` da `shared.ui_helpers`.
+
+**Stato**: ✅ IMPLEMENTATO — da validare alla prossima finestra evento DS (Ven 00:00 → Lun 00:00 UTC). Log atteso: `[DS] banner chiuso (score=X.XXX) — tap apri (345,63)`.
 
 ---
 
