@@ -1,0 +1,1257 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Doomsday Engine V6 — Technical Reference</title>
+<style>
+:root { --bg: #1a1a2e; --surface: #16213e; --surface2: #0f3460; --text: #e0e0e0; --text-dim: #9e9e9e; --accent: #00b4d8; --accent2: #e94560; --success: #4caf50; --warn: #ff9800; --code-bg: #0d1117; }
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: 'Segoe UI', Arial, sans-serif; font-size: 14px; line-height: 1.6; }
+#sidebar { position: fixed; top: 0; left: 0; width: 250px; height: 100vh; background: var(--surface); overflow-y: auto; padding: 16px 0; z-index: 100; }
+#sidebar .logo { color: var(--accent); font-size: 13px; font-weight: bold; padding: 8px 16px 16px; border-bottom: 1px solid var(--surface2); margin-bottom: 8px; }
+#sidebar .pkg { color: var(--accent2); font-size: 11px; font-weight: bold; padding: 12px 16px 4px; text-transform: uppercase; }
+#sidebar a { display: block; color: var(--text-dim); text-decoration: none; padding: 4px 16px 4px 24px; font-size: 12px; }
+#sidebar a:hover { color: var(--text); background: var(--surface2); }
+main { margin-left: 260px; padding: 24px 32px; max-width: 1100px; }
+h1 { color: var(--accent); font-size: 28px; margin-bottom: 8px; }
+h2 { color: var(--accent); font-size: 20px; margin: 40px 0 12px; padding-bottom: 6px; border-bottom: 2px solid var(--surface2); }
+h3 { color: var(--accent2); font-size: 15px; margin: 20px 0 8px; }
+p { margin-bottom: 10px; color: var(--text); }
+p.desc { color: var(--accent); font-style: italic; margin-bottom: 12px; }
+section { margin-bottom: 48px; }
+table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 13px; }
+table.methods th, table.members th { background: var(--surface2); color: var(--accent); padding: 8px 12px; text-align: left; }
+table tr:nth-child(even) { background: #1e2a3a; }
+table td { padding: 7px 12px; border-bottom: 1px solid var(--surface2); vertical-align: top; }
+pre { background: var(--code-bg); border: 1px solid var(--surface2); border-radius: 4px; padding: 14px; overflow-x: auto; margin: 10px 0 16px; }
+code { font-family: 'Cascadia Code', 'Consolas', monospace; font-size: 12px; color: #79c0ff; }
+td code { font-size: 11px; }
+.mod-pub { color: var(--success); font-size: 11px; }
+.mod-priv { color: var(--text-dim); font-size: 11px; }
+.mod-static { color: var(--warn); font-size: 11px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; margin-right: 4px; }
+.badge-task { background: #1a3a5c; color: var(--accent); }
+.badge-core { background: #3a1a1a; color: var(--accent2); }
+.badge-shared { background: #1a3a1a; color: var(--success); }
+.badge-module { background: #2a2a1a; color: var(--warn); }
+.intro-box { background: var(--surface); border-left: 4px solid var(--accent); padding: 16px 20px; margin: 20px 0; border-radius: 0 4px 4px 0; }
+.arch-flow { background: var(--code-bg); border: 1px solid var(--surface2); border-radius: 4px; padding: 16px; font-family: monospace; font-size: 12px; color: #79c0ff; white-space: pre; margin: 12px 0; }
+.warn-box { background: #2a1a00; border-left: 4px solid var(--warn); padding: 12px 16px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+.rule-box { background: #0d1f0d; border-left: 4px solid var(--success); padding: 12px 16px; margin: 12px 0; border-radius: 0 4px 4px 0; }
+</style>
+</head>
+<body>
+
+<!-- SIDEBAR PLACEHOLDER — replaced at PASSO 3 -->
+<nav id="sidebar">
+<div class="logo">&#x2694; Doomsday Engine V6<br><span style="color:var(--text-dim);font-weight:normal">Technical Reference</span></div>
+<div class="pkg">Introduzione</div>
+<a href="#overview">Overview</a>
+<a href="#arch-flow">Flusso architetturale</a>
+<div class="pkg">Core</div>
+<a href="#main-loop">Main Loop</a>
+<a href="#orchestrator">Orchestrator</a>
+<a href="#launcher">Launcher</a>
+<a href="#instance-state">InstanceState</a>
+<div class="pkg">Shared</div>
+<a href="#task-base">BaseTask / TaskContext</a>
+<a href="#adb-device">AdbDevice</a>
+<a href="#template-matcher">TemplateMatcher</a>
+<a href="#navigator">Navigator</a>
+<a href="#banner-system">Banner System</a>
+<div class="pkg">Tasks</div>
+<a href="#raccolta">RaccoltaTask</a>
+<a href="#rifornimento">RifornimentoTask</a>
+<a href="#arena">ArenaTask</a>
+<a href="#truppe">TruppeTask</a>
+<a href="#district-showdown">DistrictShowdownTask</a>
+<a href="#radar">Radar</a>
+<a href="#task-minori">Task Minori</a>
+<a href="#task-secondari">Task Secondari</a>
+<div class="pkg">Infrastructure</div>
+<a href="#analytics">Analytics / Daily Report</a>
+<a href="#dashboard">Dashboard</a>
+<a href="#config-system">Config System</a>
+</nav>
+
+<main>
+
+<section id="overview">
+<h1>&#x2694; Doomsday Engine V6</h1>
+<p style="color:var(--text-dim);margin-bottom:20px">Technical Reference — generato 2026-05-24</p>
+
+<div class="intro-box">
+<strong>Cos'e':</strong> Sistema di automazione bot per Rise of Kingdoms su 12 istanze MuMuPlayer (Android emulator).
+Gestisce raccolta risorse, rifornimento alleanza, arena, addestramento truppe e altre azioni di gioco in modo completamente automatizzato tramite ADB + OpenCV template matching + OCR.<br><br>
+<strong>Repository:</strong> <code>faustodba/doomsday-engine</code> — <code>C:\doomsday-engine</code> (dev) &bull; <code>C:\doomsday-engine-prod</code> (prod)<br>
+<strong>V5 produzione legacy:</strong> <code>faustodba/doomsday-bot-farm</code> — <code>C:\Bot-farm</code>
+</div>
+
+<h3>Stack tecnologico</h3>
+<table class="members">
+<tr><th>Componente</th><th>Tecnologia</th><th>Uso</th></tr>
+<tr><td>Bot engine</td><td><code>Python 3.10</code></td><td>Logica orchestrazione, task, state</td></tr>
+<tr><td>Device control</td><td><code>ADB (Android Debug Bridge)</code></td><td>Screenshot, tap, key events su emulatore</td></tr>
+<tr><td>Visual matching</td><td><code>OpenCV cv2.matchTemplate</code></td><td>Riconoscimento UI elements via template PNG</td></tr>
+<tr><td>OCR</td><td><code>pytesseract + Tesseract</code></td><td>Lettura numeri (slot, risorse, livelli)</td></tr>
+<tr><td>Dashboard</td><td><code>FastAPI + Jinja2 + HTMX</code></td><td>Monitoring real-time, controllo configurazione</td></tr>
+<tr><td>Notifiche</td><td><code>Telegram Bot API + SMTP Gmail</code></td><td>Alert real-time + daily report email</td></tr>
+<tr><td>Persistence</td><td><code>JSON files</code></td><td>State istanze, config, telemetria JSONL</td></tr>
+</table>
+
+<h3>Istanze e ruoli</h3>
+<table class="members">
+<tr><th>Istanza</th><th>Tipo</th><th>Ruolo</th></tr>
+<tr><td><code>FAU_00</code></td><td>full (livello 7)</td><td>Istanza principale, massimo livello</td></tr>
+<tr><td><code>FAU_01 .. FAU_08</code></td><td>full (livello 6)</td><td>Istanze standard produzione</td></tr>
+<tr><td><code>FAU_09, FAU_10</code></td><td>full (livello 6/7)</td><td>Istanze produzione avanzata</td></tr>
+<tr><td><code>FauMorfeus</code></td><td>raccolta_only (master)</td><td>Master rifugio: riceve risorse, Daily Receiving Limit tracking</td></tr>
+</table>
+
+<h3>Regole architetturali vincolanti</h3>
+<div class="rule-box">
+<strong>Firma run:</strong> <code>def run(self, ctx)</code> — mai <code>async def run</code><br>
+<strong>Attese:</strong> <code>time.sleep(n)</code> — mai <code>asyncio.sleep(n)</code><br>
+<strong>Logging:</strong> <code>ctx.log_msg(msg)</code> — mai <code>ctx.log(msg)</code><br>
+<strong>Navigator:</strong> <code>ctx.navigator.vai_in_home()</code> — mai <code>await ctx.navigator...</code><br>
+<strong>Template matching:</strong> <code>matcher.find_one()</code>, <code>matcher.score()</code> — mai <code>matcher.match()</code>, <code>matcher.find()</code><br>
+<strong>DELAY UI (vincolante):</strong> dopo ogni <code>ctx.device.tap()</code> che apre popup/overlay → <code>time.sleep(2.0)</code> minimo prima dello screenshot
+</div>
+
+<div class="warn-box">
+<strong>Config STATIC vs DYNAMIC:</strong> <code>global_config.json</code> + <code>instances.json</code> modificabili solo da <code>/ui/config/global</code>. <code>runtime_overrides.json</code> modificabile solo da HOME dashboard. Il DYNAMIC prevale sempre a runtime. Bootstrap copia static→dynamic al primo avvio senza override file.
+</div>
+</section>
+
+<section id="arch-flow">
+<h2>&#x2756; Flusso architetturale</h2>
+<p class="desc">Ciclo sequenziale: una istanza alla volta, un tick per chiamata.</p>
+<div class="arch-flow">run_prod.bat
+  └─ main.py (ciclo principale)
+       ├─ adaptive_scheduler: ordina istanze per slot liberi attesi
+       ├─ per ogni istanza (FAU_00 → FAU_10 → FauMorfeus):
+       │    └─ _thread_istanza(nome)
+       │         ├─ reset_istanza()           — pulizia stato precedente
+       │         ├─ avvia_istanza()           — MuMuManager start
+       │         ├─ attendi_home()            — launcher polling HOME stabile
+       │         │    ├─ imposta_settings_lightweight()
+       │         │    ├─ leggi_total_squads()
+       │         │    └─ pulisci_cache_giornaliera()
+       │         ├─ orchestrator.tick(ctx)    — esegui task in priorità
+       │         │    ├─ priority 5:  BoostTask
+       │         │    ├─ priority 10: RifornimentoTask
+       │         │    ├─ priority 15: RaccoltaTask
+       │         │    ├─ priority 17: RaccoltaChiusuraTask
+       │         │    ├─ priority 18: TruppeTask
+       │         │    ├─ priority 20: DonazioneTask
+       │         │    ├─ priority 25: AlleanzaTask
+       │         │    ├─ priority 30: MessaggiTask
+       │         │    ├─ priority 35: ArenaTask
+       │         │    ├─ priority 40: ArenaMercatoTask
+       │         │    ├─ priority 45: StoreTask
+       │         │    ├─ priority 50: MainMissionTask
+       │         │    ├─ priority 55: VipTask
+       │         │    ├─ priority 60: ZainoTask
+       │         │    ├─ priority 65: DistrictShowdownTask
+       │         │    └─ priority 70: RadarTask / RadarCensusTask
+       │         ├─ chiudi_istanza()          — chiudi emulatore
+       │         └─ telemetria / metrics flush
+       └─ time.sleep(tick_sleep_s)            — attesa inter-ciclo (default 300s)</div>
+</section>
+
+<!-- SEZIONI MODULI — aggiunte nei passi successivi -->
+
+<section id="adb-device">
+<h2>&#x1F4F1; AdbDevice / Screenshot / MatchResult <span class="badge badge-core">core/device.py</span></h2>
+<p class="desc">Interfaccia ADB verso MuMu Player: screenshot in-memory, tap, swipe, key events. Supporta device reali e FakeDevice per test.</p>
+<p>Il modulo <code>core/device.py</code> espone tre classi principali: <code>AdbDevice</code> (device reale via ADB), <code>FakeDevice</code> (mock per unit test), <code>Screenshot</code> (frame BGR con template matching integrato), e il dataclass <code>MatchResult</code>. Tutti i metodi sono sincroni (pattern V6 Step 25).</p>
+
+<h3>AdbDevice — costanti</h3>
+<table class="members">
+<tr><th>Nome</th><th>Default</th><th>Descrizione</th></tr>
+<tr><td><code>ADB</code></td><td><code>C:\Program Files\Netease\...\adb.exe</code></td><td>Path ADB MuMu. Override via <code>MUMU_ADB_PATH</code> env var.</td></tr>
+</table>
+
+<h3>AdbDevice.__init__</h3>
+<table class="members">
+<tr><th>Parametro</th><th>Tipo</th><th>Descrizione</th></tr>
+<tr><td><code>host</code></td><td><code>str</code></td><td>Indirizzo ADB o serial completo "127.0.0.1:16384"</td></tr>
+<tr><td><code>port</code></td><td><code>int</code></td><td>Porta ADB istanza MuMu (ignorato se host contiene ":")</td></tr>
+<tr><td><code>name</code></td><td><code>str</code></td><td>Nome istanza per logging (es. "FAU_01")</td></tr>
+<tr><td><code>auto_connect</code></td><td><code>bool=True</code></td><td>Esegue <code>adb connect HOST:PORT</code> nel costruttore (richiesto da MuMu TCP)</td></tr>
+</table>
+
+<h3>AdbDevice — metodi principali</h3>
+<table class="methods">
+<tr><th>Modificatore</th><th>Firma</th><th>Descrizione</th></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>connect(max_retry=3, retry_delay=2.0) -&gt; bool</code></td><td>Esegue <code>adb connect</code>. Riprova fino a max_retry. Richiesto da MuMu Player (TCP serial).</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>screenshot() -&gt; Screenshot | None</code></td><td>Screenshot in-memory via <code>exec-out screencap -p</code> (WU76 — no file su disco). Fallback a screencap+pull se exec-out fallisce.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>tap(x, y) -&gt; None</code></td><td>Tap via <code>adb shell input tap X Y</code>. Accetta <code>tap(x,y)</code> o <code>tap((x,y))</code>.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>swipe(x1,y1,x2,y2,duration_ms) -&gt; None</code></td><td>Swipe via <code>adb shell input swipe</code>.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>back() -&gt; None</code></td><td>Invia <code>KEYCODE_BACK</code> via <code>adb shell input keyevent</code>.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>key(keycode: str) -&gt; None</code></td><td>Invia keycode arbitrario (es. "KEYCODE_ENTER").</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>input_text(text: str) -&gt; None</code></td><td>Input testo via <code>adb shell input text</code>.</td></tr>
+</table>
+
+<h3>Screenshot — frame con template matching</h3>
+<table class="methods">
+<tr><th>Modificatore</th><th>Firma</th><th>Descrizione</th></tr>
+<tr><td><span class="mod-pub">property</span></td><td><code>frame -&gt; np.ndarray</code></td><td>Frame BGR numpy array (960x540 o risoluzione emulatore)</td></tr>
+<tr><td><span class="mod-pub">property</span></td><td><code>width, height -&gt; int</code></td><td>Dimensioni frame</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>crop(roi: tuple[x1,y1,x2,y2]) -&gt; Screenshot</code></td><td>Ritaglia sotto-regione. Usato da template matcher per ROI.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>match_template(template, threshold=0.80, zone=None) -&gt; MatchResult</code></td><td>Template matching TM_CCOEFF_NORMED. Ritorna best match. Zone: <code>(x1,y1,x2,y2)</code> per limitare la ricerca.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>match_template_all(template, threshold, zone, cluster_px=20) -&gt; list[MatchResult]</code></td><td>Trova tutti i match sopra soglia, con dedup per cluster spaziale.</td></tr>
+</table>
+
+<h3>MatchResult — dataclass</h3>
+<table class="members">
+<tr><th>Campo</th><th>Tipo</th><th>Descrizione</th></tr>
+<tr><td><code>found</code></td><td><code>bool</code></td><td>True se score &gt;= threshold</td></tr>
+<tr><td><code>score</code></td><td><code>float</code></td><td>Punteggio grezzo 0.0-1.0 (TM_CCOEFF_NORMED)</td></tr>
+<tr><td><code>cx, cy</code></td><td><code>int</code></td><td>Coordinate centro del match nel frame originale</td></tr>
+</table>
+
+<div class="warn-box"><strong>Nota WU76:</strong> Il metodo <code>_screenshot_raw</code> usa <code>exec-out screencap -p</code> per pipeline in-memory (0 file su disco). Questo ha eliminato le cascade ADB durante arena (17 screencap/battaglia via pull I/O saturavano MuMu). Fallback automatico a screencap+pull se exec-out restituisce bytes non validi.</div>
+
+<h3>Esempio</h3>
+<pre><code>device = AdbDevice(host="127.0.0.1", port=16384, name="FAU_01")
+screen = device.screenshot()
+if screen is None:
+    ctx.log_msg("[DEVICE] screenshot None — ADB disconnesso?")
+else:
+    frame = screen.frame  # np.ndarray BGR
+    device.tap(480, 270)  # tap centro schermo
+    import time; time.sleep(2.0)  # DELAY UI obbligatorio post-tap popup</code></pre>
+</section>
+
+<section id="config-system">
+  <h2>&#9881; Config System <span class="badge badge-module">config/config_loader.py</span></h2>
+  <p class="desc">Unico punto di lettura e merge della configurazione — global_config + instances + runtime_overrides.</p>
+  <p>
+    Il config system è il layer che trasforma i file JSON su disco in oggetti tipizzati usati dal bot.
+    Viene riletto ad ogni tick: le modifiche dalla dashboard hanno effetto immediato senza restart.
+    In caso di errore di lettura o campo mancante, i valori di default hardcoded garantiscono che
+    il bot non crashi mai per una configurazione corrotta.
+  </p>
+  <h3>Fonti (precedenza crescente)</h3>
+  <table class="members">
+    <tr><th>Priorità</th><th>File</th><th>Tipo</th><th>Descrizione</th></tr>
+    <tr><td>1 (fallback)</td><td>_DEFAULTS in config_loader.py</td><td>dict hardcoded</td><td>Valori di sicurezza, mai cambiano senza PR</td></tr>
+    <tr><td>2</td><td>config/global_config.json</td><td>STATIC</td><td>Parametri globali baseline (task, rifornimento, zaino, raccolta)</td></tr>
+    <tr><td>3</td><td>config/instances.json</td><td>STATIC</td><td>Parametri per-istanza (porta, truppe, livello, profilo)</td></tr>
+    <tr><td>4 (max)</td><td>config/runtime_overrides.json</td><td>DYNAMIC</td><td>Override hot-reload — prevale su tutto, modificabile senza restart</td></tr>
+  </table>
+  <h3>Tipi principali</h3>
+  <table class="members">
+    <tr><th>Classe</th><th>Campi chiave</th><th>Descrizione</th></tr>
+    <tr><td><code>MumuConfig</code></td><td>mumu_path, manager_path, timeout_carica_s=300, delay_avvio_s, delay_stab_s</td><td>Parametri MuMuPlayer — path eseguibili e timeout (WU155: 180→300s)</td></tr>
+    <tr><td><code>GlobalConfig</code></td><td>mumu, task.*, rifornimento, zaino, raccolta, globali, sistema</td><td>Configurazione globale tipizzata, costruita da <code>_from_raw(raw_dict)</code></td></tr>
+    <tr><td><code>InstanceCfg</code></td><td>nome, porta, livello, max_squadre, tipologia, truppe, raccolta_fuori_territorio</td><td>Config per singola istanza — merge globale + override per-istanza + runtime</td></tr>
+  </table>
+  <h3>Funzioni pubbliche</h3>
+  <table class="methods">
+    <tr><th>Funzione</th><th>Argomenti</th><th>Ritorno</th><th>Descrizione</th></tr>
+    <tr><td><code>load_global</code></td><td>path=None</td><td>GlobalConfig</td><td>Legge global_config.json, ritorna GlobalConfig (mai crash)</td></tr>
+    <tr><td><code>save_global</code></td><td>gcfg, path=None</td><td>bool</td><td>Serializza GlobalConfig su disco (scrittura atomica tmp+os.replace)</td></tr>
+    <tr><td><code>load_overrides</code></td><td>path</td><td>dict</td><td>Legge runtime_overrides.json grezzo (failsafe totale → {} su errore)</td></tr>
+    <tr><td><code>build_instance_cfg</code></td><td>ist_dict, gcfg, overrides</td><td>InstanceCfg</td><td>Merge globale + override per-istanza → InstanceCfg usato nel TaskContext</td></tr>
+    <tr><td><code>bootstrap_runtime_from_static_if_missing</code></td><td>—</td><td>bool</td><td>Crea runtime_overrides.json da static se assente (primo avvio). Regola WU140</td></tr>
+    <tr><td><code>merge_config</code></td><td>gcfg, overrides</td><td>GlobalConfig</td><td>Applica runtime_overrides sopra GlobalConfig — usato ad ogni tick in main.py</td></tr>
+  </table>
+  <h3>Compatibilità task</h3>
+  <p>
+    I task accedono alla config via <code>ctx.config</code> (InstanceCfg).
+    L'interfaccia è retrocompatibile con V5:
+    <code>cfg.get(key, default)</code>, <code>cfg.task_abilitato(nome)</code>,
+    e attributi uppercase come <code>cfg.RIFORNIMENTO_ABILITATO</code> sono tutti supportati.
+  </p>
+  <h3>Bootstrap static → dynamic (WU140)</h3>
+  <p>
+    <code>_build_runtime_from_static(global_config, instances)</code> copia tutti i campi
+    configurabili da STATIC a DYNAMIC, escludendo <code>mumu</code> e <code>_note</code> (read-only architetturali).
+    Chiamata da <code>bootstrap_runtime_from_static_if_missing()</code> al boot del bot
+    (<code>main.py</code>) solo se <code>runtime_overrides.json</code> è assente.
+  </p>
+  <pre><code># Utilizzo in main.py (ad ogni tick):
+gcfg     = load_global()                          # rilegge global_config.json
+overrides = load_overrides(RUNTIME_OVERRIDES_PATH) # rilegge runtime_overrides.json
+merged   = merge_config(gcfg, overrides)           # DYNAMIC > STATIC > default
+cfg      = build_instance_cfg(ist_dict, merged, overrides)
+ctx      = TaskContext(instance_name=ist["nome"], config=cfg, state=state, log=logger)</code></pre>
+  <h3>Default chiave</h3>
+  <table class="members">
+    <tr><th>Chiave</th><th>Default</th><th>Descrizione</th></tr>
+    <tr><td>tick_sleep</td><td>300s (5min)</td><td>Pausa tra cicli. Dashboard input in minuti (WU107+WU120)</td></tr>
+    <tr><td>max_parallel</td><td>2</td><td>Max istanze in parallelo (architettura attuale: 1)</td></tr>
+    <tr><td>timeout_carica_s</td><td>300s (WU155)</td><td>Timeout polling HOME post-avvio gioco</td></tr>
+    <tr><td>LIVELLO_NODO</td><td>6</td><td>Livello nodo raccolta target</td></tr>
+    <tr><td>RIFORNIMENTO_MAX_SPEDIZIONI_CICLO</td><td>5</td><td>Max spedizioni per ciclo (WU105)</td></tr>
+    <tr><td>RIFORNIMENTO_SOGLIA_CAMPO_M</td><td>5.0M</td><td>Soglia minima deposito per inviare pomodoro</td></tr>
+    <tr><td>ALLOCAZIONE_POMODORO</td><td>0.40</td><td>Frazione slot raccolta dedicata a campo/pomodoro</td></tr>
+  </table>
+  <h3>Tipologia istanza → routing task in main.py</h3>
+  <table class="members">
+    <tr><th>Tipologia</th><th>Task attivi</th><th>Note</th></tr>
+    <tr><td><code>full</code> (completo)</td><td>Tutti i task abilitati in global_config</td><td>Default standard</td></tr>
+    <tr><td><code>raccolta_fast</code> (completo · fast)</td><td>Come full, ma RaccoltaTask sostituito con RaccoltaFastTask</td><td>Delay -33%/-47% su tap_icona/CERCA (WU57). Reverted per FAU_01..10 (WU143)</td></tr>
+    <tr><td><code>raccolta_only</code> (solo raccolta)</td><td>Solo RaccoltaTask (+ RaccoltaChiusuraTask)</td><td>FauMorfeus usa questa tipologia</td></tr>
+  </table>
+</section>
+
+<section id="dashboard">
+  <h2>&#127759; Dashboard <span class="badge badge-module">dashboard/app.py</span></h2>
+  <p class="desc">FastAPI + Jinja2 + HTMX — monitoring e configurazione real-time della bot farm.</p>
+  <p>
+    La dashboard è un'applicazione FastAPI avviata separatamente dal bot con
+    <code>uvicorn dashboard.app:app --host 0.0.0.0 --port 8765</code>
+    (script: <code>run_dashboard_prod.bat</code>).
+    Legge i file di stato prodotti dal bot (<code>data/</code>, <code>config/</code>, <code>state/</code>)
+    e li espone via template Jinja2 aggiornati con HTMX.
+    <strong>Non scrive mai dati di esecuzione</strong> — modifica solo i file di configurazione.
+  </p>
+  <h3>Architettura</h3>
+  <table class="members">
+    <tr><th>Componente</th><th>Path</th><th>Responsabilità</th></tr>
+    <tr><td>App entry</td><td>dashboard/app.py</td><td>FastAPI app, router mount, lifespan, UI routes</td></tr>
+    <tr><td>Router API</td><td>dashboard/routers/api_*.py</td><td>Endpoint REST: status, stats, config, log, debug, notifications, adaptive_scheduler</td></tr>
+    <tr><td>Services</td><td>dashboard/services/</td><td>stats_reader, config_manager, telemetry_reader (logica lettura dati)</td></tr>
+    <tr><td>Templates</td><td>dashboard/templates/*.html</td><td>Jinja2 + HTMX, tema dark, no JS framework</td></tr>
+    <tr><td>Static</td><td>dashboard/static/</td><td>CSS/JS minimali</td></tr>
+  </table>
+  <h3>Pagine UI (routes GET /ui/*)</h3>
+  <table class="members">
+    <tr><th>Route</th><th>Template</th><th>Descrizione</th></tr>
+    <tr><td><code>/ui</code></td><td>index.html</td><td>Home — card produzione istanze, cfg4 sistema, sidebar risorse, tabella istanze con controlli inline</td></tr>
+    <tr><td><code>/ui/telemetria</code></td><td>telemetria.html</td><td>8 tel-card analytics (rafactor 04/05, estratta da home)</td></tr>
+    <tr><td><code>/ui/config/global</code></td><td>config_global.html</td><td>Configurazione STATICA: task baseline, sistema, rifornimento, zaino, allocazione, istanze default</td></tr>
+    <tr><td><code>/ui/predictor-istanze</code></td><td>predictor_istanze.html</td><td>Cycle predictor + Adaptive Scheduler (config + simulazione)</td></tr>
+    <tr><td><code>/ui/ab-test</code></td><td>ab_test.html</td><td>Analisi A/B adaptive vs naive scheduler (WU149)</td></tr>
+    <tr><td><code>/ui/raccolta</code></td><td>raccolta.html</td><td>Analisi nodi raccolta — distribuzione tipo×livello + fill rate</td></tr>
+    <tr><td><code>/ui/advanced</code></td><td>advanced.html</td><td>Tabella bulk istanze + addestramento truppe (config rapida)</td></tr>
+  </table>
+  <h3>Regola STATICO vs DINAMICO (WU140)</h3>
+  <p>
+    <strong>STATIC</strong> (<code>global_config.json</code> + <code>instances.json</code>): modificabile SOLO da
+    <code>/ui/config/global</code>. Serve da baseline e per il bootstrap.<br>
+    <strong>DYNAMIC</strong> (<code>runtime_overrides.json</code>): modificabile SOLO dalla HOME dashboard.
+    Hot-reload: il bot rilegge ad ogni tick, le modifiche hanno effetto immediato senza restart.<br>
+    I due piani sono indipendenti durante il funzionamento. Il merge avviene in
+    <code>config/config_loader.py::merge_config(gcfg, overrides)</code> con priorità DYNAMIC &gt; STATIC &gt; default.
+    Al primo avvio (override assente), <code>bootstrap_runtime_from_static_if_missing()</code> copia static→dynamic.
+  </p>
+  <h3>Endpoint principali</h3>
+  <table class="methods">
+    <tr><th>Metodo</th><th>Path</th><th>Descrizione</th></tr>
+    <tr><td>GET</td><td>/api/status</td><td>Stato bot live da engine_status.json (ultimo aggiornamento, ciclo corrente)</td></tr>
+    <tr><td>GET</td><td>/api/stats</td><td>Statistiche aggregate (produzione, risorse, cicli) da stats_reader</td></tr>
+    <tr><td>PATCH</td><td>/api/config/overrides/globali</td><td>Aggiorna runtime_overrides.json::globali (hot-reload prossimo tick)</td></tr>
+    <tr><td>PATCH</td><td>/api/config/overrides/istanze/{nome}</td><td>Aggiorna runtime_overrides per singola istanza (DYNAMIC only)</td></tr>
+    <tr><td>PUT</td><td>/api/config/istanze</td><td>Salva instances.json (STATIC) — batch update tabella istanze</td></tr>
+    <tr><td>PATCH</td><td>/api/config/global</td><td>Merge superficiale top-level su global_config.json (STATIC)</td></tr>
+    <tr><td>GET</td><td>/api/debug-tasks</td><td>Stato toggle debug screenshot per task (WU115)</td></tr>
+    <tr><td>PATCH</td><td>/api/debug-tasks/{task}/{enable|disable}</td><td>Toggle debug screenshot hot-reload (WU115)</td></tr>
+    <tr><td>PATCH</td><td>/api/adaptive-scheduler</td><td>Configura Adaptive Scheduler — dual-write static+dynamic (WU152)</td></tr>
+    <tr><td>GET</td><td>/api/notifications</td><td>Configurazione email notifier (schema, recipients, smtp)</td></tr>
+    <tr><td>GET</td><td>/docs</td><td>Swagger UI auto-generata (redoc disabilitato)</td></tr>
+  </table>
+  <h3>Lifespan — background task</h3>
+  <p>
+    All'avvio, <code>lifespan()</code> crea un <code>asyncio.Task</code> che ogni 30s controlla:
+    (a) se è iniziato un nuovo ciclo bot → snapshot immediato cycle predictor;
+    (b) se sono trascorsi 15 min → snapshot ordinario;
+    (c) valuta cicli completati per aggiornare <code>data/predictions/cycle_accuracy.jsonl</code>.
+    Al shutdown il task viene cancellato pulitamente.
+  </p>
+  <h3>Pattern merge endpoint PUT (WU139)</h3>
+  <p>
+    Tutti gli endpoint PUT/PATCH che modificano configurazione Pydantic usano
+    il pattern <em>merge incrementale</em>: parse JSON raw + <code>setattr</code> field-by-field
+    solo per le chiavi esplicitamente presenti nel payload.
+    <strong>Non usare mai Pydantic default_factory</strong> per i payload in arrivo —
+    i default sovrascriverebbero i campi non inviati (es. <code>acciaio_abilitato</code> tornava
+    <code>False</code> al salvataggio zaino).
+  </p>
+  <pre><code># Pattern corretto endpoint PATCH (WU139):
+raw = await request.json()
+for k, v in raw.get("zaino", {}).items():
+    if hasattr(ov.globali, k):
+        setattr(ov.globali, k, v)   # solo campi presenti
+_save_ov(ov)                        # scrittura atomica</code></pre>
+  <h3>Ambiente (dev vs prod)</h3>
+  <p>
+    <code>DOOMSDAY_ROOT</code> env var determina l'ambiente. Se contiene "prod" →
+    label "PROD" con CSS rosso, altrimenti "DEV" verde.
+    Stats_reader e config_manager leggono sempre da <code>DOOMSDAY_ROOT</code>
+    (o fallback su <code>C:/doomsday-engine-prod</code> per prod).
+    Dashboard dev legge <code>C:\doomsday-engine\config\</code>,
+    dashboard prod legge <code>C:\doomsday-engine-prod\config\</code>.
+  </p>
+</section>
+
+<section id="analytics">
+  <h2>&#128200; Analytics &amp; Daily Report <span class="badge badge-module">shared/prod_unificata.py · core/daily_report.py</span></h2>
+  <p class="desc">Produzione unificata pom-eq/h + builder email giornaliera con 11 sezioni aggregate.</p>
+  <p>
+    Il sottosistema analytics è composto da due moduli complementari.
+    <code>shared/prod_unificata.py</code> calcola la metrica <strong>produzione unificata</strong>
+    (M pomodoro-equivalente / 24h) a partire dai dati di spedizione o dalle sessioni di produzione chiuse.
+    <code>core/daily_report.py</code> aggrega tutti i dati disponibili per produrre il report email giornaliero
+    in formato testo+HTML (11 sezioni, best-effort per sezione).
+  </p>
+  <h3>prod_unificata.py — Costanti</h3>
+  <table class="members">
+    <tr><th>Costante</th><th>Valore</th><th>Descrizione</th></tr>
+    <tr><td><code>PESI</code></td><td>pom=1.0, legno=1.0, acc=2.0, pet=5.0</td><td>Moltiplicatori derivati da cap L7 (1.32M / cap_risorsa)</td></tr>
+    <tr><td><code>CAP_NOMINALE</code></td><td>dict (risorsa, livello) → int</td><td>Cap nodo per tipo e livello (L6 e L7)</td></tr>
+    <tr><td><code>TIPO_TO_RISORSA</code></td><td>campo→pomodoro, segheria→legno …</td><td>Mapping tipo raccolta bot → nome risorsa standard</td></tr>
+    <tr><td><code>_H</code></td><td>24.0</td><td>Finestra fissa per il denominatore (ore)</td></tr>
+  </table>
+  <h3>prod_unificata.py — Funzioni</h3>
+  <table class="methods">
+    <tr><th>Funzione</th><th>Argomenti</th><th>Ritorno</th><th>Descrizione</th></tr>
+    <tr><td><code>compute_from_dettaglio</code></td><td>dettaglio_oggi: list[dict]</td><td>dict</td><td>Calcola prod_unif_h da <code>state.rifornimento.dettaglio_oggi</code> (spedizioni giornaliere); fonte = risorse INVIATE al master</td></tr>
+    <tr><td><code>compute_from_storico</code></td><td>produzione_storico: list[dict]</td><td>dict</td><td>Calcola prod_unif_h dalle sessioni chiuse (<code>state.produzione_storico</code>); fonte = produzione REALE castello inclusa quota trattenuta</td></tr>
+    <tr><td><code>empty_result</code></td><td>—</td><td>dict</td><td>Ritorna dict con tutti campi a 0 / -1; usato come fallback sicuro</td></tr>
+  </table>
+  <p>
+    Output comune di entrambe le funzioni: <code>{prod_unif_h, pom_eq_totale, n_sped, per_risorsa}</code>.
+    <code>prod_unif_h == -1.0</code> indica nessun dato disponibile.
+    <code>per_risorsa</code> è un dict per risorsa con chiavi <code>{qta_tot, n, pom_eq}</code>.
+  </p>
+  <pre><code># Esempio: calcolo da dettaglio spedizioni
+from shared.prod_unificata import compute_from_dettaglio
+result = compute_from_dettaglio(state.rifornimento.dettaglio_oggi)
+# result["prod_unif_h"] → es. 2.415 (M pom-eq/24h)
+# result["per_risorsa"]["acciaio"]["pom_eq"] → pom-eq acciaio (peso×2)</code></pre>
+
+  <h3>daily_report.py — Struttura</h3>
+  <p>
+    Il report viene costruito da <code>build_daily_report(date_utc)</code> che chiama in sequenza
+    11 funzioni <code>_section_*(date)</code>. Ogni sezione è protetta da <code>try/except</code>
+    e ritorna il meglio dei dati disponibili (nessuna sezione può far crashare il report).
+  </p>
+  <table class="members">
+    <tr><th>Sezione</th><th>Funzione</th><th>Fonte dati</th></tr>
+    <tr><td>1 · Cicli</td><td><code>_section_cicli</code></td><td>data/telemetry/cicli.json + events JSONL</td></tr>
+    <tr><td>2 · Produzione rifugio</td><td><code>_section_produzione_rifugio</code></td><td>state/&lt;ist&gt;.json::produzione_storico[]</td></tr>
+    <tr><td>3 · Risorse inviate al master</td><td><code>_section_produzione</code></td><td>data/storico_farm.json::dettaglio_oggi</td></tr>
+    <tr><td>4 · Trend vs 7gg</td><td><code>_section_trend</code></td><td>storico_farm.json storico</td></tr>
+    <tr><td>5 · Rifornimento</td><td><code>_section_rifornimento</code></td><td>state/&lt;ist&gt;.json::rifornimento.*</td></tr>
+    <tr><td>6 · Truppe</td><td><code>_section_truppe</code></td><td>data/storico_truppe.json</td></tr>
+    <tr><td>7 · Performance task</td><td><code>_section_performance_task</code></td><td>events JSONL (success + duration)</td></tr>
+    <tr><td>8 · Boot HOME→ready</td><td><code>_section_boot</code></td><td>data/istanza_metrics.jsonl</td></tr>
+    <tr><td>9 · Copertura squadre</td><td><code>_section_copertura</code></td><td>data/istanza_metrics.jsonl (load_squadra)</td></tr>
+    <tr><td>10 · Eventi rilevanti</td><td><code>_section_eventi</code></td><td>alerts + restart log</td></tr>
+    <tr><td>11 · Anomalie task</td><td><code>_section_anomalie</code></td><td>events JSONL (success=False)</td></tr>
+  </table>
+  <h3>daily_report.py — Helper formato</h3>
+  <table class="methods">
+    <tr><th>Funzione</th><th>Esempio</th><th>Descrizione</th></tr>
+    <tr><td><code>_fmt_n(n)</code></td><td>1500000 → "1.50M"</td><td>Formatta numero con suffisso K/M</td></tr>
+    <tr><td><code>_fmt_dur_s(s)</code></td><td>90 → "1m", 3700 → "1h02m"</td><td>Regola 10/05: mai secondi se ≥60s</td></tr>
+  </table>
+  <p>
+    L'outlier filter <code>PROD_ORARIA_CAP_M=30.0</code> scarta sessioni con produzione/h &gt; 30M per risorsa
+    (OCR rotto con valore gonfiato). Master FauMorfeus viene sempre scorporato dalle istanze ordinarie
+    (9 punti di esclusione server-side via <code>shared/instance_meta.is_master_instance</code>).
+  </p>
+</section>
+
+<section id="banner-system">
+<h2>&#x1F4AC; Banner System <span class="badge badge-shared">shared/banner_catalog.py · ui_helpers.py</span></h2>
+<p class="desc">Catalogo banner/popup post-launch con dismissal pipeline: template matching per rilevamento, azioni di chiusura mirate (tap_template / tap_x_topright / back).</p>
+<p>Il sistema banner risolve le UNKNOWN polls durante l'avvio: invece di tap ciechi, identifica ogni banner tramite template matching e applica l'azione di chiusura corretta. La pipeline <code>dismiss_banners_loop()</code> (in <code>shared/ui_helpers.py</code>) itera il catalogo e applica la prima corrispondenza trovata. Fallback: tap X cerchio dorato <code>(910,80)</code> o BACK arrow per banner non catalogati.</p>
+
+<h3>BannerSpec — campi</h3>
+<table class="members">
+<tr><th>Campo</th><th>Tipo</th><th>Descrizione</th></tr>
+<tr><td><code>name</code></td><td><code>str</code></td><td>Identificativo univoco (es. "exit_game_dialog")</td></tr>
+<tr><td><code>template</code></td><td><code>str</code></td><td>Path template per DETECTION (es. "pin/pin_exit_game_dialog.png")</td></tr>
+<tr><td><code>roi</code></td><td><code>tuple[x1,y1,x2,y2]</code></td><td>ROI per limitare ricerca del banner</td></tr>
+<tr><td><code>threshold</code></td><td><code>float</code></td><td>Soglia score detection (default 0.80)</td></tr>
+<tr><td><code>dismiss_action</code></td><td><code>str</code></td><td>Azione chiusura: "tap_template" / "tap_x_topright" / "tap_coords" / "tap_center" / "back"</td></tr>
+<tr><td><code>dismiss_template</code></td><td><code>str|None</code></td><td>Template del PULSANTE da tappare (per "tap_template")</td></tr>
+<tr><td><code>dismiss_coords</code></td><td><code>tuple|None</code></td><td>Coordinate fisse per "tap_coords" o override "tap_x_topright"</td></tr>
+<tr><td><code>wait_after_s</code></td><td><code>float</code></td><td>Sleep post-azione per animazione UI</td></tr>
+<tr><td><code>priority</code></td><td><code>int</code></td><td>Ordine check (0=alta, 9=bassa)</td></tr>
+</table>
+
+<h3>Catalogo banner attivi</h3>
+<table class="members">
+<tr><th>Priority</th><th>Nome</th><th>Descrizione</th><th>Dismiss</th></tr>
+<tr><td>0</td><td><code>exit_game_dialog</code></td><td>"Exit game?" dialog di sistema — CRITICO, chiuderebbe il gioco su OK</td><td>tap_template pin_btn_cancel.png</td></tr>
+<tr><td>1</td><td><code>auto_collect_afk_banner</code></td><td>Modale AFK resources post-launch</td><td>tap_template pin_btn_confirm.png</td></tr>
+<tr><td>2</td><td><code>equipment_report</code></td><td>Popup IAP Equipment Report (carte bordeaux X)</td><td>tap_template pin_btn_x_tag_diamond.png</td></tr>
+</table>
+
+<h3>Fallback per banner non catalogati</h3>
+<table class="members">
+<tr><th>Fallback</th><th>Template</th><th>Coord</th><th>Uso</th></tr>
+<tr><td>X cerchio dorato</td><td><code>pin_btn_x_close.png</code></td><td><code>(910,80)</code></td><td>Popup eventi con X standard</td></tr>
+<tr><td>BACK arrow</td><td><code>pin_btn_back_arrow.png</code></td><td>match dinamico</td><td>Schermate nidificate (Alliance/Hero/Bag)</td></tr>
+</table>
+
+<h3>dismiss_banners_loop — funzione principale</h3>
+<pre><code>from shared.ui_helpers import dismiss_banners_loop
+
+# Chiamata durante avvio e pre-OCR
+counts = dismiss_banners_loop(ctx, max_iter=4, log_fn=lambda m: ctx.log_msg(m))
+# counts: dict {banner_name: n_chiusure} + "_unmatched_tap_x": n_fallback
+if counts:
+    ctx.log_msg(f"Banner chiusi: {counts}")</code></pre>
+
+<div class="rule-box"><strong>Nota banner_eventi_laterale:</strong> Disabilitato dal 26/04/2026 — il tap di chiusura nascondeva l'icona DS quando scivolava sotto la barra eventi. DistrictShowdownTask apre esplicitamente il banner prima di cercare l'icona DS e lo richiude su tutti i path di uscita (WU-DS-Banner).</div>
+</section>
+
+<section id="task-secondari">
+<h2>&#x1F504; Task Secondari <span class="badge badge-task">boost · main_mission · arena_mercato</span></h2>
+<p class="desc">BoostTask (Gathering Speed), MainMissionTask (claim rewards), ArenaMercatoTask (acquisto pack arena).</p>
+
+<h3>BoostTask</h3>
+<p class="desc">Attivazione Gathering Speed Boost con scheduling intelligente via BoostState. Priority 5 — primo task eseguito.</p>
+<table class="methods">
+<tr><th>Guard</th><th>Descrizione</th></tr>
+<tr><td><code>should_run()</code></td><td>Delega a <code>ctx.state.boost.should_run()</code>: skip se boost attivo e non in scadenza. Nessun interval fisso — la scadenza governa il timing.</td></tr>
+</table>
+<table class="methods">
+<tr><th>Flusso</th><th>Descrizione</th></tr>
+<tr><td>1. HOME → tap Manage Shelter</td><td>tap_boost (140,140)</td></tr>
+<tr><td>2. Scroll lista boost fino a Gathering Speed</td><td>Max MAX_SWIPE swipe. Mini-swipe inverso se swipe&gt;0 per ricentro riga.</td></tr>
+<tr><td>3. Pin_50_ visible → boost GIA' attivo → registra_attivo("8h")</td><td></td></tr>
+<tr><td>4. Tap riga (480, speed_cy) + polling pin_speed_use (timeout 4s)</td><td>sleep 2.0s DELAY UI</td></tr>
+<tr><td>5. USE 8h o 1d → registra_attivo(tipo)</td><td></td></tr>
+</table>
+
+<h3>MainMissionTask</h3>
+<p class="desc">Raccolta ricompense Main Mission + Daily Mission + chest milestone. Gate orario UTC&gt;=20 (WU91). Priority 22.</p>
+<table class="members">
+<tr><th>Campo</th><th>Valore</th></tr>
+<tr><td><code>Gate orario</code></td><td>UTC &gt;= 20 (<code>time_gate_main_mission()</code> — WU91/WU157)</td></tr>
+<tr><td><code>schedule</code></td><td>periodic 12h</td></tr>
+<tr><td><code>tap_apri_pannello</code></td><td><code>(33, 398)</code></td></tr>
+<tr><td>Layout 2-tab</td><td>Main (50,100) + Daily (50,185)</td></tr>
+<tr><td>Layout 3-tab (Chapter)</td><td>Chapter (50,105) + Main (50,185) + Daily (50,265) — detect via OCR "Chapter" su ROI (10,75,110,135)</td></tr>
+<tr><td>Chest milestones AP</td><td>20/40/60/80/100 — OCR AP dopo claim daily (ROI 180,130,240,175)</td></tr>
+</table>
+<p>Chiusura popup reward: tap (480,80) zona alta vuota (non (480,270) che chiuderebbe il pannello mission).</p>
+
+<h3>ArenaMercatoTask</h3>
+<p class="desc">Acquisto pack arena (360 pts + 15 pts). DELAY UI vincolante: sleep 2.0s post-tap carrello (WU113 — era 0.3s → score 0.387 → 0.934). Priority 40.</p>
+<table class="methods">
+<tr><th>Fix</th><th>Descrizione</th></tr>
+<tr><td>WU113</td><td>sleep 0.3s → 2.0s dopo tap_carrello (905,68). Pre-fix: btn360/btn15 score sempre &lt; 0 (schermata in transizione). Post-fix: acquisti normalizzati.</td></tr>
+<tr><td>DebugBuffer WU115</td><td>Dump a 4 punti chiave (pre_carrello, post_carrello, iter0_pre_check_360, pre_check_15) solo su acquisti=0 OR errore.</td></tr>
+</table>
+</section>
+
+<section id="task-minori">
+<h2>&#x1F527; Task Minori <span class="badge badge-task">tasks/donazione.py · alleanza.py · messaggi.py · store.py</span></h2>
+<p class="desc">Task di supporto: donazione tecnologia alleanza, raccolta messaggi, acquisto Mysterious Merchant Store.</p>
+
+<h3>DonazioneTask</h3>
+<p class="desc">Dona risorse alla tecnologia alleanza marcata "Marked!". Scheduling: periodic 8h (WU90), priority 20.</p>
+<table class="methods">
+<tr><th>Modificatore</th><th>Flusso</th></tr>
+<tr><td><span class="mod-pub">run</span></td><td>HOME → tap_barra("alliance") → Technology → cerca pin_marked (soglia 0.75) → tap → verifica pin_donate giallo → tap max 30 volte → back×3. Se pin_marked assente → back×3 (WU Issue #42 fix). Se pin_research (upgrade in corso) → back×1.</td></tr>
+</table>
+<table class="members">
+<tr><th>Parametro</th><th>Valore</th></tr>
+<tr><td><code>schedule</code></td><td>periodic 8h (WU90 — da always 0h: 7 run/notte → 3 run/notte)</td></tr>
+<tr><td><code>max_donazioni</code></td><td>30 tap donate per run</td></tr>
+<tr><td><code>tap_technology</code></td><td><code>(753, 446)</code></td></tr>
+</table>
+
+<h3>AlleanzaTask</h3>
+<p class="desc">Navigazione Alliance: usa tap_barra("alliance") con fallback a coord fissa (WU Issue #5). Priority 25.</p>
+<table class="methods">
+<tr><th>Fix</th><th>Descrizione</th></tr>
+<tr><td>WU Issue #5</td><td>Pre-fix: coord fissa (760,505). Post-fix: tap_barra("alliance") + fallback coord se navigator non disponibile. Pattern coerente con donazione/rifornimento.</td></tr>
+</table>
+
+<h3>MessaggiTask</h3>
+<p class="desc">Raccolta ricompense da sezione Messaggi (tab Alliance + System). Priority 30, periodic 4h.</p>
+<table class="methods">
+<tr><th>Modificatore</th><th>Flusso</th></tr>
+<tr><td><span class="mod-pub">run</span></td><td>tap icona messaggi (928,430) → tab Alliance → Read All → tab System → Read All → close. Chiusura via vai_in_home() (non n_back fissi). WU124: fix esito COMPLETATO (era OK → AttributeError).</td></tr>
+</table>
+<table class="members">
+<tr><th>Stato</th><th>Costante</th></tr>
+<tr><td>Completato</td><td><code>_Esito.COMPLETATO</code></td></tr>
+<tr><td>Schermata non aperta</td><td><code>_Esito.SCHERMATA_NON_APERTA</code></td></tr>
+</table>
+
+<h3>StoreTask</h3>
+<p class="desc">Acquisto automatico Mysterious Merchant Store: scan griglia spirale 25 step, acquista pulsanti gialli risorse. Periodic 4h, priority 45.</p>
+<table class="methods">
+<tr><th>Modificatore</th><th>Flusso</th></tr>
+<tr><td><span class="mod-pub">run</span></td><td>Assicura HOME → collassa banner → scan spirale 25 step (early exit su score &gt;=0.80 WU71) → tap Store → tap carrello (sleep 2.0s DELAY UI) → acquista pagine 1-3 → Free Refresh (1x) → BACK.</td></tr>
+</table>
+<table class="members">
+<tr><th>Fix</th><th>WU</th></tr>
+<tr><td>Multi-candidate sorted desc (WU55) — swipe non-idempotente bordi mappa</td><td>WU55</td></tr>
+<tr><td>sleep 0.3→2.0s post-tap carrello (score 0.387→0.934)</td><td>WU113 DELAY UI</td></tr>
+<tr><td>DebugBuffer WU115 — dump screenshot su fail/skip per analisi UI cambiata</td><td>WU85</td></tr>
+</table>
+</section>
+
+<section id="radar">
+<h2>&#x1F4E1; Radar / RadarCensus / RadarActions <span class="badge badge-task">tasks/radar*.py</span></h2>
+<p class="desc">Stazione radar: tap pallini rossi sulla mappa, censimento icone via classifier (radar_tool), dispatch azioni per categoria (card GO+RESCUE).</p>
+<p>Il sistema radar si compone di 3 moduli cooperanti: <code>radar.py</code> (task principale, badge check + loop pallini), <code>radar_census.py</code> (classifier icone mappa via radar_tool), <code>radar_actions.py</code> (orchestratore loop azioni post-pallini). L'algoritmo di rilevamento pallini usa BFS numpy puro (no OpenCV) su maschera pixel rossi.</p>
+
+<h3>RadarTask — Scheduling e parametri</h3>
+<table class="members">
+<tr><th>Campo</th><th>Valore</th></tr>
+<tr><td><code>name()</code></td><td><code>"radar"</code></td></tr>
+<tr><td><code>interval_hours</code></td><td><code>12h</code></td></tr>
+<tr><td><code>TAP_RADAR_ICONA</code></td><td><code>(78, 315)</code></td></tr>
+<tr><td><code>RADAR_MAPPA_ZONA</code></td><td><code>(0,100,860,460)</code></td></tr>
+<tr><td><code>RADAR_TIMEOUT_S</code></td><td><code>30s</code></td></tr>
+</table>
+
+<h3>Flusso RadarTask.run()</h3>
+<div class="arch-flow">1. Badge check: pixel check R&gt;150, G&lt;85, B&lt;85 in ROI 55x45 attorno icona
+   - assente → skip pulito (success=True, pallini=0)
+2. tap icona radar → wait 2.5s + 10s notifiche
+3. process_radar_actions() (WU150):
+   a. _loop_pallini — tap BFS pallini rossi
+   b. wait 10s animazioni
+   c. RadarCensusTask.classify() — identifica icone
+   d. dispatch {categoria → handler}:
+      - "card" → _handle_card (GO+RESCUE+ritorno mappa)
+      - altre  → placeholder
+   e. ripeti finche 0 pallini AND 0 actionable (max 10 iter)
+4. BACK → home</div>
+
+<h3>RadarCensusTask — classifier icone</h3>
+<table class="members">
+<tr><th>Campo</th><th>Descrizione</th></tr>
+<tr><td><code>name()</code></td><td><code>"radar_census"</code></td></tr>
+<tr><td>Sorgente</td><td><code>radar_tool/</code> — classifier RF + 47 template PNG (copiati da V5)</td></tr>
+<tr><td>Categorie</td><td>card, skull, pedone, soldati, avatar, paracadute, camion, fiamma, bottiglia, numero, auto + altri</td></tr>
+<tr><td>Fallback</td><td>Heuristic via nome template se RF confidence &lt; 0.60</td></tr>
+</table>
+
+<h3>RadarActions — handler card (WU150)</h3>
+<table class="methods">
+<tr><th>Funzione</th><th>Descrizione</th></tr>
+<tr><td><code>process_radar_actions(ctx, ...)</code></td><td>Orchestratore: _loop_pallini + wait + census + dispatch + loop safety. Ritorna dict {pallini_tappati, card_processate, iter, popup_pre_resolved, stagnant_abort}.</td></tr>
+<tr><td><code>handle_card(ctx, record)</code></td><td>tap card → wait 2.5s → tap GO (90,465) → wait → tap RESCUE (233,386) → wait → tap RADAR_ICON (78,315).</td></tr>
+</table>
+
+<div class="warn-box"><strong>WU151 — safety break:</strong> Se 2 iter consecutive con pallini&gt;0 AND processed==0 AND pallini_count invariato (stagnant) → abort con tentativo recovery <code>_resolve_card_popup()</code>. Evita loop sterili quando popup residuo e' gia' aperto a inizio task.</div>
+</section>
+
+<section id="district-showdown">
+<h2>&#x1F3AE; DistrictShowdownTask <span class="badge badge-task">tasks/district_showdown.py</span></h2>
+<p class="desc">Evento mensile District Showdown: lancia dadi Gold via Auto Roll, gestisce Gang Leader, Fund Raid, Influence Rewards. Attivo Ven-Lun UTC.</p>
+<p>Task always (interval=0, guard su flag + finestra temporale). Apre l'evento nella barra top, attiva Auto Roll con 3 toggle ON, monitora ogni 10s per: Gang Leader (Request Help), Access Prohibited (wait 65s), Item Source (dadi esauriti). Banner laterale HOME viene aperto prima di cercare l'icona DS (WU-DS-Banner) e richiuso su tutti i path di uscita.</p>
+
+<h3>Finestre temporali (UTC)</h3>
+<table class="members">
+<tr><th>Finestra</th><th>Condizione UTC</th></tr>
+<tr><td>Evento DS</td><td>Venerdi' 00:00 → Lunedi' 00:00 (Sab+Dom sempre attivo, Ven da h&gt;=0, Lun prima di h&lt;0)</td></tr>
+<tr><td>Fund Raid</td><td>Domenica 20:00 → Lunedi' 00:00</td></tr>
+</table>
+
+<h3>Fasi del task</h3>
+<div class="arch-flow">1. _is_in_event_window() → gate temporale
+2. comprimi_banner_home → apri banner laterale eventi (per icona DS visibile)
+3. _apri_evento(): find pin_district_showdown nella ROI barra (350,40,900,110)
+4. tap Auto (39,151) → popup Auto Roll → verifica 3 toggle ON → tap Start
+5. Loop monitoring ogni 10s:
+   - Gang Leader → Request Help + re-enable auto
+   - Access Prohibited → sleep 65s + re-enable
+   - Item Source → dadi esauriti → exit
+6. _chiudi_banner() su tutti i path
+7. vai_in_home</div>
+
+<h3>Guard should_run()</h3>
+<table class="members">
+<tr><th>Condizione</th><th>Esito</th></tr>
+<tr><td>Flag dashboard <code>district_showdown=False</code> (WU108)</td><td>Veto esplicito — skip</td></tr>
+<tr><td>Fuori finestra temporale</td><td>Skip</td></tr>
+<tr><td>Stuck counter &gt;= 5 cicli consecutivi senza completamento</td><td>Skip safety</td></tr>
+</table>
+
+<h3>PIN principali</h3>
+<table class="members">
+<tr><th>Template</th><th>Uso</th></tr>
+<tr><td><code>pin/pin_district_showdown</code></td><td>Icona evento nella barra top</td></tr>
+<tr><td><code>pin/pin_autoplay</code></td><td>Pulsante Auto nella schermata evento</td></tr>
+<tr><td><code>pin/pin_gang_leader</code></td><td>Popup Gang Leader (Request Help)</td></tr>
+<tr><td><code>pin/pin_access_prohibited</code></td><td>Popup territorio proibito (wait 65s)</td></tr>
+<tr><td><code>pin/pin_item_source</code></td><td>Popup dadi esauriti (exit)</td></tr>
+</table>
+</section>
+
+<section id="truppe">
+<h2>&#x2694; TruppeTask <span class="badge badge-task">tasks/truppe.py</span></h2>
+<p class="desc">Addestramento automatico delle 4 caserme libere (Infantry/Rider/Ranged/Engine). OCR counter X/4, checkbox Fast Training sempre OFF.</p>
+<p>Task periodico (4h, priority 18). Da HOME legge il counter X/4 caserme impegnate via OCR (cascade otsu+binary su zona 18x18px). Se X&lt;4 esegue (4-X) cicli di addestramento. Ogni ciclo: tap pannello caserme (30,247) → Train Circle (564,382) → OCR titolo per identificare il tipo → check flag caserma abilitata → tap TRAIN (794,471). Schema config WU132: 4 flag indipendenti per caserma + override per istanza.</p>
+
+<h3>Scheduling e costanti</h3>
+<table class="members">
+<tr><th>Campo</th><th>Valore</th></tr>
+<tr><td><code>name()</code></td><td><code>"truppe"</code></td></tr>
+<tr><td><code>interval_hours</code></td><td><code>4.0</code></td></tr>
+<tr><td><code>_MAX_CASERME</code></td><td><code>4</code></td></tr>
+<tr><td><code>_DELAY_STEP_S</code></td><td><code>5.0s</code></td></tr>
+</table>
+
+<h3>Coordinate UI (960x540)</h3>
+<table class="members">
+<tr><th>Costante</th><th>Coord</th><th>Uso</th></tr>
+<tr><td><code>_TAP_PANNELLO_CASERME</code></td><td><code>(30, 247)</code></td><td>Apre pannello lista caserme</td></tr>
+<tr><td><code>_TAP_TRAIN_CIRCLE</code></td><td><code>(564, 382)</code></td><td>Cerchio Train nel menu mappa caserma</td></tr>
+<tr><td><code>_TAP_TRAIN_BUTTON</code></td><td><code>(794, 471)</code></td><td>Pulsante TRAIN giallo</td></tr>
+<tr><td><code>_BOX_CHECK_FAST</code></td><td><code>(676,497,699,518)</code></td><td>Sample area checkbox Fast Training (R-mean &gt; 110 = ON)</td></tr>
+<tr><td><code>_ZONE_COUNTER_OCR</code></td><td><code>(12,264,30,282)</code></td><td>OCR counter X/4 (zona 18x18px, cascade otsu+binary per X=0)</td></tr>
+</table>
+
+<h3>Schema config 4-caserme (WU132)</h3>
+<table class="members">
+<tr><th>Config key</th><th>Default</th><th>Descrizione</th></tr>
+<tr><td><code>TRUPPE_CASERMA_INFANTRY</code></td><td><code>True</code></td><td>Abilita Infantry caserma</td></tr>
+<tr><td><code>TRUPPE_CASERMA_RIDER</code></td><td><code>True</code></td><td>Abilita Rider caserma</td></tr>
+<tr><td><code>TRUPPE_CASERMA_RANGED</code></td><td><code>True</code></td><td>Abilita Ranged caserma</td></tr>
+<tr><td><code>TRUPPE_CASERMA_ENGINE</code></td><td><code>True</code></td><td>Abilita Engine caserma</td></tr>
+</table>
+<p>Override per istanza: <code>istanze.&lt;nome&gt;.truppe_override.caserme.{tipo}: Optional[bool]</code> — null=eredita globale.</p>
+
+<h3>Metodi principali</h3>
+<table class="methods">
+<tr><th>Modificatore</th><th>Firma</th><th>Descrizione</th></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>run(ctx) -&gt; TaskResult</code></td><td>Legge counter, determina caserme da addestrare, esegue cicli. DebugBuffer WU115 integrato.</td></tr>
+<tr><td><span class="mod-priv">private</span></td><td><code>_leggi_counter(ctx) -&gt; int | None</code></td><td>OCR counter X/4 con cascade otsu→binary. Ritorna None se fallisce.</td></tr>
+<tr><td><span class="mod-priv">private</span></td><td><code>_esegui_ciclo(ctx) -&gt; bool | str</code></td><td>Un ciclo di addestramento. OCR titolo caserma → check flag → TRAIN. Ritorna True/False o "skip_flag".</td></tr>
+</table>
+</section>
+
+<section id="arena">
+<h2>&#x2694; ArenaTask <span class="badge badge-task">tasks/arena.py</span></h2>
+<p class="desc">Arena of Glory: 5 sfide giornaliere, rebuild truppe pre-prima sfida, gate orario UTC&gt;=10, template dinamici Victory/Failure/Continue.</p>
+<p>Task giornaliero che esegue fino a 5 sfide arena. Usa template matching per rilevare Victory/Failure (soglia 0.90 per evitare falsi positivi — WU81), tap dinamico su Continue (WU80), skip checkbox per velocizzare le battaglie. Rebuild truppe 1x/die (WU83) prima della prima sfida. Gate orario UTC&gt;=10 per evitare picco notturno post-reset DRL (WU145).</p>
+
+<h3>Scheduling e costanti</h3>
+<table class="members">
+<tr><th>Campo</th><th>Valore</th><th>Descrizione</th></tr>
+<tr><td><code>name()</code></td><td><code>"arena"</code></td><td></td></tr>
+<tr><td><code>schedule_type</code></td><td><code>"daily"</code></td><td>Reset 00:00 UTC</td></tr>
+<tr><td><code>MAX_SFIDE</code></td><td><code>5</code></td><td>Sfide massime per giorno</td></tr>
+<tr><td><code>_DELAY_BATTAGLIA_S</code></td><td><code>5.0s</code></td><td>Sleep post-tap START CHALLENGE</td></tr>
+<tr><td><code>_MAX_BATTAGLIA_S</code></td><td><code>5.0s</code></td><td>Timeout massimo attesa fine battaglia (skip ON + DirectX)</td></tr>
+<tr><td><code>ARENA_TIMEOUT_S</code></td><td><code>600s</code></td><td>Timeout globale task arena</td></tr>
+</table>
+
+<h3>Template PIN usati</h3>
+<table class="members">
+<tr><th>Template</th><th>ROI</th><th>Uso</th></tr>
+<tr><td><code>pin_arena_01_lista</code></td><td><code>(387,0,565,43)</code></td><td>Detect lista sfide (header)</td></tr>
+<tr><td><code>pin_arena_02_challenge</code></td><td><code>(610,434,857,486)</code></td><td>Pulsante START CHALLENGE</td></tr>
+<tr><td><code>pin_arena_03_victory</code></td><td><code>(370,35,545,95)</code></td><td>Schermata Victory (soglia 0.90)</td></tr>
+<tr><td><code>pin_arena_04_failure</code></td><td><code>(370,35,545,95)</code></td><td>Schermata Failure (soglia 0.90)</td></tr>
+<tr><td><code>pin_arena_05_continue</code></td><td><code>(380,503,535,530)</code></td><td>"Tap to Continue" corsivo bianco</td></tr>
+<tr><td><code>pin_arena_06_purchase</code></td><td><code>(334,143,586,185)</code></td><td>Popup acquisto sfide aggiuntive (5/5 esaurite)</td></tr>
+</table>
+
+<h3>Guard should_run()</h3>
+<table class="members">
+<tr><th>Condizione</th><th>Esito</th></tr>
+<tr><td>Flag dashboard <code>arena=False</code></td><td>Skip</td></tr>
+<tr><td>Gate orario UTC &lt; 10 (<code>time_gate_arena()</code> — WU145/WU157)</td><td>Skip (posticipa, last_run non aggiornato)</td></tr>
+<tr><td><code>ArenaState.esaurite=True</code> oggi</td><td>Skip (reset 00:00 UTC)</td></tr>
+</table>
+
+<h3>Metodi principali</h3>
+<table class="methods">
+<tr><th>Modificatore</th><th>Firma</th><th>Descrizione</th></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>run(ctx) -&gt; TaskResult</code></td><td>3 tentativi esterni. Per ogni tentativo: HOME + naviga + loop 5 sfide. Successo = esaurite OR sfide_eseguite &gt;= 5.</td></tr>
+<tr><td><span class="mod-priv">private</span></td><td><code>_esegui_sfida(ctx, run, i) -&gt; Literal["ok","esaurite","errore"]</code></td><td>Una singola sfida: tap prima sfida (WU117) + START CHALLENGE + attendi Fine + Continue dinamico.</td></tr>
+<tr><td><span class="mod-priv">private</span></td><td><code>_rebuild_truppe_se_dovuto(ctx)</code></td><td>1x/die UTC: rimuove truppe schierate + ricarica celle via tap+READY. Check edge density Canny per celle vuote (WU125).</td></tr>
+<tr><td><span class="mod-priv">private</span></td><td><code>_assicura_skip(ctx) -&gt; bool</code></td><td>Verifica e attiva checkbox Skip ogni sfida (WU74 — non piu' 1x/sessione).</td></tr>
+</table>
+
+<h3>Fix architetturali chiave</h3>
+<table class="members">
+<tr><th>WU</th><th>Fix</th></tr>
+<tr><td>WU75</td><td>Sleep 60s → sleep 5s + 1 check finale (eliminati 17 screencap/battaglia che saturavano ADB)</td></tr>
+<tr><td>WU76</td><td>Screenshot in-memory (exec-out) — 0 file su disco</td></tr>
+<tr><td>Issue #88</td><td>Driver Vulkan → DirectX: cascata ADB su animazione 3D battle (fix manuale MuMu Settings)</td></tr>
+<tr><td>WU79</td><td>last_run aggiornato solo su success=True — arena ripianificata su fail</td></tr>
+<tr><td>WU131</td><td><code>segna_esaurite()</code> anche su 5/5 sfide OK (non solo su popup purchase 6a sfida)</td></tr>
+</table>
+</section>
+
+<section id="rifornimento">
+<h2>&#x1F4E6; RifornimentoTask <span class="badge badge-task">tasks/rifornimento.py</span></h2>
+<p class="desc">Invio risorse (pomodoro/legno/acciaio/petrolio) al rifugio master via Resource Supply in mappa o lista Membri.</p>
+<p>Due modalita' selezionabili da config: <code>mappa</code> (naviga in mappa, centra sul castello master, tappa Resource Supply) e <code>membri</code> (naviga Alliance &rarr; Members). Modalita' mappa ha precedenza. Le spedizioni sono tracciate in <code>RifornimentoState</code> con quota giornaliera max 5. Il loop spedizioni usa skip per risorsa su fallimento (WU126 — non break totale).</p>
+
+<h3>Scheduling</h3>
+<table class="members">
+<tr><th>Campo</th><th>Valore</th></tr>
+<tr><td><code>name()</code></td><td><code>"rifornimento"</code></td></tr>
+<tr><td><code>schedule_type</code></td><td><code>"periodic"</code> (interval=4h, trattato always in prod)</td></tr>
+</table>
+
+<h3>Guard should_run()</h3>
+<table class="members">
+<tr><th>Condizione</th><th>Esito</th></tr>
+<tr><td>Flag dashboard <code>rifornimento=False</code></td><td>Skip</td></tr>
+<tr><td>Provviste esaurite oggi (<code>RifornimentoState.should_run()=False</code>)</td><td>Skip</td></tr>
+<tr><td>DRL master = 0 AND ts &gt;= mezzanotte UTC odierna</td><td>Skip (WU126 — master saturo)</td></tr>
+<tr><td>DRL = 0 ma ts stale (pre-reset 00:00 UTC)</td><td>Tenta per aggiornare OCR DRL</td></tr>
+</table>
+
+<h3>Metodi principali</h3>
+<table class="methods">
+<tr><th>Modificatore</th><th>Firma</th><th>Descrizione</th></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>run(ctx, deposito=None, slot_liberi=-1) -&gt; TaskResult</code></td><td>Seleziona modalita', verifica DOOMS_ACCOUNT, build risorse_config, chiama _esegui_mappa o _esegui_membri.</td></tr>
+<tr><td><span class="mod-priv">private</span></td><td><code>_esegui_mappa(ctx, risorse_config, ...)</code></td><td>Loop spedizioni via mappa: centra mappa + tap castello + Resource Supply + compila + VAI. Caching coord castello (WU-RifCentratura): dalla 2a sped tap diretto sulle coord cached.</td></tr>
+<tr><td><span class="mod-priv">private</span></td><td><code>_centra_mappa(ctx) -&gt; tuple[int,int]</code></td><td>Naviga lente coordinate RIFUGIO_X/RIFUGIO_Y, match pin_rifugio.png (soglia 0.55 post-WU159), ritorna coord castle esatte.</td></tr>
+<tr><td><span class="mod-priv">private</span></td><td><code>_compila_e_invia(ctx, risorsa, qta, ...) -&gt; tuple[7]</code></td><td>Apre pannello risorsa, OCR provviste + DRL, compila quantita', tap VAI. Ritorna (ok, qta_netta, qta_lorda, tassa, provviste, quota, master_saturo). Se master_saturo=True: BACK immediato + break loop (WU154).</td></tr>
+</table>
+
+<h3>Fix critici</h3>
+<table class="members">
+<tr><th>WU</th><th>Fix</th></tr>
+<tr><td>WU105</td><td>Bug "1 sped invece di 5": dopo wait slot=0, ora <code>continue</code> invece di <code>break</code> → rilegge slot e procede</td></tr>
+<tr><td>WU126</td><td>Bug "solo pom+leg": <code>break</code> su fail risorsa → <code>continue</code> + rimozione risorsa da risorse_attive</td></tr>
+<tr><td>WU147</td><td>Centratura mappa con <code>pin_rifugio.png</code> invece di avatar, soglia 0.75→0.55 (WU159) per rendering variabile</td></tr>
+<tr><td>WU154</td><td>Stop loop su DRL=0 mid-task: OCR DRL in _compila_e_invia → BACK + master_saturo=True → break</td></tr>
+</table>
+
+<h3>Tassa rifornimento</h3>
+<div class="rule-box">La tassa dipende dal <strong>livello rifugio mittente</strong> (NON dalla distanza). FAU_00 ~12% (top-level), istanze standard ~22-24%. Il tasso e' letto via OCR dal pannello compila e salvato in <code>RifornimentoState.inviato_lordo_oggi</code> (lordo) vs <code>inviato_oggi</code> (netto).</div>
+</section>
+
+<section id="raccolta">
+<h2>&#x26CF; RaccoltaTask <span class="badge badge-task">tasks/raccolta.py</span></h2>
+<p class="desc">Invio squadre raccoglitrici ai nodi risorse sulla mappa: OCR coordinate, selezione tipo/livello, blacklist fuori territorio, conferma contatore slot.</p>
+<p>Task piu' complesso del sistema (~2600 righe). Naviga in mappa, usa la lente di ricerca per trovare nodi disponibili, seleziona il tipo di risorsa ottimale (gap allocation V5), gestisce la blacklist globale dei nodi fuori territorio, confirma ogni marcia tramite OCR del contatore slot. Non ha schedulazione: viene eseguito sempre, il guard <code>should_run()</code> decide in base allo stato.</p>
+
+<h3>Scheduling</h3>
+<table class="members">
+<tr><th>Campo</th><th>Valore</th></tr>
+<tr><td><code>name()</code></td><td><code>"raccolta"</code></td></tr>
+<tr><td><code>schedule_type</code></td><td><code>"periodic"</code> (trattato come always in prod — interval=0)</td></tr>
+<tr><td><code>interval_hours</code></td><td><code>4.0</code> (reference, non vincolante)</td></tr>
+</table>
+
+<h3>Coordinate principali (960x540)</h3>
+<table class="members">
+<tr><th>Costante</th><th>Coord</th><th>Uso</th></tr>
+<tr><td><code>TAP_LENTE</code></td><td><code>(38, 325)</code></td><td>Apre lente ricerca in mappa</td></tr>
+<tr><td><code>TAP_NODO</code></td><td><code>(480, 280)</code></td><td>Tap centro nodo dopo CERCA</td></tr>
+<tr><td><code>TAP_RACCOGLI</code></td><td><code>(230, 390)</code></td><td>Pulsante RACCOGLI nel popup nodo</td></tr>
+<tr><td><code>TAP_MARCIA</code></td><td><code>(727, 476)</code></td><td>Pulsante MARCIA per inviare squadra</td></tr>
+<tr><td><code>OCR_SLOT_ZONA</code></td><td><code>(820,60,945,90)</code></td><td>OCR contatore slot X/Y squadre</td></tr>
+</table>
+
+<h3>Logica raccolta — gestione fallimenti (regola vincolante)</h3>
+<table class="members">
+<tr><th>Evento</th><th>Conseguenza</th></tr>
+<tr><td>CERCA fallita (tipo NON selezionato)</td><td><code>tipo_bloccato=True</code> → blocca tipo, NON incrementa fallimenti_cons</td></tr>
+<tr><td>Skip neutro (nodo in blacklist)</td><td>Dopo 2 skip neutri consecutivi sullo stesso tipo → blocca tipo</td></tr>
+<tr><td>Fallimento puro (marcia fallita)</td><td>Incrementa fallimenti_cons, torna HOME, rilegge slot</td></tr>
+<tr><td>Slot pieni</td><td>Uscita immediata dal loop in qualsiasi momento</td></tr>
+<tr><td>Loop esterno</td><td>Max 3 tentativi ciclo raccolta; rilettura slot tra tentativi</td></tr>
+</table>
+
+<h3>Metodi principali</h3>
+<table class="methods">
+<tr><th>Modificatore</th><th>Firma</th><th>Descrizione</th></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>run(ctx, attive_inizio=0, slot_liberi=-1, blacklist=None) -&gt; TaskResult</code></td><td>Corpo principale. Attende rientro rifornimento in volo, legge slot in HOME, naviga in mappa, esegue _loop_invio_marce.</td></tr>
+<tr><td><span class="mod-priv">private</span></td><td><code>_loop_invio_marce(ctx, obiettivo, ...)</code></td><td>Loop invio marce finche' attive &lt; obiettivo. Ricalcola sequenza tipi ad ogni iterazione (allocation gap).</td></tr>
+<tr><td><span class="mod-priv">private</span></td><td><code>_invia_squadra(ctx, tipo, ...) -&gt; InvioResult</code></td><td>Un singolo tentativo di invio per tipo: CERCA, leggi coord, check blacklist, reserve, tap nodo, marcia, commit.</td></tr>
+<tr><td><span class="mod-priv">private</span></td><td><code>_leggi_contatore_slot(ctx) -&gt; tuple[int,int]</code></td><td>OCR slot X/Y: SX-only ensemble PSM 10/8/7 (WU70). Sanity check: se attive &gt; totale_noto → OCR sbagliato, fallback conservativo.</td></tr>
+<tr><td><span class="mod-priv">private</span></td><td><code>_esegui_marcia(ctx, ...) -&gt; bool</code></td><td>Tap MARCIA + conferma post-marcia. Legge load_squadra OCR (WU116) e stash su ctx._raccolta_load_squadra.</td></tr>
+</table>
+
+<h3>Blacklist fuori territorio</h3>
+<div class="rule-box"><strong>BlacklistFuori e' GLOBALE</strong>: file <code>data/blacklist_fuori_globale.json</code> condiviso tra TUTTE le istanze (stessa mappa di gioco). Non creare mai file per istanza come <code>blacklist_fuori_FAU_XX.json</code>. Toggle per istanza: <code>raccolta_fuori_territorio=True</code> in config fa si' che il nodo NON venga aggiunto alla blacklist globale.</div>
+
+<h3>OCR slot — WU70 ensemble</h3>
+<p>Per evitare il bug "5 letto come 7" (digit DX "/" confonde OCR), il branch primario legge SOLO il digit SX con 3 PSM (10/8/7) + majority vote + sanity <code>0 &lt;= v &lt;= totale_noto</code>. Se nessuna PSM supera il sanity → fallback OCR full.</p>
+
+<h3>RaccoltaChiusuraTask (sottoclasse)</h3>
+<p>Sottoclasse di RaccoltaTask con <code>name()="raccolta_chiusura"</code> e priority 17 (subito dopo raccolta=15). Eseguita alla fine del tick per inviare eventuali marce residue con i slot liberati dai task precedenti. Non incrementa <code>attive_pre</code> nelle metriche (scrive solo <code>attive_post</code>).</p>
+</section>
+
+<section id="main-loop">
+<h2>&#x1F504; Main Loop / _thread_istanza <span class="badge badge-core">main.py</span></h2>
+<p class="desc">Entry point del bot: ciclo sequenziale su tutte le istanze abilitate, con config hot-reload ad ogni ciclo e adaptive scheduler.</p>
+<p>Il main loop legge <code>instances.json</code> e <code>runtime_overrides.json</code> ad ogni ciclo per recepire modifiche dashboard in tempo reale. L'ordine delle istanze e' determinato dall'<code>AdaptiveScheduler</code> (WU138). Ogni istanza e' processata da <code>_thread_istanza()</code> che gira nel thread principale (architettura sequenziale — max_parallel=1).</p>
+
+<h3>File e path</h3>
+<table class="members">
+<tr><th>Costante</th><th>Percorso</th><th>Funzione</th></tr>
+<tr><td><code>_OVERRIDES_PATH</code></td><td><code>config/runtime_overrides.json</code></td><td>Config dinamica hot-reload (DYNAMIC)</td></tr>
+<tr><td><code>_GLOBAL_CONFIG_PATH</code></td><td><code>config/global_config.json</code></td><td>Config baseline (STATIC)</td></tr>
+<tr><td><code>_INSTANCES_PATH</code></td><td><code>config/instances.json</code></td><td>Lista istanze con porta/indice/tipologia</td></tr>
+<tr><td><code>_TASK_SETUP_PATH</code></td><td><code>config/task_setup.json</code></td><td>Setup task: class/priority/interval_hours/schedule</td></tr>
+<tr><td><code>_CHECKPOINT_PATH</code></td><td><code>last_checkpoint.json</code></td><td>Checkpoint ciclo per resume post-restart</td></tr>
+</table>
+
+<h3>_thread_istanza — flusso dettagliato</h3>
+<div class="arch-flow">1. Rotazione log JSONL (max 1 backup .bak)
+2. inizia_tick() — metrics hook
+3. Build TaskContext:
+   - merge_config(global_config + runtime_overrides)
+   - _build_ctx(ist, gcfg, dry_run, ist_overrides)
+4. Setup Orchestrator:
+   - Registra task da config/task_setup.json
+   - Tipologia istanza:
+     · "raccolta_only" → solo RaccoltaTask + RaccoltaChiusuraTask
+     · "raccolta_fast" → RaccoltaFastTask sostituisce RaccoltaTask
+     · "full"         → tutti i task abilitati
+   - Ripristino schedule dal disco (restart-safe)
+5. avvia_istanza(ist) → MuMu + gioco
+6. attendi_home(ctx) → HOME stabile + settings + truppe
+7. comprimi_banner_home() → chiude banner eventi laterale
+8. dismiss_banners_loop() pre-OCR (4 iter)
+9. OCR risorse castello (snap produzione sessione)
+10. orchestrator.tick() → esegui task in priorita'
+11. chiusura_sessione_e_calcola() → produzione/ora
+12. chiudi_istanza(ist, porta) → MuMu shutdown
+13. chiudi_tick() — metrics + telemetria flush
+14. maybe_send_daily_report() — email hook</div>
+
+<h3>Task catalogue (_import_tasks)</h3>
+<table class="members">
+<tr><th>Classe</th><th>Modulo</th></tr>
+<tr><td><code>RaccoltaTask, RaccoltaChiusuraTask</code></td><td><code>tasks.raccolta</code></td></tr>
+<tr><td><code>RaccoltaFastTask</code></td><td><code>tasks.raccolta_fast</code></td></tr>
+<tr><td><code>RifornimentoTask</code></td><td><code>tasks.rifornimento</code></td></tr>
+<tr><td><code>BoostTask</code></td><td><code>tasks.boost</code></td></tr>
+<tr><td><code>DonazioneTask</code></td><td><code>tasks.donazione</code></td></tr>
+<tr><td><code>AlleanzaTask, MessaggiTask</code></td><td><code>tasks.alleanza, tasks.messaggi</code></td></tr>
+<tr><td><code>ArenaTask, ArenaMercatoTask</code></td><td><code>tasks.arena, tasks.arena_mercato</code></td></tr>
+<tr><td><code>TruppeTask, ZainoTask, VipTask</code></td><td><code>tasks.truppe, tasks.zaino, tasks.vip</code></td></tr>
+<tr><td><code>MainMissionTask, StoreTask</code></td><td><code>tasks.main_mission, tasks.store</code></td></tr>
+<tr><td><code>DistrictShowdownTask</code></td><td><code>tasks.district_showdown</code></td></tr>
+<tr><td><code>RadarTask, RadarCensusTask</code></td><td><code>tasks.radar, tasks.radar_census</code></td></tr>
+</table>
+
+<h3>Argomenti CLI</h3>
+<table class="members">
+<tr><th>Flag</th><th>Descrizione</th></tr>
+<tr><td><code>--dry-run</code></td><td>Esegue la logica senza toccare MuMu (test task)</td></tr>
+<tr><td><code>--istanza FAU_01</code></td><td>Esegue solo l'istanza specificata (piu' istanze separate da spazio)</td></tr>
+<tr><td><code>--tick-sleep N</code></td><td>Override sleep inter-ciclo in secondi (-1 = legge da config)</td></tr>
+<tr><td><code>--reset-config</code></td><td>Azzera sezione istanze di runtime_overrides.json</td></tr>
+<tr><td><code>--resume</code></td><td>Riprende dal checkpoint dell'ultimo ciclo interrotto</td></tr>
+</table>
+</section>
+
+<section id="instance-state">
+<h2>&#x1F4BE; InstanceState / ProduzioneSession <span class="badge badge-core">core/state.py</span></h2>
+<p class="desc">Stato runtime persistito di ogni istanza: rifornimento, boost, arena, produzione oraria. Unico punto di I/O su disco.</p>
+<p>Il modulo definisce sezioni di stato tipizzate come dataclass, ognuna con <code>to_dict()</code>/<code>from_dict()</code> per serializzazione JSON. <code>InstanceState</code> e' il contenitore principale — <code>load()</code> legge <code>state/{nome}.json</code>, <code>save()</code> lo scrive atomicamente. Tutti i reset giornalieri usano la data UTC.</p>
+
+<h3>Sezioni di InstanceState</h3>
+<table class="members">
+<tr><th>Campo</th><th>Tipo</th><th>Descrizione</th></tr>
+<tr><td><code>rifornimento</code></td><td><code>RifornimentoState</code></td><td>Quota giornaliera spedizioni, provviste residue, dettaglio invii, DRL tracking, tassa/netto/lordo</td></tr>
+<tr><td><code>boost</code></td><td><code>BoostState</code></td><td>Scadenza Gathering Speed Boost, contatore attivazioni</td></tr>
+<tr><td><code>vip</code></td><td><code>VipState</code></td><td>Stato giornaliero ricompense VIP (flag completamento)</td></tr>
+<tr><td><code>arena</code></td><td><code>ArenaState</code></td><td>Sfide arena oggi, esaurite flag, rebuild truppe giornaliero</td></tr>
+<tr><td><code>truppe</code></td><td><code>TruppeState</code></td><td>Consumo addestramento truppe (placeholder per futuri KPI)</td></tr>
+<tr><td><code>metrics</code></td><td><code>MetricsState</code></td><td>Produzione/ora, marce inviate, risorse aggregate</td></tr>
+<tr><td><code>schedule</code></td><td><code>ScheduleState</code></td><td>Persistenza last_run scheduling task (restart-safe), timestamps ISO UTC</td></tr>
+<tr><td><code>produzione_corrente</code></td><td><code>ProduzioneSession | None</code></td><td>Sessione di produzione aperta corrente</td></tr>
+<tr><td><code>produzione_storico</code></td><td><code>list[ProduzioneSession]</code></td><td>Storico sessioni 24h (FIFO)</td></tr>
+</table>
+
+<h3>InstanceState — metodi I/O</h3>
+<table class="methods">
+<tr><th>Modificatore</th><th>Firma</th><th>Descrizione</th></tr>
+<tr><td><span class="mod-static">classmethod</span></td><td><code>load(instance_name, state_dir=None) -&gt; InstanceState</code></td><td>Carica da <code>state/{nome}.json</code>. Crea nuovo se file mancante.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>save(state_dir=None) -&gt; None</code></td><td>Scrittura atomica: tmp + fsync + os.replace. Thread-safe (WU17-bis).</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>to_dict() -&gt; dict</code></td><td>Serializza tutte le sezioni a dict JSON-serializzabile.</td></tr>
+<tr><td><span class="mod-static">classmethod</span></td><td><code>from_dict(d: dict) -&gt; InstanceState</code></td><td>Deserializza da dict. Ogni sezione usa il proprio from_dict con default safe.</td></tr>
+</table>
+
+<h3>ProduzioneSession — sessione produzione</h3>
+<table class="methods">
+<tr><th>Modificatore</th><th>Firma</th><th>Descrizione</th></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>chiudi_sessione_e_calcola(risorse_finali, ts_fine, diamanti_finali=-1)</code></td><td>Chiude sessione con delta OCR, calcola produzione/ora per risorsa. Formula: <code>delta_castle - zaino_delta + rifornimento_inviato</code>. Per master: sottrae risorse ricevute da alleati (WU128).</td></tr>
+</table>
+
+<h3>RifornimentoState — campi chiave</h3>
+<table class="members">
+<tr><th>Campo</th><th>Descrizione</th></tr>
+<tr><td><code>spedizioni_oggi</code></td><td>Contatore spedizioni effettuate oggi (max quota_max=5)</td></tr>
+<tr><td><code>provviste_residue</code></td><td>Ultime provviste lette (M). -1 = non ancora lette.</td></tr>
+<tr><td><code>inviato_oggi</code></td><td>Dict {risorsa: qta_netta_totale} per la giornata</td></tr>
+<tr><td><code>dettaglio_oggi</code></td><td>Lista invii: [{ts, risorsa, qta_inviata(NETTO), qta_lorda, tassa}]</td></tr>
+<tr><td><code>eta_rientro_ultima</code></td><td>ISO timestamp rientro ultima squadra — usato da RaccoltaTask per wait rifornimento in volo</td></tr>
+<tr><td><code>cap_invio_iniziale_oggi</code></td><td>Cap netto giornaliero (WU106): prima provviste_residue del giorno</td></tr>
+</table>
+
+<h3>ArenaState — metodi chiave</h3>
+<table class="methods">
+<tr><th>Modificatore</th><th>Firma</th><th>Descrizione</th></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>puo_giocare() -&gt; bool</code></td><td>True se sfide rimanenti e non esaurite per oggi</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>segna_esaurite()</code></td><td>Marca arena esaurita per oggi (reset automatico 00:00 UTC). Chiamata dopo 5/5 sfide OK (WU131).</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>segna_rebuild_fatto()</code></td><td>Marca rebuild truppe completato per oggi (WU83)</td></tr>
+</table>
+</section>
+
+<section id="launcher">
+<h2>&#x1F680; Launcher <span class="badge badge-core">core/launcher.py</span></h2>
+<p class="desc">Gestione ciclo di vita istanze MuMu: avvio player, lancio istanza, polling HOME, chiusura. Config via sezione "mumu" di global_config.json.</p>
+<p>Il launcher e' il layer tra il main loop e il sistema operativo (MuMuManager + ADB). Tutte le funzioni sono moduli-level (non una classe) per semplicita'. Ogni funzione accetta un dict istanza con chiavi <code>nome/indice/porta</code>.</p>
+
+<h3>Costanti principali</h3>
+<table class="members">
+<tr><th>Nome</th><th>Valore</th><th>Descrizione</th></tr>
+<tr><td><code>GAME_ACTIVITY</code></td><td><code>com.igg.android.doomsdaylastsurvivors/...</code></td><td>Activity Android del gioco per am start/force-stop</td></tr>
+<tr><td><code>DELAY_POLL_S</code></td><td><code>5.0</code></td><td>Intervallo polling is_android_started</td></tr>
+</table>
+
+<h3>Configurazione MuMu (da global_config.json sezione "mumu")</h3>
+<table class="members">
+<tr><th>Campo</th><th>Descrizione</th></tr>
+<tr><td><code>mumu.manager</code></td><td>Path MuMuManager.exe (auto-rilevato da candidati se mancante)</td></tr>
+<tr><td><code>mumu.timeout_carica_s</code></td><td>Timeout polling HOME post-avvio gioco (default 300s, configurabile dashboard WU155)</td></tr>
+<tr><td><code>mumu.delay_carica_iniz_s</code></td><td>Attesa fissa iniziale post-avvio gioco prima di polling Live Chat</td></tr>
+<tr><td><code>mumu.timeout_adb_s</code></td><td>Timeout polling is_android_started</td></tr>
+</table>
+
+<h3>Funzioni pubbliche</h3>
+<table class="methods">
+<tr><th>Modificatore</th><th>Firma</th><th>Descrizione</th></tr>
+<tr><td><span class="mod-static">module</span></td><td><code>avvia_player(log_fn=None) -&gt; bool</code></td><td>Verifica/avvia MuMuPlayer.exe (necessario su Windows 11 prima di controllare le istanze).</td></tr>
+<tr><td><span class="mod-static">module</span></td><td><code>reset_istanza(ist, log_fn=None) -&gt; None</code></td><td>Force-stop gioco + MuMuManager shutdown + polling spegnimento + adb disconnect. Chiamare SEMPRE prima di avvia_istanza per stato pulito.</td></tr>
+<tr><td><span class="mod-static">module</span></td><td><code>avvia_istanza(ist, log_fn=None) -&gt; bool</code></td><td>Avvia istanza MuMu, polling is_android_started, adb connect, avvia gioco. Ritorna True se gioco avviato.</td></tr>
+<tr><td><span class="mod-static">module</span></td><td><code>attendi_home(ctx, log_fn=None) -&gt; bool</code></td><td>Polling HOME con stabilizzazione: sleep iniziale + polling Live Chat scomparsa + stab 3 poll consecutivi + settings_lightweight + troops_reader + vai_in_home finale. Misura boot_home_s per predictor (WU127).</td></tr>
+<tr><td><span class="mod-static">module</span></td><td><code>chiudi_istanza(ist, porta, log_fn=None) -&gt; None</code></td><td>Force-stop gioco + MuMuManager shutdown + adb disconnect. Fine ciclo istanza.</td></tr>
+</table>
+
+<h3>Hook in attendi_home (ordine)</h3>
+<div class="arch-flow">1. sleep 10s (splash iniziale)
+2. Polling Live Chat scomparsa (Issue #69 — template invariante)
+3. Stabilizzazione HOME: 3 poll consecutivi / max 60s con BACK ad ogni iter
+4. dismiss_banners_loop() — smaltisci banner residui
+5. imposta_settings_lightweight() — Low graphics + cache cleanup (WU60+WU64)
+6. leggi_total_squads() — OCR truppe totali (WU65)
+7. vai_in_home() finale
+8. imposta_boot_home() — registra boot_home_s per cycle predictor (WU127)</div>
+
+<div class="warn-box"><strong>Nota WU155:</strong> Il timeout boot HOME e' configurabile da dashboard (<code>sistema.timeout_carica_s</code>, default 300s, range 30-900s). Priorita' lettura: <code>sistema.timeout_carica_s</code> &gt; <code>mumu.timeout_carica_s</code> &gt; default 300.</div>
+</section>
+
+<section id="orchestrator">
+<h2>&#x2699; Orchestrator <span class="badge badge-core">core/orchestrator.py</span></h2>
+<p class="desc">Coordina l'esecuzione periodica dei task su una singola istanza: scheduling, gate HOME, telemetria, last_run tracking.</p>
+<p>L'orchestratore registra task con priorita' e tipo di scheduling (<code>periodic</code>/<code>daily</code>), e ad ogni <code>tick()</code> esegue in ordine di priorita' quelli "dovuti". Prima di ogni task esegue un gate HOME (via navigator). Ogni task e' avvolto in <code>try/except</code> per isolare i fallimenti. La persistenza di <code>last_run</code> e' responsabilita' del chiamante.</p>
+
+<h3>Schedule types</h3>
+<table class="members">
+<tr><th>Tipo</th><th>Comportamento</th></tr>
+<tr><td><code>"periodic"</code></td><td>Eseguito ogni <code>interval_hours</code> ore dall'ultimo run. Il task definisce <code>task.interval_hours</code>.</td></tr>
+<tr><td><code>"daily"</code></td><td>Eseguito una volta per ciclo giornaliero (reset 00:00 UTC, coerente col reset gioco).</td></tr>
+<tr><td><code>"always"</code></td><td>Trattato come periodic con interval=0. Il guard interno <code>should_run()</code> decide se eseguire.</td></tr>
+</table>
+
+<h3>Catena di esecuzione per ogni task</h3>
+<div class="arch-flow">1. e_dovuto()     → interval/daily scaduto? (scheduling temporale)
+                    Se False → skip silenzioso
+2. should_run()   → flag dashboard abilitato + guard stato persistente
+                    Se False → skip con log, last_run NON aggiornato
+3. Gate HOME      → navigator.vai_in_home()
+                    Se fallisce → TaskResult.fail + last_run NON aggiornato → retry al prossimo tick
+                    Se ADBUnhealthyError → abort tick + segnale reset istanza
+4. task.run(ctx)  → esecuzione effettiva
+5. last_run       → aggiornato SOLO se result.success=True OR result.skipped=True (WU79)
+                    Su fail → last_run invariato → retry al prossimo tick</div>
+
+<h3>Orchestrator — metodi</h3>
+<table class="methods">
+<tr><th>Modificatore</th><th>Firma</th><th>Descrizione</th></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>register(task, priority=50, enabled=True)</code></td><td>Registra un task. Lista ordinata per priority (piu' basso = prima).</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>tick() -&gt; list[TaskResult]</code></td><td>Esegue tutti i task dovuti. Ritorna lista risultati. Su ADBUnhealthyError abort immediato.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>enable(task_name: str)</code></td><td>Abilita task per nome.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>disable(task_name: str)</code></td><td>Disabilita task per nome (non eseguito in tick).</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>set_last_run(task_name, ts: float)</code></td><td>Imposta timestamp ultimo run manualmente (test/reset).</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>stato() -&gt; dict</code></td><td>Stato corrente: {task_name: {last_run, last_result, last_duration_s}}.</td></tr>
+</table>
+
+<div class="rule-box"><strong>WU79 — fix last_run:</strong> prima del fix, <code>last_run</code> veniva aggiornato anche su <code>result.success=False</code>, impedendo il retry per 24h. Post-fix: <code>entry.last_run = time.time()</code> solo se <code>result.success or result.skipped</code>. Su fail → retry al prossimo tick.</div>
+</section>
+
+<section id="navigator">
+<h2>&#x1F5FA; GameNavigator <span class="badge badge-core">core/navigator.py</span></h2>
+<p class="desc">Navigazione sincrona tra schermate HOME / MAPPA / barra inferiore. Classifica la schermata corrente via template matching.</p>
+<p>Il navigator usa due template sentinella per identificare la schermata: <code>pin/pin_region.png</code> (visibile in HOME — pulsante "Region") e <code>pin/pin_shelter.png</code> (visibile in MAPPA — pulsante "Shelter"). HOME e MAPPA sono collegate da un unico bottone toggle <code>(38, 505)</code>. La barra inferiore e' navigata via template matching (non coordinate fisse) per gestire layout con Beast assente (FAU_10 — icone shiftate).</p>
+
+<h3>Screen enum</h3>
+<table class="members">
+<tr><th>Valore</th><th>Significato</th></tr>
+<tr><td><code>Screen.HOME</code></td><td>Schermata castle principale (pin_region visibile)</td></tr>
+<tr><td><code>Screen.MAP</code></td><td>Mappa risorse (pin_shelter visibile)</td></tr>
+<tr><td><code>Screen.OVERLAY</code></td><td>Popup o overlay sopra HOME/MAP</td></tr>
+<tr><td><code>Screen.LOADING</code></td><td>Schermata di caricamento</td></tr>
+<tr><td><code>Screen.UNKNOWN</code></td><td>Screenshot None o schermata non riconosciuta</td></tr>
+</table>
+
+<h3>NavigatorConfig — parametri</h3>
+<table class="members">
+<tr><th>Campo</th><th>Default</th><th>Descrizione</th></tr>
+<tr><td><code>wait_after_action</code></td><td><code>2.0s</code></td><td>Sleep dopo ogni tap di navigazione</td></tr>
+<tr><td><code>max_attempts</code></td><td><code>8</code></td><td>Tentativi massimi in vai_in_home</td></tr>
+<tr><td><code>toggle_btn</code></td><td><code>(38, 505)</code></td><td>Coord bottone toggle HOME/MAPPA (V5 calibrato)</td></tr>
+<tr><td><code>pin_home_template</code></td><td><code>pin/pin_region.png</code></td><td>Template sentinella HOME</td></tr>
+<tr><td><code>pin_map_template</code></td><td><code>pin/pin_shelter.png</code></td><td>Template sentinella MAPPA</td></tr>
+<tr><td><code>pin_threshold</code></td><td><code>0.70</code></td><td>Soglia classificazione HOME/MAPPA</td></tr>
+</table>
+
+<h3>GameNavigator — metodi principali</h3>
+<table class="methods">
+<tr><th>Modificatore</th><th>Firma</th><th>Descrizione</th></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>schermata_corrente() -&gt; Screen</code></td><td>Scatta screenshot e classifica la schermata corrente.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>vai_in_home() -&gt; bool</code></td><td>Porta il bot in HOME. Gestisce MAPPA (tap toggle), OVERLAY (tap+BACK alternati), banner via <code>dismiss_banners_loop</code>. Raise <code>ADBUnhealthyError</code> se reconnect ADB e' cosmetico per 2 cicli.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>vai_in_mappa() -&gt; bool</code></td><td>Porta il bot in MAPPA: prima HOME poi tap toggle.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>tap_barra(ctx, voce, soglia=0.80) -&gt; bool</code></td><td>Trova e tappa un bottone della barra inferiore via TM. Voci: <code>"campaign", "bag", "alliance", "beast", "hero"</code>. Ritorna False se bottone assente nel layout corrente.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>chiudi_overlay(max_tries=3) -&gt; bool</code></td><td>Tenta di chiudere overlay alternando tap+BACK.</td></tr>
+</table>
+
+<div class="warn-box"><strong>ADBUnhealthyError</strong>: sollevata quando il reconnect ADB ritorna OK ma <code>screencap</code> continua a dare None per 2 cicli consecutivi (emulatore freezato — socket cosmetico). L'orchestratore cattura questa eccezione, salta i task rimanenti e segnala al main di chiudere l'istanza (Issue #56).</div>
+
+<h3>Barra inferiore — voce -&gt; template</h3>
+<table class="members">
+<tr><th>Voce</th><th>Template</th><th>ROI ricerca</th></tr>
+<tr><td><code>"campaign"</code></td><td><code>pin/pin_campaign.png</code></td><td rowspan="5"><code>(546, 456, 910, 529)</code></td></tr>
+<tr><td><code>"bag"</code></td><td><code>pin/pin_bag.png</code></td></tr>
+<tr><td><code>"alliance"</code></td><td><code>pin/pin_alliance.png</code></td></tr>
+<tr><td><code>"beast"</code></td><td><code>pin/pin_beast.png</code></td></tr>
+<tr><td><code>"hero"</code></td><td><code>pin/pin_hero.png</code></td></tr>
+</table>
+</section>
+
+<section id="template-matcher">
+<h2>&#x1F50D; TemplateMatcher <span class="badge badge-shared">shared/template_matcher.py</span></h2>
+<p class="desc">Template matching OpenCV centralizzato: cache PNG lazy-loaded, soglie per categoria, API find_one/find_all/score.</p>
+<p>Il modulo gestisce il riconoscimento visivo degli elementi UI tramite <code>cv2.matchTemplate</code> (TM_CCOEFF_NORMED). I template PNG risiedono nella directory <code>templates/</code> (o <code>pin/</code> sottocartella). La <code>TemplateCache</code> carica i file solo al primo accesso e li mantiene in memoria per tutta la sessione.</p>
+
+<h3>Soglie default per categoria</h3>
+<table class="members">
+<tr><th>Categoria</th><th>Soglia</th><th>Uso</th></tr>
+<tr><td><code>pin</code></td><td><code>0.80</code></td><td>Pin mappa: pin_home, pin_oil_refinery, pin_rifugio, ecc.</td></tr>
+<tr><td><code>btn</code></td><td><code>0.75</code></td><td>Pulsanti UI: btn_ok, btn_conferma, btn_claim, ecc.</td></tr>
+<tr><td><code>avatar</code></td><td><code>0.75</code></td><td>Avatar giocatore per rifornimento</td></tr>
+<tr><td><code>store</code></td><td><code>0.65</code></td><td>Store/mercante (variabilita' texture maggiore)</td></tr>
+<tr><td><code>default</code></td><td><code>0.75</code></td><td>Qualsiasi template non categorizzato</td></tr>
+</table>
+
+<h3>TemplateMatcher — metodi pubblici</h3>
+<table class="methods">
+<tr><th>Modificatore</th><th>Firma</th><th>Descrizione</th></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>find_one(screenshot, template_name, threshold=None, zone=None) -&gt; MatchResult</code></td><td>Cerca il template, ritorna best match. <code>zone=(x1,y1,x2,y2)</code> limita la ROI. Raise <code>FileNotFoundError</code> se template mancante.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>find_all(screenshot, template_name, threshold=None, zone=None, cluster_px=20) -&gt; list[MatchResult]</code></td><td>Trova tutte le occorrenze con dedup spaziale (cluster_px). Ordinato per score desc. Usato per rilevare piu' pulsanti identici.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>exists(screenshot, template_name, threshold=None, zone=None) -&gt; bool</code></td><td>Shortcut: True se found. Per check binario senza usare il risultato.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>not_exists(...) -&gt; bool</code></td><td>Negazione di exists. Utile per attese "finche' NON scompare X".</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>find_first_of(screenshot, template_names, threshold=None, zone=None) -&gt; tuple[str|None, MatchResult]</code></td><td>Cerca in sequenza una lista di template, ritorna il primo trovato. Utile per alternative UI (es. btn_ok | btn_conferma).</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>score(screenshot, template_name, zone=None) -&gt; float</code></td><td>Score grezzo 0.0-1.0 senza soglia. Per diagnostica e calibrazione.</td></tr>
+</table>
+
+<h3>TemplateCache — metodi principali</h3>
+<table class="methods">
+<tr><th>Modificatore</th><th>Firma</th><th>Descrizione</th></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>get(name: str) -&gt; Screenshot</code></td><td>Carica da disco alla prima chiamata, cache per le successive. Thread-safe.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>preload(names: list[str]) -&gt; dict</code></td><td>Pre-carica lista template all'avvio. Ritorna {name: None} OK o {name: Exception} falliti.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>invalidate(name: str)</code></td><td>Forza rilettura da disco al prossimo accesso.</td></tr>
+</table>
+
+<h3>Esempio</h3>
+<pre><code>from shared.template_matcher import TemplateMatcher, TemplateCache
+
+cache = TemplateCache("C:/doomsday-engine/templates")
+matcher = TemplateMatcher(cache)
+
+screen = ctx.device.screenshot()
+result = matcher.find_one(screen, "pin/pin_home.png", zone=(400, 200, 560, 340))
+if result.found:
+    ctx.log_msg(f"Home trovata score={result.score:.3f} @ ({result.cx},{result.cy})")
+    ctx.device.tap(result.cx, result.cy)
+
+# Score diagnostica senza soglia
+s = matcher.score(screen, "pin/pin_rifugio.png")
+ctx.log_msg(f"score rifugio = {s:.3f}")  # se 0.55+ e' trovato con soglia abbassata</code></pre>
+</section>
+
+<section id="task-base">
+<h2>&#x1F4E6; BaseTask / TaskContext / TaskResult <span class="badge badge-shared">shared/core</span></h2>
+<p class="desc">Contratto base per ogni task: interfaccia ABC Task, contesto di esecuzione TaskContext, risultato immutabile TaskResult.</p>
+<p>Tutti i task del bot implementano l'ABC <code>Task</code> definita in <code>core/task.py</code>. Il pattern e' sincrono per design: nessun <code>async</code>, nessun <code>await</code>. Il contesto <code>TaskContext</code> viene costruito dal launcher e passato immutato a tutti i task del tick.</p>
+
+<h3>TaskResult — risultato immutabile</h3>
+<table class="members">
+<tr><th>Campo</th><th>Tipo</th><th>Descrizione</th></tr>
+<tr><td><code>success</code></td><td><code>bool</code></td><td>True se il task ha completato senza errori</td></tr>
+<tr><td><code>message</code></td><td><code>str</code></td><td>Messaggio descrittivo dell'esito</td></tr>
+<tr><td><code>data</code></td><td><code>dict</code></td><td>Payload arbitrario (KPI, contatori, output OCR)</td></tr>
+<tr><td><code>skipped</code></td><td><code>bool</code></td><td>True se il task e' stato saltato (pre-condizioni non soddisfatte)</td></tr>
+</table>
+<table class="methods">
+<tr><th>Modificatore</th><th>Firma</th><th>Descrizione</th></tr>
+<tr><td><span class="mod-static">classmethod</span></td><td><code>TaskResult.ok(message, **data)</code></td><td>Factory: success=True, skipped=False</td></tr>
+<tr><td><span class="mod-static">classmethod</span></td><td><code>TaskResult.fail(message, **data)</code></td><td>Factory: success=False, skipped=False</td></tr>
+<tr><td><span class="mod-static">classmethod</span></td><td><code>TaskResult.skip(message)</code></td><td>Factory: success=True, skipped=True — task saltato senza errore</td></tr>
+</table>
+
+<h3>TaskContext — contesto di esecuzione</h3>
+<table class="members">
+<tr><th>Campo</th><th>Tipo</th><th>Descrizione</th></tr>
+<tr><td><code>instance_name</code></td><td><code>str</code></td><td>Nome istanza (es. "FAU_01")</td></tr>
+<tr><td><code>config</code></td><td><code>InstanceConfig</code></td><td>Configurazione merged (static + dynamic override)</td></tr>
+<tr><td><code>state</code></td><td><code>InstanceState</code></td><td>Stato persistente istanza (slot, spedizioni, boost, ecc.)</td></tr>
+<tr><td><code>log</code></td><td><code>StructuredLogger</code></td><td>Logger strutturato — accedere solo via <code>ctx.log_msg()</code></td></tr>
+<tr><td><code>device</code></td><td><code>MuMuDevice | None</code></td><td>Interfaccia ADB per screenshot e tap</td></tr>
+<tr><td><code>matcher</code></td><td><code>TemplateMatcher | None</code></td><td>Template matcher OpenCV</td></tr>
+<tr><td><code>navigator</code></td><td><code>GameNavigator | None</code></td><td>Navigator UI del gioco</td></tr>
+<tr><td><code>extras</code></td><td><code>dict</code></td><td>Dati extra inter-task (es. <code>_raccolta_slot_pieni</code>, <code>_raccolta_load_squadra</code>)</td></tr>
+</table>
+<table class="methods">
+<tr><th>Modificatore</th><th>Firma</th><th>Descrizione</th></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>ctx.log_msg(msg, *args, level="info")</code></td><td>Metodo di logging unificato. Supporta format <code>"%s %d"</code> stile logging. Unico metodo di log consentito nei task.</td></tr>
+</table>
+
+<h3>Task ABC — interfaccia base</h3>
+<table class="methods">
+<tr><th>Modificatore</th><th>Firma</th><th>Descrizione</th></tr>
+<tr><td><span class="mod-pub">abstract</span></td><td><code>def name(self) -&gt; str</code></td><td>Nome identificativo del task (es. "raccolta"). Usato per telemetria, flag, scheduling.</td></tr>
+<tr><td><span class="mod-pub">abstract</span></td><td><code>def should_run(self, ctx: TaskContext) -&gt; bool</code></td><td>Pre-condizioni: controlla flag dashboard, schedule, stato istanza. Se False il task viene saltato.</td></tr>
+<tr><td><span class="mod-pub">abstract</span></td><td><code>def run(self, ctx: TaskContext) -&gt; TaskResult</code></td><td>Corpo principale del task. SEMPRE sincrono. Chiamato dall'orchestratore solo se <code>should_run()</code> restituisce True.</td></tr>
+<tr><td><span class="mod-pub">public</span></td><td><code>def on_failure(self, ctx, result)</code></td><td>Hook chiamato su <code>result.success=False</code>. Default: log del messaggio di errore. Sovrascrivibile.</td></tr>
+</table>
+
+<h3>Esempio — implementazione minimale di un task</h3>
+<pre><code>from core.task import Task, TaskContext, TaskResult
+
+class MioTask(Task):
+    def name(self) -&gt; str:
+        return "mio_task"
+
+    def should_run(self, ctx: TaskContext) -&gt; bool:
+        # Controlla flag dashboard
+        from config.config_loader import task_abilitato
+        return task_abilitato("mio_task")
+
+    def run(self, ctx: TaskContext) -&gt; TaskResult:
+        ctx.log_msg("[MIO_TASK] avvio")
+        screen = ctx.device.screenshot()
+        result = ctx.matcher.find_one("pin_target.png", screen.frame)
+        if not result.found:
+            return TaskResult.fail("target non trovato")
+        ctx.device.tap(result.cx, result.cy)
+        import time; time.sleep(2.0)  # DELAY UI vincolante
+        return TaskResult.ok("completato", taps=1)</code></pre>
+</section>
+
+</main>
+</body>
+</html>
