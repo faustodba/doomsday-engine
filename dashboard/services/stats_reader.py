@@ -635,13 +635,6 @@ def get_produzione_istanze(include_master: bool = False, only_master: bool = Fal
         insts = get_instances()
         engine = get_engine_status()
         result: list[dict] = []
-        # Produzione unificata 24h — batch unico per tutte le istanze
-        try:
-            from shared.prod_unificata import compute_prod_unificata_all
-            _prod_unif_map = compute_prod_unificata_all(hours=24.0)
-        except Exception:
-            _prod_unif_map = {}
-
         # Soglie rifornimento comune — per calcolo inv_effettivo_netta
         try:
             _ovr = get_overrides()
@@ -754,6 +747,16 @@ def get_produzione_istanze(include_master: bool = False, only_master: bool = Fal
             else:
                 provviste_res_netta = provviste_res
 
+            # Produzione unificata 24h: Σ(qta_inviata × peso) / 24h
+            # Fonte: dettaglio_oggi (reale, verificato); denominatore fisso 24h wall-clock.
+            try:
+                from shared.prod_unificata import compute_from_dettaglio
+                det_oggi = rif.get("dettaglio_oggi") or []
+                _pu = compute_from_dettaglio(det_oggi)
+            except Exception:
+                from shared.prod_unificata import empty_result
+                _pu = empty_result()
+
             # inv_effettivo_netta: quanto l'istanza può REALMENTE spedire ORA.
             # = min(quota_residua_netta, headroom_depositi_netto)
             # headroom_depositi = Σ max(0, deposito_r - soglia_r) × (1 - tassa)
@@ -795,7 +798,7 @@ def get_produzione_istanze(include_master: bool = False, only_master: bool = Fal
                 "tassa_pct_avg":        tassa_pct_avg,
                 "provviste_residue_netta": provviste_res_netta,
                 "inv_effettivo_netta":  inv_eff_netta,
-                "prod_unificata":    _prod_unif_map.get(nome, {}),
+                "prod_unificata":    _pu,
                 "corrente":          corrente,
                 "precedente":        precedente,
                 "n_storico_24h":     len(storico),

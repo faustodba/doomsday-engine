@@ -3,41 +3,37 @@
 #
 #  Produzione oraria unificata per istanza.
 #
-#  Metrica: M pomodoro-equivalente / ora attiva bot
-#  Pesi derivati dai cap nominali L7 (nodo più comune in produzione):
+#  Metrica: M pomodoro-equivalente / 24h
+#  Fonte:   state/<nome>.json::rifornimento.dettaglio_oggi (inviato netto)
+#  Denominatore: 24h fisso (wall-clock) — le squadre producono continuamente;
+#                non si usa il tick_total_s del bot (tempo di esecuzione task)
+#
+#  Pesi derivati dai cap nominali L7:
 #    pomodoro = 1.0  (base: 1.32M/nodo)
 #    legno    = 1.0  (1.32M/nodo, identico)
-#    acciaio  = 2.0  (1.32M / 660K)
+#    acciaio  = 2.0  (1.32M / 660K — lo stesso slot vale il doppio in pom-eq)
 #    petrolio = 5.0  (1.32M / 264K)
 #
-#  Fonte dati: data/istanza_metrics.jsonl (per-march cap_nodo + tick_total_s)
-#  Finestra: ultime N ore (default 24h)
+#  Nota: la metrica misura il contributo INVIATO al master, non la produzione
+#  totale del castello (che include anche quello tenuto nei depositi).
+#  È la metrica rilevante per la gestione della farm.
 # ==============================================================================
 
 from __future__ import annotations
 
-import json
-import os
-from datetime import datetime, timezone, timedelta
-from pathlib import Path
-
-_ROOT      = Path(__file__).parent.parent
-_PROD_ROOT = Path(os.environ.get("DOOMSDAY_ROOT", str(_ROOT)))
-_METRICS   = _PROD_ROOT / "data" / "istanza_metrics.jsonl"
-
 # Mapping tipo raccolta (bot internal) → risorsa standard
-_TIPO_TO_RISORSA: dict[str, str] = {
+TIPO_TO_RISORSA: dict[str, str] = {
     "campo":    "pomodoro",
     "segheria": "legno",
     "acciaio":  "acciaio",
     "petrolio": "petrolio",
-    # alias diretti (per robustezza)
+    # alias diretti
     "pomodoro": "pomodoro",
     "legno":    "legno",
 }
 
-# Cap nominale (risorsa, livello) — fallback quando cap_nodo OCR = -1
-_CAP_NOMINALE: dict[tuple[str, int], int] = {
+# Cap nominale (risorsa, livello) — usato solo come riferimento esterno, non nel calcolo
+CAP_NOMINALE: dict[tuple[str, int], int] = {
     ("pomodoro", 6): 1_200_000,  ("pomodoro", 7): 1_320_000,
     ("legno",    6): 1_200_000,  ("legno",    7): 1_320_000,
     ("acciaio",  6):   600_000,  ("acciaio",  7):   660_000,
@@ -52,115 +48,56 @@ PESI: dict[str, float] = {
     "petrolio": 5.0,
 }
 
-_M = 1_000_000  # unità di misura output
+_M  = 1_000_000   # unità output (M)
+_H  = 24.0        # finestra fissa in ore
 
 
-def _empty_result() -> dict:
+def compute_from_dettaglio(dettaglio_oggi: list[dict]) -> dict:
+    """
+    Calcola prod_unif_h da dettaglio_oggi (lista spedizioni della giornata).
+
+    Argomento: state["rifornimento"]["dettaglio_oggi"] già caricato.
+    Ritorna dict con:
+      prod_unif_h   : float — M pom-eq/24h  (-1 se nessun dato)
+      pom_eq_totale : int   — pom-eq grezzo
+      n_sped        : int   — spedizioni contate
+      per_risorsa   : dict  — {risorsa: {qta_tot, n, pom_eq}}
+    """
+    pom_eq_totale = 0
+    n_sped        = 0
+    per_risorsa: dict[str, dict] = {}
+
+    for v in (dettaglio_oggi or []):
+        risorsa = str(v.get("risorsa", "") or "")
+        qta     = int(v.get("qta_inviata", 0) or 0)
+        if not risorsa or qta <= 0:
+            continue
+        peso   = PESI.get(risorsa, 1.0)
+        pom_eq = int(qta * peso)
+        pom_eq_totale += pom_eq
+        n_sped        += 1
+        pr = per_risorsa.setdefault(risorsa, {"qta_tot": 0, "n": 0, "pom_eq": 0})
+        pr["qta_tot"] += qta
+        pr["n"]       += 1
+        pr["pom_eq"]  += pom_eq
+
+    if pom_eq_totale > 0:
+        prod_unif_h = round(pom_eq_totale / _H / _M, 3)
+    else:
+        prod_unif_h = -1.0
+
     return {
-        "prod_unif_h":   -1.0,   # M pom-eq / h attiva  (-1 = dato non disponibile)
-        "pom_eq_totale": 0,      # pom-eq assoluto raccolto nella finestra
-        "ore_attive":    0.0,    # ore di attività bot nella finestra
-        "n_invii":       0,      # marce contate nel calcolo
-        "per_risorsa":   {},     # {risorsa: {cap_tot, n, pom_eq}}
+        "prod_unif_h":   prod_unif_h,
+        "pom_eq_totale": pom_eq_totale,
+        "n_sped":        n_sped,
+        "per_risorsa":   per_risorsa,
     }
 
 
-def compute_prod_unificata_all(hours: float = 24.0) -> dict[str, dict]:
-    """
-    Calcola prod_unif_h per TUTTE le istanze in un unico passaggio del file.
-    Ritorna {istanza: result_dict}.
-    """
-    cutoff  = datetime.now(timezone.utc) - timedelta(hours=hours)
-    data: dict[str, dict] = {}   # {istanza: accumulatori}
-
-    def _acc(istanza: str) -> dict:
-        if istanza not in data:
-            data[istanza] = {
-                "pom_eq_totale": 0,
-                "ore_attive":    0.0,
-                "n_invii":       0,
-                "per_risorsa":   {},
-            }
-        return data[istanza]
-
-    try:
-        if not _METRICS.exists():
-            return {}
-        with open(_METRICS, encoding="utf-8") as f:
-            for raw in f:
-                raw = raw.strip()
-                if not raw:
-                    continue
-                try:
-                    rec = json.loads(raw)
-                except Exception:
-                    continue
-
-                # Filtro finestra temporale
-                ts_str = rec.get("ts", "")
-                try:
-                    ts = datetime.fromisoformat(ts_str)
-                    if ts < cutoff:
-                        continue
-                except Exception:
-                    continue
-
-                istanza = rec.get("instance", "")
-                if not istanza:
-                    continue
-
-                acc = _acc(istanza)
-                acc["ore_attive"] += float(rec.get("tick_total_s", 0) or 0) / 3600.0
-
-                for inv in rec.get("raccolta", {}).get("invii", []):
-                    tipo    = str(inv.get("tipo", "")).lower()
-                    livello = int(inv.get("livello") or 7)
-                    risorsa = _TIPO_TO_RISORSA.get(tipo)
-                    if not risorsa:
-                        continue
-
-                    cap = int(inv.get("cap_nodo") or -1)
-                    if cap < 0:
-                        cap = _CAP_NOMINALE.get(
-                            (risorsa, livello),
-                            _CAP_NOMINALE.get((risorsa, 7), 0)
-                        )
-                    if cap <= 0:
-                        continue
-
-                    peso   = PESI.get(risorsa, 1.0)
-                    pom_eq = int(cap * peso)
-
-                    acc["pom_eq_totale"] += pom_eq
-                    acc["n_invii"]       += 1
-                    pr = acc["per_risorsa"].setdefault(risorsa, {"cap_tot": 0, "n": 0, "pom_eq": 0})
-                    pr["cap_tot"] += cap
-                    pr["n"]       += 1
-                    pr["pom_eq"]  += pom_eq
-
-    except Exception:
-        pass
-
-    # Calcola prod_unif_h per ogni istanza
-    result: dict[str, dict] = {}
-    for istanza, acc in data.items():
-        ore = acc["ore_attive"]
-        peq = acc["pom_eq_totale"]
-        if ore > 0 and peq > 0:
-            prod_h = peq / ore / _M   # M pom-eq / h
-        else:
-            prod_h = -1.0
-        result[istanza] = {
-            "prod_unif_h":   round(prod_h, 3),
-            "pom_eq_totale": peq,
-            "ore_attive":    round(ore, 2),
-            "n_invii":       acc["n_invii"],
-            "per_risorsa":   acc["per_risorsa"],
-        }
-    return result
-
-
-def compute_prod_unificata(istanza: str, hours: float = 24.0) -> dict:
-    """Calcola prod_unif_h per una singola istanza. Usa il batch per efficienza."""
-    all_results = compute_prod_unificata_all(hours=hours)
-    return all_results.get(istanza, _empty_result())
+def empty_result() -> dict:
+    return {
+        "prod_unif_h":   -1.0,
+        "pom_eq_totale": 0,
+        "n_sped":        0,
+        "per_risorsa":   {},
+    }

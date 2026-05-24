@@ -1415,8 +1415,8 @@ def partial_res_totali(request: Request):
         # prod_unificata aggregata (somma M pom-eq/h pesata per ore_attive → media ponderata)
         _pu_list = [(d["nome"], d.get("prod_unificata") or {}) for d in _ist_data]
         _pu_peq_tot  = sum(int(pu.get("pom_eq_totale", 0) or 0) for _, pu in _pu_list)
-        _pu_ore_tot  = sum(float(pu.get("ore_attive",  0) or 0) for _, pu in _pu_list)
-        prod_unif_agg = round(_pu_peq_tot / _pu_ore_tot / 1_000_000, 2) if _pu_ore_tot > 0 and _pu_peq_tot > 0 else -1.0
+        # Aggregato: Σ(pom_eq_totale) / 24h — denominatore fisso uguale per tutte le istanze
+        prod_unif_agg = round(_pu_peq_tot / 24.0 / 1_000_000, 2) if _pu_peq_tot > 0 else -1.0
     except Exception:
         _inv_eff_map  = {}
         inv_eff_tot   = -1
@@ -1935,27 +1935,25 @@ def partial_produzione_istanze(request: Request):
             inv_eff_lbl = "—"
             inv_eff_col = "var(--text-dim)"
 
-        # Produzione unificata 24h
-        _pu = entry.get("prod_unificata") or {}
-        _pu_h    = float(_pu.get("prod_unif_h",   -1.0) or -1.0)
-        _pu_ore  = float(_pu.get("ore_attive",     0.0) or 0.0)
-        _pu_inv  = int(  _pu.get("n_invii",        0)   or 0)
-        _pu_pr   = _pu.get("per_risorsa", {}) or {}
+        # Produzione unificata giornaliera (inviato × peso / 24h)
+        _pu    = entry.get("prod_unificata") or {}
+        _pu_h  = float(_pu.get("prod_unif_h",   -1.0) or -1.0)
+        _pu_ns = int(  _pu.get("n_sped",         0)   or 0)
+        _pu_pr = _pu.get("per_risorsa", {}) or {}
         if _pu_h >= 0:
-            _pu_lbl = f"{_pu_h:.2f} M pom-eq/h"
+            _pu_lbl = f"{_pu_h:.2f} M/h"
             _pu_col = "#7cf"
-            # Tooltip: dettaglio per risorsa + ore attive
             _RICO = {"pomodoro": "🍅", "legno": "🪵", "acciaio": "⚙", "petrolio": "🛢"}
             _PESI_LOCAL = {"pomodoro": 1, "legno": 1, "acciaio": 2, "petrolio": 5}
             _pu_detail = " · ".join(
-                f"{_RICO.get(r, r)} {_fmt_q(v['cap_tot'])} ×{_PESI_LOCAL.get(r,1)} ({v['n']}m)"
+                f"{_RICO.get(r, r)} {_fmt_q(v['qta_tot'])} ×{_PESI_LOCAL.get(r,1)}"
                 for r, v in _pu_pr.items()
-            ) or "nessuna marcia"
-            _pu_tip = f"{_pu_detail} | {_pu_ore:.1f}h attive · {_pu_inv} marce"
+            ) or "nessuna spedizione"
+            _pu_tip = f"Σ(inviato×peso)/24h | {_pu_detail} · {_pu_ns} sped"
         else:
             _pu_lbl = "—"
             _pu_col = "var(--text-dim)"
-            _pu_tip = "nessun dato nelle ultime 24h"
+            _pu_tip = "nessuna spedizione oggi"
 
         # auto-WU34 (27/04): blocco rifornimento giornaliero esteso con
         # netto/lordo/tassa + provv. lorde/nette per chiarezza semantica.
