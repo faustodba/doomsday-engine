@@ -14,6 +14,8 @@ Comandi supportati:
   /ciclo [N]    — dettaglio ciclo #N (ometti N per l'ultimo)
   /pausa        — attiva maintenance mode
   /riprendi     — disattiva maintenance mode
+  /avvia_ora    — salta sleep inter-ciclo, avvia ciclo subito
+  /restart_bot  — richiede restart bot al fine ciclo (via flag)
   /restart_bot_telegram — riavvia il processo Telegram bot (~15s downtime)
   /rif_risorsa  — abilita/disabilita risorsa rifornimento
   /rif_modo     — cambia modalità (mappa/membri/entrambi/nessuno)
@@ -58,6 +60,18 @@ _bot_thread: Optional[threading.Thread] = None
 _stop_event: Optional[threading.Event]  = None
 _update_offset: int = 0
 _running_lock = threading.Lock()
+
+# ─── Stato alert bot silenzioso ───────────────────────────────────────────────
+
+_last_bot_ok: bool          = True
+_last_bot_check_ts: float   = 0.0
+_last_bot_alert_ts: float   = 0.0
+_BOT_SILENT_CHECK_S         = 120    # controlla ogni 2 min nel polling loop
+_BOT_SILENT_COOLDOWN_S      = 900    # max 1 alert ogni 15 min
+
+# ─── Stato alert raccolta bassa ───────────────────────────────────────────────
+
+_raccolta_alert_cicli: set[int] = set()   # cicli già notificati (dedup)
 
 
 # ─── Path helpers ─────────────────────────────────────────────────────────────
@@ -957,6 +971,8 @@ def _handle_command(text: str, chat_id: str) -> str:
             "<b>Bot management</b>\n"
             "/pausa — attiva maintenance mode (bot in pausa)\n"
             "/riprendi — disattiva maintenance mode (bot riprende)\n"
+            "/avvia_ora — salta sleep inter-ciclo, avvia ciclo subito\n"
+            "/restart_bot — richiede restart al fine ciclo (run_prod.bat riavvia)\n"
             "/restart_bot_telegram — riavvia questo bot Telegram (~15s downtime)\n"
             "\n"
             "<b>Istanze</b>\n"
@@ -1047,6 +1063,34 @@ def _handle_command(text: str, chat_id: str) -> str:
             return "▶ Maintenance mode disattivato. Bot riprende."
         except Exception as exc:
             return f"⚠ Errore /riprendi: {exc}"
+
+    if cmd == "/avvia_ora":
+        if not _check_bot_running():
+            return "🔴 Bot non in esecuzione. Usa /avvia_bot per avviarlo prima."
+        flag = _root() / "data" / "wake_now.flag"
+        try:
+            flag.touch()
+            return "▶ Segnale inviato — il bot salterà il sleep e avvierà il prossimo ciclo subito."
+        except Exception as exc:
+            return f"⚠ Errore /avvia_ora: {exc}"
+
+    if cmd == "/restart_bot":
+        if not _check_bot_running():
+            return "🔴 Bot non in esecuzione. Usa /avvia_bot per avviarlo."
+        try:
+            from core.restart_scheduler import request_restart, is_restart_requested
+            if is_restart_requested():
+                return "🔄 Restart già in coda. Usa /status per monitorare."
+            ok = request_restart(reason="telegram")
+            if ok:
+                return (
+                    "🔄 <b>Restart bot richiesto.</b>\n"
+                    "Il bot uscirà a fine ciclo (exit code 100) e run_prod.bat "
+                    "lo riavvierà automaticamente.\nUsa /status per monitorare."
+                )
+            return "⚠ Scrittura flag restart fallita. Controlla i log."
+        except Exception as exc:
+            return f"⚠ Errore /restart_bot: {exc}"
 
     if cmd == "/stop_messaggi":
         if not _tg_enabled():
@@ -1258,7 +1302,7 @@ def _polling_loop(stop: threading.Event) -> None:
     Il flag `enabled` controlla SOLO le notifiche proattive (in _send_notify).
     Il polling gira se il token è configurato, anche con messaggi OFF.
     """
-    global _update_offset
+    global _update_offset, _last_bot_ok, _last_bot_check_ts, _last_bot_alert_ts
 
     from shared.telegram_client import get_updates, send_message, load_chat_id, has_token
 
@@ -1314,6 +1358,25 @@ def _polling_loop(stop: threading.Event) -> None:
             except Exception as exc:
                 reply = f"⚠ Errore interno: {exc}"
             send_message(chat, reply[:_MAX_MSG_LEN])
+
+        # ── Check bot silenzioso (ogni _BOT_SILENT_CHECK_S secondi) ──────────
+        # _send_system_alert ignora il flag enabled → notifica sempre se token ok
+        try:
+            _now = time.time()
+            if _now - _last_bot_check_ts >= _BOT_SILENT_CHECK_S:
+                _last_bot_check_ts = _now
+                _bot_now = _check_bot_running()
+                if _last_bot_ok and not _bot_now:
+                    if _now - _last_bot_alert_ts >= _BOT_SILENT_COOLDOWN_S:
+                        _last_bot_alert_ts = _now
+                        _send_system_alert(
+                            "🔴 <b>Bot fermato inaspettatamente</b>\n\n"
+                            "L'engine non risulta più in esecuzione.\n"
+                            "Usa /avvia_bot per riavviarlo o /status per dettagli."
+                        )
+                _last_bot_ok = _bot_now
+        except Exception:
+            pass
 
     _log.info("[TG-BOT] polling loop terminato")
 
@@ -1423,6 +1486,62 @@ def notify_daily_report(report_text: str) -> bool:
     available = _MAX_MSG_LEN - len(header)
     body = report_text[:available]
     return _send_notify(header + body)
+
+
+def notify_raccolta_bassa(ciclo_n: int) -> bool:
+    """Alert se >=3 istanze hanno slot liberi ma 0 marce nel ciclo corrente.
+
+    Deduplicato per ciclo_n — non notifica due volte lo stesso ciclo.
+    Usa _send_notify → rispetta il flag notifications.enabled.
+    """
+    global _raccolta_alert_cicli
+    if ciclo_n in _raccolta_alert_cicli:
+        return False
+
+    p = _root() / "data" / "istanza_metrics.jsonl"
+    if not p.exists():
+        return False
+
+    # Ultimo record per istanza
+    last: dict[str, dict] = {}
+    try:
+        for line in p.read_text(encoding="utf-8").splitlines():
+            try:
+                r = json.loads(line)
+                nome = r.get("instance", "")
+                if nome and nome != "FauMorfeus":
+                    last[nome] = r
+            except Exception:
+                pass
+    except Exception:
+        return False
+
+    # Istanze con slot liberi ma 0 marce inviate
+    problemi: list[str] = []
+    for nome, r in last.items():
+        racc      = r.get("raccolta", {})
+        attive    = racc.get("attive_pre", -1)
+        totali    = racc.get("totali", -1)
+        n_invii   = len(racc.get("invii", []))
+        if attive >= 0 and totali > 0 and attive < totali and n_invii == 0:
+            problemi.append(nome)
+
+    if len(problemi) < 3:
+        return False
+
+    _raccolta_alert_cicli.add(ciclo_n)
+    # mantieni solo gli ultimi 10 cicli per non crescere indefinitamente
+    if len(_raccolta_alert_cicli) > 10:
+        _raccolta_alert_cicli = set(sorted(_raccolta_alert_cicli)[-10:])
+
+    nomi_str = ", ".join(sorted(problemi))
+    text = (
+        f"⚠ <b>Raccolta bassa — ciclo #{ciclo_n}</b>\n\n"
+        f"{len(problemi)} istanze con slot liberi ma 0 marce:\n"
+        f"<code>{nomi_str}</code>\n\n"
+        "Possibili cause: blacklist satura, territorio esaurito, task bloccato."
+    )
+    return _send_notify(text)
 
 
 # ─── System info helpers ─────────────────────────────────────────────────────

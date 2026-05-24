@@ -1455,6 +1455,13 @@ def main():
         except Exception as _exc:
             _log("MAIN", f"[WARN] telegram notify_cycle: {_exc}")
 
+        # Alert raccolta bassa (>=3 istanze con slot liberi e 0 marce)
+        try:
+            from core.telegram_bot import notify_raccolta_bassa as _tg_racc
+            _tg_racc(ciclo_n=ciclo)
+        except Exception as _exc:
+            _log("MAIN", f"[WARN] telegram notify_raccolta: {_exc}")
+
         # WU137 fase 2 — alert real-time check post-ciclo. Ogni check è
         # rate-limited per event_type → no-op silenzioso se in cooldown.
         # Master toggle: globali.notifications.alerts_enabled (default False).
