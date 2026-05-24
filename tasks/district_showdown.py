@@ -784,7 +784,9 @@ class DistrictShowdownTask(Task):
         cfg = self._cfg
         matcher = ctx.matcher
         MAX_UNKNOWN_STREAK = 3     # 3 cicli × 15s = 45s senza pin → uscita
+        MAX_AUTO_STREAK = 20       # 20 cicli × 15s = 5 min solo "auto in corso" → abort stale
         unknown_streak = 0
+        auto_streak = 0
 
         for ciclo in range(cfg.max_monitoring_cicli):
             time.sleep(cfg.delay_monitoring)
@@ -796,6 +798,7 @@ class DistrictShowdownTask(Task):
                 ctx.log_msg(f"[DS] Ciclo {ciclo}: Gang Leader rilevato")
                 self._gestisci_gang_leader(ctx)
                 unknown_streak = 0
+                auto_streak = 0
                 continue
 
             # --- Caso 2: Access Prohibited (Break Free) ---
@@ -804,6 +807,7 @@ class DistrictShowdownTask(Task):
                 ctx.log_msg(f"[DS] Ciclo {ciclo}: Access Prohibited — attendo 70s")
                 self._gestisci_access_prohibited(ctx)
                 unknown_streak = 0
+                auto_streak = 0
                 continue
 
             # --- Caso 3: Item Source (dadi esauriti) ---
@@ -817,15 +821,26 @@ class DistrictShowdownTask(Task):
 
             # --- Caso 4: Auto_roll confermato visibile (pin_autoplay) ---
             # Se vediamo pin_autoplay ma nessuno dei 3 trigger, siamo ancora
-            # nella maschera evento con dadi in corso → reset streak.
+            # nella maschera evento con dadi in corso → reset unknown_streak.
             if matcher.find_one(screen, cfg.pin_autoplay,
                                  threshold=cfg.tm_threshold).found:
                 unknown_streak = 0
-                ctx.log_msg(f"[DS] Ciclo {ciclo}: auto in corso...")
+                auto_streak += 1
+                ctx.log_msg(
+                    f"[DS] Ciclo {ciclo}: auto in corso... "
+                    f"(streak {auto_streak}/{MAX_AUTO_STREAK})"
+                )
+                if auto_streak >= MAX_AUTO_STREAK:
+                    ctx.log_msg(
+                        f"[DS] EXIT — {MAX_AUTO_STREAK} cicli consecutivi solo auto "
+                        f"senza eventi (Gang/Prohibited/ItemSource) → stato stale, abort"
+                    )
+                    return "uscita_rilevata"
                 continue
 
             # --- Caso 5: nessun pin → streak uscita ---
             unknown_streak += 1
+            auto_streak = 0
             ctx.log_msg(
                 f"[DS] Ciclo {ciclo}: nessun pin rilevato "
                 f"(streak uscita {unknown_streak}/{MAX_UNKNOWN_STREAK})"
