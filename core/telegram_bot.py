@@ -12,8 +12,8 @@ Comandi supportati:
   /rifornimento — DRL master + spedizioni oggi
   /cicli        — ultimi 5 cicli (in corso + 4 completati)
   /ciclo [N]    — dettaglio ciclo #N (ometti N per l'ultimo)
-  /stop         — attiva maintenance mode
-  /avvia        — disattiva maintenance mode
+  /pausa        — attiva maintenance mode
+  /riprendi     — disattiva maintenance mode
   /restart_bot_telegram — riavvia il processo Telegram bot (~15s downtime)
   /rif_risorsa  — abilita/disabilita risorsa rifornimento
   /rif_modo     — cambia modalità (mappa/membri/entrambi/nessuno)
@@ -955,8 +955,8 @@ def _handle_command(text: str, chat_id: str) -> str:
             "/avvia_tutto — avvia bot + dashboard\n"
             "\n"
             "<b>Bot management</b>\n"
-            "/stop — attiva maintenance mode (bot in pausa)\n"
-            "/avvia — disattiva maintenance mode (bot riprende)\n"
+            "/pausa — attiva maintenance mode (bot in pausa)\n"
+            "/riprendi — disattiva maintenance mode (bot riprende)\n"
             "/restart_bot_telegram — riavvia questo bot Telegram (~15s downtime)\n"
             "\n"
             "<b>Istanze</b>\n"
@@ -1032,21 +1032,21 @@ def _handle_command(text: str, chat_id: str) -> str:
         except Exception as exc:
             return f"⚠ Errore /istanza: {exc}"
 
-    if cmd == "/stop":
+    if cmd == "/pausa":
         try:
             from core.maintenance import enable_maintenance
-            enable_maintenance(motivo="Telegram /stop", set_da="telegram")
+            enable_maintenance(motivo="Telegram /pausa", set_da="telegram")
             return "⏸ Maintenance mode attivato. Bot in pausa tra un'istanza e la successiva."
         except Exception as exc:
-            return f"⚠ Errore /stop: {exc}"
+            return f"⚠ Errore /pausa: {exc}"
 
-    if cmd == "/avvia":
+    if cmd == "/riprendi":
         try:
             from core.maintenance import disable_maintenance
             disable_maintenance()
             return "▶ Maintenance mode disattivato. Bot riprende."
         except Exception as exc:
-            return f"⚠ Errore /avvia: {exc}"
+            return f"⚠ Errore /riprendi: {exc}"
 
     if cmd == "/stop_messaggi":
         if not _tg_enabled():
