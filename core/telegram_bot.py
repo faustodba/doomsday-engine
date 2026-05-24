@@ -818,6 +818,70 @@ def _build_rifornimento() -> str:
     return "\n".join(lines)
 
 
+def _build_produzione() -> str:
+    """Risposta al comando /produzione.
+
+    Mostra produzione unificata (M pom-eq/h, 24h) per ogni istanza e farm,
+    calcolata dal delta deposito tra sessioni chiuse (produzione_storico).
+    Pesi L7: 🍅×1 🪵×1 ⚙×2 🛢×5.
+    """
+    try:
+        from shared.prod_unificata import compute_from_storico, PESI, empty_result as _pu_empty
+    except Exception as exc:
+        return f"⚠ prod_unificata non disponibile: {exc}"
+
+    state_dir = _root() / "state"
+    _RICO = {"pomodoro": "🍅", "legno": "🪵", "acciaio": "⚙", "petrolio": "🛢"}
+
+    rows: list[tuple[str, dict]] = []
+    farm_pom_eq = 0
+
+    for fp in sorted(state_dir.glob("FAU_*.json")):
+        nome = fp.stem
+        d = _read_state(nome)
+        storico = d.get("produzione_storico") or []
+        valido  = [s for s in storico if s.get("produzione_qty")]
+        pu = compute_from_storico(valido) if valido else _pu_empty()
+        rows.append((nome, pu))
+        if pu["prod_unif_h"] > 0:
+            farm_pom_eq += pu["pom_eq_totale"]
+
+    if not rows:
+        return "⚠ Nessun dato produzione disponibile"
+
+    farm_h = round(farm_pom_eq / 24.0 / 1_000_000, 2) if farm_pom_eq > 0 else -1.0
+    rows.sort(key=lambda x: x[1]["prod_unif_h"], reverse=True)
+
+    lines: list[str] = ["<b>📊 Produzione unificata — 24h</b>", ""]
+    for nome, pu in rows:
+        h  = pu["prod_unif_h"]
+        ns = pu.get("n_sessioni", pu.get("n_sped", 0))
+        pr = pu.get("per_risorsa") or {}
+        if h > 0:
+            # Dettaglio risorse (solo quelle con qta > 0)
+            det = "  ".join(
+                f"{_RICO.get(r,'?')}{pr[r]['qta_tot'] / 1e6:.1f}M"
+                for r in ("pomodoro", "legno", "acciaio", "petrolio")
+                if r in pr and pr[r].get("qta_tot", 0) > 0
+            )
+            lines.append(
+                f"<code>{nome:12s}</code> <b>{h:.2f}</b> M/h"
+                + (f"  <i>({det})</i>" if det else "")
+                + f"  [{ns}s]"
+            )
+        else:
+            lines.append(f"<code>{nome:12s}</code> —  (nessuna sessione)")
+
+    lines.append("")
+    if farm_h >= 0:
+        lines.append(f"<b>Farm totale: {farm_h:.2f} M pom-eq/h</b>")
+    else:
+        lines.append("Farm totale: nessun dato")
+    lines.append("<i>🍅×1 🪵×1 ⚙×2 🛢×5 · delta deposito 24h</i>")
+
+    return "\n".join(lines)
+
+
 def _build_istanza_detail(nome: str) -> str:
     """Risposta al comando /istanza XXX — card dettaglio singola istanza."""
     # Config
@@ -985,6 +1049,7 @@ def _handle_command(text: str, chat_id: str) -> str:
             "/abilita_task arena — abilita task singolo\n"
             "\n"
             "<b>Rifornimento</b>\n"
+            "/produzione — produzione unificata 24h per istanza (M pom-eq/h)\n"
             "/rifornimento — DRL + spedizioni oggi + config\n"
             "/rif_risorsa acciaio off — abilita/disabilita risorsa\n"
             "/rif_modo mappa — modalità: mappa|membri|entrambi|nessuno\n"
@@ -1011,6 +1076,12 @@ def _handle_command(text: str, chat_id: str) -> str:
             return _build_istanze()
         except Exception as exc:
             return f"⚠ Errore /istanze: {exc}"
+
+    if cmd == "/produzione":
+        try:
+            return _build_produzione()
+        except Exception as exc:
+            return f"⚠ Errore /produzione: {exc}"
 
     if cmd == "/rifornimento":
         try:

@@ -328,6 +328,20 @@ def _section_produzione_rifugio(date: str) -> dict:
     tot_ord_4    = sum(totali_ord.values())
     tot_master_4 = sum(totali_master.values())
 
+    # Produzione unificata: Σ(qty × peso) / 24h / 1M  per istanza e farm.
+    # Pesi derivati da cap L7: pomodoro=1, legno=1, acciaio=2, petrolio=5.
+    _PESI_RIF = {"pomodoro": 1.0, "legno": 1.0, "acciaio": 2.0, "petrolio": 5.0}
+    for row in ordinarie:
+        pom_eq = sum(max(0, row["risorse"].get(r, 0)) * _PESI_RIF[r] for r in _RISORSE_ORDER)
+        row["prod_unif_h"] = round(pom_eq / 24.0 / 1_000_000, 3) if pom_eq > 0 else 0.0
+    if master_row:
+        pom_eq_m = sum(max(0, master_row["risorse"].get(r, 0)) * _PESI_RIF[r] for r in _RISORSE_ORDER)
+        master_row["prod_unif_h"] = round(pom_eq_m / 24.0 / 1_000_000, 3) if pom_eq_m > 0 else 0.0
+    farm_pom_eq = sum(
+        max(0, totali_all[r]) * _PESI_RIF[r] for r in _RISORSE_ORDER
+    )
+    prod_unif_farm_h = round(farm_pom_eq / 24.0 / 1_000_000, 3) if farm_pom_eq > 0 else 0.0
+
     return {
         # totali aggregati (master + ordinarie) — per compat e riga emoji
         "totali":          totali_all,
@@ -347,6 +361,8 @@ def _section_produzione_rifugio(date: str) -> dict:
         "per_ist":         ordinarie + ([master_row] if master_row else []),
         "n_ist":           len(ordinarie) + (1 if master_row else 0),
         "durata_tot_s":    durata_ord_s + durata_master_s,
+        # produzione unificata (M pom-eq/h, 24h, pesi L7)
+        "prod_unif_farm_h": prod_unif_farm_h,
     }
 
 
@@ -1086,6 +1102,20 @@ def _render_text(date: str, s: dict) -> str:
         if rifugio.get("n_sess_anomali"):
             L.append(f"  ⚠ {rifugio['n_sess_anomali']} sessione/i scartate "
                      f"(OCR sospetto: >30M/h per risorsa)")
+        # Produzione unificata (M pom-eq/h)
+        puf = rifugio.get("prod_unif_farm_h", 0.0)
+        if puf > 0:
+            L.append(f"  prod. unif. farm: {puf:.2f} M pom-eq/h  (🍅×1 🪵×1 ⚙×2 🛢×5)")
+            top_pu = sorted(
+                [r for r in rifugio["ordinarie"] if r.get("prod_unif_h", 0) > 0],
+                key=lambda x: x["prod_unif_h"], reverse=True
+            )
+            if top_pu:
+                pu_str = "  ".join(
+                    f"{r['nome']}={r['prod_unif_h']:.2f}"
+                    for r in top_pu[:6]
+                )
+                L.append(f"  per istanza: {pu_str}")
     L.append("")
 
     # 3. RISORSE INVIATE AL MASTER (rev 10/05) — NON la produzione interna
@@ -1501,6 +1531,27 @@ def _render_html(date: str, s: dict) -> str:
                 f"sessione/i scartate (OCR sospetto: produzione &gt;30M/h "
                 f"per risorsa)</p>"
             )
+        # Produzione unificata (M pom-eq/h)
+        puf = rifugio.get("prod_unif_farm_h", 0.0)
+        if puf and puf > 0:
+            parts.append(
+                f"<p><b>Produzione unificata farm: {puf:.2f} M pom-eq/h</b> "
+                f"<small>(🍅×1 🪵×1 ⚙×2 🛢×5 · delta deposito 24h)</small></p>"
+            )
+            top_pu = sorted(
+                [r for r in rifugio.get("ordinarie", []) if r.get("prod_unif_h", 0) > 0],
+                key=lambda x: x["prod_unif_h"], reverse=True,
+            )
+            if top_pu:
+                parts.append(
+                    "<table><tr><th>istanza</th><th>prod. unif. (M/h)</th></tr>"
+                )
+                for r in top_pu:
+                    parts.append(
+                        f"<tr><td>{r['nome']}</td>"
+                        f"<td class='num'>{r['prod_unif_h']:.2f}</td></tr>"
+                    )
+                parts.append("</table>")
 
     # 3. RISORSE INVIATE AL MASTER (rev 10/05) — netto post-tassa, NON la
     # produzione interna delle istanze.
