@@ -1265,3 +1265,156 @@ def get_distribuzione_slot_per_istanza(window_records: int = 30) -> list[dict]:
     # Ordina alfabetico per nome istanza
     out.sort(key=lambda r: r["istanza"])
     return out
+
+
+# ==============================================================================
+# Raccolta — Analisi Nodi (WU-RaccoltaStats)
+# Sorgente: data/cap_nodi_dataset.jsonl  (scritto da shared/cap_nodi_dataset.py)
+# ==============================================================================
+
+_CAP_NODI_PATH     = _PROD_ROOT / "data" / "cap_nodi_dataset.jsonl"
+_RACCOLTA_TIPO_ORDER  = ("campo", "segheria", "acciaio", "petrolio")
+_RACCOLTA_TIPO_LABELS = {
+    "campo":    ("🍅", "pomodoro"),
+    "segheria": ("🪵", "legno"),
+    "acciaio":  ("⚙",  "acciaio"),
+    "petrolio": ("🛢", "petrolio"),
+}
+_RACCOLTA_LIVELLI     = (6, 7)
+_RACCOLTA_FILL_CAP    = 1.5   # outlier: load/cap > 150% → scartato
+_RACCOLTA_MASTER      = frozenset({"FauMorfeus"})
+
+
+def _rc_empty() -> dict:
+    return {"n": 0, "fill_sum": 0.0}
+
+
+def _rc_cell(n: int, fill_sum: float) -> dict:
+    return {"n": n, "fill": fill_sum / n if n else None}
+
+
+def _rc_accum(records: list) -> dict:
+    """Accumula {tipo: {lv: {n, fill_sum}}} dai record filtrati."""
+    from collections import defaultdict
+    by: dict = defaultdict(lambda: defaultdict(_rc_empty))
+    for r in records:
+        tipo = r.get("tipo", "")
+        lv   = r.get("livello")
+        if tipo not in _RACCOLTA_TIPO_LABELS or lv not in _RACCOLTA_LIVELLI:
+            continue
+        by[tipo][lv]["n"]        += 1
+        by[tipo][lv]["fill_sum"] += r["_fill"]
+    return by
+
+
+def _rc_build_tipo_row(by: dict, tipo: str) -> dict:
+    """Costruisce la riga di un tipo: {6: cell, 7: cell, 'tot': cell}."""
+    cells: dict = {}
+    tot_n, tot_fs = 0, 0.0
+    for lv in _RACCOLTA_LIVELLI:
+        raw = by.get(tipo, {}).get(lv, _rc_empty())
+        cells[lv] = _rc_cell(raw["n"], raw["fill_sum"])
+        tot_n  += raw["n"]
+        tot_fs += raw["fill_sum"]
+    cells["tot"] = _rc_cell(tot_n, tot_fs)
+    return cells
+
+
+def _rc_totale_row(by: dict) -> dict:
+    """Riga TOTALE: somma su tutti i tipi per ogni livello e per tot."""
+    cells: dict = {}
+    for lv in _RACCOLTA_LIVELLI:
+        lv_n  = sum(by.get(t, {}).get(lv, _rc_empty())["n"]        for t in _RACCOLTA_TIPO_ORDER)
+        lv_fs = sum(by.get(t, {}).get(lv, _rc_empty())["fill_sum"] for t in _RACCOLTA_TIPO_ORDER)
+        cells[lv] = _rc_cell(lv_n, lv_fs)
+    tot_n  = sum(cells[lv]["n"] for lv in _RACCOLTA_LIVELLI)
+    tot_fs = sum(by.get(t, {}).get(lv, _rc_empty())["fill_sum"]
+                 for t in _RACCOLTA_TIPO_ORDER for lv in _RACCOLTA_LIVELLI)
+    cells["tot"] = _rc_cell(tot_n, tot_fs)
+    return cells
+
+
+def get_raccolta_nodi_stats(days: int = 7) -> dict:
+    """
+    Aggrega distribuzioni nodi raccolta per tipo × livello con fill rate medio.
+
+    Esclude FauMorfeus, record con OCR fallito (load<0) e outlier (fill>150%).
+    Ordina le istanze per fill rate totale ASC (peggiori prima).
+    """
+    from datetime import datetime, timezone, timedelta
+
+    empty = {
+        "period_days": days, "total_records": 0,
+        "tipo_order":   _RACCOLTA_TIPO_ORDER,
+        "tipo_labels":  _RACCOLTA_TIPO_LABELS,
+        "livelli":      list(_RACCOLTA_LIVELLI),
+        "aggregate":    {}, "per_istanza": {}, "istanze_order": [],
+    }
+    if not _CAP_NODI_PATH.exists():
+        return empty
+
+    cutoff = None
+    if days > 0:
+        cutoff = (datetime.now(timezone.utc) - timedelta(days=days)).isoformat()
+
+    records: list = []
+    try:
+        for line in _CAP_NODI_PATH.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                r = json.loads(line)
+            except Exception:
+                continue
+            if r.get("instance") in _RACCOLTA_MASTER:
+                continue
+            if cutoff and r.get("ts", "") < cutoff:
+                continue
+            load = r.get("load_squadra", -1)
+            cap  = r.get("capacita", 0)
+            if load < 0 or cap <= 0:
+                continue
+            fill = load / cap
+            if fill > _RACCOLTA_FILL_CAP:
+                continue
+            r["_fill"] = fill
+            records.append(r)
+    except Exception:
+        return empty
+
+    if not records:
+        return {**empty, "total_records": 0}
+
+    # Aggregato globale
+    agg_by    = _rc_accum(records)
+    aggregate = {tipo: _rc_build_tipo_row(agg_by, tipo) for tipo in _RACCOLTA_TIPO_ORDER}
+    aggregate["TOTALE"] = _rc_totale_row(agg_by)
+
+    # Per istanza
+    istanze = sorted(set(r["instance"] for r in records))
+    per_istanza: dict = {}
+    for ist in istanze:
+        ist_recs = [r for r in records if r["instance"] == ist]
+        ist_by   = _rc_accum(ist_recs)
+        ist_rows = {tipo: _rc_build_tipo_row(ist_by, tipo) for tipo in _RACCOLTA_TIPO_ORDER}
+        ist_rows["TOTALE"] = _rc_totale_row(ist_by)
+        per_istanza[ist] = ist_rows
+
+    # Ordina per fill rate totale ASC (peggiori prima in cima)
+    def _fill_key(ist: str) -> float:
+        f = per_istanza[ist].get("TOTALE", {}).get("tot", {}).get("fill")
+        return f if f is not None else 0.0
+
+    istanze_order = sorted(istanze, key=_fill_key)
+
+    return {
+        "period_days":   days,
+        "total_records": len(records),
+        "tipo_order":    _RACCOLTA_TIPO_ORDER,
+        "tipo_labels":   _RACCOLTA_TIPO_LABELS,
+        "livelli":       list(_RACCOLTA_LIVELLI),
+        "aggregate":     aggregate,
+        "per_istanza":   per_istanza,
+        "istanze_order": istanze_order,
+    }

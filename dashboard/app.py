@@ -342,6 +342,25 @@ def _load_ab_records() -> list[dict]:
     return out
 
 
+@app.get("/ui/raccolta", include_in_schema=False)
+def ui_raccolta(request: Request, days: int = 7):
+    """Pagina analisi nodi raccolta — distribuzione tipo×livello + fill rate."""
+    from dashboard.services.stats_reader import get_raccolta_nodi_stats
+    stats = get_raccolta_nodi_stats(days=days)
+    return templates.TemplateResponse(request, "raccolta.html", {
+        "active":        "raccolta",
+        "days":          days,
+        "total_records": stats["total_records"],
+        "tipo_order":    stats["tipo_order"],
+        "tipo_labels":   stats["tipo_labels"],
+        "livelli":       stats["livelli"],
+        "aggregate":     stats["aggregate"],
+        "per_istanza":   stats["per_istanza"],
+        "istanze_order": stats["istanze_order"],
+        **_env_label(),
+    })
+
+
 @app.get("/ui/partial/ab-test-summary", include_in_schema=False)
 def partial_ab_test_summary(request: Request):
     """Card riepilogo sintetico AB test."""

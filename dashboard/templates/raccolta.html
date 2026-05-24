@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}Doomsday V6 — Raccolta Nodi{% endblock %}
+{% block content %}
+
+<div class="page-layout">
+  <div class="main-col" style="width:100%">
+
+    <div class="section">
+      <div class="sec-label">📊 raccolta — analisi nodi</div>
+
+      <!-- Periodo + sommario -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+        <span style="color:var(--text-dim);font-size:13px;letter-spacing:1px">periodo:</span>
+        {% for d, lbl in [(7,"7gg"),(30,"30gg"),(0,"tutti")] %}
+          <a href="/ui/raccolta?days={{ d }}"
+             class="nodi-period-btn {% if days==d %}active{% endif %}">{{ lbl }}</a>
+        {% endfor %}
+        <span style="color:var(--text-dim);font-size:13px;margin-left:8px">
+          {{ total_records }} campioni
+          {% if days > 0 %}· ultimi {{ days }} giorni{% else %}· tutto lo storico{% endif %}
+        </span>
+      </div>
+
+      <!-- Tabella principale -->
+      <div style="overflow-x:auto">
+        <table class="nodi-tbl">
+
+          <!-- Header riga 1: tipo (colspan=3 per ognuno) -->
+          <thead>
+            <tr>
+              <th class="nodi-th-ist" rowspan="2">istanza</th>
+              {% for tipo in tipo_order %}
+                {% set ico, nome = tipo_labels[tipo] %}
+                <th class="nodi-th-tipo" colspan="3">{{ ico }} {{ nome }}</th>
+              {% endfor %}
+              <th class="nodi-th-tot" rowspan="2">fill%<br><small>tot</small></th>
+            </tr>
+            <!-- Header riga 2: L6 / L7 / tot per ogni tipo -->
+            <tr>
+              {% for tipo in tipo_order %}
+                <th class="nodi-th-lv">L6</th>
+                <th class="nodi-th-lv">L7</th>
+                <th class="nodi-th-lv" style="border-right:1.5px solid var(--border-act)">tot</th>
+              {% endfor %}
+            </tr>
+          </thead>
+
+          <tbody>
+            <!-- ── TOTALE FARM ── -->
+            {% set agg = aggregate %}
+            <tr class="nodi-tr-tot">
+              <td class="nodi-td-ist">totale farm</td>
+              {% for tipo in tipo_order %}
+                {% set row = agg.get(tipo, {}) %}
+                {% for col in livelli + ["tot"] %}
+                  {% set c = row.get(col) %}
+                  <td {% if loop.last %}style="border-right:1.5px solid var(--border-act)"{% endif %}>
+                    {% if c and c.n > 0 %}
+                      <span class="nodi-n">{{ c.n }}</span>
+                      {% set f = c.fill %}
+                      {% if f is none %}
+                        <span class="nodi-fill nodi-na">—</span>
+                      {% elif f >= 0.95 %}
+                        <span class="nodi-fill nodi-sat">{{ "%.0f"|format(f*100) }}%</span>
+                      {% elif f >= 0.75 %}
+                        <span class="nodi-fill nodi-marg">{{ "%.0f"|format(f*100) }}%</span>
+                      {% else %}
+                        <span class="nodi-fill nodi-under">{{ "%.0f"|format(f*100) }}%</span>
+                      {% endif %}
+                    {% else %}
+                      <span class="nodi-na">—</span>
+                    {% endif %}
+                  </td>
+                {% endfor %}
+              {% endfor %}
+              <!-- Colonna fill% tot aggregato -->
+              {% set tot_cell = agg.get("TOTALE", {}).get("tot") %}
+              <td>
+                {% if tot_cell and tot_cell.n > 0 %}
+                  <span class="nodi-n">{{ tot_cell.n }}</span>
+                  {% set f = tot_cell.fill %}
+                  {% if f is none %}
+                    <span class="nodi-fill nodi-na">—</span>
+                  {% elif f >= 0.95 %}
+                    <span class="nodi-fill nodi-sat">{{ "%.0f"|format(f*100) }}%</span>
+                  {% elif f >= 0.75 %}
+                    <span class="nodi-fill nodi-marg">{{ "%.0f"|format(f*100) }}%</span>
+                  {% else %}
+                    <span class="nodi-fill nodi-under">{{ "%.0f"|format(f*100) }}%</span>
+                  {% endif %}
+                {% else %}
+                  <span class="nodi-na">—</span>
+                {% endif %}
+              </td>
+            </tr>
+
+            <!-- separatore visivo -->
+            <tr>
+              <td colspan="{{ 1 + (tipo_order|length)*3 + 1 }}"
+                  style="padding:1px;background:var(--border);border:none"></td>
+            </tr>
+
+            <!-- ── PER ISTANZA (ordinate per fill% ASC — peggiori prima) ── -->
+            {% for ist in istanze_order %}
+              {% set ist_data = per_istanza.get(ist, {}) %}
+              <tr>
+                <td class="nodi-td-ist">{{ ist }}</td>
+                {% for tipo in tipo_order %}
+                  {% set row = ist_data.get(tipo, {}) %}
+                  {% for col in livelli + ["tot"] %}
+                    {% set c = row.get(col) %}
+                    <td {% if loop.last %}style="border-right:1.5px solid var(--border-act)"{% endif %}>
+                      {% if c and c.n > 0 %}
+                        <span class="nodi-n">{{ c.n }}</span>
+                        {% set f = c.fill %}
+                        {% if f is none %}
+                          <span class="nodi-fill nodi-na">—</span>
+                        {% elif f >= 0.95 %}
+                          <span class="nodi-fill nodi-sat">{{ "%.0f"|format(f*100) }}%</span>
+                        {% elif f >= 0.75 %}
+                          <span class="nodi-fill nodi-marg">{{ "%.0f"|format(f*100) }}%</span>
+                        {% else %}
+                          <span class="nodi-fill nodi-under">{{ "%.0f"|format(f*100) }}%</span>
+                        {% endif %}
+                      {% else %}
+                        <span class="nodi-na">—</span>
+                      {% endif %}
+                    </td>
+                  {% endfor %}
+                {% endfor %}
+                <!-- fill% tot istanza -->
+                {% set tot_cell = ist_data.get("TOTALE", {}).get("tot") %}
+                <td>
+                  {% if tot_cell and tot_cell.n > 0 %}
+                    <span class="nodi-n">{{ tot_cell.n }}</span>
+                    {% set f = tot_cell.fill %}
+                    {% if f is none %}
+                      <span class="nodi-fill nodi-na">—</span>
+                    {% elif f >= 0.95 %}
+                      <span class="nodi-fill nodi-sat">{{ "%.0f"|format(f*100) }}%</span>
+                    {% elif f >= 0.75 %}
+                      <span class="nodi-fill nodi-marg">{{ "%.0f"|format(f*100) }}%</span>
+                    {% else %}
+                      <span class="nodi-fill nodi-under">{{ "%.0f"|format(f*100) }}%</span>
+                    {% endif %}
+                  {% else %}
+                    <span class="nodi-na">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Legenda -->
+      <div style="display:flex;gap:16px;margin-top:10px;font-size:13px;color:var(--text-dim);flex-wrap:wrap">
+        <span><span class="nodi-sat">■</span> ≥95% satura</span>
+        <span><span class="nodi-marg">■</span> 75–94% marginale</span>
+        <span><span class="nodi-under">■</span> &lt;75% underprovisioned</span>
+        <span>— nessun campione · N = numero invii</span>
+        <span style="margin-left:auto;color:var(--text-dim)">
+          fonte: data/cap_nodi_dataset.jsonl · fill = load_squadra / cap_nodo
+        </span>
+      </div>
+
+    </div><!-- /section -->
+  </div><!-- /main-col -->
+</div><!-- /page-layout -->
+
+{% endblock %}
