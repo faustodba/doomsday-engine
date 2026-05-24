@@ -330,15 +330,15 @@ def _section_produzione_rifugio(date: str) -> dict:
 
     # Produzione unificata: Σ(qty × peso) / 24h / 1M  per istanza e farm.
     # Pesi derivati da cap L7: pomodoro=1, legno=1, acciaio=2, petrolio=5.
+    # Master escluso: produzione_qty include risorse RICEVUTE dalle farm.
     _PESI_RIF = {"pomodoro": 1.0, "legno": 1.0, "acciaio": 2.0, "petrolio": 5.0}
     for row in ordinarie:
         pom_eq = sum(max(0, row["risorse"].get(r, 0)) * _PESI_RIF[r] for r in _RISORSE_ORDER)
         row["prod_unif_h"] = round(pom_eq / 24.0 / 1_000_000, 3) if pom_eq > 0 else 0.0
     if master_row:
-        pom_eq_m = sum(max(0, master_row["risorse"].get(r, 0)) * _PESI_RIF[r] for r in _RISORSE_ORDER)
-        master_row["prod_unif_h"] = round(pom_eq_m / 24.0 / 1_000_000, 3) if pom_eq_m > 0 else 0.0
+        master_row["prod_unif_h"] = 0.0  # non affidabile: include risorse ricevute
     farm_pom_eq = sum(
-        max(0, totali_all[r]) * _PESI_RIF[r] for r in _RISORSE_ORDER
+        max(0, totali_ord[r]) * _PESI_RIF[r] for r in _RISORSE_ORDER
     )
     prod_unif_farm_h = round(farm_pom_eq / 24.0 / 1_000_000, 3) if farm_pom_eq > 0 else 0.0
 
