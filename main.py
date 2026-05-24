@@ -32,6 +32,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 ROOT = os.path.dirname(os.path.abspath(__file__))
 _OVERRIDES_PATH     = os.path.join(ROOT, "config", "runtime_overrides.json")
 _GLOBAL_CONFIG_PATH = os.path.join(ROOT, "config", "global_config.json")
+_WAKE_NOW_FLAG      = os.path.join(ROOT, "data", "wake_now.flag")
 _INSTANCES_PATH     = os.path.join(ROOT, "config", "instances.json")
 _TASK_SETUP_PATH    = os.path.join(ROOT, "config", "task_setup.json")
 _CHECKPOINT_PATH    = os.path.join(ROOT, "last_checkpoint.json")
@@ -1489,7 +1490,15 @@ def main():
 
         _log("MAIN", f"Ciclo {ciclo} completato — sleep {SLEEP_CICLO//60} minuti")
         for _ in range(SLEEP_CICLO):
-            if stop_event.is_set(): break
+            if stop_event.is_set():
+                break
+            if os.path.exists(_WAKE_NOW_FLAG):
+                try:
+                    os.unlink(_WAKE_NOW_FLAG)
+                except Exception:
+                    pass
+                _log("MAIN", "[WAKE-NOW] Avvio ciclo immediato su richiesta dashboard")
+                break
             time.sleep(1)
 
     close_all_loggers()

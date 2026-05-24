@@ -93,6 +93,13 @@
          hx-swap="innerHTML">
       <span class="cnt">stato <b>—</b></span>
     </div>
+    <button id="wake-btn" onclick="wakeNow()"
+            title="Salta il sleep inter-ciclo e avvia subito il prossimo tick"
+            style="margin-left:8px;padding:3px 10px;font-size:11px;letter-spacing:1px;
+                   background:transparent;color:var(--accent);border:1px solid var(--accent);
+                   border-radius:3px;cursor:pointer;font-family:var(--mono)">
+      ▶ avvia ora
+    </button>
   </header>
 
   <div class="rbar"><div class="rbar-inner"></div></div>
@@ -290,6 +297,26 @@
       document.addEventListener('htmx:afterSwap', setupAll);
       document.addEventListener('htmx:afterSettle', setupAll);
     })();
+
+    // wake-now — salta sleep inter-ciclo, avvia tick subito
+    async function wakeNow() {
+      const btn = document.getElementById('wake-btn');
+      if (btn) { btn.disabled = true; btn.textContent = '⏳ invio...'; }
+      try {
+        const r = await fetch('/api/wake-now', {method: 'POST'});
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        if (btn) { btn.textContent = '✓ segnale inviato'; btn.style.color = 'var(--green)'; btn.style.borderColor = 'var(--green)'; }
+        setTimeout(() => {
+          if (btn) { btn.disabled = false; btn.textContent = '▶ avvia ora'; btn.style.color = ''; btn.style.borderColor = ''; }
+        }, 3000);
+      } catch (err) {
+        if (btn) { btn.textContent = '✗ errore'; btn.style.color = 'var(--red)'; btn.style.borderColor = 'var(--red)'; }
+        setTimeout(() => {
+          if (btn) { btn.disabled = false; btn.textContent = '▶ avvia ora'; btn.style.color = ''; btn.style.borderColor = ''; }
+        }, 3000);
+        console.error('wake-now error:', err);
+      }
+    }
 
     // 06/05 — toggle richiesta restart bot
     async function restartBotToggle(request) {

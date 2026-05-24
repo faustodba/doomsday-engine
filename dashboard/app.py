@@ -4146,6 +4146,28 @@ def api_restart_bot_cancel():
     return {"requested": False, "cancelled": False}
 
 
+@app.post("/api/wake-now", include_in_schema=False)
+def api_wake_now():
+    """
+    Segnala al bot di saltare il sleep corrente e avviare il prossimo ciclo subito.
+    Crea data/wake_now.flag — il bot lo rileva nel loop di pausa inter-ciclo
+    e procede immediatamente al tick successivo. No-op se il bot sta già girando.
+    """
+    flag = _PROD_ROOT / "data" / "wake_now.flag"
+    try:
+        flag.touch()
+        return {"ok": True}
+    except Exception as exc:
+        raise HTTPException(500, str(exc))
+
+
+@app.get("/api/wake-now/status", include_in_schema=False)
+def api_wake_now_status():
+    """Controlla se il flag wake-now è ancora presente (bot non l'ha ancora consumato)."""
+    flag = _PROD_ROOT / "data" / "wake_now.flag"
+    return {"pending": flag.exists()}
+
+
 @app.post("/api/raccolta-ocr-debug/{mode}", include_in_schema=False)
 def api_raccolta_ocr_debug(mode: str):
     """
