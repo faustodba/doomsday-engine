@@ -1938,8 +1938,9 @@ def partial_produzione_istanze(request: Request):
         # Produzione unificata giornaliera (inviato × peso / 24h)
         _pu    = entry.get("prod_unificata") or {}
         _pu_h  = float(_pu.get("prod_unif_h",   -1.0) or -1.0)
-        _pu_ns = int(  _pu.get("n_sped",         0)   or 0)
+        _pu_ns = int(  _pu.get("n_sessioni", _pu.get("n_sped", 0)) or 0)
         _pu_pr = _pu.get("per_risorsa", {}) or {}
+        _pu_fonte = str(_pu.get("fonte", "spedizioni"))
         if _pu_h >= 0:
             _pu_lbl = f"{_pu_h:.2f} M/h"
             _pu_col = "#7cf"
@@ -1948,12 +1949,15 @@ def partial_produzione_istanze(request: Request):
             _pu_detail = " · ".join(
                 f"{_RICO.get(r, r)} {_fmt_q(v['qta_tot'])} ×{_PESI_LOCAL.get(r,1)}"
                 for r, v in _pu_pr.items()
-            ) or "nessuna spedizione"
-            _pu_tip = f"Σ(inviato×peso)/24h | {_pu_detail} · {_pu_ns} sped"
+            ) or "nessun dato"
+            if _pu_fonte == "storico":
+                _pu_tip = f"Σ(delta_deposito+inviato)×peso/24h | {_pu_detail} · {_pu_ns} sessioni"
+            else:
+                _pu_tip = f"Σ(inviato×peso)/24h | {_pu_detail} · {_pu_ns} sped"
         else:
             _pu_lbl = "—"
             _pu_col = "var(--text-dim)"
-            _pu_tip = "nessuna spedizione oggi"
+            _pu_tip = "nessun dato produzione"
 
         # auto-WU34 (27/04): blocco rifornimento giornaliero esteso con
         # netto/lordo/tassa + provv. lorde/nette per chiarezza semantica.

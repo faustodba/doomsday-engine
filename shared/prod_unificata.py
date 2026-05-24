@@ -94,6 +94,59 @@ def compute_from_dettaglio(dettaglio_oggi: list[dict]) -> dict:
     }
 
 
+def compute_from_storico(produzione_storico: list[dict]) -> dict:
+    """
+    Calcola prod_unif_h dalle sessioni chiuse (produzione_storico).
+
+    Fonte: state["produzione_storico"] — ogni sessione ha produzione_qty
+    già calcolata dal bot: delta_castle - zaino_delta + rifornimento_inviato.
+    Questa è la metrica di produzione REALE (include risorse raccolte e
+    tenute in castello, non solo quelle spedite al master).
+
+    Denominatore: 24h fisso (window storico retention = 24h).
+    Per risorsa con delta negativo (OCR noise, consumo costruzioni): floor a 0.
+    """
+    pom_eq_totale = 0
+    n_sessioni    = 0
+    per_risorsa: dict[str, dict] = {}
+    durata_coperta_s = 0.0
+
+    for s in (produzione_storico or []):
+        pq  = s.get("produzione_qty") or {}
+        dur = float(s.get("durata_sec") or 0)
+        if not pq and dur <= 0:
+            continue
+
+        n_sessioni       += 1
+        durata_coperta_s += dur
+
+        for risorsa, peso in PESI.items():
+            qty     = float(pq.get(risorsa, 0) or 0)
+            qty_pos = max(0.0, qty)
+            pom_eq  = int(qty_pos * peso)
+            pom_eq_totale += pom_eq
+            if qty_pos > 0:
+                pr = per_risorsa.setdefault(risorsa, {"qta_tot": 0, "n": 0, "pom_eq": 0})
+                pr["qta_tot"] += int(qty_pos)
+                pr["n"]       += 1
+                pr["pom_eq"]  += pom_eq
+
+    if pom_eq_totale > 0:
+        prod_unif_h = round(pom_eq_totale / _H / _M, 3)
+    else:
+        prod_unif_h = -1.0
+
+    return {
+        "prod_unif_h":      prod_unif_h,
+        "pom_eq_totale":    pom_eq_totale,
+        "n_sped":           n_sessioni,   # compatibile con compute_from_dettaglio
+        "per_risorsa":      per_risorsa,
+        "fonte":            "storico",
+        "n_sessioni":       n_sessioni,
+        "durata_coperta_s": durata_coperta_s,
+    }
+
+
 def empty_result() -> dict:
     return {
         "prod_unif_h":   -1.0,

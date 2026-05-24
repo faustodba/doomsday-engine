@@ -747,15 +747,22 @@ def get_produzione_istanze(include_master: bool = False, only_master: bool = Fal
             else:
                 provviste_res_netta = provviste_res
 
-            # Produzione unificata 24h: Σ(qta_inviata × peso) / 24h
-            # Fonte: dettaglio_oggi (reale, verificato); denominatore fisso 24h wall-clock.
+            # Produzione unificata 24h: delta-based da produzione_storico.
+            # Fonte primaria: produzione_storico[*].produzione_qty (delta_castle
+            # - zaino_delta + rifornimento_inviato per sessione), denominatore 24h.
+            # Misura produzione REALE (raccolto + inviato), non solo spedizioni.
+            # Fallback su compute_from_dettaglio se storico vuoto o senza prod_qty.
             try:
-                from shared.prod_unificata import compute_from_dettaglio
-                det_oggi = rif.get("dettaglio_oggi") or []
-                _pu = compute_from_dettaglio(det_oggi)
+                from shared.prod_unificata import compute_from_storico, compute_from_dettaglio, empty_result as _pu_empty
+                _storico_valido = [s for s in storico if s.get("produzione_qty")]
+                if _storico_valido:
+                    _pu = compute_from_storico(_storico_valido)
+                else:
+                    det_oggi = rif.get("dettaglio_oggi") or []
+                    _pu = compute_from_dettaglio(det_oggi) if det_oggi else _pu_empty()
             except Exception:
-                from shared.prod_unificata import empty_result
-                _pu = empty_result()
+                from shared.prod_unificata import empty_result as _pu_empty
+                _pu = _pu_empty()
 
             # inv_effettivo_netta: quanto l'istanza può REALMENTE spedire ORA.
             # = min(quota_residua_netta, headroom_depositi_netto)
