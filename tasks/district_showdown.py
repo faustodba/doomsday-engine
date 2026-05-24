@@ -908,6 +908,7 @@ class DistrictShowdownTask(Task):
         max_wait = 90.0     # safety: popup max 60s nel gioco, +30s buffer
         t0 = time.time()
         poll_idx = 0
+        streak_transizione = 0  # poll consecutivi senza popup né pin_dado
 
         while time.time() - t0 < max_wait:
             elapsed = time.time() - t0
@@ -967,15 +968,26 @@ class DistrictShowdownTask(Task):
                 threshold=cfg.tm_threshold,
             )
             if has_ap.found:
+                streak_transizione = 0
                 ctx.log_msg(
                     f"[DS] AP poll {poll_idx} ({elapsed:.0f}s): popup ancora attivo — wait 5s"
                 )
             else:
                 # Nessuno dei 4 — transizione UI effimera (animazione chiusura
-                # popup, scene change). Continua polling finche' appare uno stato.
+                # popup, scene change).
+                streak_transizione += 1
                 ctx.log_msg(
-                    f"[DS] AP poll {poll_idx} ({elapsed:.0f}s): transizione, nessun pin — wait 5s"
+                    f"[DS] AP poll {poll_idx} ({elapsed:.0f}s): transizione, nessun pin "
+                    f"(streak {streak_transizione}) — wait 5s"
                 )
+                # Popup certamente chiuso da >=15s: auto-roll già in corso,
+                # il loop principale rileverà lo stato corretto.
+                if streak_transizione >= 3:
+                    ctx.log_msg(
+                        f"[DS] AP: transizione persistente dopo {elapsed:.0f}s "
+                        f"— auto probabilmente in corso → return"
+                    )
+                    return
 
             time.sleep(poll_interval)
             poll_idx += 1
