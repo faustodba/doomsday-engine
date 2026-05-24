@@ -1404,6 +1404,19 @@ def partial_res_totali(request: Request):
     prov_netta_lbl = _fmt_m(farm.provviste_residue_netta)
     prov_lordo_lbl = _fmt_m(farm.provviste_residue)
 
+    # inv_effettivo aggregato — somma per istanza dal produzione_istanze enriched
+    try:
+        from dashboard.services.stats_reader import get_produzione_istanze as _gpi
+        _ist_data    = _gpi()
+        _inv_eff_map = {d["nome"]: int(d.get("inv_effettivo_netta", -1) or -1)
+                        for d in _ist_data}
+        _inv_eff_vals = [v for v in _inv_eff_map.values() if v >= 0]
+        inv_eff_tot   = sum(_inv_eff_vals) if _inv_eff_vals else -1
+    except Exception:
+        _inv_eff_map = {}
+        inv_eff_tot  = -1
+    inv_eff_tot_lbl = _fmt_m(inv_eff_tot) if inv_eff_tot >= 0 else "—"
+
     # Dettaglio per istanza (compact) — provviste in NETTO
     _ZERO_INVIATO = {r: 0 for r in ("pomodoro", "legno", "petrolio", "acciaio")}
 
@@ -1416,7 +1429,9 @@ def partial_res_totali(request: Request):
         prov_netta_ist = _fmt_m(d.provviste_residue_netta)
         prov_lordo_ist = _fmt_m(d.provviste_residue)
         tassa_pct      = d.tassa_pct_avg * 100
-        tooltip        = f"lordo {prov_lordo_ist} · tassa {tassa_pct:.1f}%"
+        inv_eff_ist    = _inv_eff_map.get(d.nome, -1)
+        inv_eff_ist_lbl = _fmt_m(inv_eff_ist) if inv_eff_ist >= 0 else "—"
+        tooltip        = f"provv. nette {prov_netta_ist} · lordo {prov_lordo_ist} · tassa {tassa_pct:.1f}%"
         inv_str        = " · ".join(
             f"{ico}{_fmt_m(d.inviato_oggi.get(r, 0))}"
             for r, ico in RISORSE
@@ -1426,7 +1441,7 @@ def partial_res_totali(request: Request):
         <div class="res-row" style="font-size:9px">
           <span class="res-name" style="color:var(--accent);min-width:52px">{d.nome}</span>
           <span style="flex:1;color:var(--text-dim)">{inv_str}</span>
-          <span style="{esaurita_css}" title="{tooltip}">{prov_netta_ist}</span>
+          <span style="{esaurita_css}" title="{tooltip}">{inv_eff_ist_lbl}</span>
         </div>'''
 
     # WU39 — Capienza giornaliera residua FauMorfeus (Daily Receiving Limit)
@@ -1476,7 +1491,12 @@ def partial_res_totali(request: Request):
       <span>provviste residue (netto)</span>
       <span style="color:var(--accent)">{prov_netta_lbl}</span>
     </div>
-    <div class="res-sub" style="margin-top:10px">dettaglio istanze (netto)</div>
+    <div class="res-sub" style="display:flex;justify-content:space-between;align-items:center"
+         title="min(provv. nette, Σ max(0, deposito-soglia)×(1-tassa)) per istanza">
+      <span>inv. effettivo (netto)</span>
+      <span style="color:var(--green,#4ade80)">{inv_eff_tot_lbl}</span>
+    </div>
+    <div class="res-sub" style="margin-top:10px">dettaglio istanze (inv. effettivo)</div>
     {detail_rows if detail_rows else
       '<div style="color:var(--text-dim);font-size:9px;padding:4px 0">nessun dato disponibile</div>'}
     '''
@@ -1867,6 +1887,7 @@ def partial_produzione_istanze(request: Request):
         tassa_pct_avg  = float(entry.get("tassa_pct_avg", 0.23) or 0.23)
         provviste_res  = int(entry.get("provviste_residue", -1) or -1)
         provv_res_net  = int(entry.get("provviste_residue_netta", -1) or -1)
+        inv_eff        = int(entry.get("inv_effettivo_netta", -1) or -1)
         provviste_esau_state = bool(entry.get("provviste_esaurite", False))
         # Format
         netto_lbl  = _fmt_q(inviato_totale) if inviato_totale > 0 else "0"
@@ -1888,15 +1909,30 @@ def partial_produzione_istanze(request: Request):
             provv_netto_lbl = "—"
             provv_netto_col = "var(--text-dim)"
 
+        # inv_effettivo label
+        if inv_eff > 1_000_000:
+            inv_eff_lbl = _fmt_q(inv_eff)
+            inv_eff_col = "#4ade80"           # verde = buona disponibilità
+        elif inv_eff > 0:
+            inv_eff_lbl = _fmt_q(inv_eff)
+            inv_eff_col = "#fbbf24"           # giallo = poco disponibile
+        elif inv_eff == 0:
+            inv_eff_lbl = "0"
+            inv_eff_col = "var(--red,#f87171)"
+        else:
+            inv_eff_lbl = "—"
+            inv_eff_col = "var(--text-dim)"
+
         # auto-WU34 (27/04): blocco rifornimento giornaliero esteso con
         # netto/lordo/tassa + provv. lorde/nette per chiarezza semantica.
         corr_kvs = [
-            _kv("spediz",       str(sped_oggi)),
-            _kv("inv. netto",   netto_lbl,  "#7cf" if inviato_totale > 0 else "var(--text)"),
-            _kv("inv. lordo",   lordo_lbl,  "var(--text)"),
-            _kv("tassa",        tassa_lbl,  "var(--red,#f87171)" if tassa_tot > 0 else "var(--text-dim)"),
-            _kv("provv. lorde", provv_lordo_lbl, provv_lordo_col),
-            _kv("provv. nette", provv_netto_lbl, provv_netto_col),
+            _kv("spediz",        str(sped_oggi)),
+            _kv("inv. netto",    netto_lbl,  "#7cf" if inviato_totale > 0 else "var(--text)"),
+            _kv("inv. lordo",    lordo_lbl,  "var(--text)"),
+            _kv("tassa",         tassa_lbl,  "var(--red,#f87171)" if tassa_tot > 0 else "var(--text-dim)"),
+            _kv("provv. lorde",  provv_lordo_lbl, provv_lordo_col),
+            _kv("provv. nette",  provv_netto_lbl, provv_netto_col),
+            _kv("inv. effettivo", inv_eff_lbl, inv_eff_col),
         ]
         sess_block = (
             f'<div style="font-size:11px;color:var(--text-dim);'

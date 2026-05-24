@@ -635,6 +635,25 @@ def get_produzione_istanze(include_master: bool = False, only_master: bool = Fal
         insts = get_instances()
         engine = get_engine_status()
         result: list[dict] = []
+        # Soglie rifornimento comune — per calcolo inv_effettivo_netta
+        try:
+            _ovr = get_overrides()
+            _rif_com = ((_ovr.get("globali") or {}).get("rifornimento_comune") or {})
+            _soglie_rif = {
+                "pomodoro": float(_rif_com.get("soglia_campo_m",   5.0)) * 1_000_000,
+                "legno":    float(_rif_com.get("soglia_legno_m",   5.0)) * 1_000_000,
+                "acciaio":  float(_rif_com.get("soglia_acciaio_m", 3.5)) * 1_000_000,
+                "petrolio": float(_rif_com.get("soglia_petrolio_m",2.5)) * 1_000_000,
+            }
+            _rif_flags = {
+                "pomodoro": bool(_rif_com.get("campo_abilitato",    True)),
+                "legno":    bool(_rif_com.get("legno_abilitato",    True)),
+                "acciaio":  bool(_rif_com.get("acciaio_abilitato",  True)),
+                "petrolio": bool(_rif_com.get("petrolio_abilitato", True)),
+            }
+        except Exception:
+            _soglie_rif = {"pomodoro": 5e6, "legno": 5e6, "acciaio": 3.5e6, "petrolio": 2.5e6}
+            _rif_flags  = {r: True for r in ("pomodoro", "legno", "acciaio", "petrolio")}
         for ist in insts:
             nome = ist.get("nome", "")
             if not nome:
@@ -728,6 +747,25 @@ def get_produzione_istanze(include_master: bool = False, only_master: bool = Fal
             else:
                 provviste_res_netta = provviste_res
 
+            # inv_effettivo_netta: quanto l'istanza può REALMENTE spedire ORA.
+            # = min(quota_residua_netta, headroom_depositi_netto)
+            # headroom_depositi = Σ max(0, deposito_r - soglia_r) × (1 - tassa)
+            # per ogni risorsa abilitata. Usa risorse_iniziali (snapshot start tick).
+            inv_eff_netta = -1
+            try:
+                if provviste_res_netta > 0 and corrente:
+                    risorse_ini = corrente.get("risorse_iniziali") or {}
+                    headroom = 0.0
+                    for _r in ("pomodoro", "legno", "acciaio", "petrolio"):
+                        if not _rif_flags.get(_r, True):
+                            continue
+                        dep = int(risorse_ini.get(_r, 0) or 0)
+                        hw  = max(0.0, dep - _soglie_rif.get(_r, 0.0))
+                        headroom += hw * (1.0 - tassa_pct_avg)
+                    inv_eff_netta = int(min(provviste_res_netta, headroom))
+            except Exception:
+                inv_eff_netta = -1
+
             result.append({
                 "nome":              nome,
                 "abilitata":         _abilitata(nome),
@@ -749,6 +787,7 @@ def get_produzione_istanze(include_master: bool = False, only_master: bool = Fal
                 "tassa_totale":         tassa_tot,
                 "tassa_pct_avg":        tassa_pct_avg,
                 "provviste_residue_netta": provviste_res_netta,
+                "inv_effettivo_netta":  inv_eff_netta,
                 "corrente":          corrente,
                 "precedente":        precedente,
                 "n_storico_24h":     len(storico),
