@@ -635,6 +635,13 @@ def get_produzione_istanze(include_master: bool = False, only_master: bool = Fal
         insts = get_instances()
         engine = get_engine_status()
         result: list[dict] = []
+        # Produzione unificata 24h — batch unico per tutte le istanze
+        try:
+            from shared.prod_unificata import compute_prod_unificata_all
+            _prod_unif_map = compute_prod_unificata_all(hours=24.0)
+        except Exception:
+            _prod_unif_map = {}
+
         # Soglie rifornimento comune — per calcolo inv_effettivo_netta
         try:
             _ovr = get_overrides()
@@ -788,6 +795,7 @@ def get_produzione_istanze(include_master: bool = False, only_master: bool = Fal
                 "tassa_pct_avg":        tassa_pct_avg,
                 "provviste_residue_netta": provviste_res_netta,
                 "inv_effettivo_netta":  inv_eff_netta,
+                "prod_unificata":    _prod_unif_map.get(nome, {}),
                 "corrente":          corrente,
                 "precedente":        precedente,
                 "n_storico_24h":     len(storico),

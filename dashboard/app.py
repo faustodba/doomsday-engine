@@ -1404,7 +1404,7 @@ def partial_res_totali(request: Request):
     prov_netta_lbl = _fmt_m(farm.provviste_residue_netta)
     prov_lordo_lbl = _fmt_m(farm.provviste_residue)
 
-    # inv_effettivo aggregato — somma per istanza dal produzione_istanze enriched
+    # inv_effettivo + prod_unificata aggregati — batch unico dal produzione_istanze enriched
     try:
         from dashboard.services.stats_reader import get_produzione_istanze as _gpi
         _ist_data    = _gpi()
@@ -1412,10 +1412,17 @@ def partial_res_totali(request: Request):
                         for d in _ist_data}
         _inv_eff_vals = [v for v in _inv_eff_map.values() if v >= 0]
         inv_eff_tot   = sum(_inv_eff_vals) if _inv_eff_vals else -1
+        # prod_unificata aggregata (somma M pom-eq/h pesata per ore_attive → media ponderata)
+        _pu_list = [(d["nome"], d.get("prod_unificata") or {}) for d in _ist_data]
+        _pu_peq_tot  = sum(int(pu.get("pom_eq_totale", 0) or 0) for _, pu in _pu_list)
+        _pu_ore_tot  = sum(float(pu.get("ore_attive",  0) or 0) for _, pu in _pu_list)
+        prod_unif_agg = round(_pu_peq_tot / _pu_ore_tot / 1_000_000, 2) if _pu_ore_tot > 0 and _pu_peq_tot > 0 else -1.0
     except Exception:
-        _inv_eff_map = {}
-        inv_eff_tot  = -1
-    inv_eff_tot_lbl = _fmt_m(inv_eff_tot) if inv_eff_tot >= 0 else "—"
+        _inv_eff_map  = {}
+        inv_eff_tot   = -1
+        prod_unif_agg = -1.0
+    inv_eff_tot_lbl   = _fmt_m(inv_eff_tot)         if inv_eff_tot   >= 0 else "—"
+    prod_unif_agg_lbl = f"{prod_unif_agg:.2f} M/h"  if prod_unif_agg >= 0 else "—"
 
     # Dettaglio per istanza (compact) — provviste in NETTO
     _ZERO_INVIATO = {r: 0 for r in ("pomodoro", "legno", "petrolio", "acciaio")}
@@ -1495,6 +1502,11 @@ def partial_res_totali(request: Request):
          title="min(provv. nette, Σ max(0, deposito-soglia)×(1-tassa)) per istanza">
       <span>inv. effettivo (netto)</span>
       <span style="color:var(--green,#4ade80)">{inv_eff_tot_lbl}</span>
+    </div>
+    <div class="res-sub" style="display:flex;justify-content:space-between;align-items:center"
+         title="Σ(cap_nodo × peso_tipo) / ore_attive bot · pesi: pom=1 leg=1 acc=2 pet=5 · ultime 24h">
+      <span>prod. unif. 24h</span>
+      <span style="color:#7cf">{prod_unif_agg_lbl}</span>
     </div>
     <div class="res-sub" style="margin-top:10px">dettaglio istanze (inv. effettivo)</div>
     {detail_rows if detail_rows else
@@ -1923,6 +1935,28 @@ def partial_produzione_istanze(request: Request):
             inv_eff_lbl = "—"
             inv_eff_col = "var(--text-dim)"
 
+        # Produzione unificata 24h
+        _pu = entry.get("prod_unificata") or {}
+        _pu_h    = float(_pu.get("prod_unif_h",   -1.0) or -1.0)
+        _pu_ore  = float(_pu.get("ore_attive",     0.0) or 0.0)
+        _pu_inv  = int(  _pu.get("n_invii",        0)   or 0)
+        _pu_pr   = _pu.get("per_risorsa", {}) or {}
+        if _pu_h >= 0:
+            _pu_lbl = f"{_pu_h:.2f} M pom-eq/h"
+            _pu_col = "#7cf"
+            # Tooltip: dettaglio per risorsa + ore attive
+            _RICO = {"pomodoro": "🍅", "legno": "🪵", "acciaio": "⚙", "petrolio": "🛢"}
+            _PESI_LOCAL = {"pomodoro": 1, "legno": 1, "acciaio": 2, "petrolio": 5}
+            _pu_detail = " · ".join(
+                f"{_RICO.get(r, r)} {_fmt_q(v['cap_tot'])} ×{_PESI_LOCAL.get(r,1)} ({v['n']}m)"
+                for r, v in _pu_pr.items()
+            ) or "nessuna marcia"
+            _pu_tip = f"{_pu_detail} | {_pu_ore:.1f}h attive · {_pu_inv} marce"
+        else:
+            _pu_lbl = "—"
+            _pu_col = "var(--text-dim)"
+            _pu_tip = "nessun dato nelle ultime 24h"
+
         # auto-WU34 (27/04): blocco rifornimento giornaliero esteso con
         # netto/lordo/tassa + provv. lorde/nette per chiarezza semantica.
         corr_kvs = [
@@ -1980,6 +2014,17 @@ def partial_produzione_istanze(request: Request):
             '<div style="display:flex;gap:10px;align-items:flex-start">'
             + sess_block + cicli_block +
             '</div>'
+        )
+
+        # Blocco produzione unificata 24h
+        prod_block = (
+            f'<div style="margin-top:5px;padding:4px 6px;'
+            f'border-top:0.5px solid rgba(255,255,255,0.06);'
+            f'display:flex;justify-content:space-between;align-items:center;'
+            f'font-size:11px" title="{_pu_tip}">'
+            f'<span style="color:var(--text-dim)">prod. unif. 24h</span>'
+            f'<span style="color:{_pu_col};font-weight:600">{_pu_lbl}</span>'
+            f'</div>'
         )
 
         # WU66 — riga truppe (Layout A): total oggi + Δ7gg + sparkline 7 giorni
@@ -2087,6 +2132,7 @@ def partial_produzione_istanze(request: Request):
             <tbody>{rows}</tbody>
           </table>
           {bottom_block}
+          {prod_block}
           {ctrl_html}
         </div>
         ''')
