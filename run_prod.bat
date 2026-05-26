@@ -70,7 +70,7 @@ REM   Doppia rete: main.py contiene anche _cleanup_orfani_processi_startup
 REM   che killa cmd.exe + python.exe + py.exe orfani al boot (preserva PID corrente).
 echo [run_prod] Pre-kill bot orfani (PID-file + CIM)...
 powershell -NoProfile -Command "if (Test-Path 'data\bot.pid') { try { $p=[int](Get-Content 'data\bot.pid'); Stop-Process -Id $p -Force -ErrorAction SilentlyContinue; Write-Host ('  kill PID=' + $p + ' (bot.pid)') } catch {} }"
-powershell -NoProfile -Command "@('python.exe','py.exe') | ForEach-Object { $n=$_; try { Get-CimInstance Win32_Process -Filter ('Name=''' + $n + '''') | Where-Object { $_.CommandLine -like '*main.py*' -and $_.CommandLine -notlike '*-m uvicorn*' } | ForEach-Object { Write-Host ('  kill PID=' + $_.ProcessId + ' (' + $n + ')'); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } } catch {} }"
+powershell -NoProfile -Command "@('python.exe','py.exe') | ForEach-Object { $n=$_; try { Get-CimInstance Win32_Process -Filter ('Name=''' + $n + '''') | Where-Object { $_.CommandLine -like '*main.py*' -and $_.CommandLine -notlike '*-m uvicorn*' -and $_.CommandLine -notlike '*claude-bridge*' } | ForEach-Object { Write-Host ('  kill PID=' + $_.ProcessId + ' (' + $n + ')'); Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue } } catch {} }"
 timeout /t 2 /nobreak >nul
 
 
