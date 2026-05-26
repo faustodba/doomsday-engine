@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import os
 import sys
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -233,14 +234,46 @@ if _STATIC.exists():
 _TEMPLATES = Path(__file__).parent / "templates"
 templates  = Jinja2Templates(directory=str(_TEMPLATES))
 
+# URL prefix per sub-path deployment (es. /doomsday quando dietro ngrok/Caddy).
+# Impostare DASHBOARD_URL_PREFIX=/doomsday nel lancio per esposizione pubblica.
+_URL_PREFIX = os.environ.get("DASHBOARD_URL_PREFIX", "").rstrip("/")
+
+# ContextVar per prefix per-request: "" locale, "/doomsday" via Caddy/ngrok.
+# Rilevamento: Caddy aggiunge X-Forwarded-Proto: https; accesso locale è http.
+_url_prefix_ctx: ContextVar[str] = ContextVar("url_prefix", default="")
+
+
+class _DynamicPrefix:
+    """Jinja2 global trasparente: {{ url_prefix }} legge il ContextVar corrente.
+    Zero modifiche ai template necessarie."""
+    def __str__(self) -> str:
+        return _url_prefix_ctx.get()
+    def __html__(self) -> str:
+        return _url_prefix_ctx.get()
+
+
+templates.env.globals["url_prefix"] = _DynamicPrefix()
+
+
+@app.middleware("http")
+async def _url_prefix_middleware(request: Request, call_next):
+    """Imposta url_prefix nel ContextVar in base all'origine della request.
+    Locale (http diretto): prefix vuoto. Via Caddy/ngrok (https): _URL_PREFIX."""
+    proto = request.headers.get("x-forwarded-proto", "")
+    token = _url_prefix_ctx.set(_URL_PREFIX if proto == "https" else "")
+    try:
+        return await call_next(request)
+    finally:
+        _url_prefix_ctx.reset(token)
+
 
 # ==============================================================================
 # Root redirect
 # ==============================================================================
 
 @app.get("/", include_in_schema=False)
-def root():
-    return RedirectResponse(url="/ui")
+def root(request: Request):
+    return RedirectResponse(url=f"{_url_prefix_ctx.get()}/ui")
 
 
 # ==============================================================================
@@ -303,9 +336,9 @@ def ui_predictor_istanze(request: Request):
 
 
 @app.get("/ui/predictor", include_in_schema=False)
-def ui_predictor_redirect():
+def ui_predictor_redirect(request: Request):
     """08/05: route legacy → redirect a `/ui/predictor-istanze`."""
-    return RedirectResponse(url="/ui/predictor-istanze", status_code=302)
+    return RedirectResponse(url=f"{_url_prefix_ctx.get()}/ui/predictor-istanze", status_code=302)
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -892,7 +925,7 @@ def ui_config(request: Request):
     runtime è stata rimossa (duplicava overview per task flags + istanze, e
     duplicava global config per le altre sezioni). WU98 02/05/2026."""
     from fastapi.responses import RedirectResponse
-    return RedirectResponse(url="/ui/config/global", status_code=302)
+    return RedirectResponse(url=f"{_url_prefix_ctx.get()}/ui/config/global", status_code=302)
 
 
 @app.get("/ui/advanced", include_in_schema=False)

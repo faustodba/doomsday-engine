@@ -6,7 +6,7 @@
 
 <!-- Header istanza -->
 <div style="display:flex;align-items:center;gap:16px;margin-bottom:24px">
-  <a href="/ui" class="btn btn-ghost" style="font-size:11px">← back</a>
+  <a href="{{ url_prefix }}/ui" class="btn btn-ghost" style="font-size:11px">← back</a>
   <h1 style="font-family:var(--font-mono);font-size:18px;color:var(--text-head)">
     {{ stats.nome }}
   </h1>
@@ -34,7 +34,7 @@
   <div class="section-title">override runtime</div>
   {% set ist_ov = overrides.get("istanze", {}).get(stats.nome, {}) %}
   <form style="display:flex;flex-wrap:wrap;gap:12px;align-items:flex-end"
-        hx-patch="/api/config/overrides/istanze/{{ stats.nome }}"
+        hx-patch="{{ url_prefix }}/api/config/overrides/istanze/{{ stats.nome }}"
         hx-ext="json-enc"
         hx-swap="none"
         hx-on::after-request="document.getElementById('save-ok').style.opacity='1';setTimeout(()=>document.getElementById('save-ok').style.opacity='0',2000)">
@@ -89,7 +89,7 @@
     <span class="htmx-indicator" style="color:var(--accent)"> ↻</span>
   </div>
   <div class="log-viewer" id="log-box"
-       hx-get="/ui/partial/log/{{ stats.nome }}"
+       hx-get="{{ url_prefix }}/ui/partial/log/{{ stats.nome }}"
        hx-trigger="load, every 15s"
        hx-swap="innerHTML">
     {% for entry in log %}

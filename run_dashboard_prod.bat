@@ -45,6 +45,7 @@ REM ============================================================================
 cd /d C:\doomsday-engine-prod
 set PYTHONIOENCODING=utf-8
 set DOOMSDAY_ROOT=C:\doomsday-engine-prod
+set DASHBOARD_URL_PREFIX=/doomsday
 
 
 REM --- CLEANUP PORTA 8765 ---------------------------------------------------

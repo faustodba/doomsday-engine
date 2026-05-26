@@ -162,7 +162,7 @@
   window.tgSaveToken = function(){
     var tok = (document.getElementById('tg-token-input').value||'').trim();
     if(!tok){ tgSetStatus('tg-token-status','token vuoto',''); return; }
-    fetch('/api/notifications/telegram-token', {
+    fetch(URL_PREFIX + '/api/notifications/telegram-token', {
       method:'PUT', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({token: tok})
     }).then(r=>r.json()).then(d=>{
@@ -173,7 +173,7 @@
 
   window.tgDeleteToken = function(){
     if(!confirm('Eliminare il token Telegram?')) return;
-    fetch('/api/notifications/telegram-token', {method:'DELETE'})
+    fetch(URL_PREFIX + '/api/notifications/telegram-token', {method:'DELETE'})
       .then(r=>r.json()).then(d=>{
         tgSetStatus('tg-token-status', d.ok ? 'eliminato' : 'errore', d.ok);
         if(d.ok) htmx.trigger('#tg-card','refresh');
@@ -183,7 +183,7 @@
   window.tgSaveChat = function(){
     var cid = (document.getElementById('tg-chat-input').value||'').trim();
     if(!cid){ tgSetStatus('tg-chat-status','chat_id vuoto',''); return; }
-    fetch('/api/notifications/telegram-chat', {
+    fetch(URL_PREFIX + '/api/notifications/telegram-chat', {
       method:'PUT', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({chat_id: cid})
     }).then(r=>r.json()).then(d=>{
@@ -193,7 +193,7 @@
   };
 
   window.tgPatch = function(patch){
-    fetch('/api/notifications/telegram', {
+    fetch(URL_PREFIX + '/api/notifications/telegram', {
       method:'PATCH', headers:{'Content-Type':'application/json'},
       body: JSON.stringify(patch)
     }).then(r=>r.json()).then(d=>{
@@ -203,7 +203,7 @@
 
   window.tgTestSend = function(){
     tgSetStatus('tg-action-status','invio in corso…',true);
-    fetch('/api/notifications/telegram-test', {method:'POST'})
+    fetch(URL_PREFIX + '/api/notifications/telegram-test', {method:'POST'})
       .then(r=>r.json()).then(d=>{
         tgSetStatus('tg-action-status',
           d.ok ? ('✓ inviato a chat_id '+d.chat_id) : ('errore: '+(d.detail||'?')), d.ok);

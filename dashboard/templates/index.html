@@ -13,7 +13,7 @@
     <div class="section">
       <div class="sec-label">istanze (sessione corrente + precedente)</div>
       <div id="prod-istanze"
-           hx-get="/ui/partial/produzione-istanze"
+           hx-get="{{ url_prefix }}/ui/partial/produzione-istanze"
            hx-trigger="load, every 10s"
            hx-swap="innerHTML">
         <div style="color:var(--text-dim);text-align:center;padding:12px">caricamento...</div>
@@ -63,7 +63,7 @@
             <div class="col-sep"></div>
             <div class="col-sub">task flags</div>
             <div id="task-flags"
-                 hx-get="/ui/partial/task-flags-v2"
+                 hx-get="{{ url_prefix }}/ui/partial/task-flags-v2"
                  hx-trigger="load"
                  hx-swap="innerHTML"
                  style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px">
@@ -282,7 +282,7 @@
 
         {# WU119 — Trend 7gg in top della sezione farm (semantica produzione storica) #}
         <div class="res-block" id="res-trend7gg"
-             hx-get="/ui/partial/telemetria-trend"
+             hx-get="{{ url_prefix }}/ui/partial/telemetria-trend"
              hx-trigger="load, every 300s"
              hx-swap="innerHTML">
           <div class="res-sub">trend 7gg (sparkline · current · Δ)</div>
@@ -290,7 +290,7 @@
         </div>
 
         <div class="res-block" id="res-totali"
-             hx-get="/ui/partial/res-totali"
+             hx-get="{{ url_prefix }}/ui/partial/res-totali"
              hx-trigger="load, every 30s"
              hx-swap="innerHTML">
           <div class="res-sub">totale raccolto (ultime 5h)</div>
@@ -317,7 +317,7 @@
         </div>
 
         <div class="res-block" id="res-oraria"
-             hx-get="/ui/partial/res-oraria"
+             hx-get="{{ url_prefix }}/ui/partial/res-oraria"
              hx-trigger="load, every 60s"
              hx-swap="innerHTML">
           <div class="res-sub">produzione/ora (ultime 5h)</div>
@@ -398,14 +398,14 @@ function setZainoMode(mode) {
 // auto-WU22: toggle checkbox task flag (sostituisce hx-patch su pill)
 async function toggleTaskFlag(name, checked) {
   try {
-    const resp = await fetch(`/api/config/overrides/task/${name}`, {
+    const resp = await fetch(URL_PREFIX + `/api/config/overrides/task/${name}`, {
       method: 'PATCH',
       headers: {'Content-Type': 'application/x-www-form-urlencoded'},
       body: `abilitato=${checked ? 'true' : 'false'}`
     });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     if (typeof htmx !== 'undefined') {
-      htmx.ajax('GET', '/ui/partial/task-flags-v2',
+      htmx.ajax('GET', URL_PREFIX + '/ui/partial/task-flags-v2',
                 {target: '#task-flags', swap: 'innerHTML'});
     }
   } catch (err) {
@@ -416,7 +416,7 @@ async function toggleTaskFlag(name, checked) {
 // Cambio modalità remoto per pill compound in task-flags-v2
 // (autonomo, non dipende da quale box è visibile).
 async function setModeRemote(taskName, sub) {
-  const url = `/api/config/${taskName}-mode/${sub}`;
+  const url = URL_PREFIX + `/api/config/${taskName}-mode/${sub}`;
   try {
     const resp = await fetch(url, {method: 'PATCH'});
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
@@ -425,7 +425,7 @@ async function setModeRemote(taskName, sub) {
     if (taskName === 'zaino')        setZainoMode(sub);
     // Refresh task-flags-v2 per aggiornare pill active
     if (typeof htmx !== 'undefined') {
-      htmx.ajax('GET', '/ui/partial/task-flags-v2',
+      htmx.ajax('GET', URL_PREFIX + '/ui/partial/task-flags-v2',
                 {target: '#task-flags', swap: 'innerHTML'});
     }
   } catch (err) {

@@ -183,7 +183,7 @@
       smtp_port:             parseInt($('notif-smtp-port').value || 465),
     };
     try {
-      const r = await fetch('/api/notifications', {
+      const r = await fetch(URL_PREFIX + '/api/notifications', {
         method: 'PATCH',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(payload),
@@ -203,7 +203,7 @@
   window.notifTestSend = async function() {
     setMsg('invio test...', '#0066cc');
     try {
-      const r = await fetch('/api/notifications/test-send', {method: 'POST'});
+      const r = await fetch(URL_PREFIX + '/api/notifications/test-send', {method: 'POST'});
       const j = await r.json();
       if (r.ok) setMsg('✓ test inviato a ' + (j.to || []).join(', '), '#0a8000');
       else setMsg('✗ ' + (j.detail || 'errore'), '#c00');
@@ -218,7 +218,7 @@
     if (!pw) { setMsg('inserisci la password', '#c00'); return; }
     setMsg('salvataggio password...', '#0066cc');
     try {
-      const r = await fetch('/api/notifications/app-password', {
+      const r = await fetch(URL_PREFIX + '/api/notifications/app-password', {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({password: pw}),
@@ -240,7 +240,7 @@
     if (!confirm('Rimuovere app password dalla dashboard?')) return;
     setMsg('rimozione...', '#0066cc');
     try {
-      const r = await fetch('/api/notifications/app-password', {method: 'DELETE'});
+      const r = await fetch(URL_PREFIX + '/api/notifications/app-password', {method: 'DELETE'});
       const j = await r.json();
       if (r.ok) {
         setMsg('✓ rimossa (source=' + j.source + ')', '#0a8000');
@@ -256,7 +256,7 @@
   window.notifDispatchNow = async function() {
     setMsg('dispatch...', '#0066cc');
     try {
-      const r = await fetch('/api/notifications/dispatch-now', {method: 'POST'});
+      const r = await fetch(URL_PREFIX + '/api/notifications/dispatch-now', {method: 'POST'});
       const j = await r.json();
       if (r.ok) {
         const s = j.stats || {};

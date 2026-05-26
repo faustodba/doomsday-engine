@@ -1,5 +1,229 @@
 # SESSION.md — Handoff Doomsday Engine V6
 
+## Sessione 26/05/2026 (update 2) — Dynamic url_prefix: fix CSS locale dopo sub-path ngrok
+
+### Stato corrente
+
+- **Bot prod**: IN ESECUZIONE
+- **Dashboard prod**: IN ESECUZIONE con url_prefix dinamico ✓
+- **Dashboard locale**: funziona su `http://localhost:8765/` senza prefisso ✓
+
+### Problema
+
+Dopo il fix sub-path (sessione 26/05), la dashboard locale (`localhost:8765`) aveva il CSS
+rotto: `_URL_PREFIX = "/doomsday"` era statico, quindi i link diventavano
+`/doomsday/static/style.css` anche in locale dove il prefisso non esiste.
+
+### Fix: ContextVar + _DynamicPrefix
+
+Il prefisso viene rilevato a runtime per ogni request tramite header `X-Forwarded-Proto`:
+- Via ngrok/Caddy: `x-forwarded-proto: https` → prefisso `/doomsday`
+- In locale: header assente → prefisso `""`
+
+```python
+_url_prefix_ctx: ContextVar[str] = ContextVar("url_prefix", default="")
+
+class _DynamicPrefix:
+    def __str__(self) -> str: return _url_prefix_ctx.get()
+    def __html__(self) -> str: return _url_prefix_ctx.get()
+
+templates.env.globals["url_prefix"] = _DynamicPrefix()
+
+@app.middleware("http")
+async def _url_prefix_middleware(request, call_next):
+    proto = request.headers.get("x-forwarded-proto", "")
+    token = _url_prefix_ctx.set(_URL_PREFIX if proto == "https" else "")
+    try:
+        return await call_next(request)
+    finally:
+        _url_prefix_ctx.reset(token)
+```
+
+Aggiornate anche 3 `RedirectResponse` per usare `_url_prefix_ctx.get()` invece di `_URL_PREFIX`.
+Template invariati: `{{ url_prefix }}` funziona perché il global è ora l'oggetto dinamico.
+
+**File modificati**: `dashboard/app.py`.
+**Sync prod**: xcopy `dashboard/` → `C:\doomsday-engine-prod\dashboard\` → restart dashboard. ✓
+
+---
+
+## Sessione 26/05/2026 (update) — CSS fix: sync_prod.bat mancante
+
+### Stato corrente
+
+- **Bot prod**: IN ESECUZIONE
+- **Dashboard prod**: IN ESECUZIONE con `DASHBOARD_URL_PREFIX=/doomsday` ✓
+
+### Fix applicato
+
+CSS non si renderizzava via ngrok: il problema era che i fix (app.py + templates) erano stati fatti
+in `C:\doomsday-engine` (dev) ma NON deployati in `C:\doomsday-engine-prod` (prod).
+
+**Causa root:** `sync_prod.bat` non era stato eseguito dopo i fix della sessione precedente.
+`C:\doomsday-engine-prod` non è un git repo — il codice va copiato esplicitamente.
+
+**Fix:** xcopy manuale `dashboard/` + resto codice da dev a prod (equivalente a `sync_prod.bat`).
+Dashboard riavviata con env var corretta. CSS link ora è `/doomsday/static/style.css`. ✓
+
+**Regola:** dopo ogni modifica a `dashboard/` o altro codice Python, eseguire `sync_prod.bat`
+prima di riavviare il processo prod.
+
+---
+
+## Sessione 26/05/2026 — Sub-path deployment via ngrok/Caddy
+
+### Stato corrente
+
+- **Bot prod**: IN ESECUZIONE
+- **Dashboard prod**: richiede restart uvicorn per attivare le modifiche sub-path (ora completato)
+
+### Lavoro completato
+
+**Sub-path deployment support** — la dashboard può ora essere esposta via ngrok sotto `/doomsday/`
+senza che i path assoluti nei template rompano la navigazione e le chiamate API.
+
+**Meccanismo:**
+- `app.py`: aggiunto `DASHBOARD_URL_PREFIX` env var (default `""`); iniettato come Jinja2 global `url_prefix`
+- Tutti i template Jinja2: path assoluti convertiti in `{{ url_prefix }}/path` per href, hx-get, hx-post, hx-patch, hx-delete
+- JS in template: aggiunto `const URL_PREFIX = '{{ url_prefix }}';` in `base.html`; tutte le `fetch('/api/...')` e `htmx.ajax(...)` usano `URL_PREFIX + '/...'`
+- `run_dashboard_prod.bat` (prod + dev): aggiunto `set DASHBOARD_URL_PREFIX=/doomsday`
+- App redirects interni (`/`, `/ui/predictor`, `/ui/config`): aggiornati a usare `_URL_PREFIX`
+
+**File modificati:**
+- `dashboard/app.py` — DASHBOARD_URL_PREFIX + Jinja2 global + redirect
+- `dashboard/templates/base.html` — static, nav, HTMX polling, JS URL_PREFIX, fetch
+- `dashboard/templates/` — ab_test, index, advanced, config_global, instance, raccolta, telemetria, storico, predictor_istanze
+- `dashboard/templates/partials/` — notifications_card, telegram_card, adaptive_scheduler_card, task_flags
+- `run_dashboard_prod.bat` (C:\doomsday-engine-prod e C:\doomsday-engine)
+
+**Non modificati (orfani/legacy):**
+- `templates/predictor.html` — non servito da app.py (redirect a predictor_istanze)
+- `templates/config_overrides.html.legacy` — non attivo
+
+**Per attivare:** riavviare `run_dashboard_prod.bat` da `C:\doomsday-engine-prod`
+
+**Accesso locale invariato:** senza `DASHBOARD_URL_PREFIX` (o con `=""`), tutto funziona come prima su `http://localhost:8765/`
+
+### Pendenze ereditate
+
+- **Restart dashboard prod** (commit `7927a71` — `shared/prod_unificata.py`)
+- **AI Advisor concept** — lasciato in pending esplicito dall'utente
+
+---
+
+## Sessione 24/05/2026 (chiusura) — prod_unificata master fix + DS AP poll + docs reference
+
+### Stato corrente
+
+- **Bot prod**: IN ESECUZIONE
+- **Dashboard prod**: richiede restart uvicorn per caricare `shared/prod_unificata.py` (commit `7927a71` sessione precedente)
+- **Telegram bot**: IN ESECUZIONE (PID 21536)
+
+### Lavoro completato
+
+**1. prod_unificata HTML renderer (daily report sez. 2)**
+Completato renderer HTML sezione 2 "PRODUZIONE INTERNA RIFUGIO" in `core/daily_report.py`.
+Blocco `prod_unificata` inserito dopo `n_sess_anomali` (~riga 1533), prima di `# 3. RISORSE INVIATE AL MASTER`.
+Mostra: farm total `prod_unif_farm_h` M pom-eq/h + tabella per istanza.
+
+**2. Fix master in prod_unificata**
+- `dashboard/services/stats_reader.py::get_produzione_istanze`: se `is_m` → `_pu_empty()` (skip compute per master)
+- `core/daily_report.py`: `farm_pom_eq` usa `totali_ord` solo istanze ordinarie; `master_row["prod_unif_h"] = 0.0`
+- Root cause: `FauMorfeus.json::produzione_qty` include risorse ricevute via rifornimento. WU128 non funziona cross-mezzanotte UTC. Fix definitivo: escludi master dalla metrica.
+
+**3. Fix DS AP poll — early exit transizione**
+`tasks/district_showdown.py::_attendi_ap_chiuso()`: counter `streak_transizione`.
+Dopo popup closes, `pin_dado` non matchato durante animazione → 45s sprecati.
+Fix: dopo 3 poll "transizione, nessun pin" → return immediato. Reset su `has_ap.found`.
+
+**4. JavaDoc HTML reference documentation**
+Nuovo `docs/reference.html` (96KB, 1257 righe) dark theme, sidebar fissa 22 sezioni, 29 tabelle metodi.
+Fix: "Rise of Kingdoms" → "Doomsday: Last Survivors".
+
+### Commit questa sessione
+
+| Hash | Descrizione |
+|------|-------------|
+| `86a1aeb` | feat(prod_unificata): Telegram /produzione + daily report HTML sezione 2 |
+| `2ae8e56` | fix(prod_unificata): escludi master da prod_unif_h |
+| `4162cd6` | fix(DS): AP poll — early exit dopo 3 poll consecutivi di transizione |
+| `6f1e368` | docs: JavaDoc HTML reference documentation (96KB, 1257 righe) |
+| `60db5ea` | docs: fix nome gioco Rise of Kingdoms -> Doomsday: Last Survivors |
+
+### Pendenze
+
+- **Restart dashboard prod** per caricare `shared/prod_unificata.py` (commit `7927a71`, sessione precedente)
+- **AI Advisor concept** — lasciato in pending esplicito dall'utente
+
+### Prossimo step
+
+- Restart dashboard prod → verifica sezione 2 daily report + Telegram `/produzione`
+- Monitor DS prossima finestra evento (Ven-Lun UTC): cercare `[DS] AP: transizione persistente` nel log
+
+---
+
+## Sessione 24/05/2026 (aggiornamento) — prod_unificata delta-based
+
+### Stato corrente
+
+- **Bot prod**: IN ESECUZIONE
+- **Dashboard prod**: richiede restart uvicorn per caricare `shared/prod_unificata.py` aggiornato
+- **Commit**: `7927a71` — feat(prod_unificata): delta-based production metric from produzione_storico
+
+### Lavoro completato
+
+**Metrica prod_unificata reale** — usa `produzione_qty` da `produzione_storico` invece di `dettaglio_oggi`.
+
+Formula: `prod_r = (deposit_N1 - deposit_N + inviato_N→N1) / 24h` — già calcolato dal bot in `chiudi_sessione_e_calcola`. Floor a 0 per delta negativi.
+
+Valori smoke test: FAU_00=2.976, FAU_01=1.124, FAU_03=1.414, FAU_10=1.241 M pom-eq/h (fonte=storico).
+
+**Prossimo step**: restart dashboard prod per caricare `prod_unificata.py` aggiornato.
+
+---
+
+## Sessione 24/05/2026 — Bug FT flag FAU_00 chiuso
+
+### Stato corrente
+
+- **Bot prod**: IN ESECUZIONE
+- **Dashboard prod**: riavviata con fix `f0ac930` attivo in memoria
+- **Bug FT flag FAU_00**: ✅ CHIUSO
+
+### Bug FT — raccolta_fuori_territorio FAU_00
+
+**Commit fix**: `f0ac930` — `dashboard/routers/api_config_overrides.py:691`: aggiunto `raccolta_fuori_territorio` nell'`allowed` set del PATCH `/api/config/overrides/istanze/{nome}`. Senza questa chiave il payload era silenziosamente droppato ad ogni save dalla card HOME.
+
+**Stato finale verificato**:
+- `runtime_overrides.json` prod FAU_00: `raccolta_fuori_territorio: true` ✓
+- Dashboard HOME card ic-ft: `checked` ✓
+- Log bot 24/05 UTC 05:17-05:19: 5/5 marce, 0 territory check ✓
+- `RaccoltaFastTask` rispetta il flag via `RACCOLTA_FUORI_TERRITORIO_ABILITATA` in `tasks/raccolta_fast.py:388-389` ✓
+
+### WU-RaccoltaStats — pagina analisi nodi raccolta ✅
+
+**Commit**: `4a5ba8f` — nuova pagina `/ui/raccolta` con tabella Layout B (righe=istanze, colonne=tipo×livello).
+
+**Sorgente**: `data/cap_nodi_dataset.jsonl` (scritto da `shared/cap_nodi_dataset.py` dopo ogni marcia raccolta — dati persistenti, non log).
+
+**Funzionalità**:
+- `get_raccolta_nodi_stats(days)` in `stats_reader.py`: aggrega fill rate (load_squadra/capacita) per tipo × livello × istanza
+- Tipi: `campo→🍅pomodoro`, `segheria→🪵legno`, `acciaio`, `petrolio` / livelli L6+L7+tot
+- Fill rate colorato: ≥95% verde (satura), 75-94% giallo (marginale), <75% rosso (underprovisioned)
+- FauMorfeus esclusa, outlier fill>150% filtrati
+- Riga TOTALE FARM in cima, istanze ordinate per fill% ASC (peggiori prima)
+- Filtro periodo 7gg/30gg/tutti via query param `?days=N`
+- Nav link "raccolta" tra "telemetria" e "predictor istanze"
+
+**Test prod**: 1387 record 7gg, 11 istanze, fill tot 99.3%
+
+### Prossimo step
+
+- Riavviare dashboard prod per attivare `4a5ba8f` (uvicorn no --reload)
+- Verificare durante prossima finestra DS (Ven-Lun UTC): log `[DS] banner chiuso (score=...) — tap apri (345,63)`
+
+---
+
 ## Sessione 23/05/2026 — WU-RifCentratura validato + fix Telegram /rifornimento + DS banner aperto
 
 ### Stato corrente
@@ -51,6 +275,14 @@
 
 - Verificare durante prossima finestra DS: log `[DS] banner chiuso (score=...) — tap apri` nei FAU_*.jsonl
 - Monitorare ri-centratura rifornimento (`ri-centro e riprovo`) — dai dati odierni mai attivata, comportamento atteso
+
+### Chiusura sessione
+
+- Monitor `b04p6kjqh` chiuso (ciclo pulito FAU_00→FAU_06, nessuna anomalia)
+- Bot prod: in esecuzione (FAU_07+ in corso)
+- Telegram bot: in esecuzione (PID 21536)
+- Tutti i commit pushati su `origin/main` (ultimo: `621f208`)
+- Documentazione aggiornata: SESSION.md + ROADMAP.md + CLAUDE.md
 
 ---
 

@@ -29,7 +29,7 @@
         <table class="st-tbl">
           <thead><tr><th>ts</th><th>istanza</th><th>task</th><th>esito</th><th>durata</th><th>msg</th></tr></thead>
           <tbody id="storico-body"
-                 hx-get="/ui/partial/storico"
+                 hx-get="{{ url_prefix }}/ui/partial/storico"
                  hx-trigger="load, every 30s"
                  hx-include="#f-istanza, #f-task"
                  hx-swap="innerHTML">
@@ -51,7 +51,7 @@ function aggiornaStorico() {
   const params = new URLSearchParams();
   const ist = gv('f-istanza'); if (ist) params.set('istanza', ist);
   const tsk = gv('f-task');    if (tsk) params.set('task', tsk);
-  htmx.ajax('GET', '/ui/partial/storico?'+params, {target:'#storico-body', swap:'innerHTML'});
+  htmx.ajax('GET', URL_PREFIX + '/ui/partial/storico?'+params, {target:'#storico-body', swap:'innerHTML'});
 }
 </script>
 

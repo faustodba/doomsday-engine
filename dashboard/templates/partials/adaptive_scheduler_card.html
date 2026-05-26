@@ -124,7 +124,7 @@
       threshold_spedizioni_oggi:  parseInt($('adapt-th-sped').value || 100),
     };
     try {
-      const r = await fetch('/api/adaptive-scheduler', {
+      const r = await fetch(URL_PREFIX + '/api/adaptive-scheduler', {
         method: 'PATCH',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(payload),

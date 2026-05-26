@@ -11,7 +11,7 @@
     <div class="section">
       <div class="sec-label">📊 ab test · adaptive vs naive · efficacia riordino istanze</div>
       <div id="ab-summary"
-           hx-get="/ui/partial/ab-test-summary"
+           hx-get="{{ url_prefix }}/ui/partial/ab-test-summary"
            hx-trigger="load, every 60s"
            hx-swap="innerHTML">
         <div class="tel-grid">
@@ -31,7 +31,7 @@
     <div class="section">
       <div class="sec-label">📈 trend delta_slot per ciclo · adaptive − naive</div>
       <div id="ab-trend"
-           hx-get="/ui/partial/ab-test-trend"
+           hx-get="{{ url_prefix }}/ui/partial/ab-test-trend"
            hx-trigger="load, every 60s"
            hx-swap="innerHTML">
         <div class="tel-grid">
@@ -51,7 +51,7 @@
     <div class="section">
       <div class="sec-label">🕐 ultimi cicli · dettaglio per record</div>
       <div id="ab-detail"
-           hx-get="/ui/partial/ab-test-detail"
+           hx-get="{{ url_prefix }}/ui/partial/ab-test-detail"
            hx-trigger="load, every 60s"
            hx-swap="innerHTML">
         <div class="tel-grid">

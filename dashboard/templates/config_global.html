@@ -6,7 +6,7 @@
 
 <div class="banner-restart">
   <strong>config</strong> = baseline statica <code>global_config.json</code> · <span style="color:#f87171">richiede RIAVVIO bot</span> per applicare.<br>
-  Per toggle on/off rapidi (task, istanze) usa la <a href="/ui/">overview</a> · hot-reload al prossimo tick.
+  Per toggle on/off rapidi (task, istanze) usa la <a href="{{ url_prefix }}/ui/">overview</a> · hot-reload al prossimo tick.
 </div>
 
 {% set sis = cfg.get('sistema',{}) %}
@@ -51,7 +51,7 @@ async function resetConfigRuntime() {
   m.textContent = 'reset in corso...';
   m.style.color = '#0066cc';
   try {
-    const r = await fetch('/api/config/reset', {method: 'POST'});
+    const r = await fetch(URL_PREFIX + '/api/config/reset', {method: 'POST'});
     const j = await r.json();
     if (r.ok) {
       m.textContent = '✓ ' + (j.msg || 'reset eseguito') + ' — il bot leggerà i nuovi valori al prossimo tick';
@@ -72,7 +72,7 @@ async function promoteRuntimeToStatic() {
   m.textContent = 'promuovendo runtime → static...';
   m.style.color = '#0066cc';
   try {
-    const r = await fetch('/api/config/promote', {method: 'POST'});
+    const r = await fetch(URL_PREFIX + '/api/config/promote', {method: 'POST'});
     const j = await r.json();
     if (r.ok) {
       const parts = [];
@@ -475,7 +475,7 @@ async function promoteRuntimeToStatic() {
 <div class="section">
   <div class="sec-label">📧 email notifier · daily report + alert (account dedicato)</div>
   <div id="notif-card"
-       hx-get="/ui/partial/notifications"
+       hx-get="{{ url_prefix }}/ui/partial/notifications"
        hx-trigger="load, refresh, every 30s"
        hx-swap="innerHTML">
     <div style="padding:14px;color:#888;font-size:12px">caricamento…</div>
@@ -486,7 +486,7 @@ async function promoteRuntimeToStatic() {
 <div class="section">
   <div class="sec-label">💬 telegram bot · comandi + notifiche proattive</div>
   <div id="tg-card"
-       hx-get="/ui/partial/telegram"
+       hx-get="{{ url_prefix }}/ui/partial/telegram"
        hx-trigger="load, refresh, every 60s"
        hx-swap="innerHTML">
     <div style="padding:14px;color:#888;font-size:12px">caricamento…</div>
@@ -607,7 +607,7 @@ function gcShowMsg(okId, errId, ok, msg) {
 
 async function gcApiPatch(payload) {
   try {
-    const resp = await fetch('/api/config/global', {
+    const resp = await fetch(URL_PREFIX + '/api/config/global', {
       method: 'PATCH',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload),
@@ -817,7 +817,7 @@ async function gcSalvaIstanze() {
     };
   });
   try {
-    const resp = await fetch('/api/config/istanze', {
+    const resp = await fetch(URL_PREFIX + '/api/config/istanze', {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ istanze }),
@@ -874,7 +874,7 @@ async function gcSalvaTruppeIstanze() {
     }
   });
   try {
-    const resp = await fetch('/api/config/istanze/truppe', {
+    const resp = await fetch(URL_PREFIX + '/api/config/istanze/truppe', {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ istanze }),

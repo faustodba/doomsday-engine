@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}Doomsday V6{% endblock %}</title>
-  <link rel="stylesheet" href="/static/style.css">
+  <link rel="stylesheet" href="{{ url_prefix }}/static/style.css">
   <style>
     /* WU153 — pannelli collapsable (click su header per toggle, stato in localStorage) */
     .tel-card.panel-collapsed > *:not(.tel-head),
@@ -78,17 +78,17 @@
     <span class="env-warn">⚠ dati di test — non produzione</span>
     {% endif %}
     <nav class="topbar-nav">
-      <a href="/ui" class="{% if active=='home' %}active{% endif %}">home</a>
-      <a href="/ui/advanced" class="{% if active=='advanced' %}active{% endif %}">advanced</a>
-      <a href="/ui/telemetria" class="{% if active=='telemetria' %}active{% endif %}">telemetria</a>
-      <a href="/ui/raccolta" class="{% if active=='raccolta' %}active{% endif %}">raccolta</a>
-      <a href="/ui/predictor-istanze" class="{% if active=='predictor' %}active{% endif %}">predictor istanze</a>
-      <a href="/ui/ab-test" class="{% if active=='ab_test' %}active{% endif %}">ab test</a>
-      <a href="/ui/config/global" class="{% if active=='global' %}active{% endif %}">config</a>
-      <a href="/docs" target="_blank">api</a>
+      <a href="{{ url_prefix }}/ui" class="{% if active=='home' %}active{% endif %}">home</a>
+      <a href="{{ url_prefix }}/ui/advanced" class="{% if active=='advanced' %}active{% endif %}">advanced</a>
+      <a href="{{ url_prefix }}/ui/telemetria" class="{% if active=='telemetria' %}active{% endif %}">telemetria</a>
+      <a href="{{ url_prefix }}/ui/raccolta" class="{% if active=='raccolta' %}active{% endif %}">raccolta</a>
+      <a href="{{ url_prefix }}/ui/predictor-istanze" class="{% if active=='predictor' %}active{% endif %}">predictor istanze</a>
+      <a href="{{ url_prefix }}/ui/ab-test" class="{% if active=='ab_test' %}active{% endif %}">ab test</a>
+      <a href="{{ url_prefix }}/ui/config/global" class="{% if active=='global' %}active{% endif %}">config</a>
+      <a href="{{ url_prefix }}/docs" target="_blank">api</a>
     </nav>
     <div class="topbar-counters"
-         hx-get="/ui/partial/status-inline"
+         hx-get="{{ url_prefix }}/ui/partial/status-inline"
          hx-trigger="load, every 5s"
          hx-swap="innerHTML">
       <span class="cnt">stato <b>—</b></span>
@@ -107,7 +107,7 @@
   <!-- WU51 — banner manutenzione (sempre visibile, polling 5s) -->
   <div id="maint-banner"
        style="padding:6px 20px;max-width:1600px;margin:0 auto"
-       hx-get="/ui/partial/maintenance-banner"
+       hx-get="{{ url_prefix }}/ui/partial/maintenance-banner"
        hx-trigger="load, every 5s"
        hx-swap="innerHTML">
   </div>
@@ -115,7 +115,7 @@
   <!-- 06/05 — banner restart bot pendente (visibile solo se richiesta attiva) -->
   <div id="restart-banner"
        style="padding:0 20px;max-width:1600px;margin:0 auto"
-       hx-get="/ui/partial/restart-banner"
+       hx-get="{{ url_prefix }}/ui/partial/restart-banner"
        hx-trigger="load, every 10s"
        hx-swap="innerHTML">
   </div>
@@ -126,13 +126,14 @@
   </main>
 
   <script>
+    const URL_PREFIX = '{{ url_prefix }}';
     // WU51 — toggle modalità manutenzione
     async function maintenanceToggle(activate) {
       try {
         if (activate) {
           const motivo = prompt('Motivo manutenzione (opzionale):', 'aggiornamento');
           if (motivo === null) return;  // cancelled
-          const r = await fetch('/api/maintenance/start', {
+          const r = await fetch(URL_PREFIX + '/api/maintenance/start', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({motivo: motivo || ''}),
@@ -140,12 +141,12 @@
           if (!r.ok) throw new Error('HTTP ' + r.status);
         } else {
           if (!confirm('Disattivare modalità manutenzione e riprendere il bot?')) return;
-          const r = await fetch('/api/maintenance/stop', {method: 'POST'});
+          const r = await fetch(URL_PREFIX + '/api/maintenance/stop', {method: 'POST'});
           if (!r.ok) throw new Error('HTTP ' + r.status);
         }
         // Refresh immediato banner
         if (typeof htmx !== 'undefined') {
-          htmx.ajax('GET', '/ui/partial/maintenance-banner',
+          htmx.ajax('GET', URL_PREFIX + '/ui/partial/maintenance-banner',
                     {target: '#maint-banner', swap: 'innerHTML'});
         }
       } catch (err) {
@@ -173,7 +174,7 @@
         max_squadre:               parseInt(card.querySelector('.ic-sq').value || '4', 10),
       };
       try {
-        const r = await fetch('/api/config/overrides/istanze/' + encodeURIComponent(nome), {
+        const r = await fetch(URL_PREFIX + '/api/config/overrides/istanze/' + encodeURIComponent(nome), {
           method: 'PATCH',
           headers: {'Content-Type': 'application/json'},
           body: JSON.stringify(payload),
@@ -192,7 +193,7 @@
               }
             };
             document.addEventListener('htmx:afterSwap', restoreScroll);
-            setTimeout(() => htmx.ajax('GET', '/ui/partial/produzione-istanze',
+            setTimeout(() => htmx.ajax('GET', URL_PREFIX + '/ui/partial/produzione-istanze',
               {target: '#prod-istanze', swap: 'innerHTML'}), 800);
           }
         } else {
@@ -303,7 +304,7 @@
       const btn = document.getElementById('wake-btn');
       if (btn) { btn.disabled = true; btn.textContent = '⏳ invio...'; }
       try {
-        const r = await fetch('/api/wake-now', {method: 'POST'});
+        const r = await fetch(URL_PREFIX + '/api/wake-now', {method: 'POST'});
         if (!r.ok) throw new Error('HTTP ' + r.status);
         if (btn) { btn.textContent = '✓ segnale inviato'; btn.style.color = 'var(--green)'; btn.style.borderColor = 'var(--green)'; }
         setTimeout(() => {
@@ -323,15 +324,15 @@
       try {
         if (request) {
           if (!confirm('Richiedere restart bot al PROSSIMO fine ciclo?\n\nIl bot uscirà con exit code 100 e run_prod.bat lo riavvierà automaticamente fra 5s.\nNessun tick verrà interrotto.')) return;
-          const r = await fetch('/api/restart-bot', {method: 'POST'});
+          const r = await fetch(URL_PREFIX + '/api/restart-bot', {method: 'POST'});
           if (!r.ok) throw new Error('HTTP ' + r.status);
         } else {
           if (!confirm('Cancellare la richiesta di restart pendente?')) return;
-          const r = await fetch('/api/restart-bot', {method: 'DELETE'});
+          const r = await fetch(URL_PREFIX + '/api/restart-bot', {method: 'DELETE'});
           if (!r.ok) throw new Error('HTTP ' + r.status);
         }
         if (typeof htmx !== 'undefined') {
-          htmx.ajax('GET', '/ui/partial/restart-banner',
+          htmx.ajax('GET', URL_PREFIX + '/ui/partial/restart-banner',
                     {target: '#restart-banner', swap: 'innerHTML'});
         }
       } catch (err) {

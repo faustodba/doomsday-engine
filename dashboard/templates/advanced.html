@@ -12,7 +12,7 @@
   <div style="background:rgba(0,0,0,0.04);border:1px solid var(--border);border-radius:6px;
               padding:8px 12px;margin-bottom:10px;font-size:12px;color:var(--text-dim)">
     Modifiche real-time → scrivono su <code>runtime_overrides.json</code> (dynamic).
-    Per modificare i default statici (parametri iniziali) usa <a href="/ui/config/global">config</a>.
+    Per modificare i default statici (parametri iniziali) usa <a href="{{ url_prefix }}/ui/config/global">config</a>.
   </div>
   <div style="overflow-x:auto">
     <table class="ist-tbl">
@@ -25,7 +25,7 @@
         <th>fascia oraria</th>
       </tr></thead>
       <tbody id="adv-ist-tbody"
-             hx-get="/ui/partial/ist-table"
+             hx-get="{{ url_prefix }}/ui/partial/ist-table"
              hx-trigger="load"
              hx-swap="innerHTML">
         <tr><td colspan="8" style="color:var(--text-dim);font-size:9px;padding:8px">caricamento...</td></tr>
@@ -159,7 +159,7 @@ async function advSalvaIstanze() {
       raccolta_fuori_territorio: tr.querySelector('.ist-fuori-terr')?.checked ?? false,
     };
     try {
-      const r = await fetch('/api/config/overrides/istanze/' + encodeURIComponent(nome), {
+      const r = await fetch(URL_PREFIX + '/api/config/overrides/istanze/' + encodeURIComponent(nome), {
         method: 'PATCH',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify(payload),
@@ -195,7 +195,7 @@ async function advSalvaTruppeGlobali() {
     },
   };
   try {
-    const r = await fetch('/api/config/truppe-globali', {
+    const r = await fetch(URL_PREFIX + '/api/config/truppe-globali', {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify(payload),
@@ -232,7 +232,7 @@ async function advSalvaTruppeIstanze() {
     }
   });
   try {
-    const r = await fetch('/api/config/truppe-istanze', {
+    const r = await fetch(URL_PREFIX + '/api/config/truppe-istanze', {
       method: 'PUT',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({ istanze }),
