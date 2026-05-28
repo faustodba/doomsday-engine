@@ -427,22 +427,7 @@ def _build_status() -> str:
     lines.append("🟢 Dashboard: ATTIVA" if dash_ok else "🔴 Dashboard: non avviata")
 
     # DRL master
-    morf = _read_morfeus_state()
-    drl = morf.get("daily_recv_limit", -1)
-    drl_max = morf.get("daily_recv_limit_max", -1)
-    ts_drl = morf.get("ts", "")
-    if drl >= 0:
-        drl_pct = int((drl / drl_max * 100)) if drl_max > 0 else 0
-        icon = "🔴" if drl == 0 else ("🟡" if drl_pct < 20 else "🟢")
-        ts_str = ""
-        if ts_drl:
-            try:
-                dt = datetime.fromisoformat(ts_drl.replace("Z", "+00:00"))
-                ago = int((datetime.now(timezone.utc) - dt).total_seconds())
-                ts_str = f" ({_fmt_dur(ago)} fa)"
-            except Exception:
-                pass
-        lines.append(f"DRL master: {icon} {drl/1e6:.0f}M / {drl_max/1e6:.0f}M ({drl_pct}%){ts_str}")
+    lines.append(_fmt_drl_line("DRL master"))
 
     # Suggerimento avvio rapido se qualcosa è spento
     if not _check_bot_running() or not dash_ok:
@@ -739,29 +724,42 @@ def _build_cicli() -> str:
     return "\n".join(lines)
 
 
+def _morfeus_abilitata() -> bool:
+    """True se FauMorfeus è abilitata in runtime_overrides (default True)."""
+    ov = _read_runtime_overrides()
+    return ov.get("istanze", {}).get("FauMorfeus", {}).get("abilitata", True)
+
+
+def _fmt_drl_line(prefix: str = "DRL FauMorfeus") -> str:
+    """Riga DRL con timestamp e warning stale se FauMorfeus disabilitata."""
+    morf = _read_morfeus_state()
+    drl = morf.get("daily_recv_limit", -1)
+    drl_max = morf.get("daily_recv_limit_max", -1)
+    ts_drl = morf.get("ts", "")
+    if drl < 0:
+        return f"{prefix}: non disponibile"
+    drl_pct = int((drl / drl_max * 100)) if drl_max > 0 else 0
+    icon = "🔴" if drl == 0 else ("🟡" if drl_pct < 20 else "🟢")
+    ts_str = ""
+    stale_note = ""
+    if ts_drl:
+        try:
+            dt = datetime.fromisoformat(ts_drl.replace("Z", "+00:00"))
+            ago = int((datetime.now(timezone.utc) - dt).total_seconds())
+            ts_str = f" ({_fmt_dur(ago)} fa)"
+            if ago > 6 * 3600 and not _morfeus_abilitata():
+                stale_note = " ⚠ stale — FauMorfeus disabilitata"
+        except Exception:
+            pass
+    return f"{prefix}: {icon} {drl/1e6:.0f}M / {drl_max/1e6:.0f}M ({drl_pct}%){ts_str}{stale_note}"
+
+
 def _build_rifornimento() -> str:
     """Risposta al comando /rifornimento."""
     lines: list[str] = ["<b>Rifornimento</b>"]
 
     # DRL master
-    morf = _read_morfeus_state()
-    drl = morf.get("daily_recv_limit", -1)
-    drl_max = morf.get("daily_recv_limit_max", -1)
-    ts_drl = morf.get("ts", "")
-    if drl >= 0:
-        drl_pct = int((drl / drl_max * 100)) if drl_max > 0 else 0
-        icon = "🔴" if drl == 0 else ("🟡" if drl_pct < 20 else "🟢")
-        ts_str = ""
-        if ts_drl:
-            try:
-                dt = datetime.fromisoformat(ts_drl.replace("Z", "+00:00"))
-                ago = int((datetime.now(timezone.utc) - dt).total_seconds())
-                ts_str = f" ({_fmt_dur(ago)} fa)"
-            except Exception:
-                pass
-        lines.append(f"DRL FauMorfeus: {icon} {drl/1e6:.0f}M / {drl_max/1e6:.0f}M ({drl_pct}%){ts_str}")
-    else:
-        lines.append("DRL FauMorfeus: non disponibile")
+    lines.append(_fmt_drl_line("DRL FauMorfeus"))
 
     # Spedizioni per istanza (oggi)
     ov = _read_runtime_overrides()
