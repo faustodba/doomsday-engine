@@ -430,10 +430,19 @@ def _build_status() -> str:
     morf = _read_morfeus_state()
     drl = morf.get("daily_recv_limit", -1)
     drl_max = morf.get("daily_recv_limit_max", -1)
+    ts_drl = morf.get("ts", "")
     if drl >= 0:
         drl_pct = int((drl / drl_max * 100)) if drl_max > 0 else 0
         icon = "🔴" if drl == 0 else ("🟡" if drl_pct < 20 else "🟢")
-        lines.append(f"DRL master: {icon} {drl/1e6:.0f}M / {drl_max/1e6:.0f}M ({drl_pct}%)")
+        ts_str = ""
+        if ts_drl:
+            try:
+                dt = datetime.fromisoformat(ts_drl.replace("Z", "+00:00"))
+                ago = int((datetime.now(timezone.utc) - dt).total_seconds())
+                ts_str = f" ({_fmt_dur(ago)} fa)"
+            except Exception:
+                pass
+        lines.append(f"DRL master: {icon} {drl/1e6:.0f}M / {drl_max/1e6:.0f}M ({drl_pct}%){ts_str}")
 
     # Suggerimento avvio rapido se qualcosa è spento
     if not _check_bot_running() or not dash_ok:
@@ -738,7 +747,7 @@ def _build_rifornimento() -> str:
     morf = _read_morfeus_state()
     drl = morf.get("daily_recv_limit", -1)
     drl_max = morf.get("daily_recv_limit_max", -1)
-    ts_drl = morf.get("ts_ultima_lettura", "")
+    ts_drl = morf.get("ts", "")
     if drl >= 0:
         drl_pct = int((drl / drl_max * 100)) if drl_max > 0 else 0
         icon = "🔴" if drl == 0 else ("🟡" if drl_pct < 20 else "🟢")
