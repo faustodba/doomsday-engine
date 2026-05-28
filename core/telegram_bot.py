@@ -1382,6 +1382,10 @@ def _polling_loop(stop: threading.Event) -> None:
     _log.info("[TG-BOT] polling loop avviato")
     authorized_chat = load_chat_id()
 
+    # Delay primo check bot silenzioso: aspetta almeno 1 ciclo (120s) dal boot
+    # per evitare falsi alert immediati se il bot è temporaneamente fermo al riavvio TG
+    _last_bot_check_ts = time.time()
+
     while not stop.is_set():
         # Senza token non possiamo fare niente — attendi che l'utente lo configuri
         if not has_token():
@@ -1646,11 +1650,31 @@ def _check_dashboard_running() -> bool:
 def _check_bot_running() -> bool:
     """True se il processo main.py Python è in esecuzione.
 
-    Metodo primario: interroga Win32_Process via PowerShell per trovare
-    python.exe con 'main.py' nella command line.
-    Fallback: freschezza engine_status.json (< 10 min).
+    Metodi (priorità decrescente):
+    1. bot.pid — PID scritto da main.py al boot, controllo alive via Get-Process
+    2. Get-CimInstance su python.exe/*main.py* (fallback se pid file mancante)
+    3. engine_status.json freschezza (< 30 min, fallback finale)
     """
     import subprocess
+
+    # ── 1. PID file (metodo primario, affidabile e veloce) ───────────────────
+    pid_path = _root() / "data" / "bot.pid"
+    try:
+        if pid_path.exists():
+            pid = int(pid_path.read_text(encoding="utf-8").strip())
+            r = subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+                 f"(Get-Process -Id {pid} -ErrorAction SilentlyContinue) -ne $null"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if r.stdout.strip() == "True":
+                return True
+            # PID morto → non restituire False subito, potrebbe essere un pid stale
+            # da un restart recente. Prova con CimInstance per sicurezza.
+    except Exception:
+        pass
+
+    # ── 2. CimInstance fallback ───────────────────────────────────────────────
     try:
         r = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command",
@@ -1658,14 +1682,15 @@ def _check_bot_running() -> bool:
              "| Where-Object { $_.CommandLine -like '*main.py*' "
              "  -and $_.CommandLine -notlike '*-m uvicorn*' } "
              "| Measure-Object | Select-Object -ExpandProperty Count"],
-            capture_output=True, text=True, timeout=8,
+            capture_output=True, text=True, timeout=10,
         )
         count = r.stdout.strip()
         if count.isdigit() and int(count) > 0:
             return True
     except Exception:
         pass
-    # Fallback: engine_status.json freschezza
+
+    # ── 3. engine_status.json freschezza (30 min) ────────────────────────────
     es = _read_engine_status()
     if not es:
         return False
