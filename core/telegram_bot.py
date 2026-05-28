@@ -66,8 +66,10 @@ _running_lock = threading.Lock()
 _last_bot_ok: bool          = True
 _last_bot_check_ts: float   = 0.0
 _last_bot_alert_ts: float   = 0.0
+_bot_fail_streak: int       = 0      # fallimenti consecutivi check bot
 _BOT_SILENT_CHECK_S         = 120    # controlla ogni 2 min nel polling loop
 _BOT_SILENT_COOLDOWN_S      = 900    # max 1 alert ogni 15 min
+_BOT_FAIL_THRESHOLD         = 3      # richiedi 3 fail consecutivi (~6 min) prima di alertare
 
 # ─── Stato alert raccolta bassa ───────────────────────────────────────────────
 
@@ -1373,7 +1375,7 @@ def _polling_loop(stop: threading.Event) -> None:
     Il flag `enabled` controlla SOLO le notifiche proattive (in _send_notify).
     Il polling gira se il token è configurato, anche con messaggi OFF.
     """
-    global _update_offset, _last_bot_ok, _last_bot_check_ts, _last_bot_alert_ts
+    global _update_offset, _last_bot_ok, _last_bot_check_ts, _last_bot_alert_ts, _bot_fail_streak
 
     from shared.telegram_client import get_updates, send_message, load_chat_id, has_token
 
@@ -1437,15 +1439,20 @@ def _polling_loop(stop: threading.Event) -> None:
             if _now - _last_bot_check_ts >= _BOT_SILENT_CHECK_S:
                 _last_bot_check_ts = _now
                 _bot_now = _check_bot_running()
-                if _last_bot_ok and not _bot_now:
-                    if _now - _last_bot_alert_ts >= _BOT_SILENT_COOLDOWN_S:
-                        _last_bot_alert_ts = _now
-                        _send_system_alert(
-                            "🔴 <b>Bot fermato inaspettatamente</b>\n\n"
-                            "L'engine non risulta più in esecuzione.\n"
-                            "Usa /avvia_bot per riavviarlo o /status per dettagli."
-                        )
-                _last_bot_ok = _bot_now
+                if _bot_now:
+                    _bot_fail_streak = 0
+                    _last_bot_ok = True
+                else:
+                    _bot_fail_streak += 1
+                    if _last_bot_ok and _bot_fail_streak >= _BOT_FAIL_THRESHOLD:
+                        if _now - _last_bot_alert_ts >= _BOT_SILENT_COOLDOWN_S:
+                            _last_bot_alert_ts = _now
+                            _last_bot_ok = False
+                            _send_system_alert(
+                                "🔴 <b>Bot fermato inaspettatamente</b>\n\n"
+                                "L'engine non risulta più in esecuzione.\n"
+                                "Usa /avvia_bot per riavviarlo o /status per dettagli."
+                            )
         except Exception:
             pass
 
@@ -1668,7 +1675,7 @@ def _check_bot_running() -> bool:
     try:
         dt = datetime.fromisoformat(ts_raw.replace("Z", "+00:00"))
         now = datetime.now(timezone.utc) if dt.tzinfo else datetime.now()
-        return (now - dt).total_seconds() < 600
+        return (now - dt).total_seconds() < 1800
     except Exception:
         return False
 
