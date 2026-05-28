@@ -781,7 +781,7 @@ def _build_rifornimento() -> str:
 
     lines.append(f"Spedizioni totali oggi: {tot_sped}")
     if righe_ist:
-        lines.extend(righe_ist[:10])
+        lines.extend(righe_ist)
     elif tot_sped == 0:
         lines.append("  (nessuna spedizione ancora oggi)")
 
