@@ -1154,6 +1154,20 @@ def main():
         except Exception as exc:
             _log("MAIN", f"[WARN] cleanup orfani errore: {exc}")
 
+    # Reset globale ADB server — rompe connessioni zombie thread da processi
+    # orfani non rilevati dalla query CIM. Qualunque thread zombie che tiene
+    # aperta una porta ADB perderà la connessione immediatamente.
+    if not args.dry_run:
+        try:
+            import subprocess as _sp_adb
+            _gcfg_adb_raw = json.load(open(_GLOBAL_CONFIG_PATH, encoding="utf-8"))
+            _adb_exe = ((_gcfg_adb_raw.get("mumu") or {}).get("adb")
+                        or r"C:\Program Files\Netease\MuMuPlayer\nx_main\adb.exe")
+            _sp_adb.run([_adb_exe, "kill-server"], capture_output=True, timeout=10)
+            _log("MAIN", "ADB server resettato (anti-zombie)")
+        except Exception as exc:
+            _log("MAIN", f"[WARN] ADB kill-server: {exc}")
+
     # ── Resume checkpoint ────────────────────────────────────
     resume_da: Optional[str] = None
     cp = _leggi_checkpoint()
