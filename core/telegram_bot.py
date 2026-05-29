@@ -1047,7 +1047,7 @@ def _handle_command(text: str, chat_id: str) -> str:
             "/pausa           → <code>data/maintenance.flag</code> (pausa tra istanze)\n"
             "/riprendi        → rimuove <code>data/maintenance.flag</code>\n"
             "/avvia_ora       → <code>data/wake_now.flag</code> (salta sleep inter-ciclo)\n"
-            "/restart_bot     → <code>data/restart_requested.flag</code> → exit 100 → <code>start.bat :loop</code>\n"
+            "/restart_bot     → <code>data/restart_requested.flag</code> → exit 100 a fine ciclo → <code>start.bat :loop</code> (riavvio programmato)\n"
             "/restart_telegram → exit 100 → <code>run_telegram_prod.bat :loop</code> (~15s)\n"
             "\n"
             "<b>Istanze</b> → <code>runtime_overrides.json</code> (hot-reload)\n"
