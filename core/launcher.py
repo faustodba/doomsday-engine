@@ -360,22 +360,23 @@ def avvia_player(log_fn: Optional[Callable] = None) -> bool:
         # ma non ancora inizializzato → MuMuManager launch fallisce silenziosamente.
         _manager = _resolve_manager(load_global().mumu.manager)
         try:
+            # 'version' non richiede parametri — check readiness affidabile
             result = subprocess.run(
-                [_manager, "info"],
+                [_manager, "version"],
                 capture_output=True, timeout=10,
             )
             if result.returncode == 0:
-                _log("MuMuPlayer pronto (manager info OK)", log_fn)
+                _log("MuMuPlayer pronto (manager version OK)", log_fn)
                 return True
         except Exception:
             pass
-        # Manager non ha risposto — MuMu in avvio, attendi fino a readiness
+        # Manager non risponde — MuMu in avvio, attendi readiness max 30s
         _log("MuMuPlayer in avvio, attendo readiness (max 30s)...", log_fn)
         t0 = time.time()
         while time.time() - t0 < 30:
             time.sleep(3)
             try:
-                r = subprocess.run([_manager, "info"], capture_output=True, timeout=10)
+                r = subprocess.run([_manager, "version"], capture_output=True, timeout=10)
                 if r.returncode == 0:
                     _log(f"MuMuPlayer pronto ({time.time()-t0:.0f}s)", log_fn)
                     return True
