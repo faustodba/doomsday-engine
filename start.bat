@@ -7,14 +7,13 @@ REM   Sequenza sempre eseguita:
 REM     1. Kill bot orfani (PID file + CIM)
 REM     2. Shutdown tutte le istanze MuMu (0-11)
 REM     3. Reset ADB server (rompe connessioni zombie)
-REM     4. Cancella scheduler_planned_order (ricomincia fresh ogni avvio)
-REM     5. Avvio bot con --resume (usa last_checkpoint.json se esiste)
-REM     6. Loop automatico su exit code 100 (restart schedulato)
+REM     4. Avvio bot con --resume (usa last_checkpoint.json se esiste)
+REM     5. Loop automatico su exit code 100 (restart schedulato)
 REM
-REM   Checkpoint: NON viene cancellato. Se last_checkpoint.json esiste,
-REM   il bot riprende dall'ultima istanza interrotta (--resume auto).
-REM   Per ripartire da zero: cancella last_checkpoint.json manualmente
-REM   o usa reset_emergenza.bat.
+REM   Stato di gioco NON modificato:
+REM     - last_checkpoint.json preservato → --resume riprende dall'interruzione
+REM     - scheduler_planned_order.json preservato → ordine adattivo intatto
+REM   Per azzerare tutto usa reset_emergenza.bat.
 REM
 REM   Usato da:
 REM     - Avvio manuale (doppio clic o terminale)
@@ -34,7 +33,7 @@ echo ===== DOOMSDAY ENGINE — Avvio %DATE% %TIME% =====
 echo.
 
 REM --- 1. Kill bot orfani (PID file) ------------------------------------------
-echo [1/4] Kill bot orfani...
+echo [1/3] Kill bot orfani...
 if exist "data\bot.pid" (
     powershell -NoProfile -Command "try { $p=[int](Get-Content 'data\bot.pid'); Stop-Process -Id $p -Force -EA SilentlyContinue; Write-Host ('  kill PID='+$p+' (bot.pid)') } catch {}"
     del "data\bot.pid" >nul 2>nul
@@ -43,7 +42,7 @@ powershell -NoProfile -Command "@('python.exe','py.exe') | ForEach-Object { $n=$
 timeout /t 3 /nobreak >nul
 
 REM --- 2. Shutdown tutte le istanze MuMu (0-11) --------------------------------
-echo [2/4] Shutdown istanze MuMu...
+echo [2/3] Shutdown istanze MuMu...
 for /L %%i in (0,1,11) do (
     "%MUMU_MGR%" control -v %%i shutdown >nul 2>nul
 )
@@ -51,19 +50,14 @@ echo   Istanze MuMu spente
 timeout /t 2 /nobreak >nul
 
 REM --- 3. Reset ADB server ------------------------------------------------------
-echo [3/4] Reset ADB server...
+echo [3/3] Reset ADB server...
 "%ADB%" kill-server >nul 2>nul
 echo   ADB server resettato
 
-REM --- 4. Cancella planned_order (scheduler fresh) ------------------------------
-echo [4/4] Cancella scheduler_planned_order...
-if exist "data\scheduler_planned_order.json" (
-    del "data\scheduler_planned_order.json" >nul 2>nul
-    echo   scheduler_planned_order.json cancellato
-) else (
-    echo   scheduler_planned_order.json non presente
-)
-REM   last_checkpoint.json NON viene cancellato: --resume lo usa se esiste
+REM   Stato di gioco preservato integralmente:
+REM   - last_checkpoint.json: --resume riprende dall'ultima istanza interrotta
+REM   - scheduler_planned_order.json: ordine adattivo del ciclo corrente
+REM   Per azzerare lo stato usa reset_emergenza.bat
 
 echo.
 echo Avvio bot...
