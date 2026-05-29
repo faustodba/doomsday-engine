@@ -4239,8 +4239,8 @@ def api_restart_bot():
     """
     Richiede restart bot al PROSSIMO fine ciclo (mai mid-tick).
     Crea file flag `data/restart_requested.flag`. Il bot lo rileva post
-    chiusura ultima istanza, esce con exit code 100, run_prod.bat riavvia
-    automaticamente.
+    chiusura ultima istanza, esce con exit code 100, start.bat (:run_loop) lo riavvia
+    automaticamente (riavvio programmato a fine ciclo).
     """
     from core.restart_scheduler import request_restart
     ok = request_restart(reason="dashboard")

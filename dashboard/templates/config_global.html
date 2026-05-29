@@ -336,8 +336,8 @@ async function promoteRuntimeToStatic() {
       <div style="padding:8px 12px;font-size:11px;line-height:1.5;color:var(--text-dim)">
         <div style="margin-bottom:6px">
           Il bot esce a fine ciclo con <code>exit code 100</code>. Il
-          <code>run_prod.bat</code> ha un loop wrapper che cattura quel codice
-          e <b>riavvia automaticamente fra 5s</b>. Per altri exit code (0
+          <code>start.bat</code> ha un loop wrapper (<code>:run_loop</code>) che cattura quel codice
+          e <b>riavvia automaticamente fra 5s</b> (riavvio programmato). Per altri exit code (0
           normale / 1 errore) → no riavvio.
         </div>
         <div style="margin-bottom:6px">

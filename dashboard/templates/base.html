@@ -323,7 +323,7 @@
     async function restartBotToggle(request) {
       try {
         if (request) {
-          if (!confirm('Richiedere restart bot al PROSSIMO fine ciclo?\n\nIl bot uscirà con exit code 100 e run_prod.bat lo riavvierà automaticamente fra 5s.\nNessun tick verrà interrotto.')) return;
+          if (!confirm('Richiedere restart bot al PROSSIMO fine ciclo?\n\nIl bot uscirà con exit code 100 e start.bat lo riavvierà automaticamente (riavvio programmato).\nNessun tick verrà interrotto.')) return;
           const r = await fetch(URL_PREFIX + '/api/restart-bot', {method: 'POST'});
           if (!r.ok) throw new Error('HTTP ' + r.status);
         } else {
