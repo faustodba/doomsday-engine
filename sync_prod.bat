@@ -17,7 +17,7 @@ REM    - dashboard/       : intera dashboard FastAPI (py + templates + static)
 REM    - templates/       : template pin PNG per template matching
 REM    - main.py
 REM    - ROADMAP.md
-REM    - run_prod.bat, run_dashboard_prod.bat : launcher produzione
+REM    - start.bat, reset_emergenza.bat, run_dashboard_prod.bat, run_telegram_prod.bat : launcher produzione
 REM
 REM  BLACKLIST — NON SINCRONIZZATI (configurazione runtime specifica per ambiente):
 REM    - config/instances.json          : anagrafica fisica istanze MuMu,
@@ -67,7 +67,8 @@ xcopy /Y /Q "%SRC%\main.py"                    "%DST%\"            || goto :err
 xcopy /Y /Q "%SRC%\ROADMAP.md"                 "%DST%\"            || goto :err
 
 REM --- Launcher produzione ---
-xcopy /Y /Q "%SRC%\run_prod.bat"               "%DST%\"            || goto :err
+xcopy /Y /Q "%SRC%\start.bat"                  "%DST%\"            || goto :err
+xcopy /Y /Q "%SRC%\reset_emergenza.bat"        "%DST%\"            || goto :err
 xcopy /Y /Q "%SRC%\run_dashboard_prod.bat"     "%DST%\"            || goto :err
 xcopy /Y /Q "%SRC%\run_telegram_prod.bat"      "%DST%\"            || goto :err
 

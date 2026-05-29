@@ -1,15 +1,14 @@
 {
   "_note": "Doomsday Engine V6 — Configurazione globale STATICA (baseline reset). Letto ad ogni tick. Override applicati da runtime_overrides.json (modificati dalla dashboard). Default: tutti i task DISATTIVATI per partenza neutra.",
   "sistema": {
-    "tick_sleep_min": 1,
-    "max_parallel": 1,
-    "timeout_carica_s": 300
+    "tick_sleep": 60,
+    "max_parallel": 1
   },
   "mumu": {
     "manager": "C:\\Program Files\\Netease\\MuMuPlayer\\nx_main\\MuMuManager.exe",
     "adb": "C:\\Program Files\\Netease\\MuMuPlayer\\nx_main\\adb.exe",
-    "timeout_adb_s": 400,
-    "timeout_carica_s": 300,
+    "timeout_adb_s": 120,
+    "timeout_carica_s": 180,
     "delay_carica_iniz_s": 60,
     "n_back_pulizia": 5,
     "player_exe": "",
@@ -94,34 +93,21 @@
   },
   "raccolta_ocr_debug": false,
   "auto_learn_banner": false,
+  "skip_predictor_enabled": false,
+  "skip_predictor_shadow_only": true,
   "adaptive_scheduler_enabled": false,
   "adaptive_scheduler_shadow_only": true,
   "adaptive_scheduler_thresholds": {
+    "drl_residuo_pct": 30,
     "pct_istanze_sat": 50,
-    "spedizioni_oggi": 100,
-    "drl_residuo_m": 50
+    "spedizioni_oggi": 100
   },
   "notifications": {
-    "enabled": true,
+    "enabled": false,
     "daily_report_enabled": true,
     "daily_report_hour_utc": 6,
-    "from_addr": "bot.dooms.report@gmail.com",
-    "recipients": [
-      "fausto.pace@gmail.com"
-    ],
-    "smtp": {
-      "host": "smtp.gmail.com",
-      "port": 465
-    }
-  },
-  "truppe": {
-    "_note": "Default 4 caserme abilitate. Override per istanza in instances.json::istanze[].truppe_override.",
-    "caserme": {
-      "infantry": true,
-      "rider": true,
-      "ranged": true,
-      "engine": true
-    }
-  },
-  "debug_tasks": {}
+    "from_addr": "",
+    "recipients": [],
+    "smtp": {"host": "smtp.gmail.com", "port": 465}
+  }
 }

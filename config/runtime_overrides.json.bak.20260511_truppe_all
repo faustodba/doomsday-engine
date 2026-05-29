@@ -84,14 +84,6 @@
         "host": "smtp.gmail.com",
         "port": 465
       }
-    },
-    "truppe": {
-      "caserme": {
-        "infantry": true,
-        "rider": true,
-        "ranged": true,
-        "engine": true
-      }
     }
   },
   "istanze": {

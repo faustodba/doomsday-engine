@@ -1,0 +1,173 @@
+{
+  "totals": {
+    "events": 11,
+    "ok": 0,
+    "skip": 11,
+    "fail": 0,
+    "abort": 0,
+    "no_op": 0
+  },
+  "per_task": {
+    "truppe": {
+      "exec": 11,
+      "ok": 0,
+      "skip": 11,
+      "fail": 0,
+      "abort": 0,
+      "no_op": 0,
+      "ok_pct": 100.0,
+      "duration_avg_s": 0.001,
+      "duration_p50": 0.001,
+      "duration_p95": 0.001,
+      "duration_max_s": 0.001,
+      "anomalies": {},
+      "output_aggregates": {},
+      "last_ts": "2026-05-03T21:36:19.401237+00:00",
+      "last_err": "—"
+    }
+  },
+  "per_instance": {
+    "FAU_04": {
+      "exec": 1,
+      "ok": 0,
+      "skip": 1,
+      "fail": 0,
+      "abort": 0,
+      "no_op": 0,
+      "tasks_breakdown": {
+        "truppe": 1
+      },
+      "anomalies_total": 0
+    },
+    "FAU_10": {
+      "exec": 1,
+      "ok": 0,
+      "skip": 1,
+      "fail": 0,
+      "abort": 0,
+      "no_op": 0,
+      "tasks_breakdown": {
+        "truppe": 1
+      },
+      "anomalies_total": 0
+    },
+    "FAU_01": {
+      "exec": 1,
+      "ok": 0,
+      "skip": 1,
+      "fail": 0,
+      "abort": 0,
+      "no_op": 0,
+      "tasks_breakdown": {
+        "truppe": 1
+      },
+      "anomalies_total": 0
+    },
+    "FAU_08": {
+      "exec": 1,
+      "ok": 0,
+      "skip": 1,
+      "fail": 0,
+      "abort": 0,
+      "no_op": 0,
+      "tasks_breakdown": {
+        "truppe": 1
+      },
+      "anomalies_total": 0
+    },
+    "FAU_05": {
+      "exec": 1,
+      "ok": 0,
+      "skip": 1,
+      "fail": 0,
+      "abort": 0,
+      "no_op": 0,
+      "tasks_breakdown": {
+        "truppe": 1
+      },
+      "anomalies_total": 0
+    },
+    "FAU_09": {
+      "exec": 1,
+      "ok": 0,
+      "skip": 1,
+      "fail": 0,
+      "abort": 0,
+      "no_op": 0,
+      "tasks_breakdown": {
+        "truppe": 1
+      },
+      "anomalies_total": 0
+    },
+    "FAU_06": {
+      "exec": 1,
+      "ok": 0,
+      "skip": 1,
+      "fail": 0,
+      "abort": 0,
+      "no_op": 0,
+      "tasks_breakdown": {
+        "truppe": 1
+      },
+      "anomalies_total": 0
+    },
+    "FAU_02": {
+      "exec": 1,
+      "ok": 0,
+      "skip": 1,
+      "fail": 0,
+      "abort": 0,
+      "no_op": 0,
+      "tasks_breakdown": {
+        "truppe": 1
+      },
+      "anomalies_total": 0
+    },
+    "FAU_00": {
+      "exec": 1,
+      "ok": 0,
+      "skip": 1,
+      "fail": 0,
+      "abort": 0,
+      "no_op": 0,
+      "tasks_breakdown": {
+        "truppe": 1
+      },
+      "anomalies_total": 0
+    },
+    "FAU_07": {
+      "exec": 1,
+      "ok": 0,
+      "skip": 1,
+      "fail": 0,
+      "abort": 0,
+      "no_op": 0,
+      "tasks_breakdown": {
+        "truppe": 1
+      },
+      "anomalies_total": 0
+    },
+    "FAU_03": {
+      "exec": 1,
+      "ok": 0,
+      "skip": 1,
+      "fail": 0,
+      "abort": 0,
+      "no_op": 0,
+      "tasks_breakdown": {
+        "truppe": 1
+      },
+      "anomalies_total": 0
+    }
+  },
+  "anomalies_global": {},
+  "patterns_detected": {
+    "adb_cascade": [],
+    "rifornimento_skip_chain": [],
+    "task_timeout_recurring": [],
+    "home_stab_loop": []
+  },
+  "window_start": "2026-05-02T21:42:02.792758+00:00",
+  "window_end": "2026-05-03T21:42:02.792758+00:00",
+  "computed_at": "2026-05-03T21:42:02.792758+00:00"
+}

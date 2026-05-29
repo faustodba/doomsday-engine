@@ -14,6 +14,7 @@
 ::  (desktop interattivo) e possa aprire console visibili — necessario
 ::  per /avvia_tutto che lancia run_prod.bat e run_dashboard_prod.bat.
 ::  Con S4U/Session 0 i processi figli non potevano interagire col desktop.
+::  Nota: /avvia_bot lancia start.bat (non piu' run_prod.bat).
 ::
 ::  ESEGUIRE UNA SOLA VOLTA come amministratore.
 ::  Per rimuovere:  setup_telegram_autostart.bat --remove

@@ -1,0 +1,9 @@
+{
+  "factor": 1.0,
+  "n_samples": 0,
+  "bias_pct": 0.0,
+  "ts_computed": "2026-05-11T09:39:34+00:00",
+  "window_cycles": [],
+  "confidence": "bassa",
+  "reason": "insufficienti cicli (0<5)"
+}
