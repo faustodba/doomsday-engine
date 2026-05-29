@@ -19,8 +19,8 @@ echo Log: %LOG%
 echo.
 
 REM --- 1. Kill bot (PID file) -----------------------------------------
-echo [1/5] Kill bot (PID file)...
-echo [1/5] Kill bot PID file >> "%LOG%"
+echo [1/6] Kill bot (PID file)...
+echo [1/6] Kill bot PID file >> "%LOG%"
 if exist "data\bot.pid" (
     for /f %%i in (data\bot.pid) do (
         echo     kill PID=%%i
@@ -32,14 +32,14 @@ if exist "data\bot.pid" (
 )
 
 REM --- 2. Kill bot (python main.py via CIM) ---------------------------
-echo [2/5] Kill python main.py orfani...
-echo [2/5] Kill python CIM >> "%LOG%"
+echo [2/6] Kill python main.py orfani...
+echo [2/6] Kill python CIM >> "%LOG%"
 powershell -NoProfile -Command "@('python.exe','py.exe') | ForEach-Object { $n=$_; try { Get-CimInstance Win32_Process -Filter ('Name='''+$n+'''') | Where-Object { $_.CommandLine -like '*main.py*' -and $_.CommandLine -notlike '*-m uvicorn*' -and $_.CommandLine -notlike '*claude-bridge*' } | ForEach-Object { Write-Host ('  killed '+$n+' PID='+$_.ProcessId); Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue } } catch { Write-Host ('  errore: '+$_.Exception.Message) } }" 2>&1 >> "%LOG%"
 timeout /t 3 /nobreak >nul
 
 REM --- 3. Shutdown tutte le istanze MuMu (0-11) ----------------------
-echo [3/5] Shutdown istanze MuMu...
-echo [3/5] Shutdown istanze MuMu >> "%LOG%"
+echo [3/6] Shutdown istanze MuMu...
+echo [3/6] Shutdown istanze MuMu >> "%LOG%"
 set MUMU_MGR=C:\Program Files\Netease\MuMuPlayer\nx_main\MuMuManager.exe
 for /L %%i in (0,1,11) do (
     "%MUMU_MGR%" control -v %%i shutdown >> "%LOG%" 2>nul
@@ -48,8 +48,8 @@ echo     Istanze MuMu spente
 timeout /t 2 /nobreak >nul
 
 REM --- 4. Reset ADB server ---------------------------------------------
-echo [4/5] Reset ADB server...
-echo [4/5] ADB kill-server >> "%LOG%"
+echo [4/6] Reset ADB server...
+echo [4/6] ADB kill-server >> "%LOG%"
 "%ADB%" kill-server >> "%LOG%" 2>&1
 echo     OK
 

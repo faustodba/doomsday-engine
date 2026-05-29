@@ -85,13 +85,6 @@ REM da restart_scheduler — file flag dashboard, schedule cron-like, cicli max)
 REM il batch riavvia automaticamente fra 5s. Per uscita normale (0) o errore
 REM (1, ecc.) → no riavvio. Loop label `:run_loop`.
 :run_loop
-REM --- CLEANUP CHECKPOINT (anti-zombie-thread) ----------------------------
-REM   Cancella checkpoint e planned_order prima di ogni avvio.
-REM   Evita il bug resume-su-istanza-con-zombie-ADB quando il predictor
-REM   era attivo e il bot veniva riavviato a ciclo incompleto.
-echo [run_prod] Cancella checkpoint e planned_order...
-if exist "last_checkpoint.json" del "last_checkpoint.json" >nul 2>nul
-if exist "data\scheduler_planned_order.json" del "data\scheduler_planned_order.json" >nul 2>nul
 py -3.14 main.py --no-dashboard --use-runtime --resume
 if %ERRORLEVEL%==100 (
     echo [run_prod] Restart richiesto dal bot ^(exit code 100^), ripartenza fra 5s...
