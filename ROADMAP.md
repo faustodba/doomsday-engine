@@ -100,6 +100,47 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+### Sessione 29/05/2026 — WU-TgRefactor (refactoring Telegram bot + documento architetturale)
+
+#### WU-TgRefactor — split monolite 1908r in 5 moduli specializzati + dict dispatch
+
+**Motivazione**: `core/telegram_bot.py` (1908 righe) era un monolite con `_handle_command()` da 352 righe (switch if/elif su 25 comandi). Aggiungere un comando richiedeva trovare il posto giusto in 352 righe + aggiornare `/help` + aggiornare la docstring in cima — tre posti non correlati, rischio di stale (già successo: `run_prod.bat` nel help era rimasto stale per settimane).
+
+**Analisi critica** (comparativa con trading bot `d:\dev\trading-engine`):
+- Trading bot usa 4 handler modules + utils. Pattern identico adottabile senza asyncio.
+- L'asyncio del trading bot NON è adottabile: incompatibile con l'architettura sincrona del sistema (tutto usa `time.sleep`, ADB sincrono).
+- `_check_bot_running()` e `_check_dashboard_running()` usate da monitoring E control → vanno in `tg_utils.py`.
+- `_ROOT_PROD` hardcoded `C:/doomsday-engine-prod` ignorava `DOOMSDAY_ROOT` env var → spostato a `_root()`.
+
+**Split implementato** (commit `474d134`):
+
+| File | Righe | Contenuto |
+|------|-------|-----------|
+| `tg_utils.py` | 407 | path/config helpers, readers, patch functions, formatters, check processo |
+| `tg_handlers_monitoring.py` | 578 | builders + handler 8 comandi sola lettura |
+| `tg_handlers_control.py` | 152 | handler 8 comandi controllo sistema |
+| `tg_handlers_config.py` | 198 | handler 13 comandi configurazione |
+| `telegram_bot.py` | 587 | polling loop, dict `_DISPATCH`, lifecycle, notifiche proattive |
+
+**Dict dispatch** (da 352 righe if/elif a ~25 righe):
+```python
+_DISPATCH: dict[str, Callable[[str], str]] = {
+    "/status": cmd_status,
+    "/restart_bot": cmd_restart_bot,
+    "/rif_risorsa": cmd_rif_risorsa,
+    # ... 30 voci totali
+}
+def _handle_command(text, chat_id):
+    handler = _DISPATCH.get(cmd)
+    return handler(text) if handler else "Comando non riconosciuto..."
+```
+
+**Documento architetturale** creato: [`docs/TELEGRAM_BOT_ARCHITECTURE.md`](docs/TELEGRAM_BOT_ARCHITECTURE.md) — comandi completi, flusso polling, config schema, file su disco usati, guida "come aggiungere un comando".
+
+**Riavvio richiesto**: `run_telegram_prod.bat` per caricare i nuovi moduli.
+
+---
+
 ### Sessione 23/05/2026 — WU-RifornimentoCentratura (skip centratura 2ª+ spedizione)
 
 #### WU-RifornimentoCentratura — ottimizzazione loop rifornimento mappa (commit `da86da0`)
