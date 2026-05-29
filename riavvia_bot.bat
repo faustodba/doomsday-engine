@@ -29,12 +29,21 @@ if exist "data\bot.pid" (
 powershell -NoProfile -Command "@('python.exe','py.exe') | ForEach-Object { $n=$_; try { Get-CimInstance Win32_Process -Filter ('Name='''+$n+'''') | Where-Object { $_.CommandLine -like '*main.py*' -and $_.CommandLine -notlike '*-m uvicorn*' -and $_.CommandLine -notlike '*claude-bridge*' } | ForEach-Object { Write-Host ('  kill PID='+$_.ProcessId+' ('+$n+')'); Stop-Process -Id $_.ProcessId -Force -EA SilentlyContinue } } catch {} }"
 timeout /t 3 /nobreak >nul
 
-REM --- 2. Reset ADB server (rompe connessioni zombie thread) -----------
+REM --- 2. Shutdown tutte le istanze MuMu (0-11) -----------------------
+echo [riavvia_bot] Shutdown istanze MuMu...
+set MUMU_MGR=C:\Program Files\Netease\MuMuPlayer\nx_main\MuMuManager.exe
+for /L %%i in (0,1,11) do (
+    "%MUMU_MGR%" control -v %%i shutdown >nul 2>nul
+)
+echo   Istanze MuMu spente
+timeout /t 2 /nobreak >nul
+
+REM --- 3. Reset ADB server (rompe connessioni zombie thread) -----------
 echo [riavvia_bot] Reset ADB server...
 "%ADB%" kill-server >nul 2>nul
 echo   ADB server resettato
 
-REM --- 3. Cancella checkpoint e planned_order --------------------------
+REM --- 4. Cancella checkpoint e planned_order --------------------------
 echo [riavvia_bot] Cancella checkpoint e planned_order...
 if exist "last_checkpoint.json" del "last_checkpoint.json" >nul 2>nul
 if exist "data\scheduler_planned_order.json" del "data\scheduler_planned_order.json" >nul 2>nul
