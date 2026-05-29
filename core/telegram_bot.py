@@ -16,7 +16,7 @@ Comandi supportati:
   /riprendi     — disattiva maintenance mode
   /avvia_ora    — salta sleep inter-ciclo, avvia ciclo subito
   /restart_bot  — richiede restart bot al fine ciclo (via flag)
-  /restart_bot_telegram — riavvia il processo Telegram bot (~15s downtime)
+  /restart_telegram — riavvia il processo Telegram bot (~15s downtime)
   /rif_risorsa  — abilita/disabilita risorsa rifornimento
   /rif_modo     — cambia modalità (mappa/membri/entrambi/nessuno)
   /rif_soglia   — cambia soglia deposito per risorsa
@@ -1037,16 +1037,16 @@ def _handle_command(text: str, chat_id: str) -> str:
             "/ciclo 184 — dettaglio ciclo #184 (ometti N per l'ultimo)\n"
             "\n"
             f"<b>Avvio sistema</b> (bot {bot_icon}  dashboard {dash_icon})\n"
-            "/avvia_bot — avvia il bot (run_prod.bat)\n"
+            "/avvia_bot — avvia il bot (start.bat: kill+MuMu+ADB+resume)\n"
             "/avvia_dashboard — avvia la dashboard (uvicorn)\n"
             "/avvia_tutto — avvia bot + dashboard\n"
             "\n"
             "<b>Bot management</b>\n"
-            "/pausa — attiva maintenance mode (bot in pausa)\n"
+            "/pausa — attiva maintenance mode (bot in pausa tra istanze)\n"
             "/riprendi — disattiva maintenance mode (bot riprende)\n"
-            "/avvia_ora — salta sleep inter-ciclo, avvia ciclo subito\n"
-            "/restart_bot — richiede restart al fine ciclo (run_prod.bat riavvia)\n"
-            "/restart_bot_telegram — riavvia questo bot Telegram (~15s downtime)\n"
+            "/avvia_ora — salta sleep inter-ciclo, avvia prossimo ciclo subito\n"
+            "/restart_bot — richiede restart del BOT a fine ciclo corrente\n"
+            "/restart_telegram — riavvia questo SERVIZIO TELEGRAM (~15s downtime)\n"
             "\n"
             "<b>Istanze</b>\n"
             "/disabilita FAU_03 — disabilita istanza (hot-reload)\n"
@@ -1165,7 +1165,7 @@ def _handle_command(text: str, chat_id: str) -> str:
             if ok:
                 return (
                     "🔄 <b>Restart bot richiesto.</b>\n"
-                    "Il bot uscirà a fine ciclo (exit code 100) e run_prod.bat "
+                    "Il bot uscirà a fine ciclo (exit code 100) e start.bat "
                     "lo riavvierà automaticamente.\nUsa /status per monitorare."
                 )
             return "⚠ Scrittura flag restart fallita. Controlla i log."
@@ -1361,13 +1361,13 @@ def _handle_command(text: str, chat_id: str) -> str:
         lines.append("\nUsa /status tra 60s per verificare i servizi.")
         return "\n".join(lines)
 
-    if cmd == "/restart_bot_telegram":
+    if cmd in ("/restart_telegram", "/restart_bot_telegram"):
         _schedule_self_restart(delay_s=5)
         return (
-            "🔄 <b>Riavvio bot in 5s…</b>\n"
-            "Il processo esce con codice 100 → <code>run_prod.bat</code> riparte "
-            "automaticamente dopo 5s.\n"
-            "Downtime totale: ~10-15s."
+            "🔄 <b>Riavvio SERVIZIO TELEGRAM in 5s…</b>\n"
+            "Il processo Telegram esce → <code>run_telegram_prod.bat</code> lo "
+            "riavvia automaticamente dopo 10s.\n"
+            "Downtime totale: ~15s. Il bot di gioco NON viene toccato."
         )
 
     return f"Comando non riconosciuto: <code>{cmd}</code>\nUsa /help per la lista comandi."
@@ -1715,7 +1715,7 @@ def _check_bot_running() -> bool:
 # ─── Process launcher ─────────────────────────────────────────────────────────
 
 _ROOT_PROD = Path("C:/doomsday-engine-prod")
-_BAT_BOT        = _ROOT_PROD / "riavvia_bot.bat"
+_BAT_BOT        = _ROOT_PROD / "start.bat"
 _BAT_DASHBOARD  = _ROOT_PROD / "run_dashboard_prod.bat"
 
 
@@ -1729,7 +1729,7 @@ def _schedule_self_restart(delay_s: int = 5) -> None:
     def _do():
         time.sleep(delay_s)
         _log.info("[TG-BOT] restart programmato — os._exit(100)")
-        os._exit(100)  # 100 = codice atteso da run_prod.bat :run_loop per auto-restart
+        os._exit(100)  # 100 = codice atteso da run_telegram_prod.bat :loop per auto-restart
     t = threading.Thread(target=_do, daemon=True, name="tg-self-restart")
     t.start()
 
