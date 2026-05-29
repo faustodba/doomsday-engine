@@ -1715,7 +1715,7 @@ def _check_bot_running() -> bool:
 # ─── Process launcher ─────────────────────────────────────────────────────────
 
 _ROOT_PROD = Path("C:/doomsday-engine-prod")
-_BAT_BOT        = _ROOT_PROD / "run_prod.bat"
+_BAT_BOT        = _ROOT_PROD / "riavvia_bot.bat"
 _BAT_DASHBOARD  = _ROOT_PROD / "run_dashboard_prod.bat"
 
 
