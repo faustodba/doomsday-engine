@@ -58,6 +58,48 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 29/05/2026 — WU-BatchReorg (riorganizzazione bat + Telegram /help)
+
+#### WU-BatchReorg — fusione launcher + cleanup bat + help Telegram aggiornato
+
+**Motivazione**: 3 bat con ruoli sovrapposti (`run_prod.bat`, `riavvia_bot.bat`, `reset_emergenza.bat`) e testo `/help` Telegram che indicava bat sbagliati.
+
+**Analisi e fix**:
+
+1. **`run_prod.bat` vs `riavvia_bot.bat`**: i due bat erano quasi identici ma con differenze non ovvie (MuMu shutdown, ADB reset, checkpoint). Causa storica: `run_prod.bat` era pensato per ambiente sano (no cleanup), `riavvia_bot.bat` per restart pulito. Il Telegram `/avvia_bot` chiamava `riavvia_bot.bat` ma il `/help` diceva `run_prod.bat`.
+
+2. **Fusione in `start.bat`**: bat unico che fa kill orfani + MuMu OFF + ADB reset + preserva checkpoint (resume) + loop exit-100. Non tocca stato di gioco (`last_checkpoint.json`, `scheduler_planned_order.json`).
+
+3. **`reset_emergenza.bat`**: rimane separato — fa tutto + cancella checkpoint + cancella planned_order + forza `adaptive_scheduler_enabled=false`. Numerazione passi corretta `[1/5]→[1/6]`.
+
+4. **Deprecati** (rinominati `.old` in dev+prod): `run_prod.bat`, `riavvia_bot.bat`.
+
+5. **Eliminati** (one-time già applicati): `fix_inplace_rifornimento.bat`, `release_pytest_fix5_16042026.bat`, `release_prod.bat`.
+
+6. **`sync_prod.bat`** aggiornato: copia `start.bat` + `reset_emergenza.bat` invece dei vecchi launcher.
+
+7. **`telegram_bot.py`**:
+   - `_BAT_BOT` → `start.bat` (era `riavvia_bot.bat`)
+   - `/help` aggiornato: ogni comando mostra bat o meccanismo (`→ start.bat`, `→ data/maintenance.flag`, `→ runtime_overrides.json`, ecc.)
+   - `/restart_bot_telegram` rinominato `/restart_telegram` (alias retrocompat mantenuto)
+   - Commenti interni allineati
+
+**Bat landscape post-riorganizzazione**:
+
+| Bat | Scopo |
+|---|---|
+| `start.bat` | Avvio normale (manuale + Telegram) |
+| `reset_emergenza.bat` | Reset totale emergenza |
+| `run_dashboard_prod.bat` | Dashboard prod |
+| `run_telegram_prod.bat` | Servizio Telegram |
+| `setup_telegram_autostart.bat` | Setup Task Scheduler (una-tantum) |
+| `run.bat` / `run_dev.bat` / `run_dashboard_dev.bat` | Dev |
+| `task.bat` / `reset.bat` | Debug task isolati |
+
+**Riavvio richiesto**: solo `run_telegram_prod.bat` (per caricare nuovo `_BAT_BOT` + `/help`). Il bot principale non è stato toccato.
+
+---
+
 ### Sessione 23/05/2026 — WU-RifornimentoCentratura (skip centratura 2ª+ spedizione)
 
 #### WU-RifornimentoCentratura — ottimizzazione loop rifornimento mappa (commit `da86da0`)

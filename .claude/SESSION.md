@@ -1,5 +1,28 @@
 # SESSION.md — Handoff Doomsday Engine V6
 
+## Sessione 29/05/2026 — WU-BatchReorg (riorganizzazione bat + Telegram /help)
+
+### Stato corrente
+- **Bot prod**: IN ESECUZIONE — nessuna modifica a main.py, nessun restart necessario
+- **Dashboard prod**: IN ESECUZIONE
+- **Telegram bot**: ⚠️ DA RIAVVIARE — `core/telegram_bot.py` modificato (`_BAT_BOT` + `/help`)
+
+### Cosa è stato fatto
+- Analisi completa di tutti i bat (16 file)
+- `run_prod.bat` e `riavvia_bot.bat` fusi in `start.bat` (kill+MuMu+ADB+resume, no tocca stato gioco)
+- `run_prod.bat` e `riavvia_bot.bat` rinominati `.old` in dev+prod
+- Eliminati bat storici one-time: `fix_inplace_rifornimento.bat`, `release_pytest_fix5_16042026.bat`, `release_prod.bat`
+- `reset_emergenza.bat`: numerazione passi corretta `[1/5]→[1/6]`
+- `sync_prod.bat`: aggiornato per copiare `start.bat` + `reset_emergenza.bat`
+- `telegram_bot.py`: `_BAT_BOT=start.bat`, `/help` con bat/meccanismo per ogni comando, `/restart_telegram` alias aggiunto
+- ROADMAP.md aggiornata con WU-BatchReorg
+
+### Prossimo step
+Riavviare il Telegram bot: chiudi `run_telegram_prod.bat` e riaprila
+(o `/restart_telegram` da Telegram se il servizio è già raggiungibile)
+
+---
+
 ## Sessione 26/05/2026 (update 2) — Dynamic url_prefix: fix CSS locale dopo sub-path ngrok
 
 ### Stato corrente
