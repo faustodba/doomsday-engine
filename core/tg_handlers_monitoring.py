@@ -291,11 +291,19 @@ def _build_rifornimento() -> str:
     lines.append(_fmt_drl_line("DRL FauMorfeus"))
 
     ov         = _read_runtime_overrides()
-    istanze_ov = ov.get("istanze", {})
+    # Usa instances.json come sorgente della lista — runtime_overrides::istanze
+    # può essere vuoto ({}) quando nessun override è attivo per-istanza.
+    instances  = _read_instances_cfg()
+    ist_ov     = ov.get("istanze", {})
     tot_sped   = 0
     righe_ist: list[str] = []
-    for nome in sorted(istanze_ov.keys()):
-        if nome == "FauMorfeus":
+    for cfg in sorted(instances, key=lambda c: c.get("nome", "")):
+        nome = cfg.get("nome", "")
+        if not nome or nome == "FauMorfeus":
+            continue
+        # Rispetta abilitata da runtime se presente, altrimenti da static
+        abilitata = ist_ov.get(nome, {}).get("abilitata", cfg.get("abilitata", True))
+        if not abilitata:
             continue
         st        = _read_state(nome)
         rif       = st.get("rifornimento", {})
