@@ -122,7 +122,7 @@ from core.tg_handlers_config import (
     cmd_rif_risorsa, cmd_rif_soglia,
     cmd_start_messaggi, cmd_stop_messaggi, cmd_task,
 )
-from core.tg_handlers_ai import cmd_claude, cmd_haiku
+from core.tg_handlers_ai import cmd_claude, cmd_haiku, cmd_credit
 
 
 # ─── /help handler ────────────────────────────────────────────────────────────
@@ -179,6 +179,7 @@ def _cmd_help(text: str) -> str:
         "<b>AI Advisor</b> (contesto farm live)\n"
         "/claude &lt;domanda&gt; — Claude Code CLI (abbonamento, gratuito)\n"
         "/haiku  &lt;domanda&gt; — Claude Haiku API (pay-per-use, ~$0.002/query)\n"
+        "/credit             — utilizzo API: costo oggi, totale, storico 7gg\n"
         "\n"
         "/help — questo messaggio"
     )
@@ -222,6 +223,7 @@ _DISPATCH: dict[str, Callable[[str], str]] = {
     # AI advisor
     "/claude":            cmd_claude,
     "/haiku":             cmd_haiku,
+    "/credit":            cmd_credit,
 }
 
 
