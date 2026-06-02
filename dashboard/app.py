@@ -1223,6 +1223,7 @@ def partial_task_flags_v2(request: Request):
     ABBREV = {
         "district_showdown": "districtSD",  # 17 → 10
     }
+    ALWAYS_ON_TASKS = {"raccolta"}  # sempre attivi, non modificabili via UI
     MAX_LEN = 15
     rows     = []
     rendered = set()
@@ -1238,7 +1239,12 @@ def partial_task_flags_v2(request: Request):
         # Abbreviazione solo se nome > MAX_LEN char
         display = ABBREV.get(name, name) if len(name) > MAX_LEN else name
 
-        if name in COMPOUND:
+        if name in ALWAYS_ON_TASKS:
+            rows.append(f'''<label class="task-row on" title="{name} — sempre attivo, non modificabile" style="cursor:default;opacity:.8;">
+              <input type="checkbox" class="task-cb" checked disabled style="cursor:default;">
+              <span class="task-name">{display} 🔒</span>
+            </label>''')
+        elif name in COMPOUND:
             c    = COMPOUND[name]
             subs = []
             for s in c["subtypes"]:
