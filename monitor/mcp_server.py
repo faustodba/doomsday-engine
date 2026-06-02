@@ -70,48 +70,62 @@ def _fmt_anomalia(a: dict) -> str:
 # Tool 1 — ciclo_stato
 # ==============================================================================
 
+_ESITO_ICON = {
+    "running":  "▶",
+    "ok":       "✓",
+    "cascade":  "⚡",
+    "abort":    "✗",
+    "attesa":   "⏳",
+}
+
 @mcp.tool()
 def ciclo_stato() -> str:
     """Analisi completa dell'ultimo ciclo di tutte le istanze abilitate."""
     stato = stato_ciclo_completo(ROOT)
     righe: list[str] = []
-    righe.append(f"=== CICLO {stato['ciclo_n']} ===")
+
+    # Header ciclo
+    ts_str = str(stato.get("ciclo_start_ts", ""))[:16].replace("T", " ")
+    stato_ciclo = "COMPLETATO" if stato.get("completato") else "IN CORSO"
+    righe.append(f"=== CICLO {stato['ciclo_n']} — {stato_ciclo} (avv. {ts_str}) ===")
     righe.append(f"Anomalie totali: {stato['anomalie_totali']}")
     righe.append("")
-    for nome, dati in stato["istanze"].items():
-        righe.append(f"--- {nome} ---")
-        launcher = dati.get("launcher") or {}
-        raccolta = dati.get("raccolta") or {}
-        tasks    = dati.get("tasks")    or {}
-        anomalie = dati.get("anomalie") or []
 
-        if launcher:
+    for nome, dati in stato["istanze"].items():
+        esito        = dati.get("esito", "attesa")
+        task_live    = dati.get("task_corrente")
+        icon         = _ESITO_ICON.get(esito, "?")
+        launcher     = dati.get("launcher") or {}
+        raccolta     = dati.get("raccolta") or {}
+        tasks        = dati.get("tasks")    or {}
+        anomalie     = dati.get("anomalie") or []
+
+        # Riga header istanza con esito e task live
+        header = f"--- {nome} [{icon} {esito}]"
+        if esito == "running" and task_live:
+            header += f" → {task_live}"
+        righe.append(header)
+
+        if launcher and launcher.get("home_raggiunto"):
             righe.append(
                 f"  launcher: reset={launcher.get('reset_completato')} "
                 f"android={launcher.get('android_started_s')}s "
-                f"home={launcher.get('home_raggiunto')} "
                 f"stab={launcher.get('stabilizzazione')} "
                 f"instabili={launcher.get('home_instabili')}"
             )
         if tasks:
             tasks_str = ", ".join(f"{k}={v}" for k, v in tasks.items())
             righe.append(f"  tasks: {tasks_str}")
-        if raccolta:
+        if raccolta and (raccolta.get("inviate") or raccolta.get("slot_pieni")):
             righe.append(
                 f"  raccolta: inviate={raccolta.get('inviate')} "
                 f"slot_pieni={raccolta.get('slot_pieni')} "
                 f"tipi_bloccati={raccolta.get('tipi_bloccati')} "
                 f"tentativi={raccolta.get('tentativi_ciclo')}"
             )
-            skip_n = raccolta.get("skip_neutri") or {}
-            if skip_n:
-                righe.append(f"    skip_neutri: {skip_n}")
             nodi_b = raccolta.get("nodi_blacklist") or []
             if nodi_b:
                 righe.append(f"    blacklist: {nodi_b[:5]}{'…' if len(nodi_b) > 5 else ''}")
-            nodi_f = raccolta.get("nodi_fuori_territorio") or []
-            if nodi_f:
-                righe.append(f"    fuori_territorio: {nodi_f[:5]}{'…' if len(nodi_f) > 5 else ''}")
             livelli = raccolta.get("livelli_usati") or []
             if livelli:
                 righe.append(f"    livelli_usati: {livelli}")

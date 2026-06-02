@@ -291,60 +291,131 @@ def _parse_tasks(righe: list[dict]) -> dict:
 
 
 def _carica_istanze_abilitate(root: str) -> list[str]:
-    """Legge instances.json e ritorna le istanze abilitate."""
+    """Legge instances.json + runtime_overrides e ritorna le istanze abilitate.
+
+    La chiave `abilitata` in runtime_overrides ha priorità su instances.json.
+    """
     path = os.path.join(root, "config", "instances.json")
-    if not os.path.exists(path):
-        return ["FAU_00", "FAU_01", "FAU_02"]
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
-        return [i.get("nome") for i in data if i.get("abilitata", False)]
     except Exception:
         return ["FAU_00", "FAU_01", "FAU_02"]
+
+    # Override runtime: runtime_overrides.json::istanze.{nome}.abilitata
+    ov_istanze: dict = {}
+    ov_path = os.path.join(root, "config", "runtime_overrides.json")
+    try:
+        with open(ov_path, "r", encoding="utf-8") as f:
+            ov = json.load(f)
+        ov_istanze = ov.get("istanze", {})
+    except Exception:
+        pass
+
+    result = []
+    for ist in data:
+        nome = ist.get("nome")
+        if not nome:
+            continue
+        if nome in ov_istanze and "abilitata" in ov_istanze[nome]:
+            abilitata = ov_istanze[nome]["abilitata"]
+        else:
+            abilitata = ist.get("abilitata", True)
+        if abilitata:
+            result.append(nome)
+    return result
 
 
 def stato_ciclo_completo(root: str) -> dict:
     """
-    Legge i JSONL di tutte le istanze abilitate e bot.log.
-    Ritorna summary completo ultimo ciclo.
+    Stato del ciclo corrente basato su sorgenti affidabili:
+      - data/telemetry/cicli.json  → numero ciclo + timestamp per-istanza
+      - engine_status.json         → istanza live + task_corrente
+      - logs/FAU_XX.jsonl          → filtrati da start_ts istanza (solo ciclo corrente)
     """
+    # ── 1. Ciclo corrente da cicli.json ────────────────────────────────────────
+    ciclo_n        = 0
+    ciclo_start_ts = ""
+    ciclo_completo = False
+    ist_ciclo: dict[str, dict] = {}   # {nome: {start_ts, end_ts, esito}}
+
+    cicli_path = os.path.join(root, "data", "telemetry", "cicli.json")
+    try:
+        with open(cicli_path, "r", encoding="utf-8") as f:
+            cicli_data = json.load(f)
+        cicli_list = sorted(
+            cicli_data.get("cicli", []),
+            key=lambda c: c.get("start_ts", ""),
+            reverse=True,
+        )
+        if cicli_list:
+            c = cicli_list[0]
+            ciclo_n        = c.get("numero", 0)
+            ciclo_start_ts = c.get("start_ts", "")
+            ciclo_completo = c.get("completato", False)
+            ist_ciclo      = c.get("istanze", {})
+    except Exception:
+        pass
+
+    # ── 2. Stato live da engine_status.json ────────────────────────────────────
+    engine_ist: dict[str, dict] = {}
+    es_path = os.path.join(root, "engine_status.json")
+    try:
+        with open(es_path, "r", encoding="utf-8") as f:
+            es = json.load(f)
+        engine_ist = es.get("istanze", {})
+    except Exception:
+        pass
+
+    # ── 3. Lista istanze abilitate (instances.json + runtime_overrides) ────────
     istanze = _carica_istanze_abilitate(root)
 
-    # Parse bot.log per ciclo corrente
-    bot_log_path = os.path.join(root, "bot.log")
-    righe_bot = leggi_txt_tail(bot_log_path, n=500)
-    ciclo_n = 0
-    for line in reversed(righe_bot):
-        m = _RE_CICLO_N.search(line)
-        if m:
-            ciclo_n = int(m.group(1))
-            break
-
+    # ── 4. Analisi per-istanza ─────────────────────────────────────────────────
     ris_istanze: dict[str, dict] = {}
     anomalie_totali = 0
 
     for nome in istanze:
+        ist_info   = ist_ciclo.get(nome, {})
+        ist_start  = ist_info.get("start_ts", ciclo_start_ts)
+        ist_esito  = ist_info.get("esito", "attesa")   # running/ok/cascade/abort/attesa
+
+        # Task corrente dal live engine_status
+        live       = engine_ist.get(nome, {})
+        task_live  = live.get("task_corrente")
+
+        # Log filtrati: solo righe successive all'avvio dell'istanza nel ciclo
         jpath = os.path.join(root, "logs", f"{nome}.jsonl")
-        righe = leggi_jsonl_tail(jpath, n=500)
+        if ist_start:
+            righe = leggi_jsonl_da(jpath, da_ts=ist_start)
+        else:
+            righe = leggi_jsonl_tail(jpath, n=300)
+
         if not righe:
             ris_istanze[nome] = {
-                "launcher": {},
-                "tasks":    {},
-                "raccolta": {},
-                "anomalie": [],
+                "esito":        ist_esito,
+                "task_corrente": task_live,
+                "launcher":     {},
+                "tasks":        {},
+                "raccolta":     {},
+                "anomalie":     [],
             }
             continue
+
         anomalie = rileva_anomalie(righe)
         ris_istanze[nome] = {
-            "launcher": analizza_launcher(righe),
-            "tasks":    _parse_tasks(righe),
-            "raccolta": analizza_raccolta(righe),
-            "anomalie": anomalie[-20:],  # ultime 20 anomalie
+            "esito":         ist_esito,
+            "task_corrente": task_live,
+            "launcher":      analizza_launcher(righe),
+            "tasks":         _parse_tasks(righe),
+            "raccolta":      analizza_raccolta(righe),
+            "anomalie":      anomalie[-20:],
         }
         anomalie_totali += len(anomalie)
 
     return {
         "ciclo_n":         ciclo_n,
+        "ciclo_start_ts":  ciclo_start_ts,
+        "completato":      ciclo_completo,
         "istanze":         ris_istanze,
         "anomalie_totali": anomalie_totali,
     }
