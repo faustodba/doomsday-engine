@@ -1125,10 +1125,10 @@ class GlobalConfig:
             "raccolta": {
                 "livello_nodo": self.livello_nodo,
                 "allocazione": {
-                    "pomodoro": self.allocazione_pomodoro,
-                    "legno":    self.allocazione_legno,
-                    "petrolio": self.allocazione_petrolio,
-                    "acciaio":  self.allocazione_acciaio,
+                    "pomodoro": round(self.allocazione_pomodoro * 100, 1),
+                    "legno":    round(self.allocazione_legno    * 100, 1),
+                    "petrolio": round(self.allocazione_petrolio * 100, 1),
+                    "acciaio":  round(self.allocazione_acciaio  * 100, 1),
                 },
             },
             "truppe": {

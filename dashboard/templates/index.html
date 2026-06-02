@@ -240,8 +240,9 @@
             <div class="rr" id="ar-{{ r }}">
               <span class="rr-ico">{{ ico }}</span>
               <span class="rr-name">{{ r }}</span>
+              {% set av = alloc.get(r, default) %}
               <input class="rr-inp" id="a-{{ r }}" type="number" step="5" min="0" max="100"
-                     value="{{ alloc.get(r, default) | round | int }}"
+                     value="{{ ((av * 100) if av <= 1 else av) | round | int }}"
                      oninput="updateAllocTotal()">
               <span class="rr-unit">%</span>
             </div>
