@@ -36,6 +36,8 @@ Comandi supportati:
   /rif_reset    — azzera stato giornaliero rifornimento per istanza
   /stop_messaggi  — disabilita notifiche proattive
   /start_messaggi — abilita notifiche proattive
+  /claude <domanda> — AI advisor via Claude Code CLI (abbonamento)
+  /haiku  <domanda> — AI advisor via Claude Haiku API (pay-per-use)
 
 Config (runtime_overrides.json::globali.notifications.telegram):
   {
@@ -120,6 +122,7 @@ from core.tg_handlers_config import (
     cmd_rif_risorsa, cmd_rif_soglia,
     cmd_start_messaggi, cmd_stop_messaggi, cmd_task,
 )
+from core.tg_handlers_ai import cmd_claude, cmd_haiku
 
 
 # ─── /help handler ────────────────────────────────────────────────────────────
@@ -173,6 +176,10 @@ def _cmd_help(text: str) -> str:
         "/stop_messaggi  — disabilita notifiche automatiche\n"
         "/start_messaggi — abilita notifiche automatiche\n"
         "\n"
+        "<b>AI Advisor</b> (contesto farm live)\n"
+        "/claude &lt;domanda&gt; — Claude Code CLI (abbonamento, gratuito)\n"
+        "/haiku  &lt;domanda&gt; — Claude Haiku API (pay-per-use, ~$0.002/query)\n"
+        "\n"
         "/help — questo messaggio"
     )
 
@@ -212,6 +219,9 @@ _DISPATCH: dict[str, Callable[[str], str]] = {
     "/rif_soglia":        cmd_rif_soglia,
     "/rif_provviste":     cmd_rif_provviste,
     "/rif_reset":         cmd_rif_reset,
+    # AI advisor
+    "/claude":            cmd_claude,
+    "/haiku":             cmd_haiku,
 }
 
 

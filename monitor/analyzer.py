@@ -419,3 +419,320 @@ def stato_ciclo_completo(root: str) -> dict:
         "istanze":         ris_istanze,
         "anomalie_totali": anomalie_totali,
     }
+
+
+# ==============================================================================
+# Farm stato globale
+# ==============================================================================
+
+def farm_stato(root: str) -> dict:
+    """
+    Snapshot globale della farm:
+      - DRL master (FauMorfeus) da morfeus_state.json
+      - Spedizioni totali oggi + per-istanza da state/FAU_XX.json
+      - Produzione/ora aggregata da metrics per-istanza
+      - Truppe per istanza da storico_truppe.json
+      - Storico invii ultimi 3 giorni da storico_farm.json
+    """
+    result: dict = {}
+
+    # ── DRL master ────────────────────────────────────────────────────────────
+    morf_path = os.path.join(root, "data", "morfeus_state.json")
+    try:
+        with open(morf_path, encoding="utf-8") as f:
+            m = json.load(f)
+        drl     = m.get("daily_recv_limit", -1)
+        drl_max = m.get("daily_recv_limit_max", 0)
+        drl_pct = round(drl / drl_max * 100, 1) if drl_max > 0 else 0
+        result["master"] = {
+            "drl_residuo_m":   round(drl / 1e6, 1),
+            "drl_max_m":       round(drl_max / 1e6, 1),
+            "drl_pct":         drl_pct,
+            "tassa_pct":       round(m.get("tassa_pct", 0) * 100, 1),
+            "ts":              str(m.get("ts", ""))[:16],
+            "saturo":          drl == 0,
+        }
+    except Exception:
+        result["master"] = {}
+
+    # ── Istanze: rifornimento + produzione/ora + boost + arena ────────────────
+    state_dir = os.path.join(root, "state")
+    istanze_stato: dict[str, dict] = {}
+    tot_sped = 0
+    tot_inviato_m: dict[str, float] = {}
+    farm_prod: dict[str, float] = {}
+
+    for fn in sorted(os.listdir(state_dir)):
+        if not fn.endswith(".json") or fn.startswith("."):
+            continue
+        nome = fn[:-5]
+        if nome == "FauMorfeus":
+            continue
+        try:
+            with open(os.path.join(state_dir, fn), encoding="utf-8") as f:
+                st = json.load(f)
+        except Exception:
+            continue
+
+        rif  = st.get("rifornimento", {})
+        met  = st.get("metrics", {})
+        bst  = st.get("boost", {})
+        arn  = st.get("arena", {})
+
+        sped = rif.get("spedizioni_oggi", 0)
+        tot_sped += sped
+
+        # inviato per risorsa oggi
+        inv = rif.get("inviato_oggi", {})
+        for res, val in inv.items():
+            tot_inviato_m[res] = tot_inviato_m.get(res, 0) + val / 1e6
+
+        # prod/ora
+        prod_h = {}
+        for res in ("pomodoro", "legno", "acciaio", "petrolio"):
+            val = met.get(f"{res}_per_ora", 0)
+            if val and abs(val) > 100:
+                prod_h[res] = round(val / 1e6, 3)
+                farm_prod[res] = farm_prod.get(res, 0) + val
+
+        # boost scadenza
+        bst_info = None
+        if bst.get("tipo"):
+            from datetime import datetime, timezone
+            scad = bst.get("scadenza", "")
+            try:
+                dt_scad = datetime.fromisoformat(scad.replace("Z", "+00:00"))
+                now = datetime.now(timezone.utc)
+                residuo_m = int((dt_scad - now).total_seconds() / 60)
+                bst_info = f"{bst['tipo']} residuo {residuo_m}m" if residuo_m > 0 else f"{bst['tipo']} scaduto"
+            except Exception:
+                bst_info = bst.get("tipo")
+
+        istanze_stato[nome] = {
+            "sped_oggi":     sped,
+            "inviato_m":     {k: round(v / 1e6, 1) for k, v in inv.items() if v > 0},
+            "prod_h_m":      prod_h,
+            "boost":         bst_info,
+            "arena_esaurita": arn.get("esaurite", False),
+            "provviste_m":   round(rif.get("provviste_residue", -1) / 1e6, 1)
+                             if rif.get("provviste_residue", -1) >= 0 else None,
+        }
+
+    result["spedizioni_totali"] = tot_sped
+    result["inviato_totale_m"]  = {k: round(v, 1) for k, v in tot_inviato_m.items()}
+    result["farm_prod_h_m"]     = {k: round(v / 1e6, 3) for k, v in farm_prod.items()}
+    result["istanze"]           = istanze_stato
+
+    # ── Truppe ────────────────────────────────────────────────────────────────
+    tt_path = os.path.join(root, "data", "storico_truppe.json")
+    truppe: dict[str, int] = {}
+    try:
+        with open(tt_path, encoding="utf-8") as f:
+            tt = json.load(f)
+        for nome, records in tt.items():
+            if records:
+                truppe[nome] = records[-1].get("total_squads", 0)
+    except Exception:
+        pass
+    result["truppe"] = truppe
+
+    # ── Storico farm ultimi 3 giorni ──────────────────────────────────────────
+    sf_path = os.path.join(root, "data", "storico_farm.json")
+    storico: dict = {}
+    try:
+        with open(sf_path, encoding="utf-8") as f:
+            sf = json.load(f)
+        for data in sorted(sf.keys())[-3:]:
+            giorno = sf[data]
+            totale_m: dict[str, float] = {}
+            for _, val in giorno.items():
+                if isinstance(val, dict):
+                    for res, qty in val.items():
+                        if isinstance(qty, (int, float)):
+                            totale_m[res] = totale_m.get(res, 0) + qty / 1e6
+            storico[data] = {k: round(v, 1) for k, v in totale_m.items()}
+    except Exception:
+        pass
+    result["storico_3gg"] = storico
+
+    return result
+
+
+# ==============================================================================
+# Stato completo singola istanza
+# ==============================================================================
+
+def istanza_stato_completo(root: str, nome: str) -> dict:
+    """
+    Stato completo di una singola istanza:
+      - state/FAU_XX.json: rifornimento, boost, arena, metrics, produzione
+      - istanza_metrics.jsonl: ultimo record (boot, tick, raccolta, durate task)
+      - engine_status.json: task_corrente, storico task recenti
+      - storico_truppe.json: delta truppe
+    """
+    result: dict = {"nome": nome}
+
+    # ── State file ────────────────────────────────────────────────────────────
+    st_path = os.path.join(root, "state", f"{nome}.json")
+    try:
+        with open(st_path, encoding="utf-8") as f:
+            st = json.load(f)
+
+        rif = st.get("rifornimento", {})
+        result["rifornimento"] = {
+            "spedizioni_oggi": rif.get("spedizioni_oggi", 0),
+            "provviste_m":     round(rif.get("provviste_residue", -1) / 1e6, 1)
+                               if rif.get("provviste_residue", -1) >= 0 else None,
+            "tassa_pct":       round(rif.get("tassa_pct_avg", 0) * 100, 1),
+            "inviato_m":       {k: round(v / 1e6, 1) for k, v in rif.get("inviato_oggi", {}).items() if v > 0},
+            "ultima_sped":     str(rif.get("ultima_spedizione", ""))[:16],
+        }
+
+        bst = st.get("boost", {})
+        if bst.get("tipo"):
+            from datetime import datetime, timezone
+            scad = bst.get("scadenza", "")
+            try:
+                dt_scad = datetime.fromisoformat(scad.replace("Z", "+00:00"))
+                residuo_m = int((dt_scad - datetime.now(timezone.utc)).total_seconds() / 60)
+                result["boost"] = f"{bst['tipo']} — residuo {max(0, residuo_m)}m"
+            except Exception:
+                result["boost"] = bst.get("tipo", "?")
+
+        result["arena"] = {
+            "esaurite":       st.get("arena", {}).get("esaurite", False),
+            "data_rif":       st.get("arena", {}).get("data_riferimento", ""),
+        }
+
+        met = st.get("metrics", {})
+        prod_h = {}
+        for res in ("pomodoro", "legno", "acciaio", "petrolio"):
+            val = met.get(f"{res}_per_ora", 0)
+            if val and abs(val) > 1000:
+                prod_h[res] = f"{val/1e3:.0f}K/h"
+        result["prod_h"] = prod_h
+
+        pc = st.get("produzione_corrente", {})
+        result["tick_corrente"] = {
+            "ts_inizio":    str(pc.get("ts_inizio", ""))[:16],
+            "tasks_count":  len(pc.get("tasks_count", {})),
+            "zaino_delta_m": {k: round(v/1e6, 1) for k, v in pc.get("zaino_delta", {}).items() if v},
+        }
+    except Exception as exc:
+        result["state_error"] = str(exc)
+
+    # ── Istanza metrics (ultimo record) ───────────────────────────────────────
+    met_path = os.path.join(root, "data", "istanza_metrics.jsonl")
+    last_met: dict = {}
+    try:
+        with open(met_path, encoding="utf-8") as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                    if r.get("instance") == nome:
+                        last_met = r
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    if last_met:
+        racc = last_met.get("raccolta", {})
+        result["ultimo_tick"] = {
+            "ts":            str(last_met.get("ts", ""))[:16],
+            "outcome":       last_met.get("outcome", ""),
+            "boot_home_s":   last_met.get("boot_home_s", 0),
+            "tick_total_s":  last_met.get("tick_total_s", 0),
+            "marce":         len(racc.get("invii", [])),
+            "slot":          f"{racc.get('attive_pre','?')}→{racc.get('attive_post','?')}/{racc.get('totali','?')}",
+            "task_top3_s":   dict(sorted(
+                last_met.get("task_durations_s", {}).items(),
+                key=lambda x: -x[1])[:3]
+            ),
+        }
+
+    # ── Engine status — task corrente + storico ───────────────────────────────
+    es_path = os.path.join(root, "engine_status.json")
+    try:
+        with open(es_path, encoding="utf-8") as f:
+            es = json.load(f)
+        live = es.get("istanze", {}).get(nome, {})
+        result["live"] = {
+            "stato":        live.get("stato"),
+            "task_corrente": live.get("task_corrente"),
+        }
+        storico_task = [
+            s for s in es.get("storico", [])
+            if s.get("istanza") == nome
+        ][-8:]
+        if storico_task:
+            result["storico_task"] = [
+                f"{s['task']}={s['esito']} {s.get('durata_s',0):.0f}s"
+                + (f" ({s['msg'][:40]})" if s.get("msg") else "")
+                for s in storico_task
+            ]
+    except Exception:
+        pass
+
+    # ── Truppe ────────────────────────────────────────────────────────────────
+    tt_path = os.path.join(root, "data", "storico_truppe.json")
+    try:
+        with open(tt_path, encoding="utf-8") as f:
+            tt = json.load(f)
+        records = tt.get(nome, [])
+        if records:
+            last2 = records[-2:]
+            result["truppe"] = last2[-1].get("total_squads", 0)
+            if len(last2) == 2:
+                result["truppe_delta"] = last2[-1].get("total_squads", 0) - last2[0].get("total_squads", 0)
+    except Exception:
+        pass
+
+    return result
+
+
+# ==============================================================================
+# Performance task (da engine_status.storico)
+# ==============================================================================
+
+def task_performance(root: str) -> dict:
+    """
+    Performance ultimi task eseguiti da engine_status.storico.
+    Raggruppa per task: count, durata media, tasso ok, ultimi messaggi anomali.
+    """
+    es_path = os.path.join(root, "engine_status.json")
+    try:
+        with open(es_path, encoding="utf-8") as f:
+            es = json.load(f)
+    except Exception:
+        return {}
+
+    storico = es.get("storico", [])
+    from collections import defaultdict
+    perf: dict[str, dict] = defaultdict(lambda: {"count": 0, "ok": 0, "fail": 0, "durate": [], "msgs": []})
+
+    for s in storico:
+        task = s.get("task", "?")
+        esito = s.get("esito", "?")
+        dur = s.get("durata_s", 0)
+        msg = s.get("msg", "")
+        perf[task]["count"] += 1
+        if esito == "ok":
+            perf[task]["ok"] += 1
+        else:
+            perf[task]["fail"] += 1
+            if msg:
+                perf[task]["msgs"].append(f"{s.get('istanza','?')}: {msg[:50]}")
+        if dur:
+            perf[task]["durate"].append(dur)
+
+    result = {}
+    for task, d in sorted(perf.items()):
+        durate = d["durate"]
+        result[task] = {
+            "count":    d["count"],
+            "ok_pct":   round(d["ok"] / d["count"] * 100) if d["count"] else 0,
+            "dur_avg_s": round(sum(durate) / len(durate), 1) if durate else 0,
+            "fails":    d["msgs"][-3:],
+        }
+    return result
