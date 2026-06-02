@@ -1,6 +1,15 @@
 <div class="task-grid" id="task-grid-container">
   {% set task_flags = overrides.get("globali", {}).get("task", {}) %}
+  {% set ALWAYS_ON = ["raccolta"] %}
   {% for task_name, abilitato in task_flags.items() %}
+  {% if task_name in ALWAYS_ON %}
+  <span class="task-toggle on task-always-on"
+        id="cfg-tog-{{ task_name }}"
+        title="{{ task_name }} — sempre attivo, non modificabile">
+    <span class="tog-dot"></span>
+    <span class="tog-label">{{ task_name }} 🔒</span>
+  </span>
+  {% else %}
   <label class="task-toggle {% if abilitato %}on{% endif %}"
          id="cfg-tog-{{ task_name }}"
          hx-patch="{{ url_prefix }}/api/config/overrides/task/{{ task_name }}"
@@ -10,5 +19,6 @@
     <span class="tog-dot"></span>
     <span class="tog-label">{{ task_name }}</span>
   </label>
+  {% endif %}
   {% endfor %}
 </div>

@@ -257,6 +257,10 @@ html, body {
 .tog-c.off .subs,
 .tog-c.off .tog-vsep { display: none; }
 
+/* task raccolta — sempre attivo, solo visualizzazione */
+.task-always-on { cursor: default !important; opacity: 0.75; }
+.task-always-on:hover { border-color: var(--green) !important; }
+
 /* auto-WU22: task-row checkbox (2-col grid in #task-flags) */
 .task-row {
   display: flex; align-items: center; gap: 6px;
