@@ -17,7 +17,7 @@
   },
   "task": {
     "_note": "Tutti i task default FALSE — l'utente abilita esplicitamente solo quelli desiderati via dashboard. Reset configurazione = riparti da neutra.",
-    "raccolta": false,
+    "raccolta": true,
     "rifornimento": false,
     "zaino": false,
     "vip": false,

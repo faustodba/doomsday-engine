@@ -73,8 +73,11 @@ def cmd_task(text: str) -> str:
         return "⚠ Nessun task configurato in runtime_overrides.json"
     lines = ["📋 <b>Task globali</b>", ""]
     for nome_t, stato in sorted(task_dict.items()):
-        icona = "🟢" if stato else "🔴"
-        lines.append(f"{icona} {nome_t}")
+        if nome_t in _TASK_ALWAYS_ON:
+            lines.append(f"🟢 {nome_t}  <i>(sempre attivo)</i>")
+        else:
+            icona = "🟢" if stato else "🔴"
+            lines.append(f"{icona} {nome_t}")
     lines += ["", "Usa /disabilita_task &lt;nome&gt; o /abilita_task &lt;nome&gt;"]
     return "\n".join(lines)
 
@@ -85,6 +88,8 @@ def cmd_disabilita_task(text: str) -> str:
 def cmd_abilita_task(text: str) -> str:
     return _cmd_toggle_task(text, abilitata=True)
 
+_TASK_ALWAYS_ON = {"raccolta"}  # mai disabilitabile — gira sempre (WU102)
+
 def _cmd_toggle_task(text: str, abilitata: bool) -> str:
     cmd   = text.split()[0]
     parts = text.split()
@@ -94,6 +99,8 @@ def _cmd_toggle_task(text: str, abilitata: bool) -> str:
             "Usa /task per vedere la lista dei task e il loro stato."
         )
     nome_task = parts[1].lower()
+    if nome_task in _TASK_ALWAYS_ON:
+        return f"⚠ Task <b>{nome_task}</b> è sempre attivo e non può essere disabilitato."
     ov_now    = _read_runtime_overrides()
     task_dict = ov_now.get("globali", {}).get("task", {})
     if nome_task not in task_dict:
