@@ -260,15 +260,12 @@ def _find_claude_exe() -> Optional[str]:
     return None
 
 
-def cmd_claude(text: str) -> str:
+def cmd_claude(text: str):
     """Risponde con Claude Code CLI (abbonamento). Inietta contesto farm live."""
     parts = text.split(maxsplit=1)
     if len(parts) < 2 or not parts[1].strip():
-        return (
-            "⚠ Uso: /claude &lt;domanda&gt;\n"
-            "Es: /claude perché FAU_09 non raccoglie?\n"
-            "Usa il tuo abbonamento Claude — nessun costo aggiuntivo."
-        )
+        # Tuple speciale → ForceReply nel polling loop
+        return ("💬 Scrivi la tua domanda per Claude:", "/claude")
     domanda = parts[1].strip()
     exe     = _find_claude_exe()
     if not exe:
@@ -303,15 +300,12 @@ def cmd_claude(text: str) -> str:
 # Opzione 2 — /haiku (Anthropic Haiku API, pay-per-use)
 # ==============================================================================
 
-def cmd_haiku(text: str) -> str:
+def cmd_haiku(text: str):
     """Risponde con Claude Haiku API (pay-per-use) + contesto farm live."""
     parts = text.split(maxsplit=1)
     if len(parts) < 2 or not parts[1].strip():
-        return (
-            "⚠ Uso: /haiku &lt;domanda&gt;\n"
-            "Es: /haiku il rifornimento è ottimale?\n"
-            "Usa Claude Haiku API — ~$0.002 per query."
-        )
+        # Tuple speciale → ForceReply nel polling loop
+        return ("💬 Scrivi la tua domanda per Haiku:", "/haiku")
     domanda = parts[1].strip()
     api_key = _load_anthropic_key()
     if not api_key:

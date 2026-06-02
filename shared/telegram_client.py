@@ -163,33 +163,48 @@ def _get_json(url: str, timeout: int = _TIMEOUT_HTTP) -> Optional[dict]:
 def send_message(chat_id: str,
                  text: str,
                  parse_mode: str = "HTML",
-                 token: Optional[str] = None) -> bool:
-    """Invia messaggio a chat_id. Ritorna True se ok.
+                 reply_markup: Optional[dict] = None,
+                 token: Optional[str] = None) -> Optional[int]:
+    """Invia messaggio a chat_id. Ritorna message_id se ok, None altrimenti.
 
     Args:
-        chat_id:    ID chat/user destinatario (stringa o int).
-        text:       testo (HTML o plain a seconda di parse_mode).
-        parse_mode: 'HTML' | 'Markdown' | '' (plain).
-        token:      override token (default: load_token()).
+        chat_id:      ID chat/user destinatario.
+        text:         testo (HTML o plain a seconda di parse_mode).
+        parse_mode:   'HTML' | 'Markdown' | '' (plain).
+        reply_markup: dict opzionale (es. ForceReply, InlineKeyboard).
+        token:        override token (default: load_token()).
     """
     tok = token or load_token()
     if not tok:
         _log.warning("[TG-CLIENT] send_message: token non configurato")
-        return False
+        return None
     if not chat_id:
         _log.warning("[TG-CLIENT] send_message: chat_id non configurato")
-        return False
+        return None
 
     payload: dict = {"chat_id": str(chat_id), "text": text[:4096]}
     if parse_mode:
         payload["parse_mode"] = parse_mode
+    if reply_markup:
+        import json as _json
+        payload["reply_markup"] = _json.dumps(reply_markup)
 
     url = _api_url(tok, "sendMessage")
     resp = _post_json(url, payload)
     if resp and resp.get("ok"):
-        return True
+        return resp.get("result", {}).get("message_id")
     _log.warning("[TG-CLIENT] sendMessage failed: %s", resp)
-    return False
+    return None
+
+
+def send_force_reply(chat_id: str, prompt: str,
+                     token: Optional[str] = None) -> Optional[int]:
+    """Invia messaggio con ForceReply — apre automaticamente il campo input.
+
+    Ritorna il message_id del messaggio inviato (usato per tracciare la reply).
+    """
+    markup = {"force_reply": True, "input_field_placeholder": prompt[:64]}
+    return send_message(chat_id, prompt, reply_markup=markup, token=token)
 
 
 def get_updates(offset: int = 0,

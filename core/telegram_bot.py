@@ -91,6 +91,10 @@ _BOT_FAIL_THRESHOLD   = 3
 
 _raccolta_alert_cicli: set[int] = set()
 
+# ─── ForceReply tracking (AI commands senza argomenti) ───────────────────────
+# {message_id: "/claude" | "/haiku"} — reply attese dall'utente
+_force_reply_pending: dict[int, str] = {}
+
 # ─── Instance lock ────────────────────────────────────────────────────────────
 
 _PID_FILE: Optional[Path] = None
@@ -288,6 +292,20 @@ def _polling_loop(stop: threading.Event) -> None:
             if chat != authorized_chat:
                 _log.warning("[TG-BOT] messaggio da chat non autorizzato: %s", chat)
                 continue
+
+            # ── ForceReply: risposta a un comando AI senza argomenti ──────────
+            reply_to = msg.get("reply_to_message", {})
+            reply_to_id = reply_to.get("message_id") if reply_to else None
+            if reply_to_id and reply_to_id in _force_reply_pending and not text.startswith("/"):
+                cmd_origin = _force_reply_pending.pop(reply_to_id)
+                _log.info("[TG-BOT] ForceReply per %s: %s", cmd_origin, text[:60])
+                try:
+                    reply = _handle_command(f"{cmd_origin} {text}", chat)
+                except Exception as exc:
+                    reply = f"⚠ Errore interno: {exc}"
+                send_message(chat, reply[:_MAX_MSG_LEN])
+                continue
+
             if not text.startswith("/"):
                 continue
 
@@ -296,7 +314,17 @@ def _polling_loop(stop: threading.Event) -> None:
                 reply = _handle_command(text, chat)
             except Exception as exc:
                 reply = f"⚠ Errore interno: {exc}"
-            send_message(chat, reply[:_MAX_MSG_LEN])
+            # Per ForceReply: se il reply è un prompt (messaggio_id != None),
+            # salvarlo nel tracking prima di inviarlo
+            if isinstance(reply, tuple):
+                # (testo, force_reply_cmd) — formato speciale da cmd_claude/cmd_haiku
+                reply_text, force_cmd = reply
+                from shared.telegram_client import send_force_reply
+                msg_id = send_force_reply(chat, reply_text)
+                if msg_id:
+                    _force_reply_pending[msg_id] = force_cmd
+            else:
+                send_message(chat, reply[:_MAX_MSG_LEN])
 
         # ── Check bot silenzioso (ogni _BOT_SILENT_CHECK_S secondi) ──────────
         try:
