@@ -58,6 +58,51 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Issues aperti (priorità)
 
+### Sessione 03/06/2026 — MCP potenziato + AI Advisor Telegram + fix operativi
+
+#### MCP — copertura dati 30% → 95%
+
+Tre nuovi tool in `monitor/analyzer.py` e `monitor/mcp_server.py`:
+- **`farm_stato_globale`**: DRL master (morfeus_state.json), spedizioni totali, prod/ora farm, truppe per istanza, storico invii 3 giorni
+- **`istanza_stato`**: stato completo singola istanza (rifornimento, boost, arena, prod/h, ultimo tick da istanza_metrics, storico task da engine_status)
+- **`performance_task`**: count/ok%/durata media per task da engine_status.storico
+
+Fix architetturale `ciclo_stato`: ora usa `cicli.json` per numero ciclo e start_ts per-istanza, `engine_status.json` per task_corrente live, filtra log JSONL per timestamp (solo ciclo corrente). Fix `_carica_istanze_abilitate`: merge `instances.json` + `runtime_overrides::abilitata`.
+
+#### AI Advisor Telegram (`core/tg_handlers_ai.py`)
+
+Due nuovi comandi con contesto farm live (ciclo corrente, anomalie 30min, DRL, prod/ora):
+- **`/claude <domanda>`**: Claude Code CLI installato sulla macchina (abbonamento, costo zero)
+- **`/haiku <domanda>`**: Anthropic Haiku API pay-per-use (~$0.002/query, prezzi Haiku 4.5)
+- **`/credit`**: utilizzo API oggi / totale storico / ultimi 7 giorni
+
+API key: cascata env > `data/secrets.json` > `d:/dev/trading-engine/.env` (condivisione abbonamento trading bot).
+Usage tracking: `data/ai_usage.json` (struttura identica a `advisor:usage` Redis del trading bot).
+ForceReply: `/claude` e `/haiku` senza argomenti aprono automaticamente il campo input Telegram.
+
+#### Fix operativi
+
+| Fix | Dettaglio |
+|-----|-----------|
+| `/rifornimento` Telegram 0 spedizioni | Iterava `runtime_overrides::istanze {}` vuoto → ora usa `instances.json` |
+| `raccolta: false` in runtime_overrides | Ripristinato a `true`; guard in `/disabilita_task` e label `(sempre attivo)` in `/task` |
+| `global_config.json` default acciaio | `acciaio_abilitato/usa_acciaio: false` (standard, era `true` per errore) |
+| Rifornimento coordinate rifugio | 687,532 → 686,529 (castle spostato nel gioco) |
+| Dashboard raccolta pill | `task-flags-v2`: raccolta con checkbox `disabled` + 🔒 |
+| ZainoTask scheduling | `periodic 168h → daily 24h` |
+| `send_message()` | Aggiunto `reply_markup`, ritorna `message_id` (int\|None) |
+| MCP `.mcp.json` | Spostato in root progetto, path corretto, DOOMSDAY_ROOT → prod |
+| Bug double-process 03/06 | `py.exe` orfano → due bot in competizione → ADB cascade FauMorfeus → loop restart. Fix: kill orfano |
+
+#### Bug double-process (03/06/2026)
+
+**Sintomo**: bot ciclava solo FauMorfeus, cicli da 40-64s, `run_local=1` su ogni ciclo.
+**Causa**: `py.exe` (PID 21084) rimasto vivo come orfano dopo restart — il pre-kill di `start.bat` uccideva `python.exe` (24552) ma non `py.exe` (Python Launcher wrapper). Al riavvio, due bot in competizione sulle stesse istanze MuMu → ADB cascade → loop.
+**Fix**: kill manuale orfano, bot ripartito con 12 istanze regolari.
+**Nota**: `start.bat` ha già il fix per `py.exe` nel CIM filter; il timeout `/t 3` potrebbe non essere sufficiente — aumentare a 5s se si ripresenta.
+
+---
+
 ### Sessione 29/05/2026 — WU-BatchReorg (riorganizzazione bat + Telegram /help)
 
 #### WU-BatchReorg — fusione launcher + cleanup bat + help Telegram aggiornato

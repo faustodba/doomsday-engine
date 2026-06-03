@@ -1,25 +1,82 @@
 # SESSION.md — Handoff Doomsday Engine V6
 
-## Sessione 29/05/2026 — WU-BatchReorg (riorganizzazione bat + Telegram /help)
+## Sessione 03/06/2026 — MCP potenziato + AI Advisor Telegram + fix operativi
+
+### Stato corrente
+- **Bot prod**: IN ESECUZIONE — ciclo 387+ in corso, tutte 12 istanze regolari
+- **Dashboard prod**: IN ESECUZIONE
+- **Telegram bot**: ⚠️ DA RIAVVIARE — modifiche a telegram_bot.py, tg_handlers_ai.py, tg_handlers_monitoring.py
+
+### Cosa è stato fatto
+
+**MCP — 3 nuovi tool (analyzer.py + mcp_server.py)**
+- `farm_stato_globale()`: DRL master, spedizioni, prod/ora, truppe, storico 3gg
+- `istanza_stato()`: rifornimento, boost, arena, metrics, ultimo tick, storico task
+- `performance_task()`: count/ok%/durata per task da engine_status.storico
+- Bug fix `ciclo_stato`: usa `cicli.json` + `engine_status.json` + filtro per timestamp (dati affidabili)
+- `_carica_istanze_abilitate`: merge `instances.json` + `runtime_overrides` abilitata
+- Kill e riavvio processo MCP senza restart Claude Code
+
+**AI Advisor Telegram (tg_handlers_ai.py)**
+- `/claude <domanda>`: Claude Code CLI (abbonamento, gratuito)
+- `/haiku <domanda>`: Anthropic Haiku API (pay-per-use ~$0.002/query)
+- `/credit`: utilizzo API oggi/totale/storico 7gg
+- API key da trading-engine/.env (condivisione abbonamento)
+- Usage tracking in `data/ai_usage.json` (analogo Redis trading bot)
+- ForceReply: `/claude`+`/haiku` senza args aprono campo input automaticamente
+
+**Fix operativi**
+- `/rifornimento` Telegram: iterava `runtime_overrides::istanze {}` → usa `instances.json`
+- `raccolta: false` in runtime_overrides → ripristinato a `true`
+- Rifornimento coordinate rifugio 687,532 → 686,529 (castle spostato)
+- `global_config.json`: `acciaio_abilitato/usa_acciaio` default `false` (standard)
+- Dashboard: raccolta task pill read-only (🔒) in `task-flags-v2`
+- `ZainoTask`: `periodic 168h → daily 24h`
+- `send_message()`: aggiunto `reply_markup` + ritorna `message_id`
+- `MCP .mcp.json`: path corretto in root progetto (era in .claude/ formato sbagliato)
+
+**Bug risolto — bot in loop (03/06)**
+- Causa: processo orfano `py.exe` (21084) rimasto vivo dopo riavvio → due bot in competizione → ADB cascade FauMorfeus → loop restart solo FauMorfeus
+- Fix: kill orfano, bot ripartito con tutte 12 istanze
+
+### Prossimo step
+Riavviare il Telegram bot per attivare:
+- `/claude`, `/haiku`, `/credit` (AI Advisor)
+- ForceReply per comandi senza argomenti
+- `/rifornimento` con conteggio spedizioni corretto
+
+---
+
+## Sessione 29/05/2026 — WU-BatchReorg + WU-TgRefactor
 
 ### Stato corrente
 - **Bot prod**: IN ESECUZIONE — nessuna modifica a main.py, nessun restart necessario
-- **Dashboard prod**: IN ESECUZIONE
-- **Telegram bot**: ⚠️ DA RIAVVIARE — `core/telegram_bot.py` modificato (`_BAT_BOT` + `/help`)
+- **Dashboard prod**: IN ESECUZIONE — nessuna modifica
+- **Telegram bot**: ⚠️ DA RIAVVIARE — 5 moduli aggiornati (`telegram_bot.py` + 4 nuovi)
 
-### Cosa è stato fatto
+### Cosa è stato fatto (WU-BatchReorg)
 - Analisi completa di tutti i bat (16 file)
 - `run_prod.bat` e `riavvia_bot.bat` fusi in `start.bat` (kill+MuMu+ADB+resume, no tocca stato gioco)
 - `run_prod.bat` e `riavvia_bot.bat` rinominati `.old` in dev+prod
 - Eliminati bat storici one-time: `fix_inplace_rifornimento.bat`, `release_pytest_fix5_16042026.bat`, `release_prod.bat`
 - `reset_emergenza.bat`: numerazione passi corretta `[1/5]→[1/6]`
 - `sync_prod.bat`: aggiornato per copiare `start.bat` + `reset_emergenza.bat`
-- `telegram_bot.py`: `_BAT_BOT=start.bat`, `/help` con bat/meccanismo per ogni comando, `/restart_telegram` alias aggiunto
-- ROADMAP.md aggiornata con WU-BatchReorg
+- `telegram_bot.py`: `_BAT_BOT=start.bat`, `/help` con bat/meccanismo per ogni comando, `/restart_bot` chiarisce "riavvio programmato a fine ciclo"
+- Dashboard: 3 riferimenti `run_prod.bat` → `start.bat` corretti (docstring, confirm dialog, tooltip)
+
+### Cosa è stato fatto (WU-TgRefactor)
+- Analisi critica `telegram_bot.py` (1908r, 352r di if/elif) + comparativa con trading bot
+- Split in 5 moduli: `tg_utils.py` (407r) + `tg_handlers_monitoring.py` (578r) + `tg_handlers_control.py` (152r) + `tg_handlers_config.py` (198r) + `telegram_bot.py` slim (587r)
+- Dict dispatch `_DISPATCH` — aggiungere un comando = 1 funzione + 1 riga dict + 1 riga /help
+- Fix `_ROOT_PROD` hardcoded → `_root()` (rispetta `DOOMSDAY_ROOT`)
+- Documento architetturale `docs/TELEGRAM_BOT_ARCHITECTURE.md` generato
+- ROADMAP.md e SESSION.md aggiornati
+- Tutti i file sincronizzati in prod
 
 ### Prossimo step
-Riavviare il Telegram bot: chiudi `run_telegram_prod.bat` e riaprila
-(o `/restart_telegram` da Telegram se il servizio è già raggiungibile)
+Riavviare il Telegram bot per caricare i nuovi moduli:
+- Da Telegram: `/restart_telegram` (se il servizio risponde, ~15s downtime)
+- Da PC: chiudi `run_telegram_prod.bat` e riaprila
 
 ---
 
