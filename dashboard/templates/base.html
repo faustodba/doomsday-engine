@@ -86,6 +86,7 @@
       <a href="{{ url_prefix }}/ui/ab-test" class="{% if active=='ab_test' %}active{% endif %}">ab test</a>
       <a href="{{ url_prefix }}/ui/config/global" class="{% if active=='global' %}active{% endif %}">config</a>
       <a href="{{ url_prefix }}/docs" target="_blank">api</a>
+      <a href="{{ url_prefix }}/ui/switch/mobile" title="Passa alla versione mobile" style="opacity:.6">📱</a>
     </nav>
     <div class="topbar-counters"
          hx-get="{{ url_prefix }}/ui/partial/status-inline"

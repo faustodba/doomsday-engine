@@ -71,6 +71,33 @@ def _env_label() -> dict:
     }
 
 
+# ── Device detection ──────────────────────────────────────────────────────────
+
+_MOBILE_UA_PATTERNS = (
+    "mobile", "android", "iphone", "ipad", "ipod",
+    "blackberry", "windows phone", "opera mini", "opera mobi",
+)
+_COOKIE_DASHBOARD = "dashboard_mode"   # "mobile" | "desktop"
+
+
+def _is_mobile_request(request: Request) -> bool:
+    """
+    True se il client è probabilmente mobile.
+    Priorità:
+      1. Cookie `dashboard_mode` (preferenza utente esplicita)
+      2. User-Agent header (rilevamento automatico)
+    """
+    # Cookie override: l'utente ha scelto esplicitamente
+    cookie_pref = request.cookies.get(_COOKIE_DASHBOARD, "")
+    if cookie_pref == "desktop":
+        return False
+    if cookie_pref == "mobile":
+        return True
+    # Rilevamento da User-Agent
+    ua = (request.headers.get("user-agent") or "").lower()
+    return any(pat in ua for pat in _MOBILE_UA_PATTERNS)
+
+
 # ==============================================================================
 # Lifespan
 # ==============================================================================
@@ -282,6 +309,44 @@ def root(request: Request):
 
 @app.get("/ui", include_in_schema=False)
 def ui_index(request: Request):
+    # Redirect automatico su mobile (override via cookie)
+    if _is_mobile_request(request):
+        return RedirectResponse(
+            url=f"{_url_prefix_ctx.get()}/ui/mobile",
+            status_code=302,
+        )
+    from dashboard.services.config_manager import get_merged_config, get_instances
+    return templates.TemplateResponse(request, "index.html", {
+        "active":  "home",
+        "cfg":     get_merged_config(),
+        "istanze": get_instances(),
+        **_env_label(),
+    })
+
+
+@app.get("/ui/switch/mobile", include_in_schema=False)
+def ui_switch_mobile(request: Request):
+    """Imposta cookie dashboard_mode=mobile e redirect a /ui/mobile."""
+    resp = RedirectResponse(
+        url=f"{_url_prefix_ctx.get()}/ui/mobile", status_code=302
+    )
+    resp.set_cookie(_COOKIE_DASHBOARD, "mobile", max_age=60 * 60 * 24 * 365)
+    return resp
+
+
+@app.get("/ui/switch/desktop", include_in_schema=False)
+def ui_switch_desktop(request: Request):
+    """Imposta cookie dashboard_mode=desktop e redirect a /ui (desktop)."""
+    resp = RedirectResponse(
+        url=f"{_url_prefix_ctx.get()}/ui/desktop", status_code=302
+    )
+    resp.set_cookie(_COOKIE_DASHBOARD, "desktop", max_age=60 * 60 * 24 * 365)
+    return resp
+
+
+@app.get("/ui/desktop", include_in_schema=False)
+def ui_desktop(request: Request):
+    """Forza visualizzazione desktop ignorando il cookie mobile."""
     from dashboard.services.config_manager import get_merged_config, get_instances
     return templates.TemplateResponse(request, "index.html", {
         "active":  "home",
