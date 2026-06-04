@@ -4944,8 +4944,8 @@ def mobile_partial_istanza(request: Request, nome: str):
 @app.get("/ui/mobile/partial/actions", include_in_schema=False)
 def mobile_partial_actions(request: Request):
     """Partial: bottoni azione (pausa/riprendi/restart)."""
-    import os
-    maint = _root() / "data" / "maintenance.flag"
+    from dashboard.services.config_manager import _PROD_ROOT as _MROOT
+    maint = _MROOT / "data" / "maintenance.flag"
     in_maint = maint.exists()
     up = _url_prefix_ctx.get()
     if in_maint:
