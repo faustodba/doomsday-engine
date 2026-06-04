@@ -585,3 +585,90 @@ def cmd_istanza(text: str) -> str:
         return _build_istanza_detail(nome)
     except Exception as exc:
         return f"⚠ Errore /istanza: {exc}"
+
+
+# ─── /depositi ────────────────────────────────────────────────────────────────
+
+_RES_ICONS = [("pomodoro", "🍅"), ("legno", "🪵"), ("acciaio", "⚙"), ("petrolio", "🛢")]
+
+
+def _build_depositi() -> str:
+    """Mostra i depositi (risorse nel castello) di tutte le istanze ordinarie."""
+    instances = _read_instances_cfg()
+    now       = datetime.now(timezone.utc)
+
+    rows: list[tuple[str, dict, str]] = []   # (nome, risorse, ts_str)
+    totali: dict[str, float] = {}
+
+    for cfg in sorted(instances, key=lambda c: c.get("nome", "")):
+        nome = cfg.get("nome", "")
+        if not nome or nome == "FauMorfeus":
+            continue
+
+        st    = _read_state(nome)
+        ris   = None
+        ts_s  = ""
+
+        # 1. Sessione corrente (risorse_iniziali della sessione in corso)
+        pc = st.get("produzione_corrente", {})
+        if pc.get("risorse_iniziali"):
+            ris  = pc["risorse_iniziali"]
+            ts_i = _parse_dt(pc.get("ts_inizio", ""))
+            if ts_i:
+                ago   = int((now - ts_i).total_seconds())
+                ts_s  = f"{_fmt_dur(ago)} fa"
+
+        # 2. Fallback: ultima sessione completata
+        if not ris:
+            storico = st.get("produzione_storico", [])
+            if storico:
+                ult  = storico[-1]
+                ris  = ult.get("risorse_finali") or ult.get("risorse_iniziali")
+                ts_f = _parse_dt(ult.get("ts_fine") or ult.get("ts_inizio") or "")
+                if ts_f:
+                    ago   = int((now - ts_f).total_seconds())
+                    ts_s  = f"{_fmt_dur(ago)} fa"
+
+        if not ris:
+            rows.append((nome, {}, "—"))
+            continue
+
+        rows.append((nome, ris, ts_s))
+        for res, _ in _RES_ICONS:
+            totali[res] = totali.get(res, 0) + ris.get(res, 0)
+
+    if not rows:
+        return "⚠ Nessun dato depositi disponibile"
+
+    lines: list[str] = ["<b>💰 Depositi farm</b>", ""]
+
+    for nome, ris, ts_s in rows:
+        if not ris:
+            lines.append(f"<code>{nome:<12}</code> — n/d")
+            continue
+        res_parts = [
+            f"{icon}{ris.get(res, 0)/1e6:.1f}M"
+            for res, icon in _RES_ICONS
+            if ris.get(res, 0) > 0
+        ]
+        ts_note = f"  <i>({ts_s})</i>" if ts_s else ""
+        lines.append(f"<code>{nome:<12}</code> {' '.join(res_parts)}{ts_note}")
+
+    # Totali
+    lines.append("")
+    lines.append("<b>Totale farm</b>")
+    tot_parts = [
+        f"{icon}<b>{totali.get(res, 0)/1e6:.1f}M</b>"
+        for res, icon in _RES_ICONS
+        if totali.get(res, 0) > 0
+    ]
+    lines.append("  " + "  ".join(tot_parts))
+
+    return "\n".join(lines)
+
+
+def cmd_depositi(text: str) -> str:
+    try:
+        return _build_depositi()
+    except Exception as exc:
+        return f"⚠ Errore /depositi: {exc}"

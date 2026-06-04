@@ -109,7 +109,7 @@ from core.tg_utils import (
     _tg_enabled,
 )
 from core.tg_handlers_monitoring import (
-    cmd_cicli, cmd_ciclo, cmd_istanza, cmd_istanze,
+    cmd_cicli, cmd_ciclo, cmd_depositi, cmd_istanza, cmd_istanze,
     cmd_produzione, cmd_rifornimento, cmd_status,
 )
 from core.tg_handlers_control import (
@@ -144,6 +144,7 @@ def _cmd_help(text: str) -> str:
         "/istanza FAU_03 — card dettaglio singola istanza\n"
         "/produzione — produzione 24h per istanza\n"
         "/rifornimento — DRL + spedizioni oggi + config\n"
+        "/depositi — risorse deposito di tutte le farm\n"
         "/cicli — ultimi 5 cicli (in corso + 4 completati)\n"
         "/ciclo 184 — dettaglio ciclo #184 (ometti per l'ultimo)\n"
         "\n"
@@ -199,6 +200,7 @@ _DISPATCH: dict[str, Callable[[str], str]] = {
     "/istanza":           cmd_istanza,
     "/produzione":        cmd_produzione,
     "/rifornimento":      cmd_rifornimento,
+    "/depositi":          cmd_depositi,
     "/cicli":             cmd_cicli,
     "/ciclo":             cmd_ciclo,
     # Controllo
