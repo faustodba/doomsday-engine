@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <title>Doomsday Mobile</title>
+  <script src="{{ url_prefix }}/static/htmx.min.js"></script>
+  <style>
+    :root {
+      --bg:      #0f172a;
+      --bg2:     #1e293b;
+      --bg3:     #334155;
+      --border:  rgba(148,163,184,.15);
+      --text:    #e2e8f0;
+      --text-dim:#94a3b8;
+      --green:   #22c55e;
+      --red:     #ef4444;
+      --yellow:  #eab308;
+      --blue:    #3b82f6;
+      --accent:  #f97316;
+      --gap:     12px;
+      --radius:  10px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 14px;
+      min-height: 100vh;
+      padding: var(--gap);
+      padding-bottom: 80px;
+    }
+
+    /* ── Header ── */
+    .m-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 0 14px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: var(--gap);
+    }
+    .m-header-title { font-size: 17px; font-weight: 700; color: var(--text); }
+    .m-header-sub   { font-size: 11px; color: var(--text-dim); margin-top: 2px; }
+    .m-refresh-btn  {
+      background: var(--bg2); border: 1px solid var(--border);
+      color: var(--text-dim); border-radius: 6px;
+      padding: 6px 10px; font-size: 12px; cursor: pointer;
+      touch-action: manipulation;
+    }
+
+    /* ── Card ── */
+    .m-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 14px;
+      margin-bottom: var(--gap);
+    }
+    .m-sec-title {
+      font-size: 11px; font-weight: 600;
+      color: var(--text-dim); text-transform: uppercase;
+      letter-spacing: .04em; margin-bottom: 8px;
+    }
+    .m-divider { height: 1px; background: var(--border); margin: 10px 0; }
+
+    /* ── Overview ── */
+    .m-row-sb { display: flex; align-items: center; justify-content: space-between; }
+    .m-status { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+    .m-sub    { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+    .m-ciclo  { font-size: 13px; color: var(--text); margin-top: 8px; }
+    .m-live   { color: var(--green); font-weight: 600; }
+
+    /* ── Dots ── */
+    .m-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+    .m-dot-ok   { background: var(--green); box-shadow: 0 0 6px var(--green); }
+    .m-dot-err  { background: var(--red);   box-shadow: 0 0 6px var(--red); }
+    .m-dot-warn { background: var(--yellow); }
+
+    /* ── Badge ── */
+    .m-badge { font-size: 12px; padding: 3px 8px; border-radius: 4px; font-weight: 600; }
+    .m-badge-err  { background: rgba(239,68,68,.15); color: var(--red); }
+    .m-badge-warn { background: rgba(234,179,8,.15);  color: var(--yellow); }
+
+    /* ── Risorse ── */
+    .m-res-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: baseline;
+    }
+    .m-val { font-size: 18px; font-weight: 700; color: var(--text); }
+
+    /* ── Task flags ── */
+    .m-flags-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .m-flag {
+      display: inline-flex; align-items: center;
+      padding: 8px 14px;
+      border-radius: 20px;
+      font-size: 13px; font-weight: 500;
+      border: 1.5px solid transparent;
+      cursor: pointer;
+      touch-action: manipulation;
+      user-select: none;
+      -webkit-tap-highlight-color: transparent;
+      transition: opacity .15s;
+    }
+    .m-flag:active { opacity: .7; }
+    .m-flag-on   { background: rgba(34,197,94,.12); border-color: rgba(34,197,94,.4); color: var(--green); }
+    .m-flag-off  { background: rgba(239,68,68,.08); border-color: rgba(239,68,68,.25); color: #f87171; opacity: .8; }
+    .m-flag-lock { cursor: default; opacity: .65; }
+
+    /* ── Actions ── */
+    .m-actions {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .m-btn {
+      display: block;
+      width: 100%;
+      padding: 14px;
+      border-radius: var(--radius);
+      font-size: 15px; font-weight: 600;
+      text-align: center;
+      border: none; cursor: pointer;
+      touch-action: manipulation;
+      -webkit-tap-highlight-color: transparent;
+      transition: filter .15s;
+      text-decoration: none;
+    }
+    .m-btn:active { filter: brightness(.85); }
+    .m-btn-ok     { background: rgba(34,197,94,.2);  color: var(--green); border: 1.5px solid rgba(34,197,94,.4); }
+    .m-btn-warn   { background: rgba(234,179,8,.15); color: var(--yellow); border: 1.5px solid rgba(234,179,8,.35); }
+    .m-btn-info   { background: rgba(59,130,246,.15); color: #60a5fa; border: 1.5px solid rgba(59,130,246,.3); }
+    .m-btn-ghost  { background: transparent; color: var(--text-dim); border: 1px solid var(--border); font-size: 13px; padding: 11px; }
+
+    /* ── Footer nav ── */
+    .m-footer {
+      position: fixed; bottom: 0; left: 0; right: 0;
+      background: var(--bg2);
+      border-top: 1px solid var(--border);
+      display: flex;
+      padding: 10px var(--gap);
+      gap: var(--gap);
+      z-index: 100;
+    }
+    .m-footer a {
+      flex: 1; text-align: center;
+      color: var(--text-dim); font-size: 12px; text-decoration: none;
+      padding: 4px 0;
+      display: flex; flex-direction: column; align-items: center; gap: 2px;
+    }
+    .m-footer a.active { color: var(--accent); }
+    .m-footer-icon { font-size: 18px; }
+
+    /* ── Loading indicator ── */
+    .htmx-indicator { opacity: 0; transition: opacity .2s; }
+    .htmx-request .htmx-indicator { opacity: 1; }
+  </style>
+</head>
+<body>
+
+<div class="m-header">
+  <div>
+    <div class="m-header-title">⚙ Doomsday Farm</div>
+    <div class="m-header-sub" id="m-last-refresh">—</div>
+  </div>
+  <button class="m-refresh-btn"
+          onclick="refreshAll()"
+          title="Aggiorna tutto">↺ Aggiorna</button>
+</div>
+
+<!-- Overview: stato bot + ciclo -->
+<div id="m-overview"
+     hx-get="{{ url_prefix }}/ui/mobile/partial/overview"
+     hx-trigger="load, every 15s"
+     hx-swap="innerHTML">
+  <div class="m-card"><div class="m-sub">Caricamento...</div></div>
+</div>
+
+<!-- Risorse: depositi + rifornimento + produzione -->
+<div id="m-risorse"
+     hx-get="{{ url_prefix }}/ui/mobile/partial/risorse"
+     hx-trigger="load, every 60s"
+     hx-swap="innerHTML">
+  <div class="m-card"><div class="m-sub">Caricamento...</div></div>
+</div>
+
+<!-- Task flags -->
+<div class="m-card">
+  <div class="m-sec-title">📋 Task flags</div>
+  <div id="m-flags"
+       hx-get="{{ url_prefix }}/ui/mobile/partial/flags"
+       hx-trigger="load, every 30s"
+       hx-swap="innerHTML">
+    <div class="m-sub">Caricamento...</div>
+  </div>
+</div>
+
+<!-- Azioni -->
+<div class="m-card">
+  <div class="m-sec-title">⚡ Azioni</div>
+  <div id="m-actions"
+       hx-get="{{ url_prefix }}/ui/mobile/partial/actions"
+       hx-trigger="load"
+       hx-swap="innerHTML">
+  </div>
+</div>
+
+<!-- Footer nav -->
+<div class="m-footer">
+  <a href="{{ url_prefix }}/ui/mobile" class="active">
+    <span class="m-footer-icon">📱</span>Mobile
+  </a>
+  <a href="{{ url_prefix }}/ui">
+    <span class="m-footer-icon">🖥</span>Desktop
+  </a>
+  <a href="{{ url_prefix }}/ui/telemetria">
+    <span class="m-footer-icon">📊</span>Telemetria
+  </a>
+  <a href="{{ url_prefix }}/ui/config/global">
+    <span class="m-footer-icon">⚙</span>Config
+  </a>
+</div>
+
+<script>
+const URL_PREFIX = '{{ url_prefix }}';
+
+function refreshAll() {
+  ['#m-overview','#m-risorse','#m-flags','#m-actions'].forEach(id => {
+    const el = document.querySelector(id);
+    if (el) htmx.trigger(el, 'load');
+  });
+  updateRefreshTime();
+}
+
+function updateRefreshTime() {
+  const el = document.getElementById('m-last-refresh');
+  if (el) el.textContent = 'Aggiornato ' + new Date().toLocaleTimeString('it-IT', {hour:'2-digit',minute:'2-digit',second:'2-digit'});
+}
+
+document.addEventListener('htmx:afterSettle', updateRefreshTime);
+</script>
+</body>
+</html>

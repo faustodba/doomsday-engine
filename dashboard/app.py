@@ -4498,3 +4498,272 @@ def partial_restart_banner(request: Request):
     </div>
     '''
     return HTMLResponse(body)
+
+
+# ==============================================================================
+# Mobile dashboard — /ui/mobile
+# ==============================================================================
+
+@app.get("/ui/mobile", include_in_schema=False)
+def ui_mobile(request: Request):
+    """Dashboard ottimizzata per mobile — layout single-column, touch-friendly."""
+    return templates.TemplateResponse(request, "mobile.html", {
+        **_env_label(),
+    })
+
+
+@app.get("/ui/mobile/partial/overview", include_in_schema=False)
+def mobile_partial_overview(request: Request):
+    """Partial: stato bot + ciclo corrente + anomalie."""
+    from dashboard.services.stats_reader import get_engine_status
+    from dashboard.services.config_manager import get_overrides, _PROD_ROOT as _MROOT
+    from datetime import datetime, timezone
+    import json as _j
+
+    es    = get_engine_status()
+    cicli_path = _MROOT / "data" / "telemetry" / "cicli.json"
+    try:
+        cicli = _j.loads(cicli_path.read_text(encoding="utf-8"))
+    except Exception:
+        cicli = {}
+    now   = datetime.now(timezone.utc)
+
+    # Bot status
+    bot_ok  = es.stato in ("running", "waiting") if hasattr(es, "stato") else False
+    uptime  = getattr(es, "uptime_s", 0) or 0
+
+    # Ciclo corrente
+    ciclo_n    = getattr(es, "ciclo", 0) or 0
+    ciclo_info = ""
+    istanza_live = ""
+    anomalie_n   = 0
+
+    try:
+        cicli_list = sorted(cicli.get("cicli", []), key=lambda c: c.get("start_ts", ""), reverse=True)
+        if cicli_list:
+            c = cicli_list[0]
+            ciclo_n = c.get("numero", ciclo_n)
+            stato_c = "✓ completato" if c.get("completato") else "▶ in corso"
+            ts = c.get("start_ts", "")
+            if ts:
+                try:
+                    dt = datetime.fromisoformat(ts.replace("Z", "+00:00"))
+                    elapsed = int((now - dt).total_seconds())
+                    h, m = divmod(elapsed // 60, 60)
+                    elapsed_str = f"{h}h{m:02d}m" if h else f"{m}m"
+                    ciclo_info = f"Ciclo #{ciclo_n} — {stato_c} da {elapsed_str}"
+                except Exception:
+                    ciclo_info = f"Ciclo #{ciclo_n} — {stato_c}"
+            # Istanza in running
+            for nome_i, d in c.get("istanze", {}).items():
+                if d.get("esito") == "running":
+                    istanza_live = nome_i
+            # Anomalie
+            anomalie_n = sum(
+                1 for c2 in cicli_list[:3]
+                for d in c2.get("istanze", {}).values()
+                if d.get("esito") == "cascade"
+            )
+    except Exception:
+        pass
+
+    from dashboard.services.config_manager import _PROD_ROOT as _MROOT
+    maint = _MROOT / "data" / "maintenance.flag"
+    in_maint = maint.exists()
+
+    html = _mobile_overview_html(bot_ok, uptime, ciclo_info, istanza_live, anomalie_n, in_maint)
+    return HTMLResponse(html)
+
+
+def _mobile_overview_html(bot_ok, uptime_s, ciclo_info, ist_live, anomalie_n, in_maint):
+    from datetime import timedelta
+    bot_cls   = "m-dot-ok" if bot_ok else "m-dot-err"
+    bot_txt   = "ATTIVO" if bot_ok else "SPENTO"
+    up_h, r   = divmod(uptime_s, 3600)
+    up_m      = r // 60
+    up_str    = f"uptime {int(up_h)}h{int(up_m):02d}m" if bot_ok and uptime_s > 0 else ""
+    maint_str = '<span class="m-badge m-badge-warn">⏸ MANUTENZIONE</span>' if in_maint else ""
+    ist_str   = f'<span class="m-live">▶ {ist_live}</span>' if ist_live else ""
+    anom_str  = f'<span class="m-badge m-badge-err">⚠ {anomalie_n} cascade recenti</span>' if anomalie_n else ""
+    return f"""
+<div class="m-card" id="m-overview">
+  <div class="m-row-sb">
+    <div class="m-status"><span class="m-dot {bot_cls}"></span><b>Bot {bot_txt}</b>
+      <span class="m-sub">{up_str}</span></div>
+    {maint_str}
+  </div>
+  <div class="m-ciclo">{ciclo_info} {ist_str}</div>
+  {anom_str}
+</div>"""
+
+
+@app.get("/ui/mobile/partial/risorse", include_in_schema=False)
+def mobile_partial_risorse(request: Request):
+    """Partial: depositi totali + DRL master + produzione/ora."""
+    from dashboard.services.stats_reader import get_risorse_farm, get_all_stats
+    from dashboard.services.config_manager import get_overrides
+    import os, json as _json
+    from datetime import datetime, timezone
+
+    # Depositi (somma da state files)
+    from dashboard.services.config_manager import _PROD_ROOT as _MROOT
+    dep: dict = {"pomodoro": 0.0, "legno": 0.0, "acciaio": 0.0, "petrolio": 0.0}
+    state_dir = _MROOT / "state"
+    try:
+        for fn in sorted(state_dir.glob("FAU_*.json")):
+            st   = _json.loads(fn.read_text(encoding="utf-8"))
+            nome = fn.stem
+            # Sessione corrente
+            pc = st.get("produzione_corrente", {})
+            ris = pc.get("risorse_iniziali") or {}
+            if not ris:
+                storico = st.get("produzione_storico", [])
+                if storico:
+                    ris = storico[-1].get("risorse_finali") or storico[-1].get("risorse_iniziali") or {}
+            for r in ("pomodoro", "legno", "acciaio", "petrolio"):
+                dep[r] += ris.get(r, 0) / 1e6
+    except Exception:
+        pass
+
+    # DRL master
+    drl_m, drl_max, drl_pct, tassa = 0.0, 200.0, 0, 0
+    morf_path = _MROOT / "data" / "morfeus_state.json"
+    try:
+        m       = _json.loads(morf_path.read_text(encoding="utf-8"))
+        drl_m   = m.get("daily_recv_limit", 0) / 1e6
+        drl_max = m.get("daily_recv_limit_max", 200_000_000) / 1e6
+        drl_pct = int(drl_m / drl_max * 100) if drl_max > 0 else 0
+        tassa   = round(m.get("tassa_pct", 0) * 100, 1)
+    except Exception:
+        pass
+    drl_cls = "m-dot-err" if drl_pct < 10 else ("m-dot-warn" if drl_pct < 30 else "m-dot-ok")
+
+    # Spedizioni oggi
+    sped_tot = 0
+    ov = get_overrides()
+    for nome_i in [c.get("nome","") for c in _read_instances_from_state(state_dir)]:
+        st_path = state_dir / f"{nome_i}.json"
+        try:
+            st = _json.loads(st_path.read_text(encoding="utf-8"))
+            sped_tot += st.get("rifornimento", {}).get("spedizioni_oggi", 0)
+        except Exception:
+            pass
+
+    # Produzione/ora farm (da metrics per istanza)
+    prod_h: dict = {"pomodoro": 0.0, "legno": 0.0, "acciaio": 0.0, "petrolio": 0.0}
+    try:
+        for fn in sorted(state_dir.glob("FAU_*.json")):
+            st  = _json.loads(fn.read_text(encoding="utf-8"))
+            met = st.get("metrics", {})
+            for r in ("pomodoro", "legno", "acciaio", "petrolio"):
+                v = met.get(f"{r}_per_ora", 0) or 0
+                if abs(v) > 100:
+                    prod_h[r] += v / 1e6
+    except Exception:
+        pass
+
+    html = _mobile_risorse_html(dep, drl_m, drl_max, drl_pct, drl_cls, tassa, sped_tot, prod_h)
+    return HTMLResponse(html)
+
+
+def _read_instances_from_state(state_dir):
+    import json as _j
+    out = []
+    for fn in sorted(state_dir.glob("FAU_*.json")):
+        out.append({"nome": fn.stem})
+    return out
+
+
+def _mobile_risorse_html(dep, drl_m, drl_max, drl_pct, drl_cls, tassa, sped_tot, prod_h):
+    R = [("pomodoro","🍅"), ("legno","🪵"), ("acciaio","⚙"), ("petrolio","🛢")]
+    dep_row  = "  ".join(f'{ico}<span class="m-val">{dep.get(r,0):.0f}M</span>' for r, ico in R)
+    prod_row = "  ".join(
+        f'{ico}<span class="m-val">{prod_h.get(r,0)*1000:.0f}K/h</span>'
+        for r, ico in R if abs(prod_h.get(r, 0)) > 0.001
+    ) or "—"
+    return f"""
+<div class="m-card" id="m-risorse">
+  <div class="m-sec-title">💰 Depositi farm</div>
+  <div class="m-res-row">{dep_row}</div>
+  <div class="m-divider"></div>
+  <div class="m-sec-title">📈 Produzione/ora</div>
+  <div class="m-res-row">{prod_row}</div>
+  <div class="m-divider"></div>
+  <div class="m-sec-title">🚚 Rifornimento</div>
+  <div class="m-row-sb">
+    <span>DRL <span class="m-dot {drl_cls}"></span>
+      <b>{drl_m:.0f}M</b>/{drl_max:.0f}M ({drl_pct}%)</span>
+    <span>tassa {tassa}%</span>
+  </div>
+  <div class="m-sub">Spedizioni oggi: <b>{sped_tot}</b></div>
+</div>"""
+
+
+@app.get("/ui/mobile/partial/flags", include_in_schema=False)
+def mobile_partial_flags(request: Request):
+    """Partial: task flags touch-friendly."""
+    from dashboard.services.config_manager import get_overrides
+    ov    = get_overrides()
+    flags = ov.get("globali", {}).get("task", {})
+    ALWAYS_ON = {"raccolta"}
+    ORDER = ["raccolta","rifornimento","zaino","vip","boost","truppe",
+             "arena","store","alleanza","donazione","messaggi",
+             "main_mission","radar","arena_mercato","district_showdown"]
+    rendered = []
+    for name in ORDER:
+        if name not in flags:
+            continue
+        on = flags.get(name, True)
+        if name in ALWAYS_ON:
+            rendered.append(
+                f'<span class="m-flag m-flag-on m-flag-lock" title="sempre attivo">'
+                f'{name} 🔒</span>'
+            )
+        else:
+            cls = "m-flag-on" if on else "m-flag-off"
+            action = "false" if on else "true"
+            rendered.append(
+                f'<label class="m-flag {cls}"'
+                f' hx-patch="{_url_prefix_ctx.get()}/api/config/overrides/task/{name}"'
+                f' hx-vals=\'{{"abilitato":"{action}"}}\''
+                f' hx-swap="none"'
+                f' hx-on::after-request="htmx.ajax(\'GET\','
+                f'URL_PREFIX+\'/ui/mobile/partial/flags\','
+                f'{{target:\'#m-flags\',swap:\'innerHTML\'}});">'
+                f'{name}</label>'
+            )
+    body = '<div class="m-flags-grid">' + ''.join(rendered) + '</div>'
+    return HTMLResponse(body)
+
+
+@app.get("/ui/mobile/partial/actions", include_in_schema=False)
+def mobile_partial_actions(request: Request):
+    """Partial: bottoni azione (pausa/riprendi/restart)."""
+    import os
+    maint = _root() / "data" / "maintenance.flag"
+    in_maint = maint.exists()
+    up = _url_prefix_ctx.get()
+    if in_maint:
+        maint_btn = (
+            f'<button class="m-btn m-btn-ok" '
+            f'hx-post="{up}/api/maintenance/stop" hx-swap="none" '
+            f'hx-on::after-request="htmx.trigger(\'#m-overview\',\'refresh\')">'
+            f'▶ Riprendi</button>'
+        )
+    else:
+        maint_btn = (
+            f'<button class="m-btn m-btn-warn" '
+            f'hx-post="{up}/api/maintenance/start" hx-swap="none" '
+            f'hx-on::after-request="htmx.trigger(\'#m-overview\',\'refresh\')">'
+            f'⏸ Pausa</button>'
+        )
+    restart_btn = (
+        f'<button class="m-btn m-btn-info" '
+        f'hx-post="{up}/api/restart-bot" hx-swap="none" '
+        f'onclick="return confirm(\'Pianificare restart a fine ciclo?\')">'
+        f'🔄 Restart bot</button>'
+    )
+    return HTMLResponse(
+        f'<div class="m-actions">{maint_btn}{restart_btn}'
+        f'<a href="{up}/ui" class="m-btn m-btn-ghost">Dashboard completa →</a></div>'
+    )
