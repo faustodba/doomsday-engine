@@ -1255,7 +1255,9 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         ZAINO_SOGLIA_ACCIAIO_M  = gcfg.zaino_soglia_acciaio_m
 
         # ── Raccolta ──────────────────────────────────────────────────────────
-        LIVELLO_NODO         = gcfg.livello_nodo
+        # LIVELLO_NODO usa il valore per-istanza (con override runtime) invece
+        # del globale gcfg.livello_nodo. FAU_00 livello=7 → cerca nodi L7.
+        LIVELLO_NODO         = livello
         ALLOCAZIONE_POMODORO = gcfg.allocazione_pomodoro
         ALLOCAZIONE_LEGNO    = gcfg.allocazione_legno
         ALLOCAZIONE_PETROLIO = gcfg.allocazione_petrolio
