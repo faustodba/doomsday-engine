@@ -4801,6 +4801,146 @@ def mobile_partial_flags(request: Request):
     return HTMLResponse(body)
 
 
+@app.get("/ui/mobile/partial/istanze-list", include_in_schema=False)
+def mobile_partial_istanze_list(request: Request):
+    """Partial: lista nomi istanze abilitate (per il selettore)."""
+    from dashboard.services.config_manager import get_instances, get_overrides
+    instances = get_instances()
+    ov = get_overrides()
+    ist_ov = ov.get("istanze", {})
+    nomi = []
+    for cfg in instances:
+        nome = cfg.get("nome", "")
+        if not nome:
+            continue
+        abilitata = ist_ov.get(nome, {}).get("abilitata", cfg.get("abilitata", True))
+        if abilitata:
+            nomi.append(nome)
+    return {"nomi": nomi}
+
+
+@app.get("/ui/mobile/partial/istanza/{nome}", include_in_schema=False)
+def mobile_partial_istanza(request: Request, nome: str):
+    """Partial: card dettaglio singola istanza."""
+    from dashboard.services.config_manager import _PROD_ROOT as _MROOT
+    import json as _j
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc)
+    _RES = [("pomodoro","🍅"),("legno","🪵"),("acciaio","⚙"),("petrolio","🛢")]
+
+    # State file
+    st_path = _MROOT / "state" / f"{nome}.json"
+    try:
+        st = _j.loads(st_path.read_text(encoding="utf-8"))
+    except Exception:
+        return HTMLResponse(f'<div class="m-card"><div class="m-sub">⚠ {nome}: dati non disponibili</div></div>')
+
+    # Ciclo corrente (esito)
+    cicli_path = _MROOT / "data" / "telemetry" / "cicli.json"
+    ist_esito = "—"
+    ist_tasks: dict = {}
+    try:
+        cicli_data = _j.loads(cicli_path.read_text(encoding="utf-8"))
+        ciclo = sorted(cicli_data.get("cicli",[]), key=lambda c: c.get("start_ts",""), reverse=True)
+        if ciclo:
+            d = ciclo[0].get("istanze",{}).get(nome,{})
+            ist_esito = d.get("esito","—")
+    except Exception:
+        pass
+
+    # Engine status (task corrente)
+    es_path = _MROOT / "engine_status.json"
+    task_live = None
+    try:
+        es = _j.loads(es_path.read_text(encoding="utf-8"))
+        task_live = es.get("istanze",{}).get(nome,{}).get("task_corrente")
+    except Exception:
+        pass
+
+    # Istanza metrics (ultimo tick)
+    met_path = _MROOT / "data" / "istanza_metrics.jsonl"
+    last_met: dict = {}
+    try:
+        for line in met_path.read_text(encoding="utf-8").splitlines():
+            try:
+                r = _j.loads(line)
+                if r.get("instance") == nome:
+                    last_met = r
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    # Depositi
+    pc = st.get("produzione_corrente", {})
+    ris = pc.get("risorse_iniziali") or {}
+    if not ris:
+        storico = st.get("produzione_storico", [])
+        if storico:
+            ris = storico[-1].get("risorse_finali") or storico[-1].get("risorse_iniziali") or {}
+    dep_row = "  ".join(f'{ico}<span class="m-val" style="font-size:16px">{ris.get(r,0)/1e6:.0f}M</span>' for r,ico in _RES) if ris else "—"
+
+    # Rifornimento
+    rif       = st.get("rifornimento", {})
+    sped      = rif.get("spedizioni_oggi", 0)
+    prov      = rif.get("provviste_residue", -1)
+    prov_str  = f"{prov/1e6:.0f}M" if prov >= 0 else "—"
+    inv       = rif.get("inviato_oggi", {})
+    inv_str   = "  ".join(f'{ico}{v/1e6:.0f}M' for r,ico in _RES if (v:=inv.get(r,0)) > 0) or "—"
+
+    # Arena / Boost
+    arena_str = "✓ esaurita" if st.get("arena",{}).get("esaurite") else "⏳ disponibile"
+    bst       = st.get("boost", {})
+    boost_str = bst.get("tipo","—") if bst.get("tipo") else "—"
+
+    # Raccolta (ultimo tick)
+    racc_str = ""
+    if last_met:
+        racc   = last_met.get("raccolta",{})
+        marce  = len(racc.get("invii",[]))
+        ap     = racc.get("attive_pre","?")
+        tot    = racc.get("totali","?")
+        tick_s = last_met.get("tick_total_s",0)
+        outcome= last_met.get("outcome","")
+        out_icon = {"ok":"✓","cascade":"⚡","abort":"✗"}.get(outcome,"—")
+        racc_str = (
+            f'<div class="m-row-sb" style="margin-top:6px">'
+            f'<span class="m-sub">Raccolta: {marce} marce  slot {ap}/{tot}</span>'
+            f'<span class="m-sub">{out_icon} {int(tick_s)//60}m</span></div>'
+        )
+
+    # Esito badge
+    esito_css = {"ok":"m-dot-ok","cascade":"m-dot-err","abort":"m-dot-err","running":"m-dot-ok","attesa":"m-dot-warn"}.get(ist_esito,"")
+    live_str  = f'<span style="color:var(--green);font-weight:600"> → {task_live}</span>' if task_live else ""
+
+    html = f"""
+<div class="m-card" id="m-ist-card">
+  <div class="m-row-sb">
+    <div class="m-status">
+      <span class="m-dot {esito_css}"></span>
+      <b>{nome}</b>
+      {live_str}
+    </div>
+    <span class="m-sub">{ist_esito}</span>
+  </div>
+  <div class="m-divider" style="margin:8px 0 6px"></div>
+  <div class="m-sec-title">💰 Depositi</div>
+  <div class="m-res-row">{dep_row}</div>
+  <div class="m-divider" style="margin:8px 0 6px"></div>
+  <div class="m-row-sb">
+    <span class="m-sub">🚚 Sped. oggi: <b>{sped}</b>  provviste: <b>{prov_str}</b></span>
+    <span class="m-sub">⚡ Boost: {boost_str}</span>
+  </div>
+  {'<div class="m-sub" style="margin-top:4px">Inviato: ' + inv_str + '</div>' if inv_str != '—' else ''}
+  <div class="m-row-sb" style="margin-top:6px">
+    <span class="m-sub">🏟 Arena: {arena_str}</span>
+  </div>
+  {racc_str}
+</div>"""
+    return HTMLResponse(html)
+
+
 @app.get("/ui/mobile/partial/actions", include_in_schema=False)
 def mobile_partial_actions(request: Request):
     """Partial: bottoni azione (pausa/riprendi/restart)."""

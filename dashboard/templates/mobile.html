@@ -165,6 +165,26 @@
     /* ── Loading indicator ── */
     .htmx-indicator { opacity: 0; transition: opacity .2s; }
     .htmx-request .htmx-indicator { opacity: 1; }
+
+    /* ── Istanza nav ── */
+    .m-ist-nav {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
+    }
+    .m-nav-btn {
+      background: var(--bg3); border: 1px solid var(--border);
+      color: var(--text); border-radius: 8px;
+      width: 40px; height: 40px; font-size: 20px; line-height: 1;
+      cursor: pointer; flex-shrink: 0;
+      touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+    }
+    .m-nav-btn:active { filter: brightness(.8); }
+    .m-ist-sel {
+      flex: 1; background: var(--bg3); border: 1px solid var(--border);
+      color: var(--text); border-radius: 8px;
+      padding: 8px 12px; font-size: 15px; font-weight: 600;
+      -webkit-appearance: none; appearance: none;
+      text-align: center; cursor: pointer;
+    }
   </style>
 </head>
 <body>
@@ -203,6 +223,37 @@
        hx-trigger="load, every 30s"
        hx-swap="innerHTML">
     <div class="m-sub">Caricamento...</div>
+  </div>
+</div>
+
+<!-- Card istanza con selettore -->
+<div class="m-card" style="padding-bottom:8px">
+  <div class="m-sec-title">📊 Dettaglio istanza</div>
+  <!-- Selettore istanza -->
+  <div class="m-ist-nav">
+    <button class="m-nav-btn" id="m-prev" onclick="navIst(-1)">‹</button>
+    <select id="m-ist-sel" class="m-ist-sel" onchange="loadIst(this.value)">
+      <option value="FAU_00">FAU_00</option>
+      <option value="FAU_01">FAU_01</option>
+      <option value="FAU_02">FAU_02</option>
+      <option value="FAU_03">FAU_03</option>
+      <option value="FAU_04">FAU_04</option>
+      <option value="FAU_05">FAU_05</option>
+      <option value="FAU_06">FAU_06</option>
+      <option value="FAU_07">FAU_07</option>
+      <option value="FAU_08">FAU_08</option>
+      <option value="FAU_09">FAU_09</option>
+      <option value="FAU_10">FAU_10</option>
+      <option value="FauMorfeus">FauMorfeus</option>
+    </select>
+    <button class="m-nav-btn" id="m-next" onclick="navIst(+1)">›</button>
+  </div>
+  <!-- Card contenuto istanza -->
+  <div id="m-ist-card-wrap"
+       hx-get="{{ url_prefix }}/ui/mobile/partial/istanza/FAU_00"
+       hx-trigger="load"
+       hx-swap="innerHTML">
+    <div class="m-sub" style="padding:12px 0">Caricamento...</div>
   </div>
 </div>
 
@@ -249,6 +300,29 @@ function updateRefreshTime() {
 }
 
 document.addEventListener('htmx:afterSettle', updateRefreshTime);
+
+// ── Istanza selector ───────────────────────────────────────────────
+const ISTANZE = ['FAU_00','FAU_01','FAU_02','FAU_03','FAU_04','FAU_05',
+                 'FAU_06','FAU_07','FAU_08','FAU_09','FAU_10','FauMorfeus'];
+
+function loadIst(nome) {
+  const wrap = document.getElementById('m-ist-card-wrap');
+  if (!wrap) return;
+  htmx.ajax('GET', URL_PREFIX + '/ui/mobile/partial/istanza/' + nome,
+            {target: '#m-ist-card-wrap', swap: 'innerHTML'});
+  // Aggiorna select
+  const sel = document.getElementById('m-ist-sel');
+  if (sel) sel.value = nome;
+}
+
+function navIst(delta) {
+  const sel = document.getElementById('m-ist-sel');
+  if (!sel) return;
+  const idx = ISTANZE.indexOf(sel.value);
+  const newIdx = (idx + delta + ISTANZE.length) % ISTANZE.length;
+  sel.value = ISTANZE[newIdx];
+  loadIst(ISTANZE[newIdx]);
+}
 </script>
 </body>
 </html>
