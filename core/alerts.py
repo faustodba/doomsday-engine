@@ -331,19 +331,24 @@ def check_heartbeat_cicli(soglia_s: int = 3600) -> bool:
         return False
 
     try:
-        cicli_path = _root() / "data" / "telemetry" / "cicli.json"
-        if not cicli_path.exists():
-            return False
-        cicli = json.loads(cicli_path.read_text(encoding="utf-8")) or []
+        # cicli.json ha schema {"cicli": [...]} (NON una lista nuda): riusa il
+        # reader canonico di telemetry che estrae la lista correttamente.
+        # Import lazy per evitare cicli di import core<->core.
+        # Pre-fix: json.loads(...) or [] ritornava il dict {"cicli":...} e
+        # `for c in reversed(dict)` iterava le CHIAVI-stringa (isinstance dict
+        # False) -> return False sempre -> l'alert non scattava MAI.
+        from core.telemetry import load_cicli
+        cicli = load_cicli()
     except Exception:
         return False
 
-    # Trova l'ultimo ciclo "chiuso" (con ts_end valorizzato)
+    # Trova l'ultimo ciclo "chiuso" (con end_ts valorizzato — chiave reale
+    # dello schema; il ciclo in corso ha end_ts=None ed e' saltato).
     ultimo_end = None
     for c in reversed(cicli):
         if not isinstance(c, dict):
             continue
-        ts_end = c.get("ts_end") or c.get("end") or ""
+        ts_end = c.get("end_ts") or c.get("ts_end") or c.get("end") or ""
         if ts_end:
             ultimo_end = _parse_iso(ts_end)
             break

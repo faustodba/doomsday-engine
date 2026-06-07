@@ -647,6 +647,12 @@ class _TaskWrapper:
 _contatori: dict[str, dict[str, int]] = {}
 _contatori_lock = threading.Lock()
 
+# Esito reale dell'ultimo tick per istanza: impostato dal thread _thread_istanza,
+# letto dal main loop dopo t.join() per record_istanza_tick_end. Pre-fix l'esito
+# era hardcoded "ok" -> le cascade ADB sparivano dal report storico (C3). La
+# visibilita' dopo join() e' garantita dall'happens-before di Thread.join().
+_ultimo_esito_tick: dict[str, str] = {}
+
 # 08/05: WU89 Skip Predictor RIMOSSO — regola architetturale: nessun sistema
 # di predizione può saltare l'esecuzione di un'istanza nel ciclo. Tutte le
 # istanze processate ad ogni tick. Riordino consentito (Adaptive Scheduler,
@@ -933,6 +939,11 @@ def _thread_istanza(ist, tasks_cls, dry_run):
         _aggiorna_stato_istanza(nome, {"stato": "waiting", "ultimo_errore": "adb_unhealthy"})
     else:
         _log(nome, f"Tick completato ({len(results)} eseguiti)")
+
+    # Esito reale del tick per il main loop (record_istanza_tick_end). Cascade
+    # ADB ha priorita' su ok. Stessa semantica del _tick_outcome scritto in
+    # istanza_metrics piu' sotto, ma esposto al chiamante via dict module-level.
+    _ultimo_esito_tick[nome] = "cascade" if adb_unhealthy else "ok"
 
     # ── 4. Chiusura istanza MuMu ────────────────────────────────────
     if not dry_run:
@@ -1382,10 +1393,13 @@ def main():
             t.start()
             t.join()
 
-            # WU46 — telemetria: registro end tick istanza
+            # WU46 — telemetria: registro end tick istanza.
+            # Esito reale propagato dal thread (cascade ADB vs ok) invece di
+            # "ok" fisso — altrimenti le cascade sparivano dal report storico (C3).
             try:
                 from core.telemetry import record_istanza_tick_end
-                record_istanza_tick_end(nome, esito="ok")
+                _esito_tick = _ultimo_esito_tick.pop(nome, "ok")
+                record_istanza_tick_end(nome, esito=_esito_tick)
             except Exception:
                 pass
 
