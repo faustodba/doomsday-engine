@@ -1,0 +1,28 @@
+# Issues — Infra · Startup · Launcher · ADB
+
+> Archivio tematico voci WU/issue (estratto verbatim da `.claude/CLAUDE.md` il 07/06/2026).
+> 14 voci totali · 3 aperte · 11 risolte. Legenda stato: ✅ risolta · 🟡 parziale · 🆕 aperta · 🔍 da osservare · ⏸ pausa.
+
+## 🔓 Aperti / parziali
+
+| # | Issue | Priorità | Stato |
+|---|-------|----------|-------|
+| 12 | Stabilizzazione HOME FAU_01/FAU_02 non converge | MEDIA | 🟡 mitigato (window 30→60s commit `9c1dfb4`) |
+| 49 | Ottimizzazioni startup istanza (DELAY_POLL, stable_polls, delay_carica) | BASSA | 🆕 APERTA 24/04 — guadagno stimato ~90s/ciclo, rimandata post-stabilizzazione DS |
+| 72 | Fase 4 #69 false negative su gioco in background — exit early ma 47s polling sterile | DA OSSERVARE | 🔍 26/04 osservato 1 volta su FAU_10 (19:36:39 "no Live Chat" exit ma gioco in background → 47s polling fino a monkey recovery 19:37:27 + Live Chat rilevato 19:37:31). HOME raggiunto 157s vs 110s atteso. Da monitorare se ricorre, eventuale fix con `_gioco_in_foreground` check pre-splash |
+
+## ✅ Risolti
+
+| # | Issue | Priorità | Stato |
+|---|-------|----------|-------|
+| 15 | `engine_status.json` stale writer (fermo 03:51, log prosegue fino 05:51) | ALTA | ✅ NON SI PRESENTA PIÙ — verificato 03/05 sera: writer attivo ogni 5s, gap 5s coerente. Probabilmente chiusura implicita via WU34/WU40 (retry os.replace + atomic write tmp+replace). Lasciato in tabella per traccia storica |
+| 19 | Race buffer stdout ultima istanza a fine ciclo (cosmetico) | BASSA | ✅ RISOLTA 03/05 — `set PYTHONUNBUFFERED=1` aggiunto a `run_prod.bat`. Stdout line-buffered → no race finale ciclo. Effetto al prossimo restart bot |
+| 28 | Emulator orfani dopo kill unclean del bot (MuMuPlayer resta aperto) | ALTA | ✅ RISOLTA 23/04 (_cleanup_tutti_emulator a startup + pre-ciclo) |
+| 46 | Launcher — am start OK ma gioco in background + polling troppo rapido | ALTA | ✅ RISOLTA 24/04 (monkey sempre + foreground check + monkey recovery + poll 7s) |
+| 56 | Cascata ADB persistente FAU_04 12 min sterile — reconnect cosmetico | ALTA | ✅ RISOLTA 26/04 (WU24 — `ADBUnhealthyError` + abort tick + chiudi istanza) |
+| 60 | Foreground check falso positivo post-restart — penalità 43s/istanza × 12 (~9min/restart) | ALTA | ✅ RISOLTA 26/04 (`_gioco_in_foreground` usa `mCurrentFocus` invece di `pkg in dumpsys activity top`) |
+| 69 | Fase 4 attesa caricamento: polling HOME/MAP ogni 2s troppo aggressivo + classify instabile durante load | MEDIA | ✅ RISOLTA 26/04 (nuovo flow: post sleep 10s, check `is_loading_splash` → se attivo aggancio fino a scomparsa Live Chat ogni 3s, se assente exit subito; Live Chat invariante più affidabile di classify HOME/MAP fluttuante) |
+| 84 | Bug orchestrator: `entry.last_run` aggiornato anche su fail/abort | ALTA | ✅ RISOLTA da WU79 il 30/04 10:14 (duplicato in tabella). Vedi WU79 sotto per dettagli fix. |
+| WU78 | Settings_helper bypass tap Graphics/Frame/Optimize | MEDIA | ✅ IMPLEMENTATA 30/04 10:11 — driver Vulkan→DirectX (Issue #88) elimina la necessità di settings video ULTRA-LOW. Bot rimuoveva manualmente HIGH/MID/HIGH dell'utente ad ogni avvio. Pre-fix: tap Graphics LOW + Frame LOW + Optimize check + tap. Post-fix: skip totale tap, mantenuta nav verso SETTINGS panel per cache cleaning (WU64) che richiede di essere lì |
+| WU162 | Startup double-thread fix — PID file + Get-CimInstance + py.exe | ALTA | ✅ RISOLTA 22/05 (commit finale `0cd2562`). **Sintomo**: FAU_08 e FAU_10 avviate due volte nello stesso ciclo → log doppi interleaved ("in attesa... Xs" alternati da due processi), istanze processate due volte. **Root cause**: vecchio processo bot NON killato al riavvio. **Fix finale in 2 livelli**: (1) `run_prod.bat`: pre-kill via `Get-CimInstance` (CIM, affidabile) + bot.pid PRIMA di avviare Python — sicuro perché gira prima del nuovo processo; (2) `_cleanup_orfani_processi_startup` in `main.py`: meccanismo PID file (`data/bot.pid`) come kill primario + `_wmi_query` (Get-WmiObject, fallback silenzioso) su python.exe+py.exe escludendo PID corrente; kill di cmd.exe RIMOSSO (py.exe = Python Launcher esce subito dopo aver spawnato python.exe → grandparent cmd.exe irrecuperabile → causa crash exit code 1 se si tenta). **Lezione**: mai usare Get-CimInstance dentro il processo Python per killare processi antenati senza aver prima verificato il grandparent PID — rischio di auto-kill. Il pre-kill nel bat (esterno a Python) è il metodo corretto per CIM. |
+| WU162 | Startup double-thread fix — PID file + Get-CimInstance + py.exe | ALTA | ✅ RISOLTA + CONFERMATA 22/05 (commit finale `0cd2562`, confermato dopo reboot PC). **Sintomo**: FAU_08 e FAU_10 avviate due volte nello stesso ciclo → log doppi interleaved ("in attesa... Xs" alternati da due processi), istanze processate due volte. **Root cause**: vecchio processo bot NON killato al riavvio. **Fix finale in 2 livelli**: (1) `run_prod.bat`: pre-kill via `Get-CimInstance` (CIM, affidabile) + bot.pid PRIMA di avviare Python — sicuro perché gira prima del nuovo processo; (2) `_cleanup_orfani_processi_startup` in `main.py`: meccanismo PID file (`data/bot.pid`) come kill primario + `_wmi_query` (Get-WmiObject, fallback silenzioso) su python.exe+py.exe escludendo PID corrente; kill di cmd.exe RIMOSSO (py.exe = Python Launcher esce subito dopo aver spawnato python.exe → grandparent cmd.exe irrecuperabile → causa crash exit code 1 se si tenta). **Lezione**: mai usare Get-CimInstance dentro il processo Python per killare processi antenati senza aver prima verificato il grandparent PID — rischio di auto-kill. Il pre-kill nel bat (esterno a Python) è il metodo corretto per CIM. |

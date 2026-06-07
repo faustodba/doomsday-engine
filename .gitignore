@@ -57,8 +57,12 @@ env/
 *.swo
 
 # Handoff di sessione — solo locale, non versionato
-.claude/SESSION.md.claude/settings.local.json
+.claude/SESSION.md
+.claude/SESSION-storico.md
 .claude/settings.local.json
+
+# Backup riorganizzazione documenti 07/06/2026
+*.bak.20260607
 
 # Secrets (Email Notifier app password) — mai in git
 data/secrets.json
