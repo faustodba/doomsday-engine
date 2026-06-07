@@ -445,6 +445,22 @@ def notify_daily_report(report_text: str) -> bool:
     return _send_notify(header + body)
 
 
+def notify_alert(title: str, body: str = "", severity: str = "warn",
+                 instance: str = "") -> bool:
+    """Notifica Telegram generica per alert real-time senza formatter dedicato
+    (heartbeat_cicli, maintenance_lunga, restart_inatteso). Prima questi eventi
+    non avevano canale Telegram in trigger_alert. Gated da telegram.enabled
+    via _send_notify."""
+    icon = {"info": "ℹ️", "warn": "⚠️", "error": "❗", "critical": "🚨"}.get(
+        (severity or "warn").lower(), "•")
+    text = f"{icon} <b>{title}</b>"
+    if instance:
+        text += f" — {instance}"
+    if body:
+        text += f"\n{body}"
+    return _send_notify(text)
+
+
 def notify_raccolta_bassa(ciclo_n: int) -> bool:
     """Alert se >=3 istanze hanno slot liberi ma 0 marce. Deduplicato per ciclo."""
     global _raccolta_alert_cicli

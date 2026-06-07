@@ -254,13 +254,21 @@ def trigger_alert(event_type: str,
         _log.info("[ALERTS] enqueued %s sev=%s inst=%s",
                   event_type, sev_lc, instance or "-")
 
-        # Forward a Telegram per event_type rilevanti (best-effort, no eccezioni)
+        # Forward a Telegram (best-effort, no eccezioni). cascade/DRL hanno
+        # formatter dedicati; gli altri eventi (heartbeat_cicli, maintenance,
+        # restart) usano notify_alert generico — prima restavano senza canale
+        # Telegram (solo email). Il gate telegram.enabled e' dentro _send_notify.
         try:
-            from core.telegram_bot import notify_cascade_adb, notify_drl_saturo
+            from core.telegram_bot import (
+                notify_cascade_adb, notify_drl_saturo, notify_alert,
+            )
             if event_type == "cascade_adb" and instance:
                 notify_cascade_adb(instance, body[:200])
             elif event_type in ("master_saturo_long", "master_saturo"):
                 notify_drl_saturo(0.0)
+            else:
+                notify_alert(title=title, body=body[:300],
+                             severity=sev_lc, instance=instance or "")
         except Exception:
             pass
 
