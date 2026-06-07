@@ -5,6 +5,39 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 07/06/2026 — Analisi multi-agente + Fase 0 + notifiche A+B
+
+**Analisi approfondita read-only** (44 agenti, 16 subsystem) → `docs/analisi_2026-06-07.md`.
+27 findings critical/high verificati su codice (0 falsi positivi). 5 temi ricorrenti:
+(1) monitoring cieco, (2) default silenzioso da config, (3) success spurio su screenshot
+None, (4) fragilità OCR/ROI, (5) igiene repo. Piano in 5 fasi (0=osservabilità → 4=igiene).
+
+**Fix max_squadre** (WU-MaxSquadre, bug-class C6) — FAU_00/FauMorfeus usavano 4 slot invece
+di 5: `_ovr("max_squadre", 4)` legge solo dynamic, il campo mancava in `runtime_overrides`
+→ fallback hardcoded. Fix dynamic `max_squadre: 5`. Validato: FAU_00 `inviate=5`.
+
+**Fase 0 — osservabilità** (WU163, commit `5090ef5`):
+- C1/O1 `check_heartbeat_cicli`: leggeva `cicli.json` (dict) come lista + chiave `ts_end`
+  errata → l'unico alert *critical* "bot morto" non scattava MAI. Fix: `load_cicli()` + `end_ts`.
+- C3/O4 `record_istanza_tick_end`: hardcoded `esito="ok"` anche su cascade → sezioni
+  cascade/abort/fail del daily report codice morto. Fix: thread propaga esito reale via
+  `_ultimo_esito_tick` letto dopo `t.join()`.
+
+**Notifiche A+B** (WU164, commit `0e9e04b` + config dynamic):
+- Errore salvataggio dashboard "from_addr non valido" = mittente vuoto (validazione endpoint).
+- A: `enabled/alerts_enabled=true` + `from_addr=bot.dooms.report@gmail.com` +
+  `recipients=[fausto.pace@gmail.com]` (hot-reload).
+- B: `notify_alert` generico + routing heartbeat/maintenance/restart su Telegram (prima solo
+  cascade/DRL). Coupling: `trigger_alert` richiede ≥1 destinatario email anche per Telegram.
+
+**Restart**: armato (flag manuale one-shot), scatta a fine ciclo 426 per attivare B.
+
+> **Issues aperti dall'analisi** (in `docs/analisi_2026-06-07.md`): Fase 1 (success spuri
+> marcia/spedizione su screenshot None C4/C9, atomic blacklist C7, store skip C8, OCR 999M C10);
+> Fase 2 (merge `_save_ov` C5, fallback `_ovr` static C6, auth dashboard C2); Fasi 3-4 perf+igiene.
+
+---
+
 ## Stato step pytest
 
 | Step | File principali | Test | Note |
