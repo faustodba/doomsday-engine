@@ -90,8 +90,17 @@ _TPL_CLOSE          = "pin/pin_clear_cache_close.png"
 _ROI_CLOSE          = (400, 425, 560, 465)  # box stretto sul pulsante CLOSE
 _SOGLIA_CLOSE       = 0.85  # margine ampio: 0.028 (no popup) vs 1.000 (visibile)
 
-_TIMEOUT_PULIZIA_S  = 120.0  # safety cap polling CLOSE (file molti)
+_TIMEOUT_PULIZIA_S  = 20.0   # 07/06: 120→20s. Il CLOSE, quando appare, matcha
+                             # SEMPRE a iter 1 (~6s, score 1.000); i fallimenti
+                             # restano score≈-0.013 dal primo iter (popup mai
+                             # aperto). Oltre ~15-20s insistere è inutile →
+                             # tagliato lo spreco di ~100s/fallimento.
 _POLL_CLOSE_S       = 5.0    # intervallo polling
+
+# 07/06: cattura diagnostica del flow cache per ricalibrare le coord (il flow
+# fallisce su 8/11 istanze: una tap cieca Help/Clear-cache/Clear-icon manca il
+# bersaglio). Salva PNG in data/cache_debug/. DISATTIVARE dopo aver ricalibrato.
+_DEBUG_CACHE = True
 
 # Delay tra step (calibrati su PC lento — priorità stabilità su velocità)
 # 29/04 (post-test prod FAU_00): tutti +50% perché 22.5s totali ancora insufficienti
@@ -235,6 +244,31 @@ def _marca_cache_pulita(nome_istanza: str) -> None:
         pass
 
 
+def _save_cache_debug(ctx, log: Callable[[str], None], label: str) -> None:
+    """07/06 diagnostica: salva screenshot del flow cache in data/cache_debug/.
+    Gated da `_DEBUG_CACHE`. Best-effort, non solleva mai (non deve disturbare
+    il flow). Serve a vedere il layout reale delle istanze che falliscono."""
+    if not _DEBUG_CACHE or ctx.device is None:
+        return
+    try:
+        import os, cv2
+        from datetime import datetime, timezone
+        screen = ctx.device.screenshot()
+        frame = getattr(screen, "frame", None)
+        if frame is None:
+            return
+        root = os.environ.get("DOOMSDAY_ROOT", ".")
+        d = os.path.join(root, "data", "cache_debug")
+        os.makedirs(d, exist_ok=True)
+        nome = getattr(ctx, "instance_name", "?")
+        ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        path = os.path.join(d, f"{nome}_{ts}_{label}.png")
+        cv2.imwrite(path, frame)
+        log(f"[CACHE] debug snap → {label}")
+    except Exception:
+        pass
+
+
 def _pulisci_cache(ctx, log: Callable[[str], None]) -> bool:
     """
     Esegue il flow Help → Clear cache → polling CLOSE → CLOSE → BACK.
@@ -256,10 +290,12 @@ def _pulisci_cache(ctx, log: Callable[[str], None]) -> bool:
         # Tap Clear cache → popup CLEAR CACHE
         log("[CACHE] tap Clear cache (666, 375)")
         ctx.device.tap(*_TAP_CLEAR_CACHE); time.sleep(_DELAY_NAV)
+        _save_cache_debug(ctx, log, "01_help_panel")  # pannello Help/Clear-cache
 
         # Tap icona Clear centrale → avvia pulizia + progress 0..N/N
         log("[CACHE] tap Clear icon (480, 200) — avvio pulizia")
         ctx.device.tap(*_TAP_CLEAR_ICON);  time.sleep(_DELAY_TOGGLE)
+        _save_cache_debug(ctx, log, "02_after_clear_icon")  # popup pulizia/CLOSE
 
         # Polling CLOSE: pulizia veloce (~3s, 31 file FAU_10) o lenta (file molti)
         if not _attendi_close(ctx, log):
