@@ -90,6 +90,14 @@ _TPL_CLOSE          = "pin/pin_clear_cache_close.png"
 _ROI_CLOSE          = (400, 425, 560, 465)  # box stretto sul pulsante CLOSE
 _SOGLIA_CLOSE       = 0.85  # margine ampio: 0.028 (no popup) vs 1.000 (visibile)
 
+# 07/06: Clear cache via MATCH DINAMICO. Diagnosi screenshot (data/cache_debug):
+# la coord fissa (666,375) mancava il bottone su 8/11 istanze — il menu HELP ha
+# 5 o 6 voci a seconda dell'account → "Clear cache" sta a y≈258 (5 voci) o y≈375
+# (6 voci). Match del template + tap sul centro → robusto a entrambi i layout.
+_TPL_CLEAR_CACHE_BTN = "pin/pin_help_clear_cache.png"
+_ROI_CLEAR_CACHE     = (480, 170, 850, 440)  # colonna dx HELP (copre riga 2 e 3)
+_SOGLIA_CLEAR_CACHE  = 0.80
+
 _TIMEOUT_PULIZIA_S  = 20.0   # 07/06: 120→20s. Il CLOSE, quando appare, matcha
                              # SEMPRE a iter 1 (~6s, score 1.000); i fallimenti
                              # restano score≈-0.013 dal primo iter (popup mai
@@ -287,10 +295,28 @@ def _pulisci_cache(ctx, log: Callable[[str], None]) -> bool:
         log("[CACHE] tap Help (570, 235)")
         ctx.device.tap(*_TAP_HELP_BTN);   time.sleep(_DELAY_NAV)
 
-        # Tap Clear cache → popup CLEAR CACHE
-        log("[CACHE] tap Clear cache (666, 375)")
-        ctx.device.tap(*_TAP_CLEAR_CACHE); time.sleep(_DELAY_NAV)
-        _save_cache_debug(ctx, log, "01_help_panel")  # pannello Help/Clear-cache
+        # Tap Clear cache → popup CLEAR CACHE. MATCH DINAMICO (07/06): la y del
+        # bottone varia per istanza (menu HELP 5 o 6 voci). Fallback coord storica.
+        _save_cache_debug(ctx, log, "01_help_panel")  # pannello HELP (pre-tap)
+        _cx, _cy = _TAP_CLEAR_CACHE
+        if ctx.matcher is not None:
+            try:
+                _scr = ctx.device.screenshot()
+                if _scr is not None:
+                    _r = ctx.matcher.find_one(
+                        _scr, _TPL_CLEAR_CACHE_BTN,
+                        threshold=_SOGLIA_CLEAR_CACHE, zone=_ROI_CLEAR_CACHE,
+                    )
+                    if _r.found:
+                        _cx, _cy = _r.cx, _r.cy
+                        log(f"[CACHE] Clear cache match ({_cx},{_cy}) score={_r.score:.3f}")
+                    else:
+                        log(f"[CACHE] Clear cache NO match (score={_r.score:.3f}) "
+                            f"— fallback ({_cx},{_cy})")
+            except Exception as _exc:
+                log(f"[CACHE] Clear cache match errore: {_exc} — fallback ({_cx},{_cy})")
+        log(f"[CACHE] tap Clear cache ({_cx},{_cy})")
+        ctx.device.tap(_cx, _cy); time.sleep(_DELAY_NAV)
 
         # Tap icona Clear centrale → avvia pulizia + progress 0..N/N
         log("[CACHE] tap Clear icon (480, 200) — avvio pulizia")
