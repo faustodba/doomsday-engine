@@ -30,9 +30,13 @@ scritto per la vecchia API single-tab (`MessaggiConfig(wait_back=...)`, `cfg.n_b
 Riscritto con copertura per `_rileva_tab_attivo()` e `skip_tap` in `_gestisci_tab()`.
 Ora 35/35 verdi. Commit `e038736`, pushato su `main`.
 
-**Nota minore non risolta**: `time.sleep(3.0)` hardcoded in `_esegui_messaggi`/
-`_gestisci_tab` ignora i campi configurabili `cfg.wait_open`/`cfg.wait_tab` (coincide
-col default attuale, non bloccante). Da sistemare in una sessione futura.
+**Nota dead-config risolta nello stesso giorno** (commit `54ab117`): `time.sleep(3.0)`
+hardcoded in `_esegui_messaggi`/`_gestisci_tab` ignorava `cfg.wait_open`/`cfg.wait_tab`,
+rendendo inefficace il tuning manuale fatto dall'utente in precedenza (tentativo di
+fix prima di scoprire la causa reale). Wired ai campi cfg; `wait_tab` default
+2.0→3.0 per preservare il timing reale già in esecuzione (nessun cambio comportamento
+a runtime). Bonus: i test ora azzerano davvero i sleep (`_cfg_zero()`), suite passata
+da 60s a 0.14s.
 
 ---
 
