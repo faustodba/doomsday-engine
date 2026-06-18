@@ -38,6 +38,19 @@ fix prima di scoprire la causa reale). Wired ai campi cfg; `wait_tab` default
 a runtime). Bonus: i test ora azzerano davvero i sleep (`_cfg_zero()`), suite passata
 da 60s a 0.14s.
 
+**Bug telemetria scoperto e risolto** (commit `6e1c5ce`): l'utente ha notato che la
+dashboard/MCP `performance_task` mostrava messaggi al "100% eseguiti" nonostante il
+fallimento multi-giorno. Causa: `_mappa_esito()` mappava `SCHERMATA_NON_APERTA` su
+`TaskResult.skip()` (success=True) — `main.py:915` (`esito = "ok" if lr.success else
+"err"`) non distingue skip da vero completamento, quindi lo storico/dashboard
+mostrava "ok" per ogni fallimento. La telemetria granulare (`data/telemetry/events`,
+campo `outcome`) registrava invece correttamente 441 skip vs 9 ok da inizio giugno —
+discrepanza tra le due viste confermata da verifica diretta. Fix: "schermata non
+aperta" non è un no-op legittimo ma un'incapacità di eseguire il task → ora
+`TaskResult.fail()`. Effetto collaterale positivo: per WU79 `last_run` non avanza su
+fail, quindi un blocco analogo futuro viene ritentato al ciclo successivo invece di
+aspettare le 4h piene in silenzio. Test aggiornati, 35/35 verdi.
+
 ---
 
 ## Sessione 07/06/2026 — Analisi multi-agente + Fase 0 + notifiche A+B
