@@ -6,6 +6,21 @@
 #
 #  FIX RT-08a: chiusura con navigator.vai_in_home() invece di n_back_close fissi.
 #  Gestisce correttamente sia il caso con popup ricompense sia senza.
+#
+#  FIX PRE-OPEN DUAL-TAB:
+#   - Il gioco può aprire la schermata messaggi con Alliance O System già attivo.
+#   - _rileva_tab_attivo() verifica entrambi i template in sequenza (con retry)
+#     e ritorna 'alliance' | 'system' | None.
+#   - _gestisci_tab() riceve skip_tap=True sul tab già attivo per evitare
+#     un ri-tap ridondante su un tab già selezionato dal gioco.
+#   - soglia_open separata da soglia_alliance/soglia_system per taratura indipendente.
+#
+#  FIX RECALIBRAZIONE TAB BAR (18/06):
+#   - Il client gioco ha aggiunto i tab REPORT/SENT/BOOK alla schermata messaggi
+#     (era solo Alliance+System). Le tab Alliance/System si sono spostate a
+#     sinistra: roi/tap aggiornati su misurazione pixel-precisa (cv2.matchTemplate)
+#     su 104 screenshot debug reali — 0/104 match con le coordinate vecchie,
+#     103/104 con quelle nuove.
 # ==============================================================================
 
 from __future__ import annotations
@@ -20,24 +35,27 @@ from shared.ui_helpers import attendi_template
 @dataclass
 class MessaggiConfig:
     tap_icona_messaggi: tuple[int, int] = (928, 430)
-    tap_tab_alliance:   tuple[int, int] = (325, 35)
-    tap_tab_system:     tuple[int, int] = (453, 36)
+    tap_tab_alliance:   tuple[int, int] = (198, 34)
+    tap_tab_system:     tuple[int, int] = (328, 34)
     tap_read_all:       tuple[int, int] = (108, 511)
     tap_close:          tuple[int, int] = (930, 36)
-    roi_alliance:       tuple[int, int, int, int] = (283, 23, 367, 47)
-    roi_system:         tuple[int, int, int, int] = (417, 23, 490, 50)
+    roi_alliance:       tuple[int, int, int, int] = (145, 15, 250, 50)
+    roi_system:         tuple[int, int, int, int] = (280, 15, 377, 50)
     roi_read:           tuple[int, int, int, int] = (61, 499, 156, 523)
+    # soglia_open: soglia unificata PRE-OPEN, usata da _rileva_tab_attivo()
+    # su entrambi i template. Abbassabile indipendentemente da soglia_alliance/system.
+    soglia_open:        float = 0.80
     soglia_alliance:    float = 0.80
     soglia_system:      float = 0.80
     soglia_read:        float = 0.85
-    wait_open:          float = 2.0
-    wait_tab:           float = 1.0
-    wait_read:          float = 2.0
-    wait_close:         float = 1.5
+    wait_open:          float = 3.0
+    wait_tab:           float = 2.0
+    wait_read:          float = 3.0
+    wait_close:         float = 2.5
     retry_tab:          int   = 2
-    retry_sleep:        float = 1.0
-    retry_sleep_open:   float = 1.5
-    retry_sleep_read:   float = 1.0
+    retry_sleep:        float = 2.0
+    retry_sleep_open:   float = 2.5
+    retry_sleep_read:   float = 2.0
     tmpl_alliance:      str   = "pin/pin_msg_02_alliance.png"
     tmpl_system:        str   = "pin/pin_msg_03_system.png"
     tmpl_read:          str   = "pin/pin_msg_04_read.png"
@@ -108,31 +126,42 @@ class MessaggiTask(Task):
 
         log(f"Tap icona messaggi {cfg.tap_icona_messaggi}")
         device.tap(*cfg.tap_icona_messaggi)
-        time.sleep(1.0)  # Slow-PC: 0.3 → 1.0 (pre-verifica pin aperto)
+        time.sleep(3.0)
 
-        ok_open = self._verifica_pin(device, matcher, cfg.tmpl_alliance,
-                                     cfg.soglia_alliance, cfg.roi_alliance,
-                                     retry=2, retry_sleep=cfg.retry_sleep_open,
-                                     log=log, label="PRE-OPEN")
+        # PRE-OPEN: il gioco può aprire con Alliance o System già attivo (arancione).
+        # _rileva_tab_attivo() verifica entrambi i template e ritorna quale è attivo.
+        # Se nessuno dei due viene riconosciuto → schermata non aperta → abort.
+        tab_attivo = self._rileva_tab_attivo(device, matcher, cfg, log)
+
         if _dbg is not None:
             _dbg.snap("01_post_open", device.screenshot())
-        if not ok_open:
-            log("ANOMALIA: schermata non aperta — BACK + abort")
+
+        if tab_attivo is None:
+            log("ANOMALIA: schermata non aperta (nessun tab rilevato) — BACK + abort")
             device.back()
             return _Esito.SCHERMATA_NON_APERTA, False, False
 
-        log("[PRE-OPEN] schermata messaggi aperta — OK")
+        log(f"[PRE-OPEN] schermata aperta — tab attivo: {tab_attivo}")
 
-        alliance_ok = self._gestisci_tab(device, matcher,
-                                         cfg.tap_tab_alliance, cfg.tmpl_alliance,
-                                         cfg.soglia_alliance, cfg.roi_alliance,
-                                         "Alliance", log, cfg)
+        # Processa Alliance: se già attivo al PRE-OPEN salta il tap (skip_tap=True)
+        alliance_ok = self._gestisci_tab(
+            device, matcher,
+            cfg.tap_tab_alliance, cfg.tmpl_alliance,
+            cfg.soglia_alliance, cfg.roi_alliance,
+            "Alliance", log, cfg,
+            skip_tap=(tab_attivo == "alliance"),
+        )
         if _dbg is not None:
             _dbg.snap("02_post_alliance", device.screenshot())
-        system_ok   = self._gestisci_tab(device, matcher,
-                                         cfg.tap_tab_system, cfg.tmpl_system,
-                                         cfg.soglia_system, cfg.roi_system,
-                                         "System", log, cfg)
+
+        # Processa System: se già attivo al PRE-OPEN salta il tap (skip_tap=True)
+        system_ok = self._gestisci_tab(
+            device, matcher,
+            cfg.tap_tab_system, cfg.tmpl_system,
+            cfg.soglia_system, cfg.roi_system,
+            "System", log, cfg,
+            skip_tap=(tab_attivo == "system"),
+        )
         if _dbg is not None:
             _dbg.snap("03_post_system", device.screenshot())
 
@@ -149,11 +178,48 @@ class MessaggiTask(Task):
 
         return _Esito.COMPLETATO, alliance_ok, system_ok
 
+    def _rileva_tab_attivo(self, device, matcher, cfg, log) -> str | None:
+        """PRE-OPEN dual-tab: verifica Alliance poi System come sentinel di apertura.
+        Il tab attivo (arancione) viene riconosciuto dal template corrispondente.
+        Un retry gestisce animazioni lente di apertura schermata.
+        Ritorna: 'alliance' | 'system' | None (schermata non aperta).
+        """
+        shot = device.screenshot()
+
+        score_a = matcher.score(shot, cfg.tmpl_alliance, zone=cfg.roi_alliance)
+        score_s = matcher.score(shot, cfg.tmpl_system,   zone=cfg.roi_system)
+        log(f"[PRE-OPEN] alliance={score_a:.3f} system={score_s:.3f}")
+
+        if score_a >= cfg.soglia_open:
+            return "alliance"
+        if score_s >= cfg.soglia_open:
+            return "system"
+
+        # Retry: attendi animazione apertura e ricontrolla entrambi
+        log(f"[PRE-OPEN] nessun tab rilevato — retry tra {cfg.retry_sleep_open}s")
+        time.sleep(cfg.retry_sleep_open)
+        shot = device.screenshot()
+
+        score_a = matcher.score(shot, cfg.tmpl_alliance, zone=cfg.roi_alliance)
+        score_s = matcher.score(shot, cfg.tmpl_system,   zone=cfg.roi_system)
+        log(f"[PRE-OPEN RETRY] alliance={score_a:.3f} system={score_s:.3f}")
+
+        if score_a >= cfg.soglia_open:
+            return "alliance"
+        if score_s >= cfg.soglia_open:
+            return "system"
+
+        return None
+
     def _gestisci_tab(self, device, matcher, tab_tap, tab_tmpl, tab_soglia,
-                      tab_roi, nome_tab, log, cfg):
-        log(f"Tap tab {nome_tab} {tab_tap}")
-        device.tap(*tab_tap)
-        time.sleep(1.0)  # Slow-PC: 0.3 → 1.0 (pre-verifica pin tab)
+                      tab_roi, nome_tab, log, cfg, skip_tap: bool = False):
+        # skip_tap=True: tab già attivo dal PRE-OPEN, nessun tap necessario
+        if skip_tap:
+            log(f"[{nome_tab.upper()}] già attivo dal PRE-OPEN — tap skippato")
+        else:
+            log(f"Tap tab {nome_tab} {tab_tap}")
+            device.tap(*tab_tap)
+            time.sleep(3.0)
 
         ok_tab = self._verifica_pin(device, matcher, tab_tmpl, tab_soglia, tab_roi,
                                     retry=cfg.retry_tab, retry_sleep=cfg.retry_sleep,

@@ -7,7 +7,8 @@
 #    - should_run(): device None, matcher None, config disabilitato
 #    - _mappa_esito(): tutti gli esiti → TaskResult corretto
 #    - _verifica_pin(): trovato al primo tentativo, trovato al retry, non trovato
-#    - _gestisci_tab(): tab attivo + read visibile, tab attivo + no read, tab anomalo
+#    - _rileva_tab_attivo(): alliance attivo, system attivo, retry, nessun tab (None)
+#    - _gestisci_tab(): skip_tap True/False, tab anomalo, read visibile/non visibile
 #    - run():
 #        * flusso completo OK (alliance + system entrambi con messaggi)
 #        * flusso OK senza messaggi (read non visibile)
@@ -170,7 +171,6 @@ def _cfg_zero() -> MessaggiConfig:
         wait_tab=0,
         wait_read=0,
         wait_close=0,
-        wait_back=0,
         retry_sleep=0,
         retry_sleep_open=0,
         retry_sleep_read=0,
@@ -289,6 +289,104 @@ class TestVerificaPin:
 
 
 # ==============================================================================
+# Test: _rileva_tab_attivo() — PRE-OPEN dual-tab
+# ==============================================================================
+
+class TestRilevaTabAttivo:
+
+    def _rileva(self, matcher, cfg=None):
+        cfg = cfg or _cfg_zero()
+        device = FakeDevice()
+        tab = _task()._rileva_tab_attivo(device, matcher, cfg, log=lambda m: None)
+        return tab, device
+
+    def test_alliance_attivo_primo_tentativo(self):
+        cfg = _cfg()
+        m   = FakeMatcher({cfg.tmpl_alliance: 0.95, cfg.tmpl_system: 0.10})
+        tab, device = self._rileva(m)
+        assert tab == "alliance"
+        assert device.calls.count(("screenshot",)) == 1
+
+    def test_system_attivo_primo_tentativo(self):
+        cfg = _cfg()
+        m   = FakeMatcher({cfg.tmpl_alliance: 0.10, cfg.tmpl_system: 0.95})
+        tab, device = self._rileva(m)
+        assert tab == "system"
+        assert device.calls.count(("screenshot",)) == 1
+
+    def test_nessun_tab_al_primo_tentativo_poi_alliance_al_retry(self):
+        cfg = _cfg()
+        m   = FakeMatcher()
+        m.set_sequence(cfg.tmpl_alliance, [0.10, 0.95])
+        m.set_sequence(cfg.tmpl_system,   [0.10, 0.10])
+        tab, device = self._rileva(m)
+        assert tab == "alliance"
+        assert device.calls.count(("screenshot",)) == 2
+
+    def test_nessun_tab_rilevato_dopo_retry(self):
+        cfg = _cfg()
+        m   = FakeMatcher({cfg.tmpl_alliance: 0.10, cfg.tmpl_system: 0.10})
+        tab, device = self._rileva(m)
+        assert tab is None
+        assert device.calls.count(("screenshot",)) == 2
+
+
+# ==============================================================================
+# Test: _gestisci_tab() — skip_tap dal PRE-OPEN
+# ==============================================================================
+
+class TestGestisciTabSkipTap:
+
+    def test_skip_tap_non_tappa_il_tab(self):
+        cfg = _cfg()
+        m   = FakeMatcher({cfg.tmpl_alliance: 0.95, cfg.tmpl_read: 0.95})
+        device = FakeDevice()
+        ok = _task()._gestisci_tab(
+            device, m, cfg.tap_tab_alliance, cfg.tmpl_alliance,
+            cfg.soglia_alliance, cfg.roi_alliance, "Alliance",
+            log=lambda x: None, cfg=_cfg_zero(), skip_tap=True,
+        )
+        assert ok is True
+        assert device.taps_at(*cfg.tap_tab_alliance) == 0
+
+    def test_no_skip_tap_tappa_il_tab(self):
+        cfg = _cfg()
+        m   = FakeMatcher({cfg.tmpl_alliance: 0.95, cfg.tmpl_read: 0.95})
+        device = FakeDevice()
+        ok = _task()._gestisci_tab(
+            device, m, cfg.tap_tab_alliance, cfg.tmpl_alliance,
+            cfg.soglia_alliance, cfg.roi_alliance, "Alliance",
+            log=lambda x: None, cfg=_cfg_zero(), skip_tap=False,
+        )
+        assert ok is True
+        assert device.taps_at(*cfg.tap_tab_alliance) == 1
+
+    def test_tab_anomalo_ritorna_false_e_non_tappa_read(self):
+        cfg = _cfg()
+        m   = FakeMatcher({cfg.tmpl_alliance: 0.10, cfg.tmpl_read: 0.95})
+        device = FakeDevice()
+        ok = _task()._gestisci_tab(
+            device, m, cfg.tap_tab_alliance, cfg.tmpl_alliance,
+            cfg.soglia_alliance, cfg.roi_alliance, "Alliance",
+            log=lambda x: None, cfg=_cfg_zero(), skip_tap=True,
+        )
+        assert ok is False
+        assert device.taps_at(*cfg.tap_read_all) == 0
+
+    def test_read_non_visibile_non_tappa(self):
+        cfg = _cfg()
+        m   = FakeMatcher({cfg.tmpl_alliance: 0.95, cfg.tmpl_read: 0.10})
+        device = FakeDevice()
+        ok = _task()._gestisci_tab(
+            device, m, cfg.tap_tab_alliance, cfg.tmpl_alliance,
+            cfg.soglia_alliance, cfg.roi_alliance, "Alliance",
+            log=lambda x: None, cfg=_cfg_zero(), skip_tap=True,
+        )
+        assert ok is True
+        assert device.taps_at(*cfg.tap_read_all) == 0
+
+
+# ==============================================================================
 # Test: run() — flusso completo con messaggi
 # ==============================================================================
 
@@ -319,13 +417,13 @@ class TestFlussoCompleto:
         _task().run(ctx)
         assert device.taps_at(*cfg.tap_read_all) == 2
 
-    def test_back_chiusura_eseguiti(self):
-        cfg     = _cfg()
+    def test_nessun_back_in_flusso_normale(self):
+        """La chiusura usa tap_close + navigator.vai_in_home(), non back()."""
         device  = FakeDevice()
         matcher = _matcher_tutto_ok()
         ctx     = _make_ctx(device=device, matcher=matcher)
         _task().run(ctx)
-        assert device.back_count() == cfg.n_back_close
+        assert device.back_count() == 0
 
     def test_tap_close_eseguito(self):
         cfg     = _cfg()
