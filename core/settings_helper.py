@@ -43,6 +43,14 @@ Sequenza base (~22s, ~20s se Optimize già attivo):
     10. BACK × 2 (Settings → Commander → HOME)
 
 Coordinate calibrate su MuMu Player 960×540, validate su FAU_10 il 29/04.
+
+WU166 (18/06/2026) — Storico persistente pulizia cache. `data/cache_state.json`
+dice solo "pulito oggi sì/no" e le righe [CACHE] nei log istanza si perdono
+alla rotazione (ogni tick sovrascrive `logs/<NOME>.jsonl`) — un fallimento
+notturno era invisibile entro poche ore. Ogni tentativo (ok o fallito) viene
+ora appeso a `data/cache_history.jsonl` (append-only, sopravvive a riavvii e
+rotazione log). Alert automatico se manca la marca giornaliera dopo un
+cutoff: vedi `core/alerts.py::check_cache_pulizia_giornaliera`.
 """
 from __future__ import annotations
 
@@ -184,11 +192,17 @@ def imposta_settings_lightweight(
             log(f"[SETTINGS] cache già pulita oggi per {nome} — skip")
         else:
             log(f"[SETTINGS] avvio pulizia cache giornaliera per {nome}")
-            if _pulisci_cache(ctx, log):
+            _t_cache = time.time()
+            _ok_cache = _pulisci_cache(ctx, log)
+            _dt_cache = time.time() - _t_cache
+            if _ok_cache:
                 _marca_cache_pulita(nome)
                 log(f"[SETTINGS] pulizia cache OK — marcata per {nome}")
+                _log_cache_history(nome, "ok", _dt_cache, "pulizia completata")
             else:
                 log("[SETTINGS] pulizia cache FALLITA — nessun mark")
+                _log_cache_history(nome, "fail", _dt_cache,
+                                    "timeout polling CLOSE o tap fallito")
 
         # ── Step 9-10: BACK 2/3 + 3/3 → HOME ────────────────────────────────
         for i in (2, 3):
@@ -248,6 +262,31 @@ def _marca_cache_pulita(nome_istanza: str) -> None:
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         os.replace(tmp, path)
+    except Exception:
+        pass
+
+
+def _cache_history_path() -> Path:
+    """Path di `data/cache_history.jsonl` (rispetta env DOOMSDAY_ROOT)."""
+    root = os.environ.get("DOOMSDAY_ROOT", os.getcwd())
+    return Path(root) / "data" / "cache_history.jsonl"
+
+
+def _log_cache_history(nome_istanza: str, esito: str, durata_s: float, msg: str) -> None:
+    """Appende un record audit (WU166) per OGNI tentativo di pulizia cache,
+    ok o fallito. Best-effort: non deve mai interrompere il flow chiamante."""
+    try:
+        path = _cache_history_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        rec = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "istanza": nome_istanza,
+            "esito": esito,
+            "durata_s": round(durata_s, 1),
+            "msg": msg,
+        }
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
     except Exception:
         pass
 

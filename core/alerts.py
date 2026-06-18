@@ -58,6 +58,7 @@ COOLDOWN_S: dict[str, int] = {
     "master_saturo_long":    2 * 3600,  # 1×/2h
     "bot_unexpected_restart": 900,      # 1×/15min
     "heartbeat_cicli":       1800,      # 1×/30min
+    "cache_pulizia_mancante": 4 * 3600, # 1×/4h
 }
 
 DEFAULT_COOLDOWN = 1800   # 30min per event_type non listati
@@ -416,6 +417,90 @@ def check_maintenance_long(soglia_s: int = 7200) -> bool:
         event_type="maintenance_long",
         severity="warn",
         title=f"maintenance attiva da {elapsed_min}min",
+        body=body,
+    )
+
+
+def _istanze_attese_cache() -> list[str]:
+    """Istanze per cui ci si aspetta la marca giornaliera in `cache_state.json`.
+
+    Esclude: disabilitate (`abilitata=False`, runtime ha priorità su static —
+    stesso criterio di `monitor/analyzer.py::_carica_istanze_abilitate`) e
+    `tipologia=="raccolta_only"` (la pulizia cache è skippata per queste in
+    `core/launcher.py`, es. master FauMorfeus — WU112)."""
+    root = _root()
+    try:
+        instances = json.loads((root / "config" / "instances.json")
+                                .read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    try:
+        ov = json.loads((root / "config" / "runtime_overrides.json")
+                         .read_text(encoding="utf-8"))
+        ov_istanze = ov.get("istanze", {}) or {}
+    except Exception:
+        ov_istanze = {}
+
+    risultato = []
+    for ist in instances:
+        nome = ist.get("nome")
+        if not nome:
+            continue
+        ov_i = ov_istanze.get(nome, {}) or {}
+        abilitata = ov_i.get("abilitata")
+        if abilitata is None:
+            abilitata = ist.get("abilitata", True)
+        if not abilitata:
+            continue
+        tipologia = ov_i.get("tipologia") or ist.get("profilo", "full")
+        if tipologia == "raccolta_only":
+            continue
+        risultato.append(nome)
+    return risultato
+
+
+def check_cache_pulizia_giornaliera(cutoff_hour_utc: int = 12) -> bool:
+    """Istanze senza pulizia cache marcata per oggi dopo `cutoff_hour_utc` UTC.
+
+    WU166: `core/settings_helper.py::_marca_cache_pulita` scrive
+    `data/cache_state.json[nome] = oggi` SOLO su successo del flow Help→Clear
+    cache→CLOSE. Se dopo il cutoff (default mezzogiorno UTC, ben oltre la
+    finestra 00:00-02:00 osservata) la marca manca, la pulizia è quasi
+    certamente fallita — e senza questo check nessuno se ne accorgerebbe
+    (i log della notte sono già ruotati via dal tick successivo).
+    """
+    if not _alerts_enabled():
+        return False
+
+    now = _now()
+    if now.hour < cutoff_hour_utc:
+        return False
+
+    try:
+        state_path = _root() / "data" / "cache_state.json"
+        state = json.loads(state_path.read_text(encoding="utf-8")) if state_path.exists() else {}
+    except Exception:
+        return False
+
+    oggi = now.strftime("%Y-%m-%d")
+    attese = _istanze_attese_cache()
+    if not attese:
+        return False
+    mancanti = [n for n in attese if state.get(n) != oggi]
+    if not mancanti:
+        return False
+
+    body = (
+        f"Pulizia cache giornaliera non confermata per {len(mancanti)}/{len(attese)} "
+        f"istanze dopo le {cutoff_hour_utc:02d}:00 UTC: {', '.join(mancanti)}.\n"
+        f"\nVerificare `data/cache_debug/` (ultimo screenshot del tentativo) e "
+        f"`data/cache_history.jsonl` (esito/durata per istanza) — probabile "
+        f"timeout polling CLOSE o layout pannello Help non riconosciuto.\n"
+    )
+    return trigger_alert(
+        event_type="cache_pulizia_mancante",
+        severity="warn",
+        title=f"cache non pulita: {len(mancanti)} istanze",
         body=body,
     )
 

@@ -51,6 +51,26 @@ aperta" non è un no-op legittimo ma un'incapacità di eseguire il task → ora
 fail, quindi un blocco analogo futuro viene ritentato al ciclo successivo invece di
 aspettare le 4h piene in silenzio. Test aggiornati, 35/35 verdi.
 
+**WU166 — Pulizia cache: storico persistente + alert proattivo.** Scoperto durante
+l'indagine WU165 (l'utente ha chiesto verifica esplicita "funziona la clear cache
+mattutina?"): la pulizia FUNZIONAVA correttamente per tutte le 11 istanze del 18/06
+(confermato via `cache_state.json` + `data/cache_debug/`), ma senza nessuna traccia
+persistente — bypassa Task/telemetria e le righe `[CACHE]` nei log istanza si perdono
+alla rotazione (solo l'ultimo tick resta in `logs/<NOME>.jsonl`). Un fallimento notturno
+sarebbe stato invisibile.
+
+Fix in 2 parti (dev+prod):
+- `core/settings_helper.py::_log_cache_history()` — append-only `data/cache_history.jsonl`,
+  un record per ogni tentativo (ok/fail/durata/msg).
+- `core/alerts.py::check_cache_pulizia_giornaliera(cutoff_hour_utc=12)` — alert se manca
+  la marca giornaliera dopo mezzogiorno UTC. Esclude istanze `tipologia=="raccolta_only"`
+  (FauMorfeus/master, replica esatta esclusione `core/launcher.py:1064`) per evitare falsi
+  positivi. Wired in `main.py` accanto a `check_master_saturo`/`check_heartbeat_cicli`/
+  `check_maintenance_long`. Cooldown 4h.
+
+Nessun test dedicato (repo non testa unitariamente `core/` helper, solo `tasks/*.py`).
+Effetto al prossimo restart bot (flag one-shot già armato per WU165).
+
 ---
 
 ## Sessione 07/06/2026 — Analisi multi-agente + Fase 0 + notifiche A+B

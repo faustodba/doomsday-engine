@@ -1496,11 +1496,12 @@ def main():
         try:
             from core.alerts import (
                 check_master_saturo, check_heartbeat_cicli,
-                check_maintenance_long,
+                check_maintenance_long, check_cache_pulizia_giornaliera,
             )
-            check_master_saturo()      # warn 1×/2h se DRL=0 da >1h
-            check_heartbeat_cicli()    # critical 1×/30min se 0 cicli in 1h
-            check_maintenance_long()   # warn 1×/4h se maintenance > 2h
+            check_master_saturo()              # warn 1×/2h se DRL=0 da >1h
+            check_heartbeat_cicli()             # critical 1×/30min se 0 cicli in 1h
+            check_maintenance_long()            # warn 1×/4h se maintenance > 2h
+            check_cache_pulizia_giornaliera()   # warn 1×/4h se cache non marcata dopo 12 UTC
         except Exception as _exc:
             _log("MAIN", f"[WARN] alerts check: {_exc}")
 
