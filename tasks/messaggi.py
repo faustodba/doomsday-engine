@@ -28,6 +28,19 @@
 #     qualunque tuning manuale di questi due campi. Ora il codice usa
 #     cfg.wait_open/cfg.wait_tab; wait_tab default alzato 2.0→3.0 per
 #     preservare il timing reale già in esecuzione (nessun cambio comportamento).
+#
+#  FIX TELEMETRIA SCHERMATA_NON_APERTA → FAIL (18/06):
+#   - Era TaskResult.skip() → success=True, indistinguibile da un vero
+#     completamento in engine_status.json/dashboard "Performance task"
+#     (esito = "ok" if lr.success else "err", non guarda lo skipped flag).
+#     Risultato: il fallimento multi-giorno del tab bar stale risultava
+#     "100% eseguiti" nello storico/dashboard, anche se la telemetria
+#     granulare (data/telemetry/events, outcome=skip) lo registrava
+#     correttamente. "Schermata non aperta" non è un no-op legittimo
+#     (skip) ma una reale incapacità di eseguire il task → ora FAIL.
+#     Effetto collaterale positivo: last_run non avanza su fail (vedi
+#     WU79 in orchestrator.py) → retry al ciclo successivo invece di
+#     aspettare le 4h piene dell'intervallo periodic.
 # ==============================================================================
 
 from __future__ import annotations
@@ -265,5 +278,5 @@ class MessaggiTask(Task):
         if esito == _Esito.COMPLETATO:
             return TaskResult.ok("Messaggi completati", alliance=alliance_ok, system=system_ok)
         if esito == _Esito.SCHERMATA_NON_APERTA:
-            return TaskResult.skip("Schermata messaggi non aperta")
+            return TaskResult.fail("Schermata messaggi non aperta")
         return TaskResult.fail(f"Errore messaggi: {esito}")

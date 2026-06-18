@@ -12,7 +12,7 @@
 #    - run():
 #        * flusso completo OK (alliance + system entrambi con messaggi)
 #        * flusso OK senza messaggi (read non visibile)
-#        * schermata non aperta → skip
+#        * schermata non aperta → fail (non skip — WU165, evita falso "100% ok" in telemetria)
 #        * alliance anomala, system OK
 # ==============================================================================
 
@@ -223,10 +223,12 @@ class TestMappaEsito:
         assert r.success is True
         assert r.data["alliance"] is False
 
-    def test_schermata_non_aperta_skip(self):
+    def test_schermata_non_aperta_fail(self):
+        """Non è un no-op legittimo (skip) ma un'incapacità di eseguire il task:
+        deve essere FAIL per non falsare telemetria/dashboard (WU165 18/06)."""
         r = self._map(_Esito.SCHERMATA_NON_APERTA)
-        assert r.success is True
-        assert r.skipped is True
+        assert r.success is False
+        assert r.skipped is False
 
     def test_errore_fail(self):
         r = self._map(_Esito.ERRORE)
@@ -463,14 +465,14 @@ class TestNessunMessaggio:
 
 class TestSchermataNonAperta:
 
-    def test_ritorna_skip(self):
+    def test_ritorna_fail(self):
         cfg     = _cfg()
         device  = FakeDevice()
         matcher = FakeMatcher({cfg.tmpl_alliance: 0.10})   # schermata non rilevata
         ctx     = _make_ctx(device=device, matcher=matcher)
         result = _task().run(ctx)
-        assert result.success is True
-        assert result.skipped is True
+        assert result.success is False
+        assert result.skipped is False
 
     def test_back_eseguito(self):
         cfg     = _cfg()
