@@ -5,6 +5,37 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 18/06/2026 — Fix MessaggiTask (tab bar stale + dual-tab uncommitted)
+
+**WU165 — `tasks/messaggi.py` falliva da giorni** ("schermata non aperta" sistematico).
+Diagnosi forense con `cv2.matchTemplate` pixel-precisa su 104 screenshot debug reali
+(`data/messaggi_debug/`): il client gioco ha aggiunto i tab REPORT/SENT/BOOK alla
+schermata Messaggi (prima solo Alliance+System), spostando a sinistra le posizioni
+di Alliance e System. Le ROI/tap configurate erano stale: **0/104** screenshot
+superavano la soglia con le vecchie coordinate, **103/104** con quelle ricalibrate.
+
+Fix applicato (dev+prod):
+- `roi_alliance`: `(283,23,367,47)` → `(145,15,250,50)`
+- `roi_system`: `(417,23,490,50)` → `(280,15,377,50)`
+- `tap_tab_alliance`: `(325,35)` → `(198,34)`
+- `tap_tab_system`: `(453,36)` → `(328,34)`
+
+Incluso nello stesso commit anche il fix "PRE-OPEN DUAL-TAB" (`_rileva_tab_attivo` +
+`skip_tap`), che era già live in prod (copiato a mano) ma mai committato in dev —
+gap di processo rispetto al protocollo Rilasci.
+
+**Test suite stale scoperta e corretta**: `tests/tasks/test_messaggi.py` era ancora
+scritto per la vecchia API single-tab (`MessaggiConfig(wait_back=...)`, `cfg.n_back_close`
+— campi non più esistenti) e falliva 15/27, nonostante la ROADMAP dichiarasse 27/27.
+Riscritto con copertura per `_rileva_tab_attivo()` e `skip_tap` in `_gestisci_tab()`.
+Ora 35/35 verdi. Commit `e038736`, pushato su `main`.
+
+**Nota minore non risolta**: `time.sleep(3.0)` hardcoded in `_esegui_messaggi`/
+`_gestisci_tab` ignora i campi configurabili `cfg.wait_open`/`cfg.wait_tab` (coincide
+col default attuale, non bloccante). Da sistemare in una sessione futura.
+
+---
+
 ## Sessione 07/06/2026 — Analisi multi-agente + Fase 0 + notifiche A+B
 
 **Analisi approfondita read-only** (44 agenti, 16 subsystem) → `docs/analisi_2026-06-07.md`.
@@ -45,7 +76,7 @@ di 5: `_ovr("max_squadre", 4)` legge solo dynamic, il campo mancava in `runtime_
 | 1-10 | `core/`, `shared/`, `config/` | ✅ | Infrastruttura base |
 | 11 | `tasks/boost.py` | ✅ 35/35 | |
 | 12 | `tasks/store.py` | ✅ 39/39 | VIP Store + mercante diretto |
-| 13 | `tasks/messaggi.py` | ✅ 27/27 | |
+| 13 | `tasks/messaggi.py` | ✅ 35/35 | WU165 18/06: ricalibrazione tab bar + commit fix dual-tab |
 | 14 | `tasks/alleanza.py` | ✅ 24/24 | |
 | 15 | `tasks/vip.py` | ✅ 30/30 | |
 | 16 | `tasks/arena.py` | ✅ 10/10 | tap_barra("campaign") |

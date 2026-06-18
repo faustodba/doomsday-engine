@@ -19,8 +19,8 @@ CLAUDE.md ora tiene solo le **regole operative** + un riassunto degli **issue ap
 | Dashboard & configurazione | [dashboard-config.md](dashboard-config.md) | 19 | 0 |
 | OCR · Template matching · Banner | [ocr-vision.md](ocr-vision.md) | 17 | 2 |
 | Infra · Startup · Launcher · ADB | [infra-startup.md](infra-startup.md) | 14 | 3 |
-| Altro / trasversale | [altro.md](altro.md) | 6 | 0 |
-| **TOTALE** | — | **222** | **16** |
+| Altro / trasversale | [altro.md](altro.md) | 7 | 0 |
+| **TOTALE** | — | **223** | **16** |
 
 ## 🔓 Issue aperti / parziali (cross-tema)
 
