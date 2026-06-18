@@ -21,6 +21,13 @@
 #     sinistra: roi/tap aggiornati su misurazione pixel-precisa (cv2.matchTemplate)
 #     su 104 screenshot debug reali — 0/104 match con le coordinate vecchie,
 #     103/104 con quelle nuove.
+#
+#  FIX DEAD-CONFIG wait_open/wait_tab (18/06):
+#   - cfg.wait_open e cfg.wait_tab erano definiti ma ignorati: il codice usava
+#     time.sleep(3.0) hardcoded dopo il tap su icona/tab, rendendo inefficace
+#     qualunque tuning manuale di questi due campi. Ora il codice usa
+#     cfg.wait_open/cfg.wait_tab; wait_tab default alzato 2.0→3.0 per
+#     preservare il timing reale già in esecuzione (nessun cambio comportamento).
 # ==============================================================================
 
 from __future__ import annotations
@@ -49,7 +56,7 @@ class MessaggiConfig:
     soglia_system:      float = 0.80
     soglia_read:        float = 0.85
     wait_open:          float = 3.0
-    wait_tab:           float = 2.0
+    wait_tab:           float = 3.0
     wait_read:          float = 3.0
     wait_close:         float = 2.5
     retry_tab:          int   = 2
@@ -126,7 +133,7 @@ class MessaggiTask(Task):
 
         log(f"Tap icona messaggi {cfg.tap_icona_messaggi}")
         device.tap(*cfg.tap_icona_messaggi)
-        time.sleep(3.0)
+        time.sleep(cfg.wait_open)
 
         # PRE-OPEN: il gioco può aprire con Alliance o System già attivo (arancione).
         # _rileva_tab_attivo() verifica entrambi i template e ritorna quale è attivo.
@@ -219,7 +226,7 @@ class MessaggiTask(Task):
         else:
             log(f"Tap tab {nome_tab} {tab_tap}")
             device.tap(*tab_tap)
-            time.sleep(3.0)
+            time.sleep(cfg.wait_tab)
 
         ok_tab = self._verifica_pin(device, matcher, tab_tmpl, tab_soglia, tab_roi,
                                     retry=cfg.retry_tab, retry_sleep=cfg.retry_sleep,
