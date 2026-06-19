@@ -5,6 +5,36 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 19/06/2026 — WU167 claim parziale messaggi → fail
+
+**WU167 — `messaggi` riportava successo pieno anche con claim parziale.** L'utente
+ha chiesto di monitorare la prossima esecuzione di `messaggi` per verificare che
+alliance e system venissero davvero raccolti entrambi ("non so cosa perché non
+ho visto l'operazione completa"). Verifica live: l'esecuzione più recente (FAU_04,
+13:45 UTC) ha confermato entrambe le tab raccolte correttamente (`[PRE-OPEN]
+alliance=0.928 system=1.000`, due tap "Read and claim all", `output={"alliance":
+true,"system":true}`).
+
+Durante la verifica, analisi dello storico telemetrico (`data/telemetry/events/`)
+ha però scoperto un bug reale, stesso pattern di mascheramento di WU165:
+`tasks/messaggi.py::_mappa_esito()` ritornava `TaskResult.ok()` anche quando
+**una sola** delle due tab veniva raccolta (`alliance_ok or system_ok`, non
+`and`) — il fallimento parziale restava visibile solo nel campo `output` interno,
+invisibile a telemetria/dashboard aggregate. Caso reale: FAU_04 18/06 22:29 UTC,
+`[PRE-SYSTEM] score=0.528 → NO` (3 tentativi, lag UI cambio tab) →
+`output={"alliance":true,"system":false}` ma `outcome="ok"`. Frequenza storica:
+19/1480 esecuzioni "ok" (1.3%), sempre `system=False`, mai il contrario.
+
+Fix (`tasks/messaggi.py::_mappa_esito`): ok solo se **entrambe** le tab riuscite,
+altrimenti `TaskResult.fail("Claim parziale: alliance=... system=...")`. Bonus
+WU79: retry al ciclo successivo invece di aspettare 4h. `debug.flush()` ora forza
+il salvataggio screenshot anche su claim parziale (non solo doppio fallimento) per
+diagnosi futura. Test aggiornati (2 nuovi unitari su `_mappa_esito`, 1 nuovo
+integration su `run()`, 1 esistente corretto per la nuova semantica) — 37/37 verdi.
+Sync dev+prod.
+
+---
+
 ## Sessione 18/06/2026 — Fix MessaggiTask (tab bar stale + dual-tab uncommitted)
 
 **WU165 — `tasks/messaggi.py` falliva da giorni** ("schermata non aperta" sistematico).
@@ -113,7 +143,7 @@ di 5: `_ovr("max_squadre", 4)` legge solo dynamic, il campo mancava in `runtime_
 | 1-10 | `core/`, `shared/`, `config/` | ✅ | Infrastruttura base |
 | 11 | `tasks/boost.py` | ✅ 35/35 | |
 | 12 | `tasks/store.py` | ✅ 39/39 | VIP Store + mercante diretto |
-| 13 | `tasks/messaggi.py` | ✅ 35/35 | WU165 18/06: ricalibrazione tab bar + commit fix dual-tab |
+| 13 | `tasks/messaggi.py` | ✅ 37/37 | WU165 18/06: ricalibrazione tab bar + commit fix dual-tab. WU167 19/06: claim parziale → fail |
 | 14 | `tasks/alleanza.py` | ✅ 24/24 | |
 | 15 | `tasks/vip.py` | ✅ 30/30 | |
 | 16 | `tasks/arena.py` | ✅ 10/10 | tap_barra("campaign") |

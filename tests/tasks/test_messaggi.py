@@ -13,7 +13,7 @@
 #        * flusso completo OK (alliance + system entrambi con messaggi)
 #        * flusso OK senza messaggi (read non visibile)
 #        * schermata non aperta → fail (non skip — WU165, evita falso "100% ok" in telemetria)
-#        * alliance anomala, system OK
+#        * claim parziale (una sola tab riuscita) → fail (WU167, idem messaggi mancati)
 # ==============================================================================
 
 from __future__ import annotations
@@ -217,11 +217,23 @@ class TestMappaEsito:
         assert r.data["alliance"] is True
         assert r.data["system"] is True
 
-    def test_completato_con_anomalie_tab(self):
-        """Anche se un tab è anomalo il task è completato (non fail)."""
+    def test_completato_claim_parziale_alliance_fail(self):
+        """Claim parziale (alliance falso) non è un successo: WU167 19/06 —
+        metà messaggi non raccolta non deve falsare telemetria/dashboard."""
         r = self._map(_Esito.COMPLETATO, alliance=False, system=True)
-        assert r.success is True
+        assert r.success is False
+        assert r.skipped is False
         assert r.data["alliance"] is False
+        assert r.data["system"] is True
+
+    def test_completato_claim_parziale_system_fail(self):
+        """Caso reale osservato in prod (FAU_04, 18/06 22:29): tab System non
+        rilevata (score sotto soglia) → claim solo su alliance. WU167 19/06."""
+        r = self._map(_Esito.COMPLETATO, alliance=True, system=False)
+        assert r.success is False
+        assert r.skipped is False
+        assert r.data["alliance"] is True
+        assert r.data["system"] is False
 
     def test_schermata_non_aperta_fail(self):
         """Non è un no-op legittimo (skip) ma un'incapacità di eseguire il task:
@@ -435,6 +447,24 @@ class TestFlussoCompleto:
         _task().run(ctx)
         assert device.taps_at(*cfg.tap_close) == 1
 
+    def test_system_non_rilevato_fail(self):
+        """Caso reale prod (FAU_04, 18/06 22:29): alliance OK, system sotto
+        soglia (lag UI cambio tab) → claim parziale. WU167 19/06: deve essere
+        fail, non più ok con metà messaggi non raccolta."""
+        cfg     = _cfg()
+        device  = FakeDevice()
+        matcher = FakeMatcher({
+            cfg.tmpl_alliance: 0.95,
+            cfg.tmpl_system:   0.10,
+            cfg.tmpl_read:     0.95,
+        })
+        ctx     = _make_ctx(device=device, matcher=matcher)
+        result = _task().run(ctx)
+        assert result.success is False
+        assert result.skipped is False
+        assert result.data["alliance"] is True
+        assert result.data["system"] is False
+
 
 # ==============================================================================
 # Test: run() — nessun messaggio (read non visibile)
@@ -499,8 +529,10 @@ class TestSchermataNonAperta:
 
 class TestAllianceAnomala:
 
-    def test_system_completato_nonostante_alliance_anomala(self):
-        """Alliance anomala non blocca il task — system viene comunque eseguito."""
+    def test_system_eseguito_nonostante_alliance_anomala(self):
+        """Alliance anomala non blocca il task — system viene comunque tentato
+        (resilienza per-tab indipendente). WU167 19/06: il claim resta però
+        parziale → risultato complessivo fail (non più ok, vedi _mappa_esito)."""
         cfg     = _cfg()
         device  = FakeDevice()
         # alliance sempre sotto soglia dopo PRE-OPEN (che usa alliance per open check)
@@ -513,7 +545,8 @@ class TestAllianceAnomala:
         ctx    = _make_ctx(device=device, matcher=m)
         result = _task().run(ctx)
 
-        assert result.success is True
+        assert result.success is False
+        assert result.skipped is False
         assert result.data["alliance"] is False
         assert result.data["system"] is True
 

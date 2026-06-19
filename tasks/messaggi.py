@@ -129,10 +129,12 @@ class MessaggiTask(Task):
             debug.flush(success=False, log_fn=log)
             return TaskResult.fail(f"Eccezione: {exc}", step="esegui_messaggi")
 
-        # Anomalia: schermata aperta ma 0 claim su entrambe le tab
-        anomalia = (esito == _Esito.COMPLETATO and not alliance_ok and not system_ok)
+        # WU167 (19/06) — claim parziale (una sola tab riuscita) forza il flush
+        # debug per diagnosi, e success riflette il vero esito completo.
+        entrambi_ok = alliance_ok and system_ok
+        anomalia = (esito == _Esito.COMPLETATO and not entrambi_ok)
         debug.flush(
-            success=(esito == _Esito.COMPLETATO),
+            success=(esito == _Esito.COMPLETATO and entrambi_ok),
             force=anomalia,
             log_fn=log,
         )
@@ -276,7 +278,19 @@ class MessaggiTask(Task):
     @staticmethod
     def _mappa_esito(esito, alliance_ok, system_ok, log) -> TaskResult:
         if esito == _Esito.COMPLETATO:
-            return TaskResult.ok("Messaggi completati", alliance=alliance_ok, system=system_ok)
+            if alliance_ok and system_ok:
+                return TaskResult.ok("Messaggi completati", alliance=alliance_ok, system=system_ok)
+            # WU167 (19/06) — claim parziale (es. tab System non rilevata, lag UI
+            # gioco) non è un successo: ~1.3% delle run storiche (19/1480, sempre
+            # system=False) tornavano TaskResult.ok() nonostante metà dei messaggi
+            # restasse non raccolta — invisibile a telemetria/dashboard aggregate
+            # (stesso pattern di mascheramento di WU165). Ora FAIL: WU79 last_run
+            # non avanza, retry al ciclo successivo invece di aspettare 4h.
+            log(f"ANOMALIA: claim parziale alliance={alliance_ok} system={system_ok} — fail")
+            return TaskResult.fail(
+                f"Claim parziale: alliance={alliance_ok} system={system_ok}",
+                alliance=alliance_ok, system=system_ok,
+            )
         if esito == _Esito.SCHERMATA_NON_APERTA:
             return TaskResult.fail("Schermata messaggi non aperta")
         return TaskResult.fail(f"Errore messaggi: {esito}")
