@@ -5,6 +5,35 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 20/06/2026 — WU169 DistrictShowdown "icona evento non trovata" intermittente
+
+L'utente ha chiesto di verificare se i fallimenti "icona evento non trovata"
+coincidessero con il banner eventi chiuso (l'icona DS è visibile solo a
+pannello aperto). Confermato con i dati: 24 fallimenti su 10gg, due pattern
+distinti.
+- **08/05**: 8 fallimenti consecutivi su tutte le istanze, zero successi
+  quel giorno → evento mensile non attivo, legittimo.
+- **19-20/06**: 16 fallimenti **intervallati con successi sulla stessa
+  istanza** a poche ore di distanza (es. FAU_00 fail 19:52 → ok 22:45) →
+  bug transiente, non "evento spento".
+
+Causa, 2 varianti osservate sulla stessa FAU_03 (`tasks/district_showdown.py`):
+- **(A)** banner rilevato chiuso correttamente ma `time.sleep(1.0)` dopo il
+  tap di apertura — sotto il minimo 2.0s della REGOLA DELAY UI — icona
+  cercata su schermata non ancora renderizzata.
+- **(B)** nessun log "banner chiuso": il check originale agiva solo se
+  `score_chiuso >= 0.85`; sotto soglia (banner in transizione) il tap di
+  apertura veniva saltato silenziosamente, icona rimasta nascosta.
+
+Fix: nuovo `_assicura_banner_aperto()` — loga sempre entrambi i punteggi,
+tappa apri a meno che "aperto" non sia confermato (evita di richiudere un
+banner già aperto). `run()` ora fa un retry completo (check banner +
+ricerca icona) se il primo tentativo fallisce. Verificato con fake
+device/matcher i 3 casi (chiuso→tap, ambiguo→tap, aperto→no-op). Sync
+dev+prod.
+
+---
+
 ## Sessione 19/06/2026 (sera) — WU168 adaptive scheduler: 3 fix dataset/calibrazione
 
 Partito da una richiesta di recap+analisi del sistema predittivo ("qual è il

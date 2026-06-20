@@ -426,11 +426,7 @@ class DistrictShowdownTask(Task):
         # Banner eventi: regola = sempre chiuso. DS è l'unica eccezione:
         # l'icona DS è visibile nella barra top solo con pannello aperto.
         # Apri se chiuso → cerca icona → chiudi di nuovo prima di uscire.
-        from shared.ui_helpers import (
-            comprimi_banner_home,
-            _BANNER_TMPL_CHIUSO, _BANNER_ROI_PIN,
-            _BANNER_TAP_X, _BANNER_TAP_Y, _BANNER_SOGLIA,
-        )
+        from shared.ui_helpers import comprimi_banner_home
 
         def _chiudi_banner():
             try:
@@ -438,16 +434,23 @@ class DistrictShowdownTask(Task):
             except Exception:
                 pass
 
-        _sc = ctx.device.screenshot()
-        if _sc is not None:
-            s_ch = ctx.matcher.score(_sc, _BANNER_TMPL_CHIUSO, zone=_BANNER_ROI_PIN)
-            if s_ch >= _BANNER_SOGLIA:
-                ctx.log_msg(f"[DS] banner chiuso (score={s_ch:.3f}) — tap apri ({_BANNER_TAP_X},{_BANNER_TAP_Y})")
-                ctx.device.tap(_BANNER_TAP_X, _BANNER_TAP_Y)
-                time.sleep(1.0)
+        # 2. Cerca e tap icona evento nella barra top — con retry (WU169
+        # 20/06): 24 fallimenti "icona non trovata" osservati su 10gg,
+        # intervallati con successi sulla stessa istanza a poche ore di
+        # distanza → bug transiente (banner ambiguo o animazione apertura
+        # non completa), non evento spento. Un secondo tentativo con
+        # log esplicito e delay corretto (2.0s, REGOLA DELAY UI) risolve
+        # entrambe le varianti osservate senza serie collaterali (l'unico
+        # rischio — toggle che richiude un banner già aperto — è escluso da
+        # `_assicura_banner_aperto`, che non tocca nulla se già aperto).
+        self._assicura_banner_aperto(ctx)
+        trovata = self._apri_evento(ctx)
+        if not trovata:
+            ctx.log_msg("[DS] Icona non trovata al 1° tentativo — retry banner+ricerca")
+            self._assicura_banner_aperto(ctx)
+            trovata = self._apri_evento(ctx)
 
-        # 2. Cerca e tap icona evento nella barra top
-        if not self._apri_evento(ctx):
+        if not trovata:
             ctx.log_msg("[DS] Icona district_showdown non trovata — skip")
             if _dbg.enabled:
                 _dbg.snap("99_icona_non_trovata", ctx.device.screenshot())
@@ -539,6 +542,43 @@ class DistrictShowdownTask(Task):
                 "cicli_bloccati":  _ds_stuck.get(inst, 0),
             },
         )
+
+    # ------------------------------------------------------------------
+    # Step 0 — Assicura banner eventi aperto (WU169 20/06)
+    # ------------------------------------------------------------------
+
+    def _assicura_banner_aperto(self, ctx: TaskContext) -> None:
+        """Apre il banner eventi se chiuso o ambiguo, prima di cercare
+        l'icona DS (visibile solo a pannello aperto).
+
+        WU169 (20/06) — il check precedente loggava solo quando rilevava
+        "chiuso" con score >= soglia (0.85): se il punteggio era sotto
+        soglia (banner in transizione/animazione, o variazione visiva) il
+        tap di apertura veniva saltato IN SILENZIO, senza alcun log — causa
+        di una quota dei 24 fallimenti "icona non trovata" osservati su
+        10gg (intervallati con successi sulla stessa istanza, non "evento
+        spento"). Ora i punteggi vengono sempre loggati, e si tappa apri
+        a meno che "aperto" non sia confermato con score alto — ri-tappare
+        un banner già aperto lo richiuderebbe (è un toggle), quindi quel
+        caso resta un no-op esplicito.
+        """
+        from shared.ui_helpers import (
+            _BANNER_TMPL_APERTO, _BANNER_TMPL_CHIUSO, _BANNER_ROI_PIN,
+            _BANNER_TAP_X, _BANNER_TAP_Y, _BANNER_SOGLIA,
+        )
+        sc = ctx.device.screenshot()
+        if sc is None:
+            return
+        s_ap = ctx.matcher.score(sc, _BANNER_TMPL_APERTO, zone=_BANNER_ROI_PIN)
+        s_ch = ctx.matcher.score(sc, _BANNER_TMPL_CHIUSO, zone=_BANNER_ROI_PIN)
+        ctx.log_msg(f"[DS] banner stato: aperto={s_ap:.3f} chiuso={s_ch:.3f}")
+        if s_ap >= _BANNER_SOGLIA and s_ap > s_ch:
+            return  # confermato aperto — niente da fare (ri-tap lo chiuderebbe)
+        ctx.log_msg(
+            f"[DS] banner non confermato aperto — tap apri ({_BANNER_TAP_X},{_BANNER_TAP_Y})"
+        )
+        ctx.device.tap(_BANNER_TAP_X, _BANNER_TAP_Y)
+        time.sleep(self._cfg.delay_dopo_tap_minor)   # 2.0s — REGOLA DELAY UI
 
     # ------------------------------------------------------------------
     # Step 1 — Apri evento
