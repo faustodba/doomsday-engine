@@ -38,6 +38,15 @@ SNAPSHOT_INTERVAL_MIN = 15
 
 _lock = threading.Lock()
 
+# WU168 (19/06) — `input_context` (istanze_abilitate/task_globali_abilitati/
+# tasks_per_istanza_due) cambia raramente ma viene scritto per intero ogni
+# 15 min da 45+ giorni: cycle_snapshots.jsonl pesa 6.3MB su 3.649 righe,
+# più del doppio di istanza_metrics.jsonl con meno della metà delle righe.
+# Dedup: se identico al precedente, si scrive solo un riferimento
+# ("input_context_ref": "same_as_prev") — i reader lo risolvono in modo
+# trasparente (_read_snapshots_resolved), nessun consumer va modificato.
+_last_full_context: dict = {"value": None}
+
 
 def _root() -> Path:
     env = os.environ.get("DOOMSDAY_ROOT")
@@ -135,13 +144,17 @@ def record_snapshot(predicted_min: float,
         "n_istanze": n_istanze,
         "confidence": confidence,
     }
-    if input_context:
-        record["input_context"] = input_context
     if extra:
         record["extra"] = extra
-    line = json.dumps(record, ensure_ascii=False) + "\n"
     try:
         with _lock:
+            # WU168 — dedup input_context (vedi nota in testa al modulo)
+            if input_context and input_context == _last_full_context["value"]:
+                record["input_context_ref"] = "same_as_prev"
+            elif input_context:
+                record["input_context"] = input_context
+                _last_full_context["value"] = input_context
+            line = json.dumps(record, ensure_ascii=False) + "\n"
             with _snapshots_path().open("a", encoding="utf-8") as f:
                 f.write(line)
         return True
@@ -162,7 +175,7 @@ def get_snapshot_for_cycle(cycle_numero: int,
     Returns:
         Dict snapshot o None se non trovato.
     """
-    rows = [r for r in _read_jsonl(_snapshots_path())
+    rows = [r for r in _read_snapshots_resolved()
             if r.get("cycle_numero") == cycle_numero]
     if not rows:
         return None
@@ -176,9 +189,26 @@ def get_snapshot_for_cycle(cycle_numero: int,
 
 def get_all_snapshots_for_cycle(cycle_numero: int) -> list[dict]:
     """Ritorna tutti gli snapshot del ciclo, sorted asc per elapsed_min."""
-    rows = [r for r in _read_jsonl(_snapshots_path())
+    rows = [r for r in _read_snapshots_resolved()
             if r.get("cycle_numero") == cycle_numero]
     rows.sort(key=lambda r: r.get("elapsed_min", 0))
+    return rows
+
+
+def _read_snapshots_resolved() -> list[dict]:
+    """`_read_jsonl(cycle_snapshots.jsonl)` con `input_context_ref` risolto
+    (WU168 — vedi dedup in `record_snapshot`). I record sono in ordine
+    cronologico nel file: basta una scansione forward mantenendo l'ultimo
+    `input_context` pieno visto. Unico punto di risoluzione — tutti i
+    consumer (qui e `dashboard/app.py`) continuano a vedere sempre
+    `input_context` popolato, dedup o no, senza modifiche a valle."""
+    rows = _read_jsonl(_snapshots_path())
+    last_full: Optional[dict] = None
+    for r in rows:
+        if "input_context" in r:
+            last_full = r["input_context"]
+        elif r.get("input_context_ref") == "same_as_prev" and last_full is not None:
+            r["input_context"] = last_full
     return rows
 
 
@@ -303,6 +333,6 @@ def read_recent_accuracy(n_cycles: int = 10) -> list[dict]:
 
 def read_recent_snapshots(n: int = 50) -> list[dict]:
     """Ultimi N snapshot in tutti i cicli (desc per ts)."""
-    rows = _read_jsonl(_snapshots_path())
+    rows = _read_snapshots_resolved()
     rows.sort(key=lambda r: r.get("ts", ""), reverse=True)
     return rows[:n]

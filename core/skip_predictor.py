@@ -243,12 +243,17 @@ def _calc_t_marcia_min(invio: dict, istanza: str) -> Optional[float]:
     """
     Stima T_marcia totale (andata + raccolta + ritorno) in minuti per 1 invio.
 
-    Formula: T_marcia = (2 × eta_marcia_min + saturazione × T_L_max[livello, istanza]) × coef
+    Formula: T_marcia = 2 × eta_marcia_min + (saturazione × T_L_max[livello, istanza]) × coef
 
-    `coef` da calibrazione closed-loop (proposta B 08/05): coefficiente
-    moltiplicativo per (istanza, livello) auto-calibrato dal bias storico
-    predicted vs real (file `data/predictor_t_l_calibration.json`). Default
-    1.0 quando insufficienti samples o bias < trigger.
+    WU168 (19/06) — `coef` applicato SOLO al termine di raccolta
+    (saturazione × T_L_max), non più all'intera T_marcia. `eta_marcia_min`
+    viene da OCR diretto sul singolo invio (misura, non stima), correggerlo
+    con un coefficiente aggregato per (istanza, livello) introduceva rumore
+    su una quantità già accurata. `coef` da calibrazione closed-loop
+    (proposta B 08/05): coefficiente moltiplicativo per (istanza, livello)
+    auto-calibrato dal bias storico predicted vs real
+    (file `data/predictor_t_l_calibration.json`). Default 1.0 quando
+    insufficienti samples o bias < trigger.
 
     Ritorna None se dati insufficienti (livello o load_squadra mancanti).
     """
@@ -264,15 +269,15 @@ def _calc_t_marcia_min(invio: dict, istanza: str) -> Optional[float]:
     saturazione = min(1.0, load / cap)
     eta_min = eta_s / 60.0
     t_l_max = _get_t_l_max_min(istanza, livello)
-    t_marcia = 2 * eta_min + saturazione * t_l_max
-    # Calibrazione closed-loop (proposta B 08/05)
+    raccolta_min = saturazione * t_l_max
+    # Calibrazione closed-loop (proposta B 08/05) — solo sul termine di raccolta
     try:
         from core.t_marcia_calibration import get_calibration_coef
         coef = get_calibration_coef(istanza, livello)
-        t_marcia *= coef
+        raccolta_min *= coef
     except Exception:
         pass
-    return t_marcia
+    return 2 * eta_min + raccolta_min
 
 
 def _predict_gap_minutes() -> float:

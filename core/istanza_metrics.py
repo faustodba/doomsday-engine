@@ -35,6 +35,11 @@
 #      "task_durations_s": {                          per ogni task eseguito nel tick
 #        "raccolta": 95.3, "donazione": 21.5, ...
 #      },
+#      "adaptive_scheduler_meta": {                    WU168 19/06 — score previsto, consumato
+#        "slot_liberi_attesi": 4, "slot_liberi_now": 0, # da core/t_marcia_calibration.py per il
+#        "t_avvio_min_atteso": 59.3, "reasons_attive": [], # closed-loop bias predicted/reale
+#        "posizione_in_ciclo": 4
+#      },
 #      "outcome": "ok" | "cascade" | "abort"
 #    }
 #
@@ -52,6 +57,15 @@ from typing import Any
 
 _lock = threading.Lock()
 _BUFFER_PER_INSTANCE: dict[str, dict[str, Any]] = {}
+
+# WU168 (19/06) — staging per il meta adaptive scheduler. Lo scheduler calcola
+# l'ordine di TUTTE le istanze del ciclo (`main.py`) PRIMA che venga spawnato
+# il thread `_thread_istanza` di ciascuna (che chiama `inizia_tick` creando il
+# buffer) — `imposta_adaptive_scheduler_meta` arrivava quindi sempre con
+# buf=None e veniva silenziosamente scartato. Soluzione: se il buffer non
+# esiste ancora, il meta resta qui in attesa; `inizia_tick` lo consuma al
+# momento della creazione del buffer.
+_PENDING_SCHEDULER_META: dict[str, dict[str, Any]] = {}
 
 
 def _root_dir() -> Path:
@@ -72,15 +86,24 @@ def _file_path() -> Path:
 # ------------------------------------------------------------------
 
 def inizia_tick(instance: str, cycle_id: int = 0) -> None:
-    """Inizializza buffer per il tick corrente di un'istanza."""
+    """Inizializza buffer per il tick corrente di un'istanza.
+
+    WU168 — se lo scheduler ha già impostato un meta in staging per questa
+    istanza (calcolato pre-tick, prima che il buffer esistesse), lo allega
+    subito al nuovo buffer invece di perderlo.
+    """
     with _lock:
-        _BUFFER_PER_INSTANCE[instance] = {
+        buf = {
             "instance": instance,
             "cycle_id": int(cycle_id),
             "ts_avvio": datetime.now(timezone.utc).isoformat(),
             "raccolta": {"invii": []},
             "task_durations_s": {},
         }
+        pending = _PENDING_SCHEDULER_META.pop(instance, None)
+        if pending is not None:
+            buf["adaptive_scheduler_meta"] = pending
+        _BUFFER_PER_INSTANCE[instance] = buf
 
 
 def imposta_boot_home(instance: str, secondi: float) -> None:
@@ -133,17 +156,34 @@ def imposta_adaptive_scheduler_meta(instance: str,
     Chiamato dal main loop quando lo scheduler attiva e calcola l'ordine.
     Permette poi di confrontare slot_liberi_attesi vs reali (post-OCR HOME)
     per validare l'efficacia del modello T_marcia + scheduler.
+
+    WU168 (19/06) — BUG FIX (2 bachi cumulativi, entrambi azzeravano i dati):
+    1. Il buffer usava la chiave "adaptive_scheduler" ma `t_marcia_calibration.py`
+       legge "adaptive_scheduler_meta" (mismatch mai notato), e la chiave non
+       era nella whitelist di `chiudi_tick()` — il dato veniva bufferizzato ma
+       mai scritto su disco.
+    2. Questo hook viene chiamato dal main loop PRIMA di spawnare il thread
+       `_thread_istanza` di ogni istanza (che chiama `inizia_tick`, creando
+       il buffer) — quindi arrivava sempre con buf=None e veniva scartato
+       silenziosamente. Fix: se il buffer non esiste ancora, il meta va in
+       staging (`_PENDING_SCHEDULER_META`), consumato da `inizia_tick`.
+    Risultato pre-fix: la calibrazione closed-loop T_marcia (proposta B
+    08/05) è sempre stata inerte (0 campioni, coef sempre 1.0 per ogni
+    istanza/livello) dal giorno in cui è stata introdotta.
     """
+    meta = {
+        "slot_liberi_attesi":  int(slot_liberi_attesi),
+        "slot_liberi_now":     int(slot_liberi_now),
+        "t_avvio_min_atteso":  round(float(t_avvio_min_atteso), 1),
+        "reasons_attive":      list(reasons_attive),
+        "posizione_in_ciclo":  int(posizione_in_ciclo),
+    }
     with _lock:
         buf = _BUFFER_PER_INSTANCE.get(instance)
-        if buf is None:
-            return
-        meta = buf.setdefault("adaptive_scheduler", {})
-        meta["slot_liberi_attesi"]  = int(slot_liberi_attesi)
-        meta["slot_liberi_now"]     = int(slot_liberi_now)
-        meta["t_avvio_min_atteso"]  = round(float(t_avvio_min_atteso), 1)
-        meta["reasons_attive"]      = list(reasons_attive)
-        meta["posizione_in_ciclo"]  = int(posizione_in_ciclo)
+        if buf is not None:
+            buf["adaptive_scheduler_meta"] = meta
+        else:
+            _PENDING_SCHEDULER_META[instance] = meta
 
 
 def aggiungi_invio_raccolta(instance: str, tipo: str, livello: int,
@@ -240,7 +280,7 @@ def chiudi_tick(instance: str, outcome: str = "ok",
         "outcome": str(outcome),
     }
     for k in ("boot_home_s", "raccolta", "rifornimento", "task_durations_s",
-              "wait_inter_task_s", "wait_inter_task_n"):
+              "wait_inter_task_s", "wait_inter_task_n", "adaptive_scheduler_meta"):
         if k in buf:
             record[k] = buf[k]
     if tick_total_s is not None:

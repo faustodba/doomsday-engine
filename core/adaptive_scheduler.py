@@ -519,18 +519,14 @@ def _empty_score(istanza: str) -> dict:
 # ─── Blend deterministico + empirico (proposta A 08/05) ─────────────────────
 
 def _blend_alpha(n_samples: int) -> float:
-    """Peso deterministico in funzione del numero di sample empirici disponibili.
-
-    Più sample empirici → meno peso al deterministico → più peso a empirico.
-        n>=30  → α=0.3 (peso forte empirico)
-        15-29  → α=0.5 (50/50)
-        5-14   → α=0.7 (peso forte deterministico)
-        <5     → α=1.0 (solo deterministico, no fiducia empirica)
+    """Peso deterministico, continuo in n_samples (WU168 19/06 — prima era a
+    gradini: n=4→α=1.0, n=5→α=0.7, salto di 0.3 per UN solo campione in più,
+    poteva far cambiare bruscamente lo score/ordine senza nulla di reale
+    cambiato). Ora interpolazione lineare tra α=1.0 (n=0, solo deterministico)
+    e α=0.3 (n>=30, peso forte empirico) — stessi estremi, nessun salto.
     """
-    if n_samples >= 30: return 0.3
-    if n_samples >= 15: return 0.5
-    if n_samples >= 5:  return 0.7
-    return 1.0
+    n = max(0, n_samples)
+    return max(0.3, 1.0 - 0.7 * min(n, 30) / 30.0)
 
 
 def _blend_with_empirical(out: dict, istanza: str, gap_min: float) -> dict:

@@ -5,6 +5,54 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 19/06/2026 (sera) — WU168 adaptive scheduler: 3 fix dataset/calibrazione
+
+Partito da una richiesta di recap+analisi del sistema predittivo ("qual è il
+dataset?" → proposta migliorativa → "implementa tutti i punti"). Durante
+l'implementazione del fix proposto (auto-calibrazione T_L_max) è emerso un bug
+molto più fondamentale di quanto previsto.
+
+**Bug critico scoperto**: la calibrazione closed-loop T_marcia
+(`core/t_marcia_calibration.py`, proposta B 08/05) non ha **mai funzionato**
+da quando è stata introdotta — sempre 0 campioni, `coef` sempre 1.0. Causa,
+3 bug cumulativi in `core/istanza_metrics.py`:
+1. `imposta_adaptive_scheduler_meta` scriveva la chiave `"adaptive_scheduler"`
+   nel buffer, ma il reader si aspettava `"adaptive_scheduler_meta"` (mismatch).
+2. La chiave non era nella whitelist di `chiudi_tick()` → mai scritta su disco
+   anche a mismatch risolto.
+3. L'hook è chiamato dal main loop PRIMA che `inizia_tick()` crei il buffer per
+   quell'istanza (lo scheduler ordina tutte le istanze prima di avviare i
+   thread) → `buf=None` sempre, scartato silenziosamente.
+
+Fix: chiave corretta + whitelist aggiornata + staging
+`_PENDING_SCHEDULER_META` consumato da `inizia_tick()` indipendentemente
+dall'ordine di chiamata. Verificato end-to-end su sandbox isolata con la
+sequenza reale (meta → inizia_tick → chiudi_tick).
+
+**Fix #2 — scoping calibrazione** (`core/skip_predictor.py::_calc_t_marcia_min`):
+`coef` moltiplicava l'intera `T_marcia = 2×eta + sat×T_L_max`, correggendo
+anche `eta_marcia` (misura OCR diretta, non una stima — non andrebbe
+corretta da un coefficiente aggregato). Ora `coef` moltiplica solo il termine
+`sat×T_L_max`. Aggiunto campo informativo `effective_t_l_max` (base×coef) in
+`compute_calibration()` per audit drift del baseline manuale
+`config/predictor_t_l_max.json` — non sovrascritto automaticamente.
+
+**Fix #3 — smoothing cliff** (`core/adaptive_scheduler.py::_blend_alpha`): da
+gradini netti (salto di 0.3 per un solo campione extra a n=5) a interpolazione
+lineare continua, stessi estremi (α=1.0 a n=0, α=0.3 a n≥30).
+
+**Fix #4 — igiene storage**: `cycle_snapshots.jsonl` (6.3MB/3.649 righe,
+più pesante di `istanza_metrics.jsonl` con meno della metà delle righe) per
+duplicazione di `input_context` quasi-statico ogni 15min. Dedup write-side +
+resolver read-side trasparente (zero modifiche ai consumer dashboard). Più
+`tools/rotate_predictor_logs.py` (CLI manuale, dry-run default, archiviazione
+mensile) — testato su sandbox, ricostruzione bit-a-bit identica all'originale.
+
+Nessun test dedicato (convenzione repo: solo `tasks/*.py` ha test unitari).
+Validazione via sandbox isolate + dry-run. Sync dev+prod.
+
+---
+
 ## Sessione 19/06/2026 — WU167 claim parziale messaggi → fail
 
 **WU167 — `messaggi` riportava successo pieno anche con claim parziale.** L'utente

@@ -23,13 +23,23 @@ Persistenza: `data/predictor_t_l_calibration.json`:
       "coefs": {"FAU_05|6": 1.12, "FAU_07|7": 0.95, ...},
       "samples": {"FAU_05|6": 18, ...},
       "bias_slot": {"FAU_05|6": 2.4, ...},
+      "effective_t_l_max": {"FAU_05|6": 127.7, ...},  # WU168 — base × coef, solo info
       "ts_computed": "...",
       "n_total_samples": int,
       "confidence": "alta" | "media" | "bassa",
     }
 
 Hook: `core.skip_predictor._calc_t_marcia_min` legge `get_calibration_coef(ist, lv)`
-e applica come moltiplicatore sul T_marcia totale. Default 1.0 se no samples.
+e applica come moltiplicatore SOLO sul termine di raccolta (saturazione ×
+T_L_max), non sull'intera T_marcia (WU168 19/06 — `eta_marcia` è una misura
+OCR diretta, non va corretta da un coefficiente aggregato). Default 1.0 se
+no samples.
+
+`effective_t_l_max` (WU168) è puramente informativo: mostra quale sarebbe
+il T_L_max "vero" secondo i dati osservati (`base × coef`), per capire se
+il baseline manuale in `config/predictor_t_l_max.json` è driftato e andrebbe
+aggiornato a mano — NON viene scritto automaticamente nel file statico
+(rischio di doppia correzione se sommato al coef ancora attivo).
 
 Guardrail:
 - min 5 sample per (ist, lv) per coefficiente non-1.0
@@ -111,7 +121,7 @@ def compute_calibration(window: int = WINDOW_RECORDS) -> dict:
     records = _read_records(window=window)
     if not records:
         return {
-            "coefs": {}, "samples": {}, "bias_slot": {},
+            "coefs": {}, "samples": {}, "bias_slot": {}, "effective_t_l_max": {},
             "ts_computed": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "n_total_samples": 0,
             "confidence": "bassa",
@@ -164,6 +174,7 @@ def compute_calibration(window: int = WINDOW_RECORDS) -> dict:
     coefs: dict[str, float] = {}
     samples: dict[str, int] = {}
     bias_map: dict[str, float] = {}
+    effective_t_l_max: dict[str, float] = {}
 
     for (ist, lv), errors in bias_pool.items():
         n = len(errors)
@@ -179,6 +190,17 @@ def compute_calibration(window: int = WINDOW_RECORDS) -> dict:
         coef = max(COEF_MIN, min(COEF_MAX, coef))
         coefs[key] = round(coef, 4)
 
+    # WU168 — effective_t_l_max informativo (base × coef), per audit drift
+    # del baseline manuale config/predictor_t_l_max.json. Non scritto altrove.
+    try:
+        from core.skip_predictor import _get_t_l_max_min
+        for key, coef in coefs.items():
+            ist, lv_str = key.split("|", 1)
+            base = _get_t_l_max_min(ist, int(lv_str))
+            effective_t_l_max[key] = round(base * coef, 1)
+    except Exception as exc:
+        _log.debug("[T-CAL] effective_t_l_max skip: %s", exc)
+
     n_total = sum(samples.values())
     if n_total >= 50:
         confidence = "alta"
@@ -188,13 +210,14 @@ def compute_calibration(window: int = WINDOW_RECORDS) -> dict:
         confidence = "bassa"
 
     return {
-        "coefs":           coefs,
-        "samples":         samples,
-        "bias_slot":       bias_map,
-        "ts_computed":     datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        "n_total_samples": n_total,
-        "confidence":      confidence,
-        "reason":          f"n_keys={len(coefs)} window={window}",
+        "coefs":             coefs,
+        "samples":           samples,
+        "bias_slot":         bias_map,
+        "effective_t_l_max": effective_t_l_max,
+        "ts_computed":       datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "n_total_samples":   n_total,
+        "confidence":        confidence,
+        "reason":            f"n_keys={len(coefs)} window={window}",
     }
 
 
