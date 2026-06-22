@@ -37,6 +37,9 @@ verificato empiricamente con `TemplateMatcher` reale (score=1.000 su popup
 vs -0.029/0.097 su schermate normali). Test 42/42 verdi (5 nuovi). Debug
 flush temporaneo rimosso post-fix. Sync dev+prod, restart armato.
 
+**Restart confermato**: ciclo 271 avviato 2026-06-22 04:29 UTC, `boot_ts`
+coincide, flag consumato. Fix attivo in produzione.
+
 ---
 
 ## Sessione 20/06/2026 — WU169 DistrictShowdown "icona evento non trovata" intermittente
