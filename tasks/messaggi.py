@@ -59,19 +59,27 @@ class MessaggiConfig:
     tap_tab_system:     tuple[int, int] = (328, 34)
     tap_read_all:       tuple[int, int] = (108, 511)
     tap_close:          tuple[int, int] = (930, 36)
+    # WU170 (22/06) — chiusura popup reward post-claim ("Congratulations! You
+    # got"). "Tap empty space to close": qualunque punto fuori dal box reward
+    # centrale funziona; (480,500) è in basso, sotto il testo istruzioni,
+    # verificato vuoto sia col popup aperto sia (no-op) a schermo normale.
+    tap_dismiss_popup:  tuple[int, int] = (480, 500)
     roi_alliance:       tuple[int, int, int, int] = (145, 15, 250, 50)
     roi_system:         tuple[int, int, int, int] = (280, 15, 377, 50)
     roi_read:           tuple[int, int, int, int] = (61, 499, 156, 523)
+    roi_congrats:       tuple[int, int, int, int] = (180, 78, 780, 130)
     # soglia_open: soglia unificata PRE-OPEN, usata da _rileva_tab_attivo()
     # su entrambi i template. Abbassabile indipendentemente da soglia_alliance/system.
     soglia_open:        float = 0.80
     soglia_alliance:    float = 0.80
     soglia_system:      float = 0.80
     soglia_read:        float = 0.85
+    soglia_congrats:    float = 0.80
     wait_open:          float = 3.0
     wait_tab:           float = 3.0
     wait_read:          float = 3.0
     wait_close:         float = 2.5
+    wait_dismiss_popup: float = 1.5
     retry_tab:          int   = 2
     retry_sleep:        float = 2.0
     retry_sleep_open:   float = 2.5
@@ -79,6 +87,7 @@ class MessaggiConfig:
     tmpl_alliance:      str   = "pin/pin_msg_02_alliance.png"
     tmpl_system:        str   = "pin/pin_msg_03_system.png"
     tmpl_read:          str   = "pin/pin_msg_04_read.png"
+    tmpl_congrats:      str   = "pin/pin_msg_05_congrats.png"
 
 
 class _Esito:
@@ -133,9 +142,14 @@ class MessaggiTask(Task):
         # debug per diagnosi, e success riflette il vero esito completo.
         entrambi_ok = alliance_ok and system_ok
         anomalia = (esito == _Esito.COMPLETATO and not entrambi_ok)
+        # TEMP DIAGNOSI (21/06) — force=True su OGNI esecuzione per catturare
+        # screenshot anche quando il codice CREDE che sia tutto ok (sospetto
+        # falso positivo: utente segnala raccolta visibile solo su 1 tab pur
+        # con alliance_ok=system_ok=True nei log). RIMUOVERE force=True dopo
+        # diagnosi, ripristinare force=anomalia.
         debug.flush(
             success=(esito == _Esito.COMPLETATO and entrambi_ok),
-            force=anomalia,
+            force=True,
             log_fn=log,
         )
 
@@ -258,9 +272,33 @@ class MessaggiTask(Task):
             log("Tap Read and claim all")
             device.tap(*cfg.tap_read_all)
             time.sleep(cfg.wait_read)
+            # WU170 (22/06) — il claim può generare un popup reward
+            # ("Congratulations! You got") che resta aperto SOPRA la
+            # schermata messaggi. Se non chiuso qui, il tap successivo verso
+            # l'altro tab viene assorbito dal popup ("tap empty space to
+            # close") invece di raggiungere il tab bar sottostante — il bot
+            # resta sullo stesso tab ma un falso positivo del template
+            # matching sul tab target fa credere che il cambio sia riuscito
+            # (claim parziale invisibile, vedi indagine screenshot FAU_03
+            # 22/06). Dismiss esplicito, retry per eventuale secondo popup.
+            self._dismiss_popup_reward(device, matcher, log, cfg)
         else:
             log(f"[PRE-READ] bottone non visibile — nessun messaggio su {nome_tab}")
         return True
+
+    def _dismiss_popup_reward(self, device, matcher, log, cfg, max_tentativi: int = 2) -> None:
+        """Chiude il popup "Congratulations! You got" se presente dopo un
+        claim. No-op silenzioso se il popup non c'è. WU170 (22/06)."""
+        for _ in range(max_tentativi):
+            shot = device.screenshot()
+            if shot is None:
+                return
+            score = matcher.score(shot, cfg.tmpl_congrats, zone=cfg.roi_congrats)
+            if score < cfg.soglia_congrats:
+                return
+            log(f"[POPUP] reward rilevato (score={score:.3f}) — chiudo")
+            device.tap(*cfg.tap_dismiss_popup)
+            time.sleep(cfg.wait_dismiss_popup)
 
     def _verifica_pin(self, device, matcher, tmpl, soglia, roi,
                       retry, retry_sleep, log, label) -> bool:

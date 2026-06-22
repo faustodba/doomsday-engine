@@ -171,6 +171,7 @@ def _cfg_zero() -> MessaggiConfig:
         wait_tab=0,
         wait_read=0,
         wait_close=0,
+        wait_dismiss_popup=0,
         retry_sleep=0,
         retry_sleep_open=0,
         retry_sleep_read=0,
@@ -401,6 +402,49 @@ class TestGestisciTabSkipTap:
 
 
 # ==============================================================================
+# Test: _dismiss_popup_reward() — WU170 22/06
+# ==============================================================================
+
+class TestDismissPopupReward:
+
+    def test_popup_assente_no_tap(self):
+        """Nessun popup rilevato → no-op, nessun tap di dismiss."""
+        cfg     = _cfg_zero()
+        device  = FakeDevice()
+        matcher = FakeMatcher({cfg.tmpl_congrats: 0.10})
+        _task()._dismiss_popup_reward(device, matcher, log=lambda x: None, cfg=cfg)
+        assert device.taps_at(*cfg.tap_dismiss_popup) == 0
+
+    def test_popup_rilevato_un_tap_poi_chiuso(self):
+        """Popup rilevato al 1° check, chiuso al 2° → 1 solo tap dismiss."""
+        cfg     = _cfg_zero()
+        device  = FakeDevice()
+        matcher = FakeMatcher()
+        matcher.set_sequence(cfg.tmpl_congrats, [0.95, 0.10])
+        _task()._dismiss_popup_reward(device, matcher, log=lambda x: None, cfg=cfg)
+        assert device.taps_at(*cfg.tap_dismiss_popup) == 1
+
+    def test_popup_persistente_rispetta_max_tentativi(self):
+        """Popup sempre rilevato → tappa fino a max_tentativi, poi si arrende."""
+        cfg     = _cfg_zero()
+        device  = FakeDevice()
+        matcher = FakeMatcher({cfg.tmpl_congrats: 0.95})
+        _task()._dismiss_popup_reward(device, matcher, log=lambda x: None,
+                                       cfg=cfg, max_tentativi=2)
+        assert device.taps_at(*cfg.tap_dismiss_popup) == 2
+
+    def test_screenshot_none_non_crasha(self):
+        cfg = _cfg_zero()
+        class _NoneDevice(FakeDevice):
+            def screenshot(self):
+                return None
+        device  = _NoneDevice()
+        matcher = FakeMatcher({cfg.tmpl_congrats: 0.95})
+        _task()._dismiss_popup_reward(device, matcher, log=lambda x: None, cfg=cfg)
+        assert device.taps_at(*cfg.tap_dismiss_popup) == 0
+
+
+# ==============================================================================
 # Test: run() — flusso completo con messaggi
 # ==============================================================================
 
@@ -430,6 +474,22 @@ class TestFlussoCompleto:
         ctx     = _make_ctx(device=device, matcher=matcher)
         _task().run(ctx)
         assert device.taps_at(*cfg.tap_read_all) == 2
+
+    def test_popup_reward_dopo_claim_non_blocca_secondo_tab(self):
+        """WU170 22/06 — caso reale FAU_03: popup reward dopo il claim
+        Alliance non deve impedire lo switch+claim su System. Il popup
+        appare dopo OGNI claim (sequenza usata 2 volte) e viene chiuso
+        prima di procedere."""
+        cfg     = _cfg()
+        device  = FakeDevice()
+        matcher = _matcher_tutto_ok()
+        matcher.set_sequence(cfg.tmpl_congrats, [0.95, 0.10, 0.95, 0.10])
+        ctx     = _make_ctx(device=device, matcher=matcher)
+        result  = _task().run(ctx)
+        assert result.success is True
+        assert result.data["alliance"] is True
+        assert result.data["system"] is True
+        assert device.taps_at(*cfg.tap_dismiss_popup) == 2
 
     def test_nessun_back_in_flusso_normale(self):
         """La chiusura usa tap_close + navigator.vai_in_home(), non back()."""
