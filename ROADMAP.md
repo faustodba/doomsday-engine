@@ -5,6 +5,40 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 22/06/2026 — WU170 messaggi: popup reward intercetta tap cambio tab
+
+L'utente ha segnalato (2ª volta, dopo verifica visiva diretta su FAU_08) che
+il bot raccoglieva solo su una tab senza spostarsi sull'altra, pur con i log
+che mostravano `alliance_ok=system_ok=True`. Diagnosticato forzando la
+cattura debug screenshot su OGNI esecuzione (`force=True` temporaneo +
+riavvio), poi confrontando i 4 campioni raccolti:
+
+- FAU_00, FAU_10, FAU_04 → corretti (tab cambia, contenuto visivamente diverso)
+- **FAU_03 (23:53:21 UTC) → bug confermato in diretta**
+
+Confronto pixel-preciso della tab bar (crop ROI esatte usate dal codice)
+sullo screenshot `03_post_system` ha mostrato il tab **"ALLIANCE" ancora
+attivo** (dorato) nonostante il log dicesse `[PRE-SYSTEM] score=0.919 → OK`.
+
+**Root cause**: il claim "Read and claim all" su Alliance genera un popup
+reward ("Congratulations! You got") che resta aperto sopra la schermata. Il
+tap successivo per passare a System (328,34) cade su un'area "tap empty
+space to close" del popup, **chiudendolo senza mai raggiungere il tab bar**
+— il bot resta su Alliance ma il check System produce un **falso positivo**
+del template matching (score 0.919, sopra soglia 0.80). I messaggi System
+non vengono mai raccolti, claim parziale completamente invisibile — stesso
+pattern di mascheramento di WU165/167, ma più subdolo (qui il punteggio
+template è genuinamente alto, non un retry insufficiente).
+
+**Fix**: nuovo `_dismiss_popup_reward()` chiamato dopo ogni claim, chiude
+esplicitamente il popup (se presente) prima di procedere al tab successivo.
+Nuovo template `pin_msg_05_congrats.png` estratto da screenshot reale,
+verificato empiricamente con `TemplateMatcher` reale (score=1.000 su popup
+vs -0.029/0.097 su schermate normali). Test 42/42 verdi (5 nuovi). Debug
+flush temporaneo rimosso post-fix. Sync dev+prod, restart armato.
+
+---
+
 ## Sessione 20/06/2026 — WU169 DistrictShowdown "icona evento non trovata" intermittente
 
 L'utente ha chiesto di verificare se i fallimenti "icona evento non trovata"
