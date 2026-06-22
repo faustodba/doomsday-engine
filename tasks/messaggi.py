@@ -140,16 +140,13 @@ class MessaggiTask(Task):
 
         # WU167 (19/06) — claim parziale (una sola tab riuscita) forza il flush
         # debug per diagnosi, e success riflette il vero esito completo.
+        # WU170 (22/06): force=True temporaneo (diagnosi popup reward FAU_03)
+        # rimosso post-fix — torna al normale force=anomalia.
         entrambi_ok = alliance_ok and system_ok
         anomalia = (esito == _Esito.COMPLETATO and not entrambi_ok)
-        # TEMP DIAGNOSI (21/06) — force=True su OGNI esecuzione per catturare
-        # screenshot anche quando il codice CREDE che sia tutto ok (sospetto
-        # falso positivo: utente segnala raccolta visibile solo su 1 tab pur
-        # con alliance_ok=system_ok=True nei log). RIMUOVERE force=True dopo
-        # diagnosi, ripristinare force=anomalia.
         debug.flush(
             success=(esito == _Esito.COMPLETATO and entrambi_ok),
-            force=True,
+            force=anomalia,
             log_fn=log,
         )
 
