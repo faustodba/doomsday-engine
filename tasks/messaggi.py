@@ -212,7 +212,7 @@ class MessaggiTask(Task):
         return _Esito.COMPLETATO, alliance_ok, system_ok
 
     def _rileva_tab_attivo(self, device, matcher, cfg, log) -> str | None:
-        """PRE-OPEN dual-tab: verifica Alliance poi System come sentinel di apertura.
+        """PRE-OPEN dual-tab: verifica Alliance e System come sentinel di apertura.
         Il tab attivo (arancione) viene riconosciuto dal template corrispondente.
         Un retry gestisce animazioni lente di apertura schermata.
         Ritorna: 'alliance' | 'system' | None (schermata non aperta).
@@ -223,10 +223,9 @@ class MessaggiTask(Task):
         score_s = matcher.score(shot, cfg.tmpl_system,   zone=cfg.roi_system)
         log(f"[PRE-OPEN] alliance={score_a:.3f} system={score_s:.3f}")
 
-        if score_a >= cfg.soglia_open:
-            return "alliance"
-        if score_s >= cfg.soglia_open:
-            return "system"
+        tab = self._tab_piu_probabile(score_a, score_s, cfg.soglia_open)
+        if tab is not None:
+            return tab
 
         # Retry: attendi animazione apertura e ricontrolla entrambi
         log(f"[PRE-OPEN] nessun tab rilevato — retry tra {cfg.retry_sleep_open}s")
@@ -237,12 +236,27 @@ class MessaggiTask(Task):
         score_s = matcher.score(shot, cfg.tmpl_system,   zone=cfg.roi_system)
         log(f"[PRE-OPEN RETRY] alliance={score_a:.3f} system={score_s:.3f}")
 
-        if score_a >= cfg.soglia_open:
-            return "alliance"
-        if score_s >= cfg.soglia_open:
-            return "system"
+        return self._tab_piu_probabile(score_a, score_s, cfg.soglia_open)
 
-        return None
+    @staticmethod
+    def _tab_piu_probabile(score_a: float, score_s: float, soglia: float) -> str | None:
+        """WU171: ritorna il tab col punteggio PIÙ ALTO fra quelli sopra
+        soglia, non il primo che la supera. I due template possono superare
+        soglia_open SIMULTANEAMENTE (osservato 23/06 su 5 istanze, sempre
+        identico: alliance=0.928 system=1.000 — il template alliance non è
+        sufficientemente selettivo fra stato attivo/inattivo del tab). La
+        vecchia logica if/elif assegnava sempre priorità ad alliance a
+        prescindere dal punteggio reale: quando System era il tab davvero
+        attivo (score 1.000), Alliance veniva creduto attivo (skip_tap=True,
+        mai tappato) e il claim "Read and claim all" colpiva il contenuto di
+        System spacciandolo per Alliance — poi il passo System tappava di
+        nuovo lo stesso tab (già attivo) e claimava 2 volte lo stesso
+        contenuto. Alliance non veniva mai visitata, sistematicamente, ogni
+        volta che il gioco apre Messaggi con System come tab di default.
+        """
+        if score_a < soglia and score_s < soglia:
+            return None
+        return "alliance" if score_a >= score_s else "system"
 
     def _gestisci_tab(self, device, matcher, tab_tap, tab_tmpl, tab_soglia,
                       tab_roi, nome_tab, log, cfg, skip_tap: bool = False):

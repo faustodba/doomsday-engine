@@ -5,6 +5,43 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 23/06/2026 (2) — WU171 messaggi: tab attivo sbagliato, alliance mai raccolto
+
+L'utente ha segnalato che il task `messaggi` "continua a non funzionare bene":
+il controllo dice di trovarsi su Alliance ma in realtà è su System, quindi
+tappa di nuovo System (già lì) e non recupera mai le ricompense Alliance.
+
+Diagnosi log+screenshot FAU_10 (11:28 UTC, `data/messaggi_debug/`):
+`[PRE-OPEN] alliance=0.928 system=1.000` → il bot rileva `tab attivo: alliance`,
+ma lo screenshot `01_post_open` mostra **System** realmente attivo (oro, badge
+12) e Alliance inattivo (badge 4). Conseguenza: `[ALLIANCE] già attivo dal
+PRE-OPEN — tap skippato` (mai tappato Alliance), claim "Read and claim all"
+eseguito sul contenuto di System spacciandolo per Alliance, poi il passo
+System tappa di nuovo lo stesso tab (già lì) e claima **due volte lo stesso
+contenuto**. Alliance non viene mai visitata.
+
+**Root cause** (`tasks/messaggi.py::_rileva_tab_attivo`): la logica era
+`if score_a >= soglia: return "alliance"` valutato PRIMA del check su system
+— quando ENTRAMBI superano `soglia_open=0.80` simultaneamente, alliance vince
+sempre, indipendentemente da quale punteggio sia più alto o quale tab sia
+realmente attivo. Verificato che questo overlap di punteggi è **sistematico**,
+non occasionale: stessi identici valori (alliance=0.928, system=1.000)
+confermati su 5/5 istanze controllate (FAU_02/03/04/09/10) — il template
+`pin_msg_02_alliance.png` non discrimina a sufficienza fra stato attivo e
+inattivo del tab.
+
+**Fix**: nuovo helper `_tab_piu_probabile(score_a, score_s, soglia)` — ritorna
+il tab col punteggio PIÙ ALTO fra quelli sopra soglia, non il primo che la
+supera. Usato sia nel check iniziale che nel retry. Nessuna modifica a
+template/soglie. Test: 42/42 verdi. Sync dev+prod, restart armato.
+
+**Prossimo step**: dopo il restart, verificare che le prossime esecuzioni di
+`messaggi` su istanze che si aprono con System come tab di default mostrino
+`tab attivo: system` nel log (non più sempre `alliance`), e che `output`
+riporti `alliance=true` genuino (non un claim duplicato su System).
+
+---
+
 ## Sessione 23/06/2026 — WU163 rifornimento: debug match pin rifugio falso positivo
 
 L'utente ha segnalato (con problemi di connettività in corso) che FAU_10 non
