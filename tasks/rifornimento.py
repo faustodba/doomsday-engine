@@ -352,6 +352,28 @@ def _seleziona_risorsa(risorse_reali: dict[str, float],
 # Navigazione mappa UI (via ctx.device)
 # ------------------------------------------------------------------------------
 
+def _dump_debug_screenshot(ctx: TaskContext, screen, tag: str, score: float) -> None:
+    """
+    Salva uno screenshot di calibrazione per il match avatar/pin rifugio.
+    Filename: data/rifornimento_debug/<istanza>_<ts>_<tag>_score<score>.png
+    tag="fail"    → match fallito su entrambe le ROI (totale).
+    tag="suspect" → match confermato solo dalla soglia permissiva di retry
+                    (WU163, score < soglia primaria — a rischio falso positivo).
+    """
+    try:
+        import os, cv2
+        from datetime import datetime
+        debug_dir = os.path.join("data", "rifornimento_debug")
+        os.makedirs(debug_dir, exist_ok=True)
+        ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        fname = f"{ctx.instance_name}_{ts_str}_{tag}_score{score:.3f}.png"
+        fpath = os.path.join(debug_dir, fname)
+        cv2.imwrite(fpath, screen.frame)
+        ctx.log_msg(f"Rifornimento: debug screenshot [{tag}] → {fpath}")
+    except Exception as exc_dbg:
+        ctx.log_msg(f"Rifornimento: debug dump fallito: {exc_dbg}")
+
+
 def _centra_mappa(ctx: TaskContext) -> tuple[int, int]:
     """
     Centra la mappa sul rifugio configurato tramite la lente coordinate.
@@ -418,7 +440,9 @@ def _centra_mappa(ctx: TaskContext) -> tuple[int, int]:
                 f"roi={roi_pri}"
             )
             # Tentativo 2 (retry): ROI 300x300 se primo fallisce o bassa confidenza
+            via_retry = False
             if not r.found:
+                via_retry = True
                 r = ctx.matcher.find_one(screen_post, avatar_tpl,
                                          threshold=soglia, zone=roi_retry)
                 last_score = r.score
@@ -433,25 +457,19 @@ def _centra_mappa(ctx: TaskContext) -> tuple[int, int]:
                 tap_x = int(r.cx)
                 tap_y = int(r.cy)
                 used_avatar = True
+                # WU163: il match confermato SOLO dalla soglia permissiva di
+                # retry (primaria fallita, score < 0.70) è a rischio falso
+                # positivo (vedi WU161) — il tap può cadere su un'icona
+                # evento o altro elemento invece del vero pin. Dump per
+                # verifica visiva, nessun cambio di comportamento.
+                if via_retry:
+                    _dump_debug_screenshot(
+                        ctx, screen_post, "suspect", last_score
+                    )
             else:
                 # Calibrazione: dump screenshot post-centramento quando il
-                # match fallisce su entrambe le ROI. Filename:
-                # data/rifornimento_debug/<istanza>_<ts>_score<score>.png
-                try:
-                    import os, cv2
-                    from datetime import datetime
-                    debug_dir = os.path.join("data", "rifornimento_debug")
-                    os.makedirs(debug_dir, exist_ok=True)
-                    ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-                    fname = (
-                        f"{ctx.instance_name}_{ts_str}_"
-                        f"score{last_score:.3f}.png"
-                    )
-                    fpath = os.path.join(debug_dir, fname)
-                    cv2.imwrite(fpath, screen_post.frame)
-                    ctx.log_msg(f"Rifornimento: debug screenshot → {fpath}")
-                except Exception as exc_dbg:
-                    ctx.log_msg(f"Rifornimento: debug dump fallito: {exc_dbg}")
+                # match fallisce su entrambe le ROI.
+                _dump_debug_screenshot(ctx, screen_post, "fail", last_score)
     except Exception as exc:
         ctx.log_msg(f"Rifornimento: match avatar fallito: {exc} — uso fallback")
 

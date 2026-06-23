@@ -5,6 +5,47 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 23/06/2026 — WU163 rifornimento: debug match pin rifugio falso positivo
+
+L'utente ha segnalato (con problemi di connettività in corso) che FAU_10 non
+aveva inviato rifornimento perché non riusciva a tappare sul rifugio. Verifica
+log (`logs/FAU_10.jsonl` 07:02 UTC, `logs/FAU_05.jsonl` 05:53 UTC stesso giorno):
+ROI primaria del match pin rifugio fallisce (score 0.406-0.543 < soglia 0.70),
+ROI retry "trova" con score borderline 0.59-0.60 (soglia permissiva 0.55) — ma
+è un **falso positivo**: il tap risultante su (435,174) — identico su entrambe
+le istanze, sospetto elemento fisso — non apre RESOURCE SUPPLY (score
+0.397-0.406 vs soglia 0.75) → 0 spedizioni. Le altre 6/9 istanze attive quel
+giorno hanno avuto match diretto forte (score 0.886) e 5/5 spedizioni — non è
+un problema generale, è il caso limite già previsto nel commento WU161
+(`tasks/rifornimento.py:407-410`).
+
+**Ipotesi utente da verificare**: icone evento sulla mappa che coprono/
+confondono il pin del rifugio nella ROI di ricerca (coerente con precedente
+WU162, che aveva già introdotto il collasso del banner eventi laterale per lo
+stesso motivo — ma quel collasso gestisce solo quel banner specifico).
+
+**Azioni**:
+1. Attivato `globali.debug_tasks.rifornimento=true` in `runtime_overrides.json`
+   prod (dynamic, hot-reload, nessun riavvio necessario per questo flag).
+2. Refactor del dump screenshot esistente in `tasks/rifornimento.py::_centra_mappa`
+   in helper dedicato `_dump_debug_screenshot(ctx, screen, tag, score)`, con due
+   tag distinti: `fail` (match fallito su entrambe le ROI, comportamento
+   preesistente) e **`suspect`** (NUOVO — match confermato SOLO dalla soglia
+   permissiva di retry, score < 0.70 — il caso a rischio falso positivo).
+   Nessun cambio di comportamento/logica di tap, solo osservabilità aggiuntiva
+   in `data/rifornimento_debug/`.
+3. Test: 43/43 verdi (le 9 failure pre-esistenti in `test_rifornimento.py` sono
+   debito tecnico invariato, confermato identico anche su `git stash`).
+4. Sync dev→prod, commit+push, restart one-shot armato a fine ciclo corrente.
+
+**Prossimo step**: alla prossima occorrenza del bug (qualsiasi istanza),
+analizzare lo screenshot `*_suspect_score*.png` in `data/rifornimento_debug/`
+per confermare/escludere l'ipotesi icone evento. Se confermata, valutare fix
+(es. estendere `dismiss_banners_loop`/`comprimi_banner_home` prima della
+ricerca pin, oppure escludere la zona delle icone dalla ROI di matching).
+
+---
+
 ## Sessione 22/06/2026 — WU170 messaggi: popup reward intercetta tap cambio tab
 
 L'utente ha segnalato (2ª volta, dopo verifica visiva diretta su FAU_08) che
