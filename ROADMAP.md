@@ -5,6 +5,52 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 25/06/2026 (4) — WU175 catalogo nodi: separazione territorio + ultima istanza
+
+L'utente ha chiesto la colonna "ultima istanza occupante" e, analizzando il
+dato, ha notato un'incongruenza: la coordinata 696_532 con 48-49 osservazioni
+è impossibile se si parla di "nodo occupato" (un'occupazione reale è limitata
+da disponibilità squadre/tempi di marcia, non può ripetersi 48 volte in 2
+giorni). Verifica sui dati grezzi: confermato, **100% di quelle osservazioni
+erano `esito=fuori_territorio`**, zero `trovato` — il nodo non è mai stato
+occupato, solo scoperto e scartato ripetutamente durante la ricerca.
+
+Root cause: il catalogo WU173 mischiava due popolazioni semanticamente
+diverse — `trovato` (squadra realmente inviata: 212 coordinate distinte,
+max 4 osservazioni/coordinata su 2gg, comportamento coerente con vera
+occupazione) vs `fuori_territorio` (solo scoperta/scarto, nessun limite di
+ripetizione: concentrato su SOLO 3 coordinate con conteggi abnormi 49/32/16).
+Le due popolazioni non si sovrappongono mai (0 coordinate in comune) — una
+volta blacklistato un nodo non viene mai più "trovato".
+
+**Fix** (richiesta esplicita utente: "i nodi fuori territorio devono essere
+conteggiati a parte, non hanno nessuna utilità, la mappatura è utile [solo
+per] i nodi in territorio, il nodo occupato è effettivamente l'ultima
+istanza che ha occupato il nodo"):
+- `tools/costruisci_catalogo_nodi.py` riscritto — il catalogo principale
+  contiene SOLO coordinate con ≥1 osservazione `trovato`; le coordinate
+  solo-fuori-territorio sono escluse e contate a parte in un nuovo file
+  `data/nodi_mappa_catalogo_meta.json`.
+- Ogni entry del catalogo ha 2 nuovi campi: `ultima_istanza` +
+  `ultima_occupazione_ts`, derivati dall'osservazione `trovato` più recente
+  (mai dalle `fuori_territorio`, che non rappresentano occupazione).
+- Dashboard: nuova colonna "ultima istanza occupante" + contatore "N fuori
+  territorio (escluse)" nel sommario.
+- Bonus fix scoperto in corso d'opera: `n_cross_istanza` della dashboard
+  contava erroneamente anche le coordinate ambigue nelle "confermate
+  cross-istanza" (24 vs 20 del tool CLI) — corretto escludendo `ambiguo`.
+
+Catalogo rigenerato: 214 coordinate in territorio (50 ricorrenti, 92%
+concordanti), 3 coordinate fuori territorio escluse. Validato end-to-end
+con dashboard locale (porta temporanea 8799). Test: 559 pass / 148 fail
+(pre-esistenti, nessuna regressione). Sync dev+prod, commit+push.
+
+**Prossimo step**: continuare ad accumulare osservazioni (passivo). Da
+rivalutare periodicamente con `tools/costruisci_catalogo_nodi.py --prod
+--write` se procedere alla fase 2 (uso attivo del catalogo).
+
+---
+
 ## Sessione 25/06/2026 (3) — WU174 dashboard: pagina /ui/nodi-mappa
 
 L'utente ha chiesto: (1) confermare che il dataset WU173 è persistente

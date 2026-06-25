@@ -1486,6 +1486,7 @@ def get_raccolta_nodi_stats(days: int = 7) -> dict:
 # ==============================================================================
 
 _NODI_MAPPA_CATALOGO_PATH = _PROD_ROOT / "data" / "nodi_mappa_catalogo.json"
+_NODI_MAPPA_META_PATH     = _PROD_ROOT / "data" / "nodi_mappa_catalogo_meta.json"
 
 
 def get_nodi_mappa_catalogo(tipo_filter: str = "", min_oss: int = 1) -> dict:
@@ -1496,9 +1497,23 @@ def get_nodi_mappa_catalogo(tipo_filter: str = "", min_oss: int = 1) -> dict:
     esplicitamente (vedi conversazione 25/06: la variante scartata in caso
     di parità non è conservata, solo il dato grezzo in nodi_mappa_observations
     non perde nulla).
+
+    WU175: il catalogo contiene SOLO nodi "in territorio" (almeno una
+    osservazione esito=trovato) — i nodi solo fuori-territorio sono esclusi
+    da tools/costruisci_catalogo_nodi.py (nessuna utilità per la mappatura).
+    Il relativo conteggio è letto da nodi_mappa_catalogo_meta.json.
     """
+    n_fuori_territorio = 0
+    try:
+        if _NODI_MAPPA_META_PATH.exists():
+            meta = json.loads(_NODI_MAPPA_META_PATH.read_text(encoding="utf-8"))
+            n_fuori_territorio = int(meta.get("n_coordinate_solo_fuori_territorio", 0))
+    except Exception:
+        pass
+
     empty = {
         "nodes": [], "total": 0, "n_ambigui": 0, "n_cross_istanza": 0,
+        "n_fuori_territorio": n_fuori_territorio,
         "by_tipo_count": {},
         "tipo_order":  _RACCOLTA_TIPO_ORDER,
         "tipo_labels": _RACCOLTA_TIPO_LABELS,
@@ -1535,6 +1550,7 @@ def get_nodi_mappa_catalogo(tipo_filter: str = "", min_oss: int = 1) -> dict:
             "ambiguo":            n_conc < n_oss,
             "prima_osservazione": v.get("prima_osservazione", ""),
             "ultima_osservazione": v.get("ultima_osservazione", ""),
+            "ultima_istanza":     v.get("ultima_istanza", ""),
         })
 
     if not nodes:
@@ -1543,18 +1559,21 @@ def get_nodi_mappa_catalogo(tipo_filter: str = "", min_oss: int = 1) -> dict:
     from collections import Counter
     by_tipo_count = dict(Counter(n["tipo"] for n in nodes))
     n_ambigui      = sum(1 for n in nodes if n["ambiguo"])
-    n_cross_istanza = sum(1 for n in nodes if n["n_istanze"] > 1)
+    # "confermate" = cross-istanza E concordanti (esclude le ambigue/instabili,
+    # coerente con la sezione "Conferme cross-istanza" del tool CLI).
+    n_cross_istanza = sum(1 for n in nodes if n["n_istanze"] > 1 and not n["ambiguo"])
 
     nodes.sort(key=lambda n: (-n["n_osservazioni"], n["chiave"]))
 
     return {
-        "nodes":           nodes,
-        "total":           len(nodes),
-        "n_ambigui":       n_ambigui,
-        "n_cross_istanza": n_cross_istanza,
-        "by_tipo_count":   by_tipo_count,
-        "tipo_order":       _RACCOLTA_TIPO_ORDER,
-        "tipo_labels":      _RACCOLTA_TIPO_LABELS,
-        "tipo_filter":      tipo_filter,
-        "min_oss":          min_oss,
+        "nodes":             nodes,
+        "total":             len(nodes),
+        "n_ambigui":         n_ambigui,
+        "n_cross_istanza":   n_cross_istanza,
+        "n_fuori_territorio": n_fuori_territorio,
+        "by_tipo_count":     by_tipo_count,
+        "tipo_order":        _RACCOLTA_TIPO_ORDER,
+        "tipo_labels":       _RACCOLTA_TIPO_LABELS,
+        "tipo_filter":       tipo_filter,
+        "min_oss":           min_oss,
     }

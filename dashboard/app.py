@@ -442,20 +442,21 @@ def _load_ab_records() -> list[dict]:
 
 @app.get("/ui/nodi-mappa", include_in_schema=False)
 def ui_nodi_mappa(request: Request, tipo: str = "", min_oss: int = 1):
-    """Pagina visualizzazione dataset mappatura nodi (WU173/WU174) — tabella filtrabile."""
+    """Pagina visualizzazione dataset mappatura nodi (WU173/WU174/WU175) — tabella filtrabile."""
     from dashboard.services.stats_reader import get_nodi_mappa_catalogo
     cat = get_nodi_mappa_catalogo(tipo_filter=tipo, min_oss=min_oss)
     return templates.TemplateResponse(request, "nodi_mappa.html", {
-        "active":          "nodi_mappa",
-        "tipo_sel":        tipo,
-        "min_oss":         min_oss,
-        "nodes":           cat["nodes"],
-        "total":           cat["total"],
-        "n_ambigui":       cat["n_ambigui"],
-        "n_cross_istanza": cat["n_cross_istanza"],
-        "by_tipo_count":   cat["by_tipo_count"],
-        "tipo_order":      cat["tipo_order"],
-        "tipo_labels":     cat["tipo_labels"],
+        "active":            "nodi_mappa",
+        "tipo_sel":          tipo,
+        "min_oss":           min_oss,
+        "nodes":             cat["nodes"],
+        "total":             cat["total"],
+        "n_ambigui":         cat["n_ambigui"],
+        "n_cross_istanza":   cat["n_cross_istanza"],
+        "n_fuori_territorio": cat["n_fuori_territorio"],
+        "by_tipo_count":     cat["by_tipo_count"],
+        "tipo_order":        cat["tipo_order"],
+        "tipo_labels":       cat["tipo_labels"],
         **_env_label(),
     })
 

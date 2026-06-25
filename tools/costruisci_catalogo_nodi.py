@@ -9,9 +9,23 @@ tasks/raccolta.py ad ogni ricerca CERCA — vedi shared/nodi_mappa.py) e
 costruisce, per ogni coordinata osservata, il tipo/livello più probabile
 (majority vote sulle osservazioni concordanti).
 
+WU175 (25/06/2026) — feedback utente: i nodi con esito SOLO
+"fuori_territorio" non hanno nessuna utilità per la mappatura (il bot non
+li occupa mai, sono permanentemente skippati) e venivano confusi con i nodi
+realmente occupabili (es. 696_532: 49 osservazioni, tutte "fuori_territorio",
+mai una sola occupazione reale — il conteggio alto era pura frequenza di
+scoperta/scarto durante la ricerca, non segnale di occupazione). Il catalogo
+ora include SOLO coordinate con almeno una osservazione "trovato" (= nodo
+in territorio, realmente occupato/occupabile dal bot). Le coordinate
+"solo fuori_territorio" sono contate a parte, escluse dal catalogo.
+
+Per ogni coordinata nel catalogo viene anche tracciata `ultima_istanza`
+(quale istanza ha effettuato l'ultima occupazione reale, esito="trovato")
+e `ultima_occupazione_ts`.
+
 Output (sempre):
-    1. Totali: coordinate distinte, osservazioni, copertura per istanza
-    2. Distribuzione confidenza: quante coordinate hanno N osservazioni
+    1. Totali: osservazioni trovato vs fuori_territorio, coordinate distinte
+    2. Distribuzione confidenza (solo nodi in territorio)
     3. Coordinate INSTABILI (tipo/livello discordanti tra osservazioni) —
        da rivedere manualmente, possibile collisione OCR o respawn reale
     4. Conferme cross-istanza (prova di mappa condivisa, alta confidenza)
@@ -66,6 +80,7 @@ def main() -> int:
     root = Path("C:/doomsday-engine-prod") if args.prod else Path("C:/doomsday-engine")
     obs_path = root / "data" / "nodi_mappa_observations.jsonl"
     cat_path = root / "data" / "nodi_mappa_catalogo.json"
+    meta_path = root / "data" / "nodi_mappa_catalogo_meta.json"
 
     if not obs_path.exists():
         print(f"Dataset osservazioni non trovato: {obs_path}")
@@ -75,9 +90,15 @@ def main() -> int:
     if args.days > 0:
         cutoff = datetime.now(timezone.utc) - timedelta(days=args.days)
 
+    # WU175: separazione netta — solo esito="trovato" entra nel catalogo
+    # (nodi in territorio, realmente occupati/occupabili). "fuori_territorio"
+    # viene contato a parte, nessuna utilità per la mappatura.
     by_chiave: dict[str, list[dict]] = defaultdict(list)
+    chiavi_fuori_territorio: set[str] = set()
     n_scartate_istanza = 0
     n_righe = 0
+    n_trovato = 0
+    n_fuori_territorio = 0
 
     with obs_path.open(encoding="utf-8") as f:
         for line in f:
@@ -99,24 +120,39 @@ def main() -> int:
                         continue
                 except Exception:
                     pass
+
+            if r.get("esito") == "fuori_territorio":
+                n_fuori_territorio += 1
+                chiavi_fuori_territorio.add(r["chiave"])
+                continue
+
+            n_trovato += 1
             by_chiave[r["chiave"]].append(r)
 
-    if not by_chiave:
-        print("Nessuna osservazione valida nel periodo (dopo esclusioni).")
-        return 0
+    # Coordinate "solo fuori territorio" = non hanno NESSUNA osservazione
+    # trovato — mai occupate, nessuna utilità per il catalogo.
+    chiavi_solo_fuori = chiavi_fuori_territorio - set(by_chiave.keys())
 
     print(f"=== Osservazioni totali nel file: {n_righe} "
           f"(scartate istanze escluse: {n_scartate_istanza}) ===")
-    print(f"=== Coordinate distinte: {len(by_chiave)} ===\n")
+    print(f"=== trovato (in territorio): {n_trovato}   "
+          f"fuori_territorio (solo scarto, nessuna utilità): {n_fuori_territorio} ===")
+    print(f"=== Coordinate in territorio (catalogo): {len(by_chiave)}   "
+          f"Coordinate SOLO fuori territorio (escluse): {len(chiavi_solo_fuori)} ===\n")
+
+    if not by_chiave:
+        print("Nessuna osservazione 'trovato' nel periodo (dopo esclusioni) — "
+              "catalogo vuoto, nessun nodo in territorio osservato.")
+        return 0
 
     # ── Sezione 2: distribuzione confidenza ──────────────────────────────
     dist_n_oss = Counter(len(obs) for obs in by_chiave.values())
-    print("--- Distribuzione osservazioni per coordinata ---")
+    print("--- Distribuzione osservazioni per coordinata (solo in territorio) ---")
     for n_oss in sorted(dist_n_oss):
-        print(f"  {n_oss:>3} osservazioni  →  {dist_n_oss[n_oss]:>4} coordinate")
+        print(f"  {n_oss:>3} osservazioni  ->  {dist_n_oss[n_oss]:>4} coordinate")
     print()
 
-    # ── Costruzione catalogo (majority vote) ─────────────────────────────
+    # ── Costruzione catalogo (majority vote, solo esito=trovato) ─────────
     catalogo: dict[str, dict] = {}
     instabili: list[dict] = []
     confermate_cross_istanza: list[dict] = []
@@ -130,14 +166,19 @@ def main() -> int:
         cx = obs[0]["cx"]
         cy = obs[0]["cy"]
 
+        obs_ordinate = sorted(obs, key=lambda o: o["ts"])
+        ultima = obs_ordinate[-1]
+
         entry = {
             "cx": cx, "cy": cy,
             "tipo": tipo_top, "livello": liv_top,
             "n_osservazioni": len(obs),
             "n_concordanti": n_top,
             "n_istanze": len(istanze),
-            "prima_osservazione": min(o["ts"] for o in obs),
-            "ultima_osservazione": max(o["ts"] for o in obs),
+            "prima_osservazione": obs_ordinate[0]["ts"],
+            "ultima_osservazione": ultima["ts"],
+            "ultima_istanza": ultima["instance"],
+            "ultima_occupazione_ts": ultima["ts"],
         }
         catalogo[chiave] = entry
 
@@ -167,7 +208,7 @@ def main() -> int:
         print(f"  {r['chiave']}  varianti={r['varianti']}  istanze={r['istanze']}")
         for o in sorted(r["obs"], key=lambda x: x["ts"]):
             print(f"      {o['ts']}  {o['instance']:12s} "
-                  f"tipo={o['tipo']:10s} Lv.{o['livello']}  ({o['esito']})")
+                  f"tipo={o['tipo']:10s} Lv.{o['livello']}")
     print()
 
     # ── Sezione 4: conferme cross-istanza ─────────────────────────────────
@@ -182,17 +223,17 @@ def main() -> int:
 
     # ── Sezione 5: verdetto maturità ──────────────────────────────────────
     quota_matura = n_concordanti_2plus / n_ricorrenti if n_ricorrenti else 0.0
-    print("--- Verdetto maturità dataset ---")
+    print("--- Verdetto maturità dataset (solo nodi in territorio) ---")
     print(f"  Coordinate ricorrenti (>1 oss.):              {n_ricorrenti}")
     print(f"  ...di cui concordanti >= {SOGLIA_CONFIDENZA_MIN} oss.:          "
           f"{n_concordanti_2plus}  ({quota_matura*100:.1f}%)")
     print(f"  Coordinate viste 1 sola volta (immature):     "
           f"{len(by_chiave) - n_ricorrenti}")
     if quota_matura >= SOGLIA_COPERTURA_MATURA and n_ricorrenti >= 20:
-        print(f"  → MATURO: {quota_matura*100:.1f}% >= soglia "
+        print(f"  -> MATURO: {quota_matura*100:.1f}% >= soglia "
               f"{SOGLIA_COPERTURA_MATURA*100:.0f}%, campione sufficiente.")
     else:
-        print(f"  → NON ANCORA MATURO (soglia {SOGLIA_COPERTURA_MATURA*100:.0f}%, "
+        print(f"  -> NON ANCORA MATURO (soglia {SOGLIA_COPERTURA_MATURA*100:.0f}%, "
               f"min 20 coordinate ricorrenti) — continuare a raccogliere cicli.")
     print()
 
@@ -202,7 +243,20 @@ def main() -> int:
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(catalogo, f, indent=2, ensure_ascii=False, sort_keys=True)
         tmp.replace(cat_path)
-        print(f"Catalogo scritto: {cat_path}  ({len(catalogo)} coordinate)")
+        print(f"Catalogo scritto: {cat_path}  ({len(catalogo)} coordinate in territorio)")
+
+        meta = {
+            "generato_ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "n_coordinate_territorio": len(catalogo),
+            "n_coordinate_solo_fuori_territorio": len(chiavi_solo_fuori),
+            "n_osservazioni_trovato": n_trovato,
+            "n_osservazioni_fuori_territorio": n_fuori_territorio,
+        }
+        tmp_meta = meta_path.with_suffix(".json.tmp")
+        with open(tmp_meta, "w", encoding="utf-8") as f:
+            json.dump(meta, f, indent=2, ensure_ascii=False)
+        tmp_meta.replace(meta_path)
+        print(f"Meta scritto: {meta_path}")
     else:
         print("(--write non specificato — nessun file scritto, solo report)")
 
