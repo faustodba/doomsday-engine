@@ -39,26 +39,29 @@
     <div class="divider"></div>
 
     <div class="section">
-      <div class="sec-label">tabella dettaglio</div>
+      <div class="sec-label">tabella dettaglio <span style="color:var(--text-dim);font-size:11px;font-weight:400">(clicca un'intestazione per ordinare)</span></div>
       <div style="overflow-x:auto">
-        <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px">
+        <table id="nodi-tbl" style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px">
           <thead>
             <tr>
-              <th style="background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px">chiave</th>
-              <th style="background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px">tipo</th>
-              <th style="background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:center;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px">liv</th>
-              <th style="background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:center;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px">oss.</th>
-              <th style="background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:center;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px">concordanti</th>
-              <th style="background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:center;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px">istanze</th>
-              <th style="background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--accent);font-weight:400;font-size:11px;letter-spacing:1px">ultima istanza occupante</th>
-              <th style="background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px">prima oss.</th>
-              <th style="background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px">ultima oss.</th>
+              <th onclick="nmSort(0,'str')"  style="cursor:pointer;background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px;user-select:none">chiave <span class="nm-arrow"></span></th>
+              <th onclick="nmSort(1,'str')"  style="cursor:pointer;background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px;user-select:none">tipo <span class="nm-arrow"></span></th>
+              <th onclick="nmSort(2,'num')"  style="cursor:pointer;background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:center;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px;user-select:none">liv <span class="nm-arrow"></span></th>
+              <th onclick="nmSort(3,'num')"  style="cursor:pointer;background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:center;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px;user-select:none">oss. <span class="nm-arrow"></span></th>
+              <th onclick="nmSort(4,'num')"  style="cursor:pointer;background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:center;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px;user-select:none">concordanti <span class="nm-arrow"></span></th>
+              <th onclick="nmSort(5,'num')"  style="cursor:pointer;background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:center;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px;user-select:none">istanze <span class="nm-arrow"></span></th>
+              <th onclick="nmSort(6,'str')"  style="cursor:pointer;background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--accent);font-weight:400;font-size:11px;letter-spacing:1px;user-select:none">ultima istanza occupante <span class="nm-arrow"></span></th>
+              <th onclick="nmSort(7,'str')"  style="cursor:pointer;background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px;user-select:none">prima oss. <span class="nm-arrow"></span></th>
+              <th onclick="nmSort(8,'str')"  style="cursor:pointer;background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px;user-select:none">ultima oss. <span class="nm-arrow"></span></th>
             </tr>
           </thead>
           <tbody>
             {% for n in nodes %}
               {% set ico, nome = tipo_labels.get(n.tipo, ("?", n.tipo)) %}
-              <tr style="{% if n.ambiguo %}background:rgba(229,115,115,0.08){% endif %}">
+              <tr style="{% if n.ambiguo %}background:rgba(229,115,115,0.08){% endif %}"
+                  data-sort-0="{{ n.chiave }}" data-sort-1="{{ n.tipo }}" data-sort-2="{{ n.livello }}"
+                  data-sort-3="{{ n.n_osservazioni }}" data-sort-4="{{ n.n_concordanti }}" data-sort-5="{{ n.n_istanze }}"
+                  data-sort-6="{{ n.ultima_istanza }}" data-sort-7="{{ n.prima_osservazione }}" data-sort-8="{{ n.ultima_osservazione }}">
                 <td style="padding:4px 10px;border:0.5px solid var(--border);color:var(--text)">{{ n.chiave }}{% if n.ambiguo %} <span style="color:#e57373" title="tipo/livello discordanti tra le osservazioni">⚠</span>{% endif %}</td>
                 <td style="padding:4px 10px;border:0.5px solid var(--border)">{{ ico }}&thinsp;{{ nome }}</td>
                 <td style="padding:4px 10px;border:0.5px solid var(--border);text-align:center">{{ n.livello }}</td>
@@ -79,5 +82,34 @@
 
   </div>
 </div>
+
+<script>
+  let nmSortCol = -1, nmSortAsc = true;
+  function nmSort(col, kind) {
+    const tbl  = document.getElementById('nodi-tbl');
+    const tbody = tbl.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr')).filter(r => r.hasAttribute('data-sort-' + col));
+    if (!rows.length) return;
+
+    nmSortAsc = (nmSortCol === col) ? !nmSortAsc : true;
+    nmSortCol = col;
+
+    rows.sort((a, b) => {
+      let va = a.getAttribute('data-sort-' + col) || '';
+      let vb = b.getAttribute('data-sort-' + col) || '';
+      if (kind === 'num') {
+        va = parseFloat(va) || 0;
+        vb = parseFloat(vb) || 0;
+        return nmSortAsc ? va - vb : vb - va;
+      }
+      return nmSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+    });
+    rows.forEach(r => tbody.appendChild(r));
+
+    tbl.querySelectorAll('.nm-arrow').forEach(s => s.textContent = '');
+    const th = tbl.querySelectorAll('thead th')[col];
+    if (th) th.querySelector('.nm-arrow').textContent = nmSortAsc ? '▲' : '▼';
+  }
+</script>
 
 {% endblock %}
