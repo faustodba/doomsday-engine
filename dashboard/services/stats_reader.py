@@ -1491,7 +1491,7 @@ _NODI_MAPPA_CATALOGO_PATH = _PROD_ROOT / "data" / "nodi_mappa_catalogo.json"
 def get_nodi_mappa_catalogo(tipo_filter: str = "", min_oss: int = 1) -> dict:
     """
     Carica il catalogo nodi mappa e lo prepara per la visualizzazione
-    dashboard (scatter + tabella). `ambiguo` è derivato a runtime da
+    dashboard (tabella filtrabile). `ambiguo` è derivato a runtime da
     n_concordanti < n_osservazioni — il catalogo su disco non lo persiste
     esplicitamente (vedi conversazione 25/06: la variante scartata in caso
     di parità non è conservata, solo il dato grezzo in nodi_mappa_observations
@@ -1499,7 +1499,6 @@ def get_nodi_mappa_catalogo(tipo_filter: str = "", min_oss: int = 1) -> dict:
     """
     empty = {
         "nodes": [], "total": 0, "n_ambigui": 0, "n_cross_istanza": 0,
-        "bounds": {"cx_min": 0, "cx_max": 0, "cy_min": 0, "cy_max": 0},
         "by_tipo_count": {},
         "tipo_order":  _RACCOLTA_TIPO_ORDER,
         "tipo_labels": _RACCOLTA_TIPO_LABELS,
@@ -1542,8 +1541,6 @@ def get_nodi_mappa_catalogo(tipo_filter: str = "", min_oss: int = 1) -> dict:
         return {**empty, "total": 0}
 
     from collections import Counter
-    cx_vals = [n["cx"] for n in nodes if n["cx"] is not None]
-    cy_vals = [n["cy"] for n in nodes if n["cy"] is not None]
     by_tipo_count = dict(Counter(n["tipo"] for n in nodes))
     n_ambigui      = sum(1 for n in nodes if n["ambiguo"])
     n_cross_istanza = sum(1 for n in nodes if n["n_istanze"] > 1)
@@ -1555,12 +1552,6 @@ def get_nodi_mappa_catalogo(tipo_filter: str = "", min_oss: int = 1) -> dict:
         "total":           len(nodes),
         "n_ambigui":       n_ambigui,
         "n_cross_istanza": n_cross_istanza,
-        "bounds": {
-            "cx_min": min(cx_vals) if cx_vals else 0,
-            "cx_max": max(cx_vals) if cx_vals else 0,
-            "cy_min": min(cy_vals) if cy_vals else 0,
-            "cy_max": max(cy_vals) if cy_vals else 0,
-        },
         "by_tipo_count":   by_tipo_count,
         "tipo_order":       _RACCOLTA_TIPO_ORDER,
         "tipo_labels":      _RACCOLTA_TIPO_LABELS,

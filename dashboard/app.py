@@ -440,77 +440,11 @@ def _load_ab_records() -> list[dict]:
     return out
 
 
-_NODI_MAPPA_TIPO_COLORI = {
-    "campo":    "#ef5350",   # rosso pomodoro
-    "segheria": "#a1887f",   # marrone legno
-    "acciaio":  "#78909c",   # grigio-blu acciaio
-    "petrolio": "#7e57c2",   # viola scuro petrolio
-}
-_NODI_MAPPA_COLORE_DEFAULT = "#888888"
-
-
-def _build_nodi_mappa_svg(nodes: list[dict], bounds: dict) -> str:
-    """Scatter SVG dei nodi mappa: posizione=cx/cy reali, colore=tipo,
-    raggio=confidenza (n_osservazioni), anello rosso tratteggiato=ambiguo."""
-    if not nodes:
-        return "<div style='padding:14px;color:var(--text-dim);font-size:12px'>nessun nodo nel catalogo</div>"
-
-    W, H = 860, 520
-    pad = 30
-    plot_w = W - 2 * pad
-    plot_h = H - 2 * pad
-
-    cx_min, cx_max = bounds["cx_min"], bounds["cx_max"]
-    cy_min, cy_max = bounds["cy_min"], bounds["cy_max"]
-    rx = (cx_max - cx_min) or 1
-    ry = (cy_max - cy_min) or 1
-
-    def sx(cx: float) -> float:
-        return pad + (cx - cx_min) / rx * plot_w
-
-    def sy(cy: float) -> float:
-        return pad + (cy - cy_min) / ry * plot_h
-
-    circles = []
-    for n in nodes:
-        if n["cx"] is None or n["cy"] is None:
-            continue
-        col = _NODI_MAPPA_TIPO_COLORI.get(n["tipo"], _NODI_MAPPA_COLORE_DEFAULT)
-        r = 3 + min(n["n_osservazioni"] - 1, 15) * 0.5
-        px, py = sx(n["cx"]), sy(n["cy"])
-        anello = ""
-        if n["ambiguo"]:
-            anello = (
-                f"<circle cx='{px:.1f}' cy='{py:.1f}' r='{r + 3:.1f}' "
-                f"fill='none' stroke='#e57373' stroke-width='1.5' "
-                f"stroke-dasharray='2,2'/>"
-            )
-        title = (
-            f"{n['chiave']} — {n['tipo']} Lv.{n['livello']} — "
-            f"{n['n_osservazioni']} oss. / {n['n_istanze']} istanze"
-            + (" — AMBIGUO" if n["ambiguo"] else "")
-        )
-        circles.append(
-            f"<circle cx='{px:.1f}' cy='{py:.1f}' r='{r:.1f}' "
-            f"fill='{col}' fill-opacity='0.75' stroke='var(--bg)' stroke-width='1'>"
-            f"<title>{title}</title></circle>{anello}"
-        )
-
-    return f"""
-    <svg viewBox='0 0 {W} {H}' xmlns='http://www.w3.org/2000/svg'
-         style='width:100%;height:{H}px;background:var(--bg2);border:0.5px solid var(--border)'>
-      <rect x='{pad}' y='{pad}' width='{plot_w}' height='{plot_h}'
-            fill='none' stroke='var(--border)' stroke-width='1' stroke-dasharray='3,3'/>
-      {''.join(circles)}
-    </svg>"""
-
-
 @app.get("/ui/nodi-mappa", include_in_schema=False)
 def ui_nodi_mappa(request: Request, tipo: str = "", min_oss: int = 1):
-    """Pagina visualizzazione dataset mappatura nodi (WU173/WU174) — scatter + tabella."""
+    """Pagina visualizzazione dataset mappatura nodi (WU173/WU174) — tabella filtrabile."""
     from dashboard.services.stats_reader import get_nodi_mappa_catalogo
     cat = get_nodi_mappa_catalogo(tipo_filter=tipo, min_oss=min_oss)
-    svg = _build_nodi_mappa_svg(cat["nodes"], cat["bounds"])
     return templates.TemplateResponse(request, "nodi_mappa.html", {
         "active":          "nodi_mappa",
         "tipo_sel":        tipo,
@@ -522,7 +456,6 @@ def ui_nodi_mappa(request: Request, tipo: str = "", min_oss: int = 1):
         "by_tipo_count":   cat["by_tipo_count"],
         "tipo_order":      cat["tipo_order"],
         "tipo_labels":     cat["tipo_labels"],
-        "svg_markup":      svg,
         **_env_label(),
     })
 
