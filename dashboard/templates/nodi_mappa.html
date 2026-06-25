@@ -13,10 +13,18 @@
         "ultima oss." = CERCA+lettura coordinata · "ultima istanza occupante" = marcia confermata (eventi distinti) ·
         mostra <code>—</code> finché nessuna marcia è ancora stata completata su quel nodo
       </div>
-      <div style="color:var(--text-dim);font-size:11px;margin-bottom:10px">
-        🔄 catalogo rigenerato automaticamente ogni {{ rebuild_interval_min }} min ·
-        {% if ultimo_rebuild %}ultimo: <b>{{ ultimo_rebuild }}</b>{% else %}ultimo: in corso…{% endif %} ·
-        {% if prossimo_rebuild %}prossimo: <b style="color:var(--accent)">{{ prossimo_rebuild }}</b>{% else %}prossimo: a breve{% endif %}
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+        <span style="color:var(--text-dim);font-size:11px">
+          🔄 catalogo rigenerato automaticamente ogni {{ rebuild_interval_min }} min ·
+          {% if ultimo_rebuild %}ultimo: <b>{{ ultimo_rebuild }}</b>{% else %}ultimo: in corso…{% endif %} ·
+          {% if prossimo_rebuild %}prossimo: <b style="color:var(--accent)">{{ prossimo_rebuild }}</b>{% else %}prossimo: a breve{% endif %}
+        </span>
+        <button id="nm-refresh-btn" onclick="nmForceRebuild()"
+                style="padding:2px 10px;font-size:11px;background:transparent;
+                       color:var(--accent);border:1px solid var(--accent);
+                       border-radius:3px;cursor:pointer">
+          ⟳ aggiorna ora
+        </button>
       </div>
 
       <!-- Sommario + filtri -->
@@ -97,6 +105,22 @@
 </div>
 
 <script>
+  async function nmForceRebuild() {
+    const btn = document.getElementById('nm-refresh-btn');
+    const testoOrig = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '⟳ aggiornamento…';
+    try {
+      const r = await fetch(URL_PREFIX + '/api/nodi-mappa/rebuild', {method: 'POST'});
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      window.location.reload();
+    } catch (err) {
+      alert('Errore durante l\'aggiornamento: ' + err.message);
+      btn.disabled = false;
+      btn.textContent = testoOrig;
+    }
+  }
+
   let nmSortCol = -1, nmSortAsc = true;
   function nmSort(col, kind) {
     const tbl  = document.getElementById('nodi-tbl');

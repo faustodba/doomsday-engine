@@ -26,7 +26,7 @@ from contextlib import asynccontextmanager
 from typing import Optional
 
 from fastapi import FastAPI, Request
-from fastapi.responses import RedirectResponse, HTMLResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
@@ -518,6 +518,29 @@ def ui_nodi_mappa(request: Request, tipo: str = "", min_oss: int = 1):
         "prossimo_rebuild":  _fmt_local(_nodi_mappa_rebuild_state.get("next_ts")),
         **_env_label(),
     })
+
+
+@app.post("/api/nodi-mappa/rebuild", include_in_schema=False)
+def api_nodi_mappa_rebuild():
+    """WU179 — forza la rigenerazione immediata del catalogo nodi mappa
+    (bottone "aggiorna" in /ui/nodi-mappa), senza attendere il prossimo
+    giro del background task periodico (ogni 20min). Riazzera anche il
+    timer del loop periodico (stesso _nodi_mappa_rebuild_state condiviso)."""
+    from datetime import datetime, timezone, timedelta
+    from pathlib import Path
+    from tools.costruisci_catalogo_nodi import build_catalogo
+
+    root = Path(os.environ.get("DOOMSDAY_ROOT", "."))
+    meta = build_catalogo(root, write=True, verbose=False)
+    now = datetime.now(timezone.utc)
+    _nodi_mappa_rebuild_state["last_ts"] = now.isoformat()
+    _nodi_mappa_rebuild_state["next_ts"] = (
+        now + timedelta(minutes=NODI_MAPPA_REBUILD_INTERVAL_MIN)
+    ).isoformat()
+    _nodi_mappa_rebuild_state["last_meta"] = meta
+    if "errore" in meta:
+        return JSONResponse({"ok": False, "errore": meta["errore"]}, status_code=500)
+    return JSONResponse({"ok": True, "meta": meta})
 
 
 @app.get("/ui/raccolta", include_in_schema=False)
