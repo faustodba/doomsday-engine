@@ -1862,6 +1862,14 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
     ttl_log = f"ETA={eta_s}s" if eta_s else f"TTL={_cfg(ctx, 'BLACKLIST_COMMITTED_TTL')}s"
     ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} COMMITTED ({ttl_log})")
 
+    # WU177 — dataset mappatura nodi: occupazione CONFERMATA (marcia riuscita,
+    # non solo nodo trovato). Distinto da "trovato" (CERCA+lettura, WU173).
+    try:
+        from shared.nodi_mappa import registra_osservazione
+        registra_osservazione(ctx.instance_name, chiave, tipo, livello_nodo, "occupato")
+    except Exception:
+        pass
+
     # auto-WU14 step2: hook produzione — incrementa truppe raccolta inviate
     try:
         if hasattr(ctx, "state") and ctx.state and ctx.state.produzione_corrente:

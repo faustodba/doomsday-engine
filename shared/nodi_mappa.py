@@ -18,6 +18,22 @@
 #  Il dataset si auto-alimenta al passare dei cicli su tutte le istanze
 #  (mappa condivisa, confermato — vedi analisi 25/06).
 #
+#  WU177 (25/06/2026) — chiarimento utente: "osservazione" e "occupazione"
+#  sono due eventi DISTINTI del flusso raccolta, non lo stesso evento con
+#  filtro temporale (come avevo implementato in WU176 con un cutoff
+#  arbitrario). Esiti tracciati:
+#    "trovato"         — CERCA + lettura coordinata: il nodo esiste, tipo e
+#                         livello letti, ma la marcia non è ancora tentata.
+#                         Alimenta prima/ultima_osservazione nel catalogo.
+#    "fuori_territorio" — CERCA + lettura coordinata, nodo scartato perché
+#                          in blacklist permanente. Nessuna utilità mappatura.
+#    "occupato"          — marcia CONFERMATA (post blacklist.commit, dopo
+#                           _esegui_marcia riuscita). Alimenta SOLO
+#                           ultima_istanza/ultima_occupazione_ts. Non esiste
+#                           nel seed storico (mai minato dai log) — è
+#                           intrinsecamente sempre dato live, nessun cutoff
+#                           artificiale necessario.
+#
 #  FASE 2 (futura, NON implementata qui): quando il dataset è ritenuto
 #  abbastanza completo/attendibile dall'utente, un sistema successivo userà
 #  il catalogo aggregato (`tools/costruisci_catalogo_nodi.py`) per saltare
@@ -43,7 +59,7 @@
 #      "cy":       550,
 #      "tipo":     "segheria",
 #      "livello":  6,
-#      "esito":    "trovato" | "fuori_territorio"
+#      "esito":    "trovato" | "fuori_territorio" | "occupato"
 #    }
 #
 #  Failsafe: tutte le funzioni catturano eccezioni — un disco pieno o un
@@ -60,7 +76,7 @@ from pathlib import Path
 # Istanze le cui osservazioni coordinate sono note come non attendibili.
 ISTANZE_ESCLUSE = frozenset({"FauMorfeus"})
 
-_ESITI_VALIDI = frozenset({"trovato", "fuori_territorio"})
+_ESITI_VALIDI = frozenset({"trovato", "fuori_territorio", "occupato"})
 
 
 def _path() -> Path:

@@ -5,6 +5,47 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 25/06/2026 (6) — WU177 catalogo nodi: osservazione vs occupazione, eventi distinti
+
+L'utente ha corretto il mio approccio WU176 (cutoff temporale arbitrario):
+"la data ultima osservazione nasce dal cerca e dalla lettura del nodo,
+mentre l'ultima istanza occupante invece nasce quando è confermato l'invio
+del raccoglitore" — sono due eventi REALMENTE distinti nel flusso
+`tasks/raccolta.py`, non lo stesso evento con un filtro temporale.
+
+**Fix architetturale corretto**:
+- Nuovo esito `"occupato"` in `shared/nodi_mappa.py` (terzo valore oltre
+  `trovato`/`fuori_territorio`).
+- Nuovo hook in `tasks/raccolta.py` al **Step 7 (COMMIT)** — dopo
+  `blacklist.commit(chiave, eta_s)`, quando `_esegui_marcia` ha già avuto
+  successo. Distinto dall'hook esistente a "nodo trovato — procedo" (CERCA
+  + lettura, Step 1-2, ben prima del tentativo di marcia).
+- `tools/costruisci_catalogo_nodi.py` riscritto: `prima/ultima_osservazione`
+  + tipo/livello continuano a derivare da `trovato` (invariato);
+  `ultima_istanza`/`ultima_occupazione_ts` derivano ESCLUSIVAMENTE da
+  `occupato`. Nessun cutoff arbitrario necessario — "occupato" non esiste
+  nel seed storico (il mining dei log originale catturava solo
+  "trovato"/"RESERVED", mai "COMMITTED"), quindi è per costruzione sempre
+  dato genuinamente live.
+
+Test: 57/57 verdi. Catalogo rigenerato: 218 coordinate, 0 con occupazione
+confermata al momento (atteso — il bot deve ancora ricaricare il nuovo
+hook). Verificato che la dashboard riflette il dato senza riavvio proprio
+(legge il catalogo da disco ad ogni richiesta, nessuna cache).
+
+**Restart bot armato** (`claude_nodi_occupazione_confermata_WU177`) — a
+fine ciclo corrente caricherà il nuovo hook. Da quel momento, ogni marcia
+completata con successo popolerà `ultima_istanza` per quella coordinata.
+
+Sync dev+prod, commit+push.
+
+**Prossimo step**: dopo il restart, osservare che le prime marce
+completate popolino `ultima_istanza` (rieseguire `tools/
+costruisci_catalogo_nodi.py --prod --write` periodicamente per
+rigenerare il catalogo con i nuovi dati "occupato").
+
+---
+
 ## Sessione 25/06/2026 (5) — WU176 catalogo nodi: ultima istanza solo se live
 
 Dopo aver chiarito il formato date (sessione precedente), l'utente ha
