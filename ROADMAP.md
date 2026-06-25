@@ -5,6 +5,48 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 25/06/2026 (3) — WU174 dashboard: pagina /ui/nodi-mappa
+
+L'utente ha chiesto: (1) confermare che il dataset WU173 è persistente
+locale e non derivato dai log delle istanze (confermato — `tools/
+costruisci_catalogo_nodi.py` legge solo `data/nodi_mappa_observations.jsonl`,
+il mining dai log è stato usato SOLO per il seed iniziale una tantum); (2)
+se è possibile un sistema di visualizzazione su dashboard.
+
+Proposta (confermata dall'utente via scelta multipla): scatter SVG +
+tabella, stesso pattern già usato in `/ui/ab-test`.
+
+**Implementazione**:
+- `dashboard/services/stats_reader.py::get_nodi_mappa_catalogo()` — legge
+  `data/nodi_mappa_catalogo.json`, filtra per tipo/min_osservazioni, calcola
+  `ambiguo` a runtime (`n_concordanti < n_osservazioni` — non persistito nel
+  catalogo, vedi discussione sulla scelta arbitraria in caso di parità 1-vs-1).
+- `dashboard/app.py` — route `/ui/nodi-mappa` + `_build_nodi_mappa_svg()`
+  (scatter inline, stesso pattern del trend SVG di `/ui/ab-test`): posizione
+  = cx/cy reali, colore = tipo (rosso/marrone/grigio/viola), raggio =
+  confidenza (n_osservazioni, cap 15), anello rosso tratteggiato = ambiguo.
+- `dashboard/templates/nodi_mappa.html` (NEW) — sezione scatter + sezione
+  tabella filtrabile (tipo, soglia min osservazioni), badge ⚠ sulle righe
+  ambigue. Link nav in `base.html`.
+
+**Validazione end-to-end** (dashboard locale, porta temporanea 8799): 210
+coordinate → 214 cerchi SVG (210 nodi + 4 anelli ambigui, combaciante con
+l'analisi precedente), filtri verificati (`tipo=petrolio&min_oss=2` → 11
+coordinate, `min_oss=10` → 3 coordinate, entrambi coerenti con la
+distribuzione reale). SVG validato come XML ben formato.
+
+Test: 148 fail / 559 pass su tutta la repo (pre-esistenti, nessuna nuova
+regressione — variazione di 1 rispetto alla sessione precedente, probabile
+test non deterministico estraneo a questa modifica). Sync dev+prod.
+
+**Prossimo step**: riavviare la dashboard (uvicorn non ha `--reload` in
+prod) per attivare la nuova pagina. Da rieseguire `tools/
+costruisci_catalogo_nodi.py --prod --write` periodicamente per aggiornare
+il catalogo via via che il dataset accumula osservazioni — la pagina
+dashboard legge sempre l'ultimo catalogo scritto su disco.
+
+---
+
 ## Sessione 25/06/2026 (2) — WU173 raccolta: dataset mappatura nodi (fase 1)
 
 L'utente ha chiesto un'analisi più approfondita: è possibile mappare tutti i

@@ -1476,3 +1476,94 @@ def get_raccolta_nodi_stats(days: int = 7) -> dict:
         "per_istanza":   per_istanza,
         "istanze_order": istanze_order,
     }
+
+
+# ==============================================================================
+# Nodi mappa — catalogo coordinata → tipo/livello (WU173/WU174)
+# Sorgente: data/nodi_mappa_catalogo.json (scritto da
+#           tools/costruisci_catalogo_nodi.py --write, derivato da
+#           data/nodi_mappa_observations.jsonl).
+# ==============================================================================
+
+_NODI_MAPPA_CATALOGO_PATH = _PROD_ROOT / "data" / "nodi_mappa_catalogo.json"
+
+
+def get_nodi_mappa_catalogo(tipo_filter: str = "", min_oss: int = 1) -> dict:
+    """
+    Carica il catalogo nodi mappa e lo prepara per la visualizzazione
+    dashboard (scatter + tabella). `ambiguo` è derivato a runtime da
+    n_concordanti < n_osservazioni — il catalogo su disco non lo persiste
+    esplicitamente (vedi conversazione 25/06: la variante scartata in caso
+    di parità non è conservata, solo il dato grezzo in nodi_mappa_observations
+    non perde nulla).
+    """
+    empty = {
+        "nodes": [], "total": 0, "n_ambigui": 0, "n_cross_istanza": 0,
+        "bounds": {"cx_min": 0, "cx_max": 0, "cy_min": 0, "cy_max": 0},
+        "by_tipo_count": {},
+        "tipo_order":  _RACCOLTA_TIPO_ORDER,
+        "tipo_labels": _RACCOLTA_TIPO_LABELS,
+        "tipo_filter": tipo_filter, "min_oss": min_oss,
+    }
+    if not _NODI_MAPPA_CATALOGO_PATH.exists():
+        return empty
+
+    try:
+        catalogo = json.loads(_NODI_MAPPA_CATALOGO_PATH.read_text(encoding="utf-8"))
+    except Exception:
+        return empty
+    if not catalogo:
+        return empty
+
+    nodes = []
+    for chiave, v in catalogo.items():
+        tipo = v.get("tipo", "?")
+        if tipo_filter and tipo != tipo_filter:
+            continue
+        n_oss = int(v.get("n_osservazioni", 0))
+        if n_oss < min_oss:
+            continue
+        n_conc = int(v.get("n_concordanti", n_oss))
+        nodes.append({
+            "chiave":             chiave,
+            "cx":                 v.get("cx"),
+            "cy":                 v.get("cy"),
+            "tipo":               tipo,
+            "livello":            v.get("livello"),
+            "n_osservazioni":     n_oss,
+            "n_concordanti":      n_conc,
+            "n_istanze":          int(v.get("n_istanze", 0)),
+            "ambiguo":            n_conc < n_oss,
+            "prima_osservazione": v.get("prima_osservazione", ""),
+            "ultima_osservazione": v.get("ultima_osservazione", ""),
+        })
+
+    if not nodes:
+        return {**empty, "total": 0}
+
+    from collections import Counter
+    cx_vals = [n["cx"] for n in nodes if n["cx"] is not None]
+    cy_vals = [n["cy"] for n in nodes if n["cy"] is not None]
+    by_tipo_count = dict(Counter(n["tipo"] for n in nodes))
+    n_ambigui      = sum(1 for n in nodes if n["ambiguo"])
+    n_cross_istanza = sum(1 for n in nodes if n["n_istanze"] > 1)
+
+    nodes.sort(key=lambda n: (-n["n_osservazioni"], n["chiave"]))
+
+    return {
+        "nodes":           nodes,
+        "total":           len(nodes),
+        "n_ambigui":       n_ambigui,
+        "n_cross_istanza": n_cross_istanza,
+        "bounds": {
+            "cx_min": min(cx_vals) if cx_vals else 0,
+            "cx_max": max(cx_vals) if cx_vals else 0,
+            "cy_min": min(cy_vals) if cy_vals else 0,
+            "cy_max": max(cy_vals) if cy_vals else 0,
+        },
+        "by_tipo_count":   by_tipo_count,
+        "tipo_order":       _RACCOLTA_TIPO_ORDER,
+        "tipo_labels":      _RACCOLTA_TIPO_LABELS,
+        "tipo_filter":      tipo_filter,
+        "min_oss":          min_oss,
+    }

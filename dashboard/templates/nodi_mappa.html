@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}Doomsday V6 — Nodi Mappa{% endblock %}
+{% block content %}
+
+<div class="page-layout">
+  <div class="main-col" style="width:100%">
+
+    <div class="section">
+      <div class="sec-label">🗺 nodi mappa — catalogo coordinata → tipo/livello (WU173)</div>
+
+      <!-- Sommario + filtri -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+        <span style="color:var(--text-dim);font-size:12px">{{ total }} coordinate</span>
+        <span style="color:var(--text-dim);font-size:12px">·</span>
+        <span style="color:#e57373;font-size:12px">{{ n_ambigui }} ambigue</span>
+        <span style="color:var(--text-dim);font-size:12px">·</span>
+        <span style="color:var(--accent);font-size:12px">{{ n_cross_istanza }} confermate cross-istanza</span>
+
+        <span style="margin-left:16px;color:var(--text-dim);font-size:12px;letter-spacing:1px;text-transform:uppercase">tipo</span>
+        <a href="{{ url_prefix }}/ui/nodi-mappa?tipo=&min_oss={{ min_oss }}"
+           style="display:inline-flex;align-items:center;padding:2px 9px;border:0.5px solid {% if not tipo_sel %}var(--accent){% else %}var(--border){% endif %};border-radius:3px;font-size:12px;color:{% if not tipo_sel %}var(--accent){% else %}var(--text-dim){% endif %};text-decoration:none">tutti</a>
+        {% for t in tipo_order %}
+          {% set ico, nome = tipo_labels[t] %}
+          <a href="{{ url_prefix }}/ui/nodi-mappa?tipo={{ t }}&min_oss={{ min_oss }}"
+             style="display:inline-flex;align-items:center;padding:2px 9px;border:0.5px solid {% if tipo_sel==t %}var(--accent){% else %}var(--border){% endif %};border-radius:3px;font-size:12px;color:{% if tipo_sel==t %}var(--accent){% else %}var(--text-dim){% endif %};text-decoration:none">{{ ico }}&thinsp;{{ nome }} ({{ by_tipo_count.get(t, 0) }})</a>
+        {% endfor %}
+
+        <span style="margin-left:16px;color:var(--text-dim);font-size:12px;letter-spacing:1px;text-transform:uppercase">min osservazioni</span>
+        {% for m in [1, 2, 5] %}
+          <a href="{{ url_prefix }}/ui/nodi-mappa?tipo={{ tipo_sel }}&min_oss={{ m }}"
+             style="display:inline-flex;align-items:center;padding:2px 9px;border:0.5px solid {% if min_oss==m %}var(--accent){% else %}var(--border){% endif %};border-radius:3px;font-size:12px;color:{% if min_oss==m %}var(--accent){% else %}var(--text-dim){% endif %};text-decoration:none">{{ m }}+</a>
+        {% endfor %}
+
+        <!-- Legenda colori -->
+        <span style="margin-left:auto;display:flex;align-items:center;gap:10px;font-size:12px;flex-wrap:wrap">
+          {% for t in tipo_order %}
+            {% set ico, nome = tipo_labels[t] %}
+            <span style="color:{{ {'campo':'#ef5350','segheria':'#a1887f','acciaio':'#78909c','petrolio':'#7e57c2'}[t] }}">●</span><span style="color:var(--text-dim)">{{ nome }}</span>
+          {% endfor %}
+          <span style="color:#e57373">○</span><span style="color:var(--text-dim)">ambiguo</span>
+          <span style="color:var(--text-dim)">raggio = n° osservazioni</span>
+        </span>
+      </div>
+
+      <!-- Scatter SVG -->
+      <div style="margin-bottom:18px">
+        {{ svg_markup | safe }}
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section">
+      <div class="sec-label">tabella dettaglio</div>
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px">
+          <thead>
+            <tr>
+              <th style="background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px">chiave</th>
+              <th style="background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px">tipo</th>
+              <th style="background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:center;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px">liv</th>
+              <th style="background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:center;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px">oss.</th>
+              <th style="background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:center;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px">concordanti</th>
+              <th style="background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:center;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px">istanze</th>
+              <th style="background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px">prima oss.</th>
+              <th style="background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px">ultima oss.</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for n in nodes %}
+              {% set ico, nome = tipo_labels.get(n.tipo, ("?", n.tipo)) %}
+              <tr style="{% if n.ambiguo %}background:rgba(229,115,115,0.08){% endif %}">
+                <td style="padding:4px 10px;border:0.5px solid var(--border);color:var(--text)">{{ n.chiave }}{% if n.ambiguo %} <span style="color:#e57373" title="tipo/livello discordanti tra le osservazioni">⚠</span>{% endif %}</td>
+                <td style="padding:4px 10px;border:0.5px solid var(--border)">{{ ico }}&thinsp;{{ nome }}</td>
+                <td style="padding:4px 10px;border:0.5px solid var(--border);text-align:center">{{ n.livello }}</td>
+                <td style="padding:4px 10px;border:0.5px solid var(--border);text-align:center">{{ n.n_osservazioni }}</td>
+                <td style="padding:4px 10px;border:0.5px solid var(--border);text-align:center">{{ n.n_concordanti }}/{{ n.n_osservazioni }}</td>
+                <td style="padding:4px 10px;border:0.5px solid var(--border);text-align:center">{{ n.n_istanze }}</td>
+                <td style="padding:4px 10px;border:0.5px solid var(--border);color:var(--text-dim);font-size:11px">{{ n.prima_osservazione[:16] }}</td>
+                <td style="padding:4px 10px;border:0.5px solid var(--border);color:var(--text-dim);font-size:11px">{{ n.ultima_osservazione[:16] }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="8" style="padding:14px;text-align:center;color:var(--text-dim);border:0.5px solid var(--border)">nessun nodo nel catalogo — eseguire tools/costruisci_catalogo_nodi.py --write</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+{% endblock %}
