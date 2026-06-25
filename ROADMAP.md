@@ -5,6 +5,41 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 25/06/2026 (7) — WU178 catalogo nodi: rigenerazione automatica periodica
+
+Dopo aver verificato che l'hook "occupato" scriveva correttamente (6-7
+osservazioni reali da FAU_01/FAU_07), l'utente ha notato che la dashboard
+non mostrava ancora nulla — causa: il catalogo è un artefatto statico, non
+si auto-aggiornava (richiedeva rilancio manuale del tool CLI). Richiesta:
+rigenerazione automatica periodica, con indicazione del prossimo
+aggiornamento in UI.
+
+**Implementazione**:
+- `tools/costruisci_catalogo_nodi.py` refactored — logica estratta in
+  `build_catalogo(root, days, write, verbose)`, riutilizzabile sia da CLI
+  sia da un chiamante Python diretto (`main()` ora thin wrapper).
+- Nuovo background task `dashboard/app.py::_nodi_mappa_rebuild_loop()`
+  (stesso pattern del `_predictor_recorder_loop` già esistente nel
+  lifespan): rigenera il catalogo ogni 20 min
+  (`NODI_MAPPA_REBUILD_INTERVAL_MIN`), aggiorna uno stato in-process
+  condiviso col route (`_nodi_mappa_rebuild_state`) con timestamp
+  ultimo/prossimo.
+- Pagina `/ui/nodi-mappa`: nuova riga "🔄 catalogo rigenerato
+  automaticamente ogni 20 min · ultimo: GG/MM HH:MM · prossimo: GG/MM
+  HH:MM" (ora locale).
+
+Validato end-to-end: dashboard riavviata, log confermano avvio loop +
+rigenerazione immediata al boot (242 coordinate, 215 senza occupante),
+pagina mostra "ultimo: 25/06 17:32 · prossimo: 25/06 17:52" (+20min
+esatti). Test 57/57 verdi. Sync dev+prod.
+
+**Prossimo step**: nessuna azione richiesta — il catalogo ora si mantiene
+fresco da solo. Il numero di nodi "senza occupante" scenderà
+progressivamente nelle prossime ore/giorni man mano che le 11 istanze
+completano marce sui rispettivi nodi.
+
+---
+
 ## Sessione 25/06/2026 (6) — WU177 catalogo nodi: osservazione vs occupazione, eventi distinti
 
 L'utente ha corretto il mio approccio WU176 (cutoff temporale arbitrario):

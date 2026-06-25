@@ -104,6 +104,48 @@ def _is_mobile_request(request: Request) -> bool:
 
 _predictor_recorder_task = None
 
+_nodi_mappa_rebuild_task = None
+NODI_MAPPA_REBUILD_INTERVAL_MIN = 20
+# Stato condiviso col route /ui/nodi-mappa (stesso processo/event loop) per
+# mostrare in UI quando è avvenuta l'ultima rigenerazione e quando è prevista
+# la prossima.
+_nodi_mappa_rebuild_state: dict = {"last_ts": None, "next_ts": None, "last_meta": None}
+
+
+async def _nodi_mappa_rebuild_loop():
+    """Background task (WU178): rigenera periodicamente il catalogo nodi
+    mappa (data/nodi_mappa_catalogo.json) dalle osservazioni accumulate da
+    tasks/raccolta.py. Stesso pattern del predictor recorder. Senza questo
+    task il catalogo resta fermo all'ultima esecuzione manuale del tool CLI
+    — ultima_istanza/ultima_occupazione_ts non si aggiornerebbero mai da soli."""
+    import asyncio
+    from datetime import datetime, timezone, timedelta
+    from pathlib import Path
+    from tools.costruisci_catalogo_nodi import build_catalogo
+
+    root = Path(os.environ.get("DOOMSDAY_ROOT", "."))
+    interval_s = NODI_MAPPA_REBUILD_INTERVAL_MIN * 60
+    print(f"[DASHBOARD] {_ts()} nodi_mappa rebuild loop avviato "
+          f"(ogni {NODI_MAPPA_REBUILD_INTERVAL_MIN}min)")
+    while True:
+        try:
+            meta = build_catalogo(root, write=True, verbose=False)
+            now = datetime.now(timezone.utc)
+            _nodi_mappa_rebuild_state["last_ts"] = now.isoformat()
+            _nodi_mappa_rebuild_state["next_ts"] = (
+                now + timedelta(seconds=interval_s)
+            ).isoformat()
+            _nodi_mappa_rebuild_state["last_meta"] = meta
+            if "errore" not in meta:
+                print(f"[DASHBOARD] {_ts()} catalogo nodi mappa rigenerato: "
+                      f"{meta.get('n_coordinate_territorio', 0)} coordinate, "
+                      f"{meta.get('n_senza_occupante_live', 0)} senza occupante")
+            else:
+                print(f"[DASHBOARD] {_ts()} catalogo nodi mappa: {meta['errore']}")
+        except Exception as exc:
+            print(f"[DASHBOARD] {_ts()} nodi_mappa rebuild errore: {exc}")
+        await asyncio.sleep(interval_s)
+
 
 async def _predictor_recorder_loop():
     """Background task: snapshot cycle predictor + evaluate completed cycles.
@@ -214,12 +256,15 @@ async def lifespan(app: FastAPI):
     print(f"[DASHBOARD] instances:     {len(insts)} istanze")
     print(f"[DASHBOARD] API docs:      http://localhost:8765/docs")
     # Avvia background task predictor recorder
-    global _predictor_recorder_task
+    global _predictor_recorder_task, _nodi_mappa_rebuild_task
     _predictor_recorder_task = asyncio.create_task(_predictor_recorder_loop())
+    _nodi_mappa_rebuild_task = asyncio.create_task(_nodi_mappa_rebuild_loop())
     yield
     print(f"[DASHBOARD] {_ts()} shutdown.")
     if _predictor_recorder_task and not _predictor_recorder_task.done():
         _predictor_recorder_task.cancel()
+    if _nodi_mappa_rebuild_task and not _nodi_mappa_rebuild_task.done():
+        _nodi_mappa_rebuild_task.cancel()
 
 
 # ==============================================================================
@@ -442,8 +487,18 @@ def _load_ab_records() -> list[dict]:
 
 @app.get("/ui/nodi-mappa", include_in_schema=False)
 def ui_nodi_mappa(request: Request, tipo: str = "", min_oss: int = 1):
-    """Pagina visualizzazione dataset mappatura nodi (WU173/WU174/WU175/WU176) — tabella filtrabile."""
+    """Pagina visualizzazione dataset mappatura nodi (WU173-WU178) — tabella filtrabile."""
     from dashboard.services.stats_reader import get_nodi_mappa_catalogo
+
+    def _fmt_local(ts_iso):
+        if not ts_iso:
+            return None
+        try:
+            from datetime import datetime as _dt
+            return _dt.fromisoformat(ts_iso).astimezone().strftime("%d/%m %H:%M")
+        except Exception:
+            return None
+
     cat = get_nodi_mappa_catalogo(tipo_filter=tipo, min_oss=min_oss)
     return templates.TemplateResponse(request, "nodi_mappa.html", {
         "active":            "nodi_mappa",
@@ -458,6 +513,9 @@ def ui_nodi_mappa(request: Request, tipo: str = "", min_oss: int = 1):
         "by_tipo_count":     cat["by_tipo_count"],
         "tipo_order":        cat["tipo_order"],
         "tipo_labels":       cat["tipo_labels"],
+        "rebuild_interval_min": NODI_MAPPA_REBUILD_INTERVAL_MIN,
+        "ultimo_rebuild":    _fmt_local(_nodi_mappa_rebuild_state.get("last_ts")),
+        "prossimo_rebuild":  _fmt_local(_nodi_mappa_rebuild_state.get("next_ts")),
         **_env_label(),
     })
 

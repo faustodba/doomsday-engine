@@ -627,14 +627,27 @@
     "cx": 693,
     "cy": 519,
     "livello": 7,
-    "n_concordanti": 1,
-    "n_istanze": 1,
-    "n_osservazioni": 1,
+    "n_concordanti": 2,
+    "n_istanze": 2,
+    "n_osservazioni": 2,
     "prima_osservazione": "2026-06-25T05:50:36.637104+00:00",
     "tipo": "campo",
     "ultima_istanza": null,
     "ultima_occupazione_ts": null,
-    "ultima_osservazione": "2026-06-25T05:50:36.637104+00:00"
+    "ultima_osservazione": "2026-06-25T12:13:50.189888+00:00"
+  },
+  "693_521": {
+    "cx": 693,
+    "cy": 521,
+    "livello": 7,
+    "n_concordanti": 3,
+    "n_istanze": 1,
+    "n_osservazioni": 3,
+    "prima_osservazione": "2026-06-25T12:31:23.867724+00:00",
+    "tipo": "campo",
+    "ultima_istanza": null,
+    "ultima_occupazione_ts": null,
+    "ultima_osservazione": "2026-06-25T12:36:30.634627+00:00"
   },
   "693_522": {
     "cx": 693,
@@ -778,6 +791,19 @@
     "ultima_istanza": null,
     "ultima_occupazione_ts": null,
     "ultima_osservazione": "2026-06-24T16:26:52.294633+00:00"
+  },
+  "696_522": {
+    "cx": 696,
+    "cy": 522,
+    "livello": 6,
+    "n_concordanti": 1,
+    "n_istanze": 1,
+    "n_osservazioni": 1,
+    "prima_osservazione": "2026-06-25T14:13:37.503620+00:00",
+    "tipo": "acciaio",
+    "ultima_istanza": "FAU_07",
+    "ultima_occupazione_ts": "2026-06-25T14:13:52.583245+00:00",
+    "ultima_osservazione": "2026-06-25T14:13:37.503620+00:00"
   },
   "696_535": {
     "cx": 696,
@@ -1004,14 +1030,14 @@
     "cx": 700,
     "cy": 533,
     "livello": 7,
-    "n_concordanti": 1,
-    "n_istanze": 1,
-    "n_osservazioni": 1,
+    "n_concordanti": 2,
+    "n_istanze": 2,
+    "n_osservazioni": 2,
     "prima_osservazione": "2026-06-25T11:00:32.684207+00:00",
     "tipo": "campo",
-    "ultima_istanza": null,
-    "ultima_occupazione_ts": null,
-    "ultima_osservazione": "2026-06-25T11:00:32.684207+00:00"
+    "ultima_istanza": "FAU_07",
+    "ultima_occupazione_ts": "2026-06-25T14:13:13.090815+00:00",
+    "ultima_osservazione": "2026-06-25T14:12:51.057589+00:00"
   },
   "700_541": {
     "cx": 700,
@@ -1303,14 +1329,14 @@
     "cx": 702,
     "cy": 534,
     "livello": 7,
-    "n_concordanti": 1,
-    "n_istanze": 2,
-    "n_osservazioni": 2,
+    "n_concordanti": 2,
+    "n_istanze": 3,
+    "n_osservazioni": 3,
     "prima_osservazione": "2026-06-24T17:59:43.384106+00:00",
     "tipo": "campo",
-    "ultima_istanza": null,
-    "ultima_occupazione_ts": null,
-    "ultima_osservazione": "2026-06-25T07:15:11.365077+00:00"
+    "ultima_istanza": "FAU_01",
+    "ultima_occupazione_ts": "2026-06-25T13:57:55.759824+00:00",
+    "ultima_osservazione": "2026-06-25T13:57:26.050136+00:00"
   },
   "702_538": {
     "cx": 702,
@@ -1520,18 +1546,31 @@
     "ultima_occupazione_ts": null,
     "ultima_osservazione": "2026-06-25T05:25:54.034857+00:00"
   },
+  "703_541": {
+    "cx": 703,
+    "cy": 541,
+    "livello": 7,
+    "n_concordanti": 3,
+    "n_istanze": 1,
+    "n_osservazioni": 3,
+    "prima_osservazione": "2026-06-25T11:40:49.127639+00:00",
+    "tipo": "campo",
+    "ultima_istanza": null,
+    "ultima_occupazione_ts": null,
+    "ultima_osservazione": "2026-06-25T11:48:14.664162+00:00"
+  },
   "703_549": {
     "cx": 703,
     "cy": 549,
     "livello": 6,
-    "n_concordanti": 1,
-    "n_istanze": 1,
-    "n_osservazioni": 1,
+    "n_concordanti": 2,
+    "n_istanze": 2,
+    "n_osservazioni": 2,
     "prima_osservazione": "2026-06-25T01:01:22.992929+00:00",
     "tipo": "petrolio",
     "ultima_istanza": null,
     "ultima_occupazione_ts": null,
-    "ultima_osservazione": "2026-06-25T01:01:22.992929+00:00"
+    "ultima_osservazione": "2026-06-25T11:43:16.203550+00:00"
   },
   "704_524": {
     "cx": 704,
@@ -1754,6 +1793,19 @@
     "ultima_occupazione_ts": null,
     "ultima_osservazione": "2026-06-24T20:23:10.461945+00:00"
   },
+  "707_528": {
+    "cx": 707,
+    "cy": 528,
+    "livello": 7,
+    "n_concordanti": 1,
+    "n_istanze": 1,
+    "n_osservazioni": 1,
+    "prima_osservazione": "2026-06-25T13:54:24.222869+00:00",
+    "tipo": "campo",
+    "ultima_istanza": "FAU_01",
+    "ultima_occupazione_ts": "2026-06-25T13:54:45.128913+00:00",
+    "ultima_osservazione": "2026-06-25T13:54:24.222869+00:00"
+  },
   "707_535": {
     "cx": 707,
     "cy": 535,
@@ -1792,6 +1844,19 @@
     "ultima_istanza": null,
     "ultima_occupazione_ts": null,
     "ultima_osservazione": "2026-06-24T17:21:34.300710+00:00"
+  },
+  "708_520": {
+    "cx": 708,
+    "cy": 520,
+    "livello": 7,
+    "n_concordanti": 1,
+    "n_istanze": 1,
+    "n_osservazioni": 1,
+    "prima_osservazione": "2026-06-25T12:07:18.274176+00:00",
+    "tipo": "petrolio",
+    "ultima_istanza": null,
+    "ultima_occupazione_ts": null,
+    "ultima_osservazione": "2026-06-25T12:07:18.274176+00:00"
   },
   "708_521": {
     "cx": 708,
@@ -2031,14 +2096,14 @@
     "cx": 712,
     "cy": 532,
     "livello": 6,
-    "n_concordanti": 1,
-    "n_istanze": 1,
-    "n_osservazioni": 1,
+    "n_concordanti": 3,
+    "n_istanze": 2,
+    "n_osservazioni": 3,
     "prima_osservazione": "2026-06-25T07:29:20.694186+00:00",
     "tipo": "petrolio",
-    "ultima_istanza": null,
-    "ultima_occupazione_ts": null,
-    "ultima_osservazione": "2026-06-25T07:29:20.694186+00:00"
+    "ultima_istanza": "FAU_01",
+    "ultima_occupazione_ts": "2026-06-25T13:56:04.540515+00:00",
+    "ultima_osservazione": "2026-06-25T13:55:38.516229+00:00"
   },
   "712_533": {
     "cx": 712,
@@ -2130,6 +2195,19 @@
     "ultima_istanza": null,
     "ultima_occupazione_ts": null,
     "ultima_osservazione": "2026-06-24T22:48:09.948180+00:00"
+  },
+  "715_525": {
+    "cx": 715,
+    "cy": 525,
+    "livello": 6,
+    "n_concordanti": 1,
+    "n_istanze": 1,
+    "n_osservazioni": 1,
+    "prima_osservazione": "2026-06-25T14:02:08.328249+00:00",
+    "tipo": "campo",
+    "ultima_istanza": "FAU_01",
+    "ultima_occupazione_ts": "2026-06-25T14:02:32.747417+00:00",
+    "ultima_osservazione": "2026-06-25T14:02:08.328249+00:00"
   },
   "716_518": {
     "cx": 716,
@@ -2248,6 +2326,19 @@
     "ultima_occupazione_ts": null,
     "ultima_osservazione": "2026-06-25T05:00:18.811480+00:00"
   },
+  "717_525": {
+    "cx": 717,
+    "cy": 525,
+    "livello": 7,
+    "n_concordanti": 1,
+    "n_istanze": 1,
+    "n_osservazioni": 1,
+    "prima_osservazione": "2026-06-25T12:09:38.063774+00:00",
+    "tipo": "campo",
+    "ultima_istanza": null,
+    "ultima_occupazione_ts": null,
+    "ultima_osservazione": "2026-06-25T12:09:38.063774+00:00"
+  },
   "717_547": {
     "cx": 717,
     "cy": 547,
@@ -2278,14 +2369,14 @@
     "cx": 718,
     "cy": 522,
     "livello": 6,
-    "n_concordanti": 1,
+    "n_concordanti": 2,
     "n_istanze": 2,
-    "n_osservazioni": 2,
+    "n_osservazioni": 3,
     "prima_osservazione": "2026-06-24T17:38:50.158493+00:00",
-    "tipo": "acciaio",
-    "ultima_istanza": null,
-    "ultima_occupazione_ts": null,
-    "ultima_osservazione": "2026-06-25T10:56:52.568093+00:00"
+    "tipo": "campo",
+    "ultima_istanza": "FAU_01",
+    "ultima_occupazione_ts": "2026-06-25T13:50:50.838832+00:00",
+    "ultima_osservazione": "2026-06-25T13:50:24.640555+00:00"
   },
   "718_523": {
     "cx": 718,
@@ -2390,6 +2481,19 @@
     "ultima_istanza": null,
     "ultima_occupazione_ts": null,
     "ultima_osservazione": "2026-06-25T06:37:16.751069+00:00"
+  },
+  "719_529": {
+    "cx": 719,
+    "cy": 529,
+    "livello": 7,
+    "n_concordanti": 1,
+    "n_istanze": 1,
+    "n_osservazioni": 1,
+    "prima_osservazione": "2026-06-25T12:11:41.950665+00:00",
+    "tipo": "campo",
+    "ultima_istanza": null,
+    "ultima_occupazione_ts": null,
+    "ultima_osservazione": "2026-06-25T12:11:41.950665+00:00"
   },
   "719_549": {
     "cx": 719,
@@ -2729,6 +2833,19 @@
     "ultima_occupazione_ts": null,
     "ultima_osservazione": "2026-06-24T18:57:18.759227+00:00"
   },
+  "725_550": {
+    "cx": 725,
+    "cy": 550,
+    "livello": 6,
+    "n_concordanti": 1,
+    "n_istanze": 1,
+    "n_osservazioni": 1,
+    "prima_osservazione": "2026-06-25T11:46:34.076039+00:00",
+    "tipo": "acciaio",
+    "ultima_istanza": null,
+    "ultima_occupazione_ts": null,
+    "ultima_osservazione": "2026-06-25T11:46:34.076039+00:00"
+  },
   "725_552": {
     "cx": 725,
     "cy": 552,
@@ -2793,6 +2910,19 @@
     "ultima_istanza": null,
     "ultima_occupazione_ts": null,
     "ultima_osservazione": "2026-06-25T09:12:55.633994+00:00"
+  },
+  "728_546": {
+    "cx": 728,
+    "cy": 546,
+    "livello": 6,
+    "n_concordanti": 1,
+    "n_istanze": 1,
+    "n_osservazioni": 1,
+    "prima_osservazione": "2026-06-25T11:42:09.954040+00:00",
+    "tipo": "acciaio",
+    "ultima_istanza": null,
+    "ultima_occupazione_ts": null,
+    "ultima_osservazione": "2026-06-25T11:42:09.954040+00:00"
   },
   "728_549": {
     "cx": 728,

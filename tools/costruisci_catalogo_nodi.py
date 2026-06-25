@@ -36,7 +36,12 @@ superato):
                           intrinsecamente dato live, nessun cutoff arbitrario
                           necessario.
 
-Output (sempre):
+WU178 (25/06/2026) — la logica di build è stata estratta in `build_catalogo()`
+per poterla richiamare anche da un background task della dashboard (rebuild
+automatico periodico) e non solo da questa CLI. Vedi
+dashboard/app.py::_nodi_mappa_rebuild_loop().
+
+Output (sempre, anche da dashboard via build_catalogo(verbose=True)):
     1. Totali: osservazioni trovato/fuori_territorio/occupato, coordinate
     2. Distribuzione confidenza (solo nodi in territorio)
     3. Coordinate INSTABILI (tipo/livello discordanti tra osservazioni) —
@@ -76,33 +81,30 @@ SOGLIA_COPERTURA_MATURA = 0.70
 ISTANZE_ESCLUSE = {"FauMorfeus"}
 
 
-def main() -> int:
-    try:
-        sys.stdout.reconfigure(encoding="utf-8")
-    except Exception:
-        pass
+def build_catalogo(root: Path, days: int = 0, write: bool = True,
+                    verbose: bool = True) -> dict:
+    """
+    Costruisce (ed eventualmente persiste) il catalogo nodi mappa.
 
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--prod", action="store_true",
-                        help="Usa C:/doomsday-engine-prod/data invece di dev")
-    parser.add_argument("--days", type=int, default=0,
-                        help="Solo ultimi N giorni (0 = tutto)")
-    parser.add_argument("--write", action="store_true",
-                        help="Persiste data/nodi_mappa_catalogo.json")
-    args = parser.parse_args()
+    Ritorna sempre il dict `meta` (anche se write=False, in tal caso senza
+    scrivere nulla su disco) — utile per loggare un riepilogo da un caller
+    Python (es. background task dashboard) senza dover fare parsing di stdout.
+    """
+    def log(msg: str = "") -> None:
+        if verbose:
+            print(msg)
 
-    root = Path("C:/doomsday-engine-prod") if args.prod else Path("C:/doomsday-engine")
     obs_path = root / "data" / "nodi_mappa_observations.jsonl"
     cat_path = root / "data" / "nodi_mappa_catalogo.json"
     meta_path = root / "data" / "nodi_mappa_catalogo_meta.json"
 
     if not obs_path.exists():
-        print(f"Dataset osservazioni non trovato: {obs_path}")
-        return 1
+        log(f"Dataset osservazioni non trovato: {obs_path}")
+        return {"errore": "dataset_non_trovato"}
 
     cutoff = None
-    if args.days > 0:
-        cutoff = datetime.now(timezone.utc) - timedelta(days=args.days)
+    if days > 0:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
 
     # WU175/WU177: 3 esiti separati. "trovato" -> membership catalogo +
     # tipo/livello + prima/ultima_osservazione. "occupato" -> SOLO
@@ -155,24 +157,24 @@ def main() -> int:
     # trovato — mai occupate, nessuna utilità per il catalogo.
     chiavi_solo_fuori = chiavi_fuori_territorio - set(by_chiave.keys())
 
-    print(f"=== Osservazioni totali nel file: {n_righe} "
-          f"(scartate istanze escluse: {n_scartate_istanza}) ===")
-    print(f"=== trovato: {n_trovato}   occupato (marcia confermata): {n_occupato}   "
-          f"fuori_territorio (nessuna utilità): {n_fuori_territorio} ===")
-    print(f"=== Coordinate in territorio (catalogo): {len(by_chiave)}   "
-          f"Coordinate SOLO fuori territorio (escluse): {len(chiavi_solo_fuori)} ===\n")
+    log(f"=== Osservazioni totali nel file: {n_righe} "
+        f"(scartate istanze escluse: {n_scartate_istanza}) ===")
+    log(f"=== trovato: {n_trovato}   occupato (marcia confermata): {n_occupato}   "
+        f"fuori_territorio (nessuna utilità): {n_fuori_territorio} ===")
+    log(f"=== Coordinate in territorio (catalogo): {len(by_chiave)}   "
+        f"Coordinate SOLO fuori territorio (escluse): {len(chiavi_solo_fuori)} ===\n")
 
     if not by_chiave:
-        print("Nessuna osservazione 'trovato' nel periodo (dopo esclusioni) — "
-              "catalogo vuoto, nessun nodo in territorio osservato.")
-        return 0
+        log("Nessuna osservazione 'trovato' nel periodo (dopo esclusioni) — "
+            "catalogo vuoto, nessun nodo in territorio osservato.")
+        return {"n_coordinate_territorio": 0}
 
     # ── Sezione 2: distribuzione confidenza ──────────────────────────────
     dist_n_oss = Counter(len(obs) for obs in by_chiave.values())
-    print("--- Distribuzione osservazioni per coordinata (solo in territorio) ---")
+    log("--- Distribuzione osservazioni per coordinata (solo in territorio) ---")
     for n_oss in sorted(dist_n_oss):
-        print(f"  {n_oss:>3} osservazioni  ->  {dist_n_oss[n_oss]:>4} coordinate")
-    print()
+        log(f"  {n_oss:>3} osservazioni  ->  {dist_n_oss[n_oss]:>4} coordinate")
+    log()
 
     # ── Costruzione catalogo (majority vote su "trovato") ────────────────
     catalogo: dict[str, dict] = {}
@@ -235,76 +237,97 @@ def main() -> int:
                     })
 
     # ── Sezione 3: instabili ──────────────────────────────────────────────
-    print(f"--- Coordinate INSTABILI (tipo/livello discordanti): "
-          f"{len(instabili)} ---")
+    log(f"--- Coordinate INSTABILI (tipo/livello discordanti): "
+        f"{len(instabili)} ---")
     if not instabili:
-        print("  (nessuna)")
+        log("  (nessuna)")
     for r in sorted(instabili, key=lambda x: -len(x["obs"])):
-        print(f"  {r['chiave']}  varianti={r['varianti']}  istanze={r['istanze']}")
+        log(f"  {r['chiave']}  varianti={r['varianti']}  istanze={r['istanze']}")
         for o in sorted(r["obs"], key=lambda x: x["ts"]):
-            print(f"      {o['ts']}  {o['instance']:12s} "
-                  f"tipo={o['tipo']:10s} Lv.{o['livello']}")
-    print()
+            log(f"      {o['ts']}  {o['instance']:12s} "
+                f"tipo={o['tipo']:10s} Lv.{o['livello']}")
+    log()
 
     # ── Sezione 4: conferme cross-istanza ─────────────────────────────────
-    print(f"--- Conferme cross-istanza (alta confidenza): "
-          f"{len(confermate_cross_istanza)} ---")
+    log(f"--- Conferme cross-istanza (alta confidenza): "
+        f"{len(confermate_cross_istanza)} ---")
     for r in sorted(confermate_cross_istanza, key=lambda x: -x["n_oss"])[:20]:
-        print(f"  {r['chiave']}  tipo={r['tipo']:<10} Lv.{r['livello']}  "
-              f"n_oss={r['n_oss']:>3}  istanze={r['istanze']}")
+        log(f"  {r['chiave']}  tipo={r['tipo']:<10} Lv.{r['livello']}  "
+            f"n_oss={r['n_oss']:>3}  istanze={r['istanze']}")
     if len(confermate_cross_istanza) > 20:
-        print(f"  ... e altre {len(confermate_cross_istanza) - 20}")
-    print()
+        log(f"  ... e altre {len(confermate_cross_istanza) - 20}")
+    log()
 
     # ── Sezione 4b: copertura occupazione confermata (WU177) ──────────────
-    print("--- Occupazione confermata (esito='occupato', marcia riuscita) ---")
-    print(f"  Nodi con ultima_istanza nota:        {len(catalogo) - n_senza_occupazione_confermata}")
-    print(f"  Nodi senza occupazione confermata:   {n_senza_occupazione_confermata}  "
-          f"(mostrano '—' in dashboard finché una marcia non viene completata)")
-    print()
+    log("--- Occupazione confermata (esito='occupato', marcia riuscita) ---")
+    log(f"  Nodi con ultima_istanza nota:        {len(catalogo) - n_senza_occupazione_confermata}")
+    log(f"  Nodi senza occupazione confermata:   {n_senza_occupazione_confermata}  "
+        f"(mostrano '—' in dashboard finché una marcia non viene completata)")
+    log()
 
     # ── Sezione 5: verdetto maturità ──────────────────────────────────────
     quota_matura = n_concordanti_2plus / n_ricorrenti if n_ricorrenti else 0.0
-    print("--- Verdetto maturità dataset (solo nodi in territorio) ---")
-    print(f"  Coordinate ricorrenti (>1 oss.):              {n_ricorrenti}")
-    print(f"  ...di cui concordanti >= {SOGLIA_CONFIDENZA_MIN} oss.:          "
-          f"{n_concordanti_2plus}  ({quota_matura*100:.1f}%)")
-    print(f"  Coordinate viste 1 sola volta (immature):     "
-          f"{len(by_chiave) - n_ricorrenti}")
+    log("--- Verdetto maturità dataset (solo nodi in territorio) ---")
+    log(f"  Coordinate ricorrenti (>1 oss.):              {n_ricorrenti}")
+    log(f"  ...di cui concordanti >= {SOGLIA_CONFIDENZA_MIN} oss.:          "
+        f"{n_concordanti_2plus}  ({quota_matura*100:.1f}%)")
+    log(f"  Coordinate viste 1 sola volta (immature):     "
+        f"{len(by_chiave) - n_ricorrenti}")
     if quota_matura >= SOGLIA_COPERTURA_MATURA and n_ricorrenti >= 20:
-        print(f"  -> MATURO: {quota_matura*100:.1f}% >= soglia "
-              f"{SOGLIA_COPERTURA_MATURA*100:.0f}%, campione sufficiente.")
+        log(f"  -> MATURO: {quota_matura*100:.1f}% >= soglia "
+            f"{SOGLIA_COPERTURA_MATURA*100:.0f}%, campione sufficiente.")
     else:
-        print(f"  -> NON ANCORA MATURO (soglia {SOGLIA_COPERTURA_MATURA*100:.0f}%, "
-              f"min 20 coordinate ricorrenti) — continuare a raccogliere cicli.")
-    print()
+        log(f"  -> NON ANCORA MATURO (soglia {SOGLIA_COPERTURA_MATURA*100:.0f}%, "
+            f"min 20 coordinate ricorrenti) — continuare a raccogliere cicli.")
+    log()
 
-    if args.write:
+    meta = {
+        "generato_ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "n_coordinate_territorio": len(catalogo),
+        "n_coordinate_solo_fuori_territorio": len(chiavi_solo_fuori),
+        "n_osservazioni_trovato": n_trovato,
+        "n_osservazioni_occupato": n_occupato,
+        "n_osservazioni_fuori_territorio": n_fuori_territorio,
+        "n_senza_occupante_live": n_senza_occupazione_confermata,
+    }
+
+    if write:
         cat_path.parent.mkdir(parents=True, exist_ok=True)
         tmp = cat_path.with_suffix(".json.tmp")
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(catalogo, f, indent=2, ensure_ascii=False, sort_keys=True)
         tmp.replace(cat_path)
-        print(f"Catalogo scritto: {cat_path}  ({len(catalogo)} coordinate in territorio)")
+        log(f"Catalogo scritto: {cat_path}  ({len(catalogo)} coordinate in territorio)")
 
-        meta = {
-            "generato_ts": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "n_coordinate_territorio": len(catalogo),
-            "n_coordinate_solo_fuori_territorio": len(chiavi_solo_fuori),
-            "n_osservazioni_trovato": n_trovato,
-            "n_osservazioni_occupato": n_occupato,
-            "n_osservazioni_fuori_territorio": n_fuori_territorio,
-            "n_senza_occupante_live": n_senza_occupazione_confermata,
-        }
         tmp_meta = meta_path.with_suffix(".json.tmp")
         with open(tmp_meta, "w", encoding="utf-8") as f:
             json.dump(meta, f, indent=2, ensure_ascii=False)
         tmp_meta.replace(meta_path)
-        print(f"Meta scritto: {meta_path}")
+        log(f"Meta scritto: {meta_path}")
     else:
-        print("(--write non specificato — nessun file scritto, solo report)")
+        log("(write=False — nessun file scritto, solo report)")
 
-    return 0
+    return meta
+
+
+def main() -> int:
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--prod", action="store_true",
+                        help="Usa C:/doomsday-engine-prod/data invece di dev")
+    parser.add_argument("--days", type=int, default=0,
+                        help="Solo ultimi N giorni (0 = tutto)")
+    parser.add_argument("--write", action="store_true",
+                        help="Persiste data/nodi_mappa_catalogo.json")
+    args = parser.parse_args()
+
+    root = Path("C:/doomsday-engine-prod") if args.prod else Path("C:/doomsday-engine")
+    meta = build_catalogo(root, days=args.days, write=args.write, verbose=True)
+    return 1 if "errore" in meta else 0
 
 
 if __name__ == "__main__":

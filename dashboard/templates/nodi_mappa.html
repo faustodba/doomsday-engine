@@ -7,11 +7,16 @@
 
     <div class="section">
       <div class="sec-label">🗺 nodi mappa — catalogo coordinata → tipo/livello (solo nodi in territorio)</div>
-      <div style="color:var(--text-dim);font-size:11px;margin-bottom:10px">
-        Dati scritti in tempo reale dal task <code>raccolta</code> ad ogni ricerca (non derivati dai log) ·
+      <div style="color:var(--text-dim);font-size:11px;margin-bottom:6px">
+        Dati scritti in tempo reale dal task <code>raccolta</code> (non derivati dai log) ·
         date in formato <code>GG/MM HH:MM</code> ora locale ·
-        "ultima istanza occupante" mostra <code>—</code> finché il nodo non viene rivisitato dal vivo
-        (il seed storico iniziale non conta come occupazione attuale)
+        "ultima oss." = CERCA+lettura coordinata · "ultima istanza occupante" = marcia confermata (eventi distinti) ·
+        mostra <code>—</code> finché nessuna marcia è ancora stata completata su quel nodo
+      </div>
+      <div style="color:var(--text-dim);font-size:11px;margin-bottom:10px">
+        🔄 catalogo rigenerato automaticamente ogni {{ rebuild_interval_min }} min ·
+        {% if ultimo_rebuild %}ultimo: <b>{{ ultimo_rebuild }}</b>{% else %}ultimo: in corso…{% endif %} ·
+        {% if prossimo_rebuild %}prossimo: <b style="color:var(--accent)">{{ prossimo_rebuild }}</b>{% else %}prossimo: a breve{% endif %}
       </div>
 
       <!-- Sommario + filtri -->

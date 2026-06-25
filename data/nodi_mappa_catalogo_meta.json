@@ -1,9 +1,9 @@
 {
-  "generato_ts": "2026-06-25T11:29:50+00:00",
-  "n_coordinate_territorio": 218,
+  "generato_ts": "2026-06-25T14:13:55+00:00",
+  "n_coordinate_territorio": 228,
   "n_coordinate_solo_fuori_territorio": 3,
-  "n_osservazioni_trovato": 289,
-  "n_osservazioni_occupato": 0,
-  "n_osservazioni_fuori_territorio": 103,
-  "n_senza_occupante_live": 218
+  "n_osservazioni_trovato": 310,
+  "n_osservazioni_occupato": 7,
+  "n_osservazioni_fuori_territorio": 117,
+  "n_senza_occupante_live": 221
 }
