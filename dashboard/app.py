@@ -112,39 +112,71 @@ NODI_MAPPA_REBUILD_INTERVAL_MIN = 20
 _nodi_mappa_rebuild_state: dict = {"last_ts": None, "next_ts": None, "last_meta": None}
 
 
-async def _nodi_mappa_rebuild_loop():
-    """Background task (WU178): rigenera periodicamente il catalogo nodi
-    mappa (data/nodi_mappa_catalogo.json) dalle osservazioni accumulate da
-    tasks/raccolta.py. Stesso pattern del predictor recorder. Senza questo
-    task il catalogo resta fermo all'ultima esecuzione manuale del tool CLI
-    — ultima_istanza/ultima_occupazione_ts non si aggiornerebbero mai da soli."""
-    import asyncio
+def _nodi_mappa_esegui_rebuild(root) -> dict:
+    """Esegue il rebuild e aggiorna lo stato condiviso. Chiamata sia dal
+    loop periodico sia dall'endpoint manuale /api/nodi-mappa/rebuild —
+    `last_ts` è l'UNICA fonte di verità su "quando è avvenuto l'ultimo
+    rebuild", letta da entrambi (WU180: fix inconsistenza pulsante manuale)."""
     from datetime import datetime, timezone, timedelta
-    from pathlib import Path
     from tools.costruisci_catalogo_nodi import build_catalogo
+
+    meta = build_catalogo(root, write=True, verbose=False)
+    now = datetime.now(timezone.utc)
+    interval_s = NODI_MAPPA_REBUILD_INTERVAL_MIN * 60
+    _nodi_mappa_rebuild_state["last_ts"] = now.isoformat()
+    _nodi_mappa_rebuild_state["next_ts"] = (
+        now + timedelta(seconds=interval_s)
+    ).isoformat()
+    _nodi_mappa_rebuild_state["last_meta"] = meta
+    return meta
+
+
+async def _nodi_mappa_rebuild_loop():
+    """Background task (WU178, fix granularità WU180): rigenera
+    periodicamente il catalogo nodi mappa dalle osservazioni accumulate da
+    tasks/raccolta.py. Senza questo task il catalogo resta fermo all'ultima
+    esecuzione manuale — ultima_istanza non si aggiornerebbe mai da sola.
+
+    WU180: poll granulare ogni 30s (stesso pattern di _predictor_recorder_loop)
+    invece di un singolo `sleep(interval_s)` — rigenera SOLO se sono passati
+    >= interval_s da `last_ts` (fonte di verità condivisa con l'endpoint
+    manuale). Pre-fix: un click su "aggiorna ora" aggiornava `next_ts` per la
+    UI ma non il timer interno del loop (ancorato al suo ultimo risveglio),
+    quindi "prossimo aggiornamento" in pagina poteva non corrispondere a
+    quando il loop rigenerava davvero. Ora entrambi i trigger condividono la
+    stessa fonte di verità (`last_ts`), nessuna doppia rigenerazione né
+    disallineamento."""
+    import asyncio
+    from datetime import datetime, timezone
+    from pathlib import Path
 
     root = Path(os.environ.get("DOOMSDAY_ROOT", "."))
     interval_s = NODI_MAPPA_REBUILD_INTERVAL_MIN * 60
+    POLL_GRANULAR_S = 30
     print(f"[DASHBOARD] {_ts()} nodi_mappa rebuild loop avviato "
-          f"(ogni {NODI_MAPPA_REBUILD_INTERVAL_MIN}min)")
+          f"(ogni {NODI_MAPPA_REBUILD_INTERVAL_MIN}min, poll {POLL_GRANULAR_S}s)")
     while True:
         try:
-            meta = build_catalogo(root, write=True, verbose=False)
-            now = datetime.now(timezone.utc)
-            _nodi_mappa_rebuild_state["last_ts"] = now.isoformat()
-            _nodi_mappa_rebuild_state["next_ts"] = (
-                now + timedelta(seconds=interval_s)
-            ).isoformat()
-            _nodi_mappa_rebuild_state["last_meta"] = meta
-            if "errore" not in meta:
-                print(f"[DASHBOARD] {_ts()} catalogo nodi mappa rigenerato: "
-                      f"{meta.get('n_coordinate_territorio', 0)} coordinate, "
-                      f"{meta.get('n_senza_occupante_live', 0)} senza occupante")
-            else:
-                print(f"[DASHBOARD] {_ts()} catalogo nodi mappa: {meta['errore']}")
+            last_ts = _nodi_mappa_rebuild_state.get("last_ts")
+            elapsed_s = float("inf")
+            if last_ts:
+                try:
+                    elapsed_s = (
+                        datetime.now(timezone.utc) - datetime.fromisoformat(last_ts)
+                    ).total_seconds()
+                except Exception:
+                    pass
+            if elapsed_s >= interval_s:
+                meta = _nodi_mappa_esegui_rebuild(root)
+                if "errore" not in meta:
+                    print(f"[DASHBOARD] {_ts()} catalogo nodi mappa rigenerato: "
+                          f"{meta.get('n_coordinate_territorio', 0)} coordinate, "
+                          f"{meta.get('n_senza_occupante_live', 0)} senza occupante")
+                else:
+                    print(f"[DASHBOARD] {_ts()} catalogo nodi mappa: {meta['errore']}")
         except Exception as exc:
             print(f"[DASHBOARD] {_ts()} nodi_mappa rebuild errore: {exc}")
-        await asyncio.sleep(interval_s)
+        await asyncio.sleep(POLL_GRANULAR_S)
 
 
 async def _predictor_recorder_loop():
@@ -524,20 +556,14 @@ def ui_nodi_mappa(request: Request, tipo: str = "", min_oss: int = 1):
 def api_nodi_mappa_rebuild():
     """WU179 — forza la rigenerazione immediata del catalogo nodi mappa
     (bottone "aggiorna" in /ui/nodi-mappa), senza attendere il prossimo
-    giro del background task periodico (ogni 20min). Riazzera anche il
-    timer del loop periodico (stesso _nodi_mappa_rebuild_state condiviso)."""
-    from datetime import datetime, timezone, timedelta
+    giro del background task periodico. Usa lo stesso helper
+    `_nodi_mappa_esegui_rebuild()` del loop (WU180) — `last_ts` è l'unica
+    fonte di verità condivisa, quindi il loop periodico vede correttamente
+    "appena rigenerato" e non rifà il lavoro a breve."""
     from pathlib import Path
-    from tools.costruisci_catalogo_nodi import build_catalogo
 
     root = Path(os.environ.get("DOOMSDAY_ROOT", "."))
-    meta = build_catalogo(root, write=True, verbose=False)
-    now = datetime.now(timezone.utc)
-    _nodi_mappa_rebuild_state["last_ts"] = now.isoformat()
-    _nodi_mappa_rebuild_state["next_ts"] = (
-        now + timedelta(minutes=NODI_MAPPA_REBUILD_INTERVAL_MIN)
-    ).isoformat()
-    _nodi_mappa_rebuild_state["last_meta"] = meta
+    meta = _nodi_mappa_esegui_rebuild(root)
     if "errore" in meta:
         return JSONResponse({"ok": False, "errore": meta["errore"]}, status_code=500)
     return JSONResponse({"ok": True, "meta": meta})
