@@ -1529,6 +1529,18 @@ def get_nodi_mappa_catalogo(tipo_filter: str = "", min_oss: int = 1) -> dict:
     if not catalogo:
         return empty
 
+    def _fmt_ts(ts_iso: str) -> str:
+        """ISO UTC -> 'DD/MM HH:MM' ora locale (pattern già usato altrove in
+        questo file, es. get_copertura_ultimi_cicli). Più leggibile del
+        timestamp ISO grezzo (es. '2026-06-25T10:01...')."""
+        if not ts_iso:
+            return "—"
+        try:
+            from datetime import datetime as _dt
+            return _dt.fromisoformat(ts_iso).astimezone().strftime("%d/%m %H:%M")
+        except Exception:
+            return ts_iso[:16]
+
     nodes = []
     for chiave, v in catalogo.items():
         tipo = v.get("tipo", "?")
@@ -1548,8 +1560,10 @@ def get_nodi_mappa_catalogo(tipo_filter: str = "", min_oss: int = 1) -> dict:
             "n_concordanti":      n_conc,
             "n_istanze":          int(v.get("n_istanze", 0)),
             "ambiguo":            n_conc < n_oss,
-            "prima_osservazione": v.get("prima_osservazione", ""),
-            "ultima_osservazione": v.get("ultima_osservazione", ""),
+            "prima_osservazione": v.get("prima_osservazione", ""),       # raw ISO — usato per ordinamento
+            "ultima_osservazione": v.get("ultima_osservazione", ""),     # raw ISO — usato per ordinamento
+            "prima_osservazione_fmt": _fmt_ts(v.get("prima_osservazione", "")),
+            "ultima_osservazione_fmt": _fmt_ts(v.get("ultima_osservazione", "")),
             "ultima_istanza":     v.get("ultima_istanza", ""),
         })
 

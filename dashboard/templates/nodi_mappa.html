@@ -7,6 +7,10 @@
 
     <div class="section">
       <div class="sec-label">🗺 nodi mappa — catalogo coordinata → tipo/livello (solo nodi in territorio)</div>
+      <div style="color:var(--text-dim);font-size:11px;margin-bottom:10px">
+        Dati scritti in tempo reale dal task <code>raccolta</code> ad ogni ricerca (non derivati dai log) ·
+        date in formato <code>GG/MM HH:MM</code> ora locale
+      </div>
 
       <!-- Sommario + filtri -->
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
@@ -69,8 +73,8 @@
                 <td style="padding:4px 10px;border:0.5px solid var(--border);text-align:center">{{ n.n_concordanti }}/{{ n.n_osservazioni }}</td>
                 <td style="padding:4px 10px;border:0.5px solid var(--border);text-align:center">{{ n.n_istanze }}</td>
                 <td style="padding:4px 10px;border:0.5px solid var(--border);color:var(--accent);font-weight:500">{{ n.ultima_istanza or "—" }}</td>
-                <td style="padding:4px 10px;border:0.5px solid var(--border);color:var(--text-dim);font-size:11px">{{ n.prima_osservazione[:16] }}</td>
-                <td style="padding:4px 10px;border:0.5px solid var(--border);color:var(--text-dim);font-size:11px">{{ n.ultima_osservazione[:16] }}</td>
+                <td style="padding:4px 10px;border:0.5px solid var(--border);color:var(--text-dim);font-size:11px" title="ora locale">{{ n.prima_osservazione_fmt }}</td>
+                <td style="padding:4px 10px;border:0.5px solid var(--border);color:var(--text-dim);font-size:11px" title="ora locale">{{ n.ultima_osservazione_fmt }}</td>
               </tr>
             {% else %}
               <tr><td colspan="9" style="padding:14px;text-align:center;color:var(--text-dim);border:0.5px solid var(--border)">nessun nodo in territorio nel catalogo — eseguire tools/costruisci_catalogo_nodi.py --write</td></tr>
