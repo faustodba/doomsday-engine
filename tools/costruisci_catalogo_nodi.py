@@ -23,6 +23,18 @@ Per ogni coordinata nel catalogo viene anche tracciata `ultima_istanza`
 (quale istanza ha effettuato l'ultima occupazione reale, esito="trovato")
 e `ultima_occupazione_ts`.
 
+WU176 (25/06/2026) — feedback utente: il dataset iniziale (357 osservazioni)
+è stato minato una tantum dai log testuali PRIMA che l'hook live in
+tasks/raccolta.py iniziasse a scrivere (bootstrap, vedi SEED_CUTOFF_TS).
+Mostrare `ultima_istanza` calcolata anche su quelle osservazioni storiche
+è ingannevole — sembra un dato "appena successo" ma può risalire a ore
+prima dell'attivazione del sistema live. `ultima_istanza`/
+`ultima_occupazione_ts` vengono quindi popolati SOLO se esiste almeno una
+osservazione "trovato" con ts >= SEED_CUTOFF_TS; altrimenti restano None
+("non ancora rilevato dal vivo" lato dashboard) anche se il nodo è
+comunque nel catalogo (tipo/livello/confidenza usano tutto lo storico,
+seed incluso — quello resta valido come prova di identità del nodo).
+
 Output (sempre):
     1. Totali: osservazioni trovato vs fuori_territorio, coordinate distinte
     2. Distribuzione confidenza (solo nodi in territorio)
@@ -54,6 +66,14 @@ from pathlib import Path
 
 SOGLIA_CONFIDENZA_MIN = 2
 SOGLIA_COPERTURA_MATURA = 0.70
+
+# WU176: spartiacque tra seed storico (mining log una tantum, pre-hook) e
+# dati genuinamente live (scritti da shared/nodi_mappa.py::registra_osservazione
+# durante l'esecuzione reale del bot). Corrisponde al boot del bot prod che ha
+# caricato per primo il codice dell'hook (vedi data/restart_state.json al
+# momento dell'introduzione WU173). Fisso: il seed non cresce più, non serve
+# aggiornarlo nelle sessioni successive.
+SEED_CUTOFF_TS = datetime(2026, 6, 25, 9, 52, 5, tzinfo=timezone.utc)
 
 # Istanze le cui osservazioni vanno escluse (lettura coordinate non
 # attendibile — vedi shared/nodi_mappa.py::ISTANZE_ESCLUSE). Ridichiarato
@@ -158,6 +178,7 @@ def main() -> int:
     confermate_cross_istanza: list[dict] = []
     n_concordanti_2plus = 0
     n_ricorrenti = 0
+    n_senza_occupante_live = 0
 
     for chiave, obs in by_chiave.items():
         coppie = Counter((o["tipo"], o["livello"]) for o in obs)
@@ -169,6 +190,18 @@ def main() -> int:
         obs_ordinate = sorted(obs, key=lambda o: o["ts"])
         ultima = obs_ordinate[-1]
 
+        # WU176: ultima_istanza/ultima_occupazione_ts SOLO da osservazioni
+        # live (post seed-cutoff) — mai dal seed storico minato dai log.
+        obs_live = [o for o in obs_ordinate if datetime.fromisoformat(o["ts"]) >= SEED_CUTOFF_TS]
+        if obs_live:
+            ultima_live = obs_live[-1]
+            ultima_istanza = ultima_live["instance"]
+            ultima_occupazione_ts = ultima_live["ts"]
+        else:
+            n_senza_occupante_live += 1
+            ultima_istanza = None
+            ultima_occupazione_ts = None
+
         entry = {
             "cx": cx, "cy": cy,
             "tipo": tipo_top, "livello": liv_top,
@@ -177,8 +210,8 @@ def main() -> int:
             "n_istanze": len(istanze),
             "prima_osservazione": obs_ordinate[0]["ts"],
             "ultima_osservazione": ultima["ts"],
-            "ultima_istanza": ultima["instance"],
-            "ultima_occupazione_ts": ultima["ts"],
+            "ultima_istanza": ultima_istanza,
+            "ultima_occupazione_ts": ultima_occupazione_ts,
         }
         catalogo[chiave] = entry
 
@@ -221,6 +254,13 @@ def main() -> int:
         print(f"  ... e altre {len(confermate_cross_istanza) - 20}")
     print()
 
+    # ── Sezione 4b: freschezza ultima_istanza (WU176) ──────────────────────
+    print(f"--- Occupante live (post seed-cutoff {SEED_CUTOFF_TS.isoformat()}) ---")
+    print(f"  Con ultima_istanza live:     {len(catalogo) - n_senza_occupante_live}")
+    print(f"  Senza occupante live ancora: {n_senza_occupante_live}  "
+          f"(mostrano '—' in dashboard finché non rivisitati dal bot)")
+    print()
+
     # ── Sezione 5: verdetto maturità ──────────────────────────────────────
     quota_matura = n_concordanti_2plus / n_ricorrenti if n_ricorrenti else 0.0
     print("--- Verdetto maturità dataset (solo nodi in territorio) ---")
@@ -251,6 +291,8 @@ def main() -> int:
             "n_coordinate_solo_fuori_territorio": len(chiavi_solo_fuori),
             "n_osservazioni_trovato": n_trovato,
             "n_osservazioni_fuori_territorio": n_fuori_territorio,
+            "n_senza_occupante_live": n_senza_occupante_live,
+            "seed_cutoff_ts": SEED_CUTOFF_TS.isoformat(),
         }
         tmp_meta = meta_path.with_suffix(".json.tmp")
         with open(tmp_meta, "w", encoding="utf-8") as f:

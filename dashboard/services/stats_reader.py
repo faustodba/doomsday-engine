@@ -1502,18 +1502,25 @@ def get_nodi_mappa_catalogo(tipo_filter: str = "", min_oss: int = 1) -> dict:
     osservazione esito=trovato) — i nodi solo fuori-territorio sono esclusi
     da tools/costruisci_catalogo_nodi.py (nessuna utilità per la mappatura).
     Il relativo conteggio è letto da nodi_mappa_catalogo_meta.json.
+
+    WU176: `ultima_istanza` nel catalogo è già filtrata a monte (dal tool)
+    per escludere il seed storico minato dai log — qui esponiamo anche
+    `n_senza_occupante_live` per trasparenza in dashboard.
     """
     n_fuori_territorio = 0
+    n_senza_occupante_live = 0
     try:
         if _NODI_MAPPA_META_PATH.exists():
             meta = json.loads(_NODI_MAPPA_META_PATH.read_text(encoding="utf-8"))
             n_fuori_territorio = int(meta.get("n_coordinate_solo_fuori_territorio", 0))
+            n_senza_occupante_live = int(meta.get("n_senza_occupante_live", 0))
     except Exception:
         pass
 
     empty = {
         "nodes": [], "total": 0, "n_ambigui": 0, "n_cross_istanza": 0,
         "n_fuori_territorio": n_fuori_territorio,
+        "n_senza_occupante_live": n_senza_occupante_live,
         "by_tipo_count": {},
         "tipo_order":  _RACCOLTA_TIPO_ORDER,
         "tipo_labels": _RACCOLTA_TIPO_LABELS,
@@ -1585,6 +1592,7 @@ def get_nodi_mappa_catalogo(tipo_filter: str = "", min_oss: int = 1) -> dict:
         "n_ambigui":         n_ambigui,
         "n_cross_istanza":   n_cross_istanza,
         "n_fuori_territorio": n_fuori_territorio,
+        "n_senza_occupante_live": n_senza_occupante_live,
         "by_tipo_count":     by_tipo_count,
         "tipo_order":        _RACCOLTA_TIPO_ORDER,
         "tipo_labels":       _RACCOLTA_TIPO_LABELS,

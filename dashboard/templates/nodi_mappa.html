@@ -9,7 +9,9 @@
       <div class="sec-label">🗺 nodi mappa — catalogo coordinata → tipo/livello (solo nodi in territorio)</div>
       <div style="color:var(--text-dim);font-size:11px;margin-bottom:10px">
         Dati scritti in tempo reale dal task <code>raccolta</code> ad ogni ricerca (non derivati dai log) ·
-        date in formato <code>GG/MM HH:MM</code> ora locale
+        date in formato <code>GG/MM HH:MM</code> ora locale ·
+        "ultima istanza occupante" mostra <code>—</code> finché il nodo non viene rivisitato dal vivo
+        (il seed storico iniziale non conta come occupazione attuale)
       </div>
 
       <!-- Sommario + filtri -->
@@ -21,6 +23,8 @@
         <span style="color:var(--accent);font-size:12px">{{ n_cross_istanza }} confermate cross-istanza</span>
         <span style="color:var(--text-dim);font-size:12px">·</span>
         <span style="color:var(--text-dim);font-size:12px" title="nodi sempre scartati come fuori territorio, mai occupati — nessuna utilità per la mappatura, esclusi dal catalogo">{{ n_fuori_territorio }} fuori territorio (escluse)</span>
+        <span style="color:var(--text-dim);font-size:12px">·</span>
+        <span style="color:var(--text-dim);font-size:12px" title="nodi il cui storico include solo dati del seed iniziale (mining log, una tantum) — nessuna osservazione live ancora registrata da quando l'hook è attivo">{{ n_senza_occupante_live }} senza occupante live ancora</span>
 
         <span style="margin-left:16px;color:var(--text-dim);font-size:12px;letter-spacing:1px;text-transform:uppercase">tipo</span>
         <a href="{{ url_prefix }}/ui/nodi-mappa?tipo=&min_oss={{ min_oss }}"
