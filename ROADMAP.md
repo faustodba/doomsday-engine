@@ -5,6 +5,54 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 25/06/2026 — WU172 store: memorizzazione posizione edificio per istanza
+
+L'utente ha chiesto una nuova regola per il task `store`: il posizionamento
+dell'edificio è fisso in ogni istanza (non cambia mai), quindi prova prima
+con una posizione memorizzata e solo se fallisce fai lo scan completo a
+griglia (25 passi) per ritrovarlo — aggiornando la memoria se la posizione
+è cambiata.
+
+**Mining storico** richiesto esplicitamente dall'utente: analizzati i log
+`[STORE] passo N → score=... *** match ***` di tutte le istanze (correnti +
+`.jsonl.bak` del giorno prima). Risultato netto: **passo 7 vincente per
+10/11 istanze** (FAU_07 passo 8) — segnale fortissimo, non casuale. Passo 7
+corrisponde a un offset di swipe `(0,+300)` dalla vista di partenza (dalla
+griglia a spirale `cfg.griglia`); passo 8 → `(+300,+300)`.
+
+**Implementazione**:
+- Nuovo modulo `shared/store_position.py` — `load()`/`save()` per istanza,
+  storage `data/store_position.json`, atomic write (pattern identico a
+  `morfeus_state.py`).
+- `tasks/store.py::_esegui_store`: prima dello scan, se esiste una posizione
+  memorizzata → un singolo swipe diretto (`_applica_delta_swipe`, helper
+  estratto e riusato anche dalla cascata di recovery multi-candidato
+  preesistente) + 1 verifica. Confermata → store gestito direttamente, scan
+  saltato (~20-40s risparmiati nel caso comune). Non confermata → torna allo
+  start (swipe inverso) e fa lo scan classico invariato, che a fine ricerca
+  aggiorna la memoria **solo se la posizione è nuova o diversa**.
+- Seed iniziale `data/store_position.json` popolato con i dati minati
+  (dev+prod, 11 istanze).
+
+**Bug collaterale trovato e corretto durante l'implementazione**: il nuovo
+codice chiamava sempre `store_position.load/save`, scrivendo nella vera
+cartella `data/` del repo dev durante l'esecuzione dei test (nessun
+isolamento `DOOMSDAY_ROOT`) — aggiunta fixture `autouse` in
+`tests/tasks/test_store.py` (pattern già usato in `test_telemetry_rollup.py`).
+
+Test: 34/39 verdi in `test_store.py` (5 fail pre-esistenti invariate,
+verificato identico set pre/post-fix via `git stash`), nessuna regressione
+sul resto della repo (149 fail pre-esistenti totali su tutta la suite, tutte
+unrelated). Sync dev+prod, commit+push.
+
+**Prossimo step**: osservare i prossimi cicli — confermare nei log che
+`Posizione memorizzata: ... *** confermata ***` scatti per la maggioranza
+delle istanze (skip scan) e che l'eventuale aggiornamento di posizione
+(`Posizione store aggiornata in memoria`) avvenga solo quando l'edificio
+risulta davvero altrove.
+
+---
+
 ## Sessione 23/06/2026 (2) — WU171 messaggi: tab attivo sbagliato, alliance mai raccolto
 
 L'utente ha segnalato che il task `messaggi` "continua a non funzionare bene":

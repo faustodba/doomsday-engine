@@ -6,7 +6,12 @@
 #  Flusso (porta identica V5):
 #    1. Assicura HOME via navigator
 #    2. Collassa banner eventi (libera viewport)
-#    3. Scan griglia spirale 25 passi → trova edificio Store
+#    2.5 WU172: prova la posizione store memorizzata (shared/store_position.py)
+#        — l'edificio è fisso nel mondo per istanza, un singolo swipe diretto
+#        + verifica invece dello scan completo nel caso comune (~20-40s saving)
+#    3. Se la posizione memorizzata non è confermata (o non esiste ancora):
+#       scan griglia spirale 25 passi → trova edificio Store, poi memorizza
+#       la posizione (se nuova/diversa) per i prossimi run
 #    4. Tap Store → verifica label / mercante diretto → tap carrello
 #    5. Verifica merchant aperto
 #    6. Acquista tutti i pulsanti gialli (pin_legno/pomodoro/acciaio) per pagina
@@ -41,6 +46,7 @@ from typing import TYPE_CHECKING
 
 from core.task import Task, TaskContext, TaskResult
 from shared.ui_helpers import attendi_template
+from shared import store_position
 
 if TYPE_CHECKING:
     from core.device import MuMuDevice, FakeDevice
@@ -213,7 +219,8 @@ class StoreTask(Task):
 
         try:
             esito, acquistati, refreshed = self._esegui_store(
-                device, matcher, log, cfg
+                device, matcher, log, cfg,
+                instance_name=getattr(ctx, "instance_name", "_unknown"),
             )
         except Exception as exc:
             self._debug_buf.snap("exception", device.screenshot())
@@ -239,6 +246,7 @@ class StoreTask(Task):
         matcher: "TemplateMatcher",
         log,
         cfg:     StoreConfig,
+        instance_name: str = "_unknown",
     ) -> tuple[str, int, bool]:
         """
         Flusso completo store.
@@ -254,6 +262,40 @@ class StoreTask(Task):
             if stato_banner in ("aperto", "chiuso")
             else cfg.roi_home_banner_aperto
         )
+
+        # ── WU172: prova prima la posizione store memorizzata ───────────────
+        # L'edificio è fisso nel mondo per istanza (non si sposta mai) — se
+        # l'ultimo ritrovamento riuscito è ancora valido, un singolo swipe
+        # diretto + 1 verifica risparmia l'intero scan a griglia (~20-40s).
+        # Se la verifica fallisce (mappa scrollata da altro task, drift) →
+        # torna allo start e procede con lo scan classico, che aggiornerà la
+        # memoria con la nuova posizione trovata.
+        cx_fin = cy_fin = -1
+        pos_memo = store_position.load(instance_name)
+        if pos_memo is not None:
+            dx_m, dy_m = pos_memo["dx"], pos_memo["dy"]
+            log(
+                f"Posizione memorizzata: offset=({dx_m},{dy_m}) "
+                f"score_storico={pos_memo['score']:.3f} — provo diretto"
+            )
+            self._applica_delta_swipe(device, dx_m, dy_m, cfg)
+            shot_memo = device.screenshot()
+            r_memo = matcher.find_one(shot_memo, cfg.tmpl_store,
+                                      threshold=cfg.soglia_store,
+                                      zone=roi_corrente)
+            log(
+                f"Verifica posizione memorizzata: score={r_memo.score:.3f} "
+                f"({r_memo.cx},{r_memo.cy})"
+                + ("  *** confermata ***" if r_memo.found else "  non confermata")
+            )
+            if r_memo.found:
+                cx_fin, cy_fin = r_memo.cx, r_memo.cy
+            else:
+                log("Posizione memorizzata non confermata — torno allo start, scan completo")
+                self._applica_delta_swipe(device, -dx_m, -dy_m, cfg)
+
+        if cx_fin >= 0:
+            return self._gestisci_negozio_e_chiudi(device, matcher, cx_fin, cy_fin, log, cfg)
 
         # ── Scan griglia spirale (take-max + multi-candidate auto-WU23) ─────
         # WU23: invece di salvare solo il best step, accumula TUTTI i match
@@ -326,15 +368,7 @@ class StoreTask(Task):
             log(f"Tentativo {cand_idx+1}/{len(candidates)}: step={cand_step} "
                 f"score_atteso={cand_score:.3f} — delta swipe ({delta_x},{delta_y})")
 
-            # Apply delta swipes
-            if delta_x != 0:
-                sign_x = 1 if delta_x > 0 else -1
-                for _ in range(abs(delta_x) // p):
-                    self._swipe_mappa(device, sign_x * p, 0, cfg)
-            if delta_y != 0:
-                sign_y = 1 if delta_y > 0 else -1
-                for _ in range(abs(delta_y) // p):
-                    self._swipe_mappa(device, 0, sign_y * p, cfg)
+            self._applica_delta_swipe(device, delta_x, delta_y, cfg)
 
             # Aggiorna end_x/end_y per il prossimo delta-from
             end_x, end_y = tgt_x, tgt_y
@@ -358,15 +392,37 @@ class StoreTask(Task):
             log(f"Store re-match fallito per tutti i {len(candidates)} candidati")
             return _Esito.STORE_NON_TROVATO, 0, False
 
-        # ── Gestione negozio ──────────────────────────────────────────────────
-        esito_neg, acquistati, refreshed = self._gestisci_negozio(
-            device, matcher, cx_fin, cy_fin, log, cfg
-        )
+        # WU172: memorizza la posizione solo se nuova o diversa dalla
+        # precedente — evita scritture inutili quando coincide già.
+        dx_trovato, dy_trovato = cumulative[cand_step]
+        if pos_memo is None or (dx_trovato, dy_trovato) != (pos_memo["dx"], pos_memo["dy"]):
+            store_position.save(instance_name, dx_trovato, dy_trovato, cand_score)
+            log(
+                f"Posizione store aggiornata in memoria: "
+                f"offset=({dx_trovato},{dy_trovato}) score={cand_score:.3f}"
+            )
 
+        # ── Gestione negozio + verifica HOME finale ─────────────────────────
         # auto-WU10: rimosso _ripristina_banner — banner resta chiuso permanentemente
         # (closed at startup in main.py via comprimi_banner_home, persists across tasks)
+        return self._gestisci_negozio_e_chiudi(device, matcher, cx_fin, cy_fin, log, cfg)
 
-        # ── Verifica HOME finale ──────────────────────────────────────────────
+    def _gestisci_negozio_e_chiudi(
+        self,
+        device:  "MuMuDevice | FakeDevice",
+        matcher: "TemplateMatcher",
+        cx_store: int,
+        cy_store: int,
+        log,
+        cfg:     StoreConfig,
+    ) -> tuple[str, int, bool]:
+        """Apre/gestisce il negozio sull'edificio (cx_store,cy_store) e verifica
+        il ritorno in HOME a fine flusso. Condiviso dal path memorizzato (WU172)
+        e dal path scan classico."""
+        esito_neg, acquistati, refreshed = self._gestisci_negozio(
+            device, matcher, cx_store, cy_store, log, cfg
+        )
+
         shot = device.screenshot()
         home_ok = matcher.exists(shot, "pin/pin_region.png", threshold=0.80)
         if not home_ok:
@@ -647,6 +703,29 @@ class StoreTask(Task):
         return "sconosciuto"
 
     # ── Swipe helpers ─────────────────────────────────────────────────────────
+
+    def _applica_delta_swipe(
+        self,
+        device: "MuMuDevice | FakeDevice",
+        delta_x: int,
+        delta_y: int,
+        cfg: StoreConfig,
+    ) -> None:
+        """
+        Applica gli swipe necessari per coprire un delta (multipli interi di
+        passo_scan) rispetto alla posizione corrente della mappa. Usato sia
+        dalla cascata di recovery multi-candidato sia dal check WU172 della
+        posizione store memorizzata (diretto e di rollback).
+        """
+        p = cfg.passo_scan
+        if delta_x != 0:
+            sign_x = 1 if delta_x > 0 else -1
+            for _ in range(abs(delta_x) // p):
+                self._swipe_mappa(device, sign_x * p, 0, cfg)
+        if delta_y != 0:
+            sign_y = 1 if delta_y > 0 else -1
+            for _ in range(abs(delta_y) // p):
+                self._swipe_mappa(device, 0, sign_y * p, cfg)
 
     def _swipe_mappa(
         self,

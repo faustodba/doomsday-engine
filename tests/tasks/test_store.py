@@ -29,6 +29,17 @@ from tasks.store import StoreConfig, StoreTask, _Esito
 
 
 # ==============================================================================
+# WU172 — isola data/store_position.json nella tmp_path: senza questa
+# fixture, _esegui_store() (che ora chiama sempre store_position.load/save)
+# scrive nella vera cartella data/ del repo dev durante i test.
+# ==============================================================================
+
+@pytest.fixture(autouse=True)
+def _isola_store_position(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOOMSDAY_ROOT", str(tmp_path))
+
+
+# ==============================================================================
 # Fake infrastructure (stessa struttura di test_boost.py)
 # ==============================================================================
 
