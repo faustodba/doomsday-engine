@@ -5,6 +5,34 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 25/06/2026 (5) — WU176 catalogo nodi: ultima istanza solo se live
+
+Dopo aver chiarito il formato date (sessione precedente), l'utente ha
+notato un'altra incongruenza: ogni nodo nel catalogo mostrava un'istanza
+occupante anche se il sistema live era partito da meno di un'ora —
+sospetto fondato, verificato sui dati: **202/214 nodi (94%)** avevano
+`ultima_istanza` risalente al seed storico (mining log una tantum di
+WU173, prima dell'attivazione dell'hook), non un'occupazione reale
+recente. Solo 12 nodi riflettevano una genuina osservazione live.
+
+**Fix**: nuova costante `SEED_CUTOFF_TS` (timestamp fisso del boot che ha
+attivato l'hook) in `tools/costruisci_catalogo_nodi.py` — `ultima_istanza`
+/`ultima_occupazione_ts` popolati SOLO da osservazioni con `ts >= cutoff`;
+altrimenti `None` (`—` in dashboard). Tipo/livello/confidenza continuano a
+usare tutto lo storico (seed incluso resta prova valida di identità del
+nodo, non di occupazione attuale). Nuovo contatore `n_senza_occupante_live`
+in dashboard.
+
+Catalogo rigenerato: 216 coordinate, 16 con occupante live, 200 in attesa
+di rivisitazione. Sync dev+prod, dashboard riavviata e verificata
+end-to-end (curl su produzione: 16 istanze popolate, 200 "—").
+
+**Prossimo step**: il numero di nodi "senza occupante live" scenderà
+naturalmente nel tempo man mano che il bot rivisita le coordinate —
+nessuna azione richiesta, solo attesa + rebuild periodico del catalogo.
+
+---
+
 ## Sessione 25/06/2026 (4) — WU175 catalogo nodi: separazione territorio + ultima istanza
 
 L'utente ha chiesto la colonna "ultima istanza occupante" e, analizzando il
