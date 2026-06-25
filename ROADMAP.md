@@ -5,6 +5,61 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 25/06/2026 (2) — WU173 raccolta: dataset mappatura nodi (fase 1)
+
+L'utente ha chiesto un'analisi più approfondita: è possibile mappare tutti i
+nodi della mappa? Le coordinate sono ricorrenti? A parità di coordinata il
+nodo è sempre lo stesso tipo/livello? Obiettivo finale (dichiarato
+esplicitamente, fase 2 futura): una volta che il dataset è ritenuto
+completo/attendibile, usarlo per velocizzare l'invio raccoglitori saltando
+la scansione CERCA.
+
+**Analisi preliminare** (mining log esistenti, ~46h di storico — vedi nota
+sotto su profondità): 357 osservazioni, 214 coordinate distinte. 88% delle
+coordinate ricorrenti (43/49) coerenti tipo+livello; 25/49 confermate
+cross-istanza (prova diretta della mappa condivisa). Un caso (696_532)
+mostra cambio tipo a un mese di distanza — coerente con l'ipotesi
+dell'utente sul respawn dei nodi terminati. Bug scoperto: la lettura
+coordinate di FauMorfeus è inattendibile (legge ripetutamente la coordinata
+del proprio rifugio invece del nodo).
+
+**Implementazione fase 1** (raccolta dati, nessun cambio di comportamento):
+- Nuovo modulo `shared/nodi_mappa.py` — `registra_osservazione()` append-only
+  su `data/nodi_mappa_observations.jsonl`, esclude FauMorfeus alla fonte.
+- 3 hook in `tasks/raccolta.py::_tenta_marcia` (nodo trovato/RESERVED, nodo
+  fuori-territorio skip ×2 varianti) — ogni CERCA che legge chiave+tipo+
+  livello alimenta il dataset, indipendentemente dall'esito.
+- Nuovo tool `tools/costruisci_catalogo_nodi.py [--prod] [--days N]
+  [--write]`: majority-vote per coordinata, report instabilità + conferme
+  cross-istanza + verdetto di maturità.
+- Seed iniziale: 357 osservazioni minate dai log correnti (dev+prod) +
+  primo catalogo `data/nodi_mappa_catalogo.json` (210 coordinate).
+- Bug collaterale corretto: fixture autouse `DOOMSDAY_ROOT` aggiunta a
+  `test_raccolta.py` (isola anche la pollution pre-esistente di
+  `cap_nodi_dataset.jsonl` durante i test).
+
+Test: 57/57 verdi `test_raccolta.py`, nessuna regressione sul resto della
+repo (149 fail pre-esistenti invariate). Sync dev+prod, commit+push.
+
+**Nota onestà sui dati**: la profondità storica reale dei log è ~46h (log
+corrente + un solo `.bak`, ruotano giornalmente) — 161/210 coordinate (77%)
+viste 1 sola volta, zero conferma indipendente. Il verdetto "maturo" del
+tool guarda solo le coordinate ricorrenti (91.8% concordi), non la copertura
+totale — il dataset deve continuare ad accumulare cicli prima di essere
+considerato pronto per la fase 2.
+
+**Fase 2 (NON implementata, gating esplicito dell'utente)**: uso attivo del
+catalogo in `tasks/raccolta.py` per saltare la scansione CERCA e navigare
+direttamente alla coordinata nota, quando il dataset sarà ritenuto maturo.
+
+**Prossimo step**: lasciare accumulare osservazioni per più giorni/settimane
+(il dataset si alimenta passivamente ad ogni ciclo di tutte le istanze),
+poi rieseguire `tools/costruisci_catalogo_nodi.py --prod` periodicamente per
+valutare la copertura totale (non solo le ricorrenti) prima di decidere se
+procedere alla fase 2.
+
+---
+
 ## Sessione 25/06/2026 — WU172 store: memorizzazione posizione edificio per istanza
 
 L'utente ha chiesto una nuova regola per il task `store`: il posizionamento

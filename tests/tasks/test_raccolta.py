@@ -27,6 +27,17 @@ from tasks.raccolta import (
 )
 
 
+# ==============================================================================
+# WU173 — isola data/nodi_mappa_observations.jsonl (e data/cap_nodi_dataset.jsonl,
+# pre-esistente) nella tmp_path: senza questa fixture i test che esercitano
+# _tenta_marcia scrivono nella vera cartella data/ del repo dev.
+# ==============================================================================
+
+@pytest.fixture(autouse=True)
+def _isola_data_dir(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOOMSDAY_ROOT", str(tmp_path))
+
+
 # ------------------------------------------------------------------------------
 # Fixture base
 # ------------------------------------------------------------------------------
