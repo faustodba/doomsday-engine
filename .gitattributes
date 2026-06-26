@@ -1,0 +1,5 @@
+# I file batch DEVONO usare CRLF: cmd.exe non parsa correttamente i .bat con
+# line endings LF (esegue frammenti di metà riga come comandi). Bug 26/06/2026:
+# sync_prod.bat / start.bat finiti in LF dopo il rename dei launcher -> rotti.
+*.bat text eol=crlf
+*.cmd text eol=crlf
