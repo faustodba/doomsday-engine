@@ -5,6 +5,44 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 26/06/2026 — WU181 store: re-center deterministico sul rifugio
+
+Verifica funzionamento task `store` su richiesta utente. Telemetria 26/06
+(28 run): 14 ok (202 oggetti, 14 free refresh), 5 skip (merchant non
+disponibile, legittimi), **9 fail "Store non trovato" (32%)**.
+
+**Diagnosi** (smontate 2 ipotesi sbagliate):
+- *Non* è l'edificio che scompare (è sempre presente) né il revert della
+  modalità grafica HIGH (la UI HOME rende a `0.988` identica in fail e ok).
+- È l'**origine dello scan non ancorata**: l'offset memorizzato
+  (`store_position`, WU172) e la griglia ±600px sono relativi al pan di camera
+  EREDITATO dal task precedente. `vai_in_home()` ri-centra sul rifugio solo se
+  trova lo schermo in MAP (toggle MAP→HOME); entrando da HOME già attiva è un
+  no-op → pan ereditato.
+
+**Correlazione predecessore→esito** (decisiva): tutti i 9 fail preceduti da
+`messaggi` (7) o `arena_mercato` (2) — lasciano un pan non centrato; **0 fail
+su 15 run** dopo `raccolta`/`donazione` — pan centrato. Score: verify pos.memo
+0.33-0.36 + grid_max 0.40-0.43 (rumore) nei fail vs 0.66-0.74 negli ok.
+
+**Fix** (`tasks/store.py::run`, step 0): forzato il giro
+`vai_in_mappa()` + `vai_in_home()` prima dello scan → la camera si aggancia al
+rifugio in modo deterministico, l'offset memorizzato torna valido a
+prescindere dal task precedente. Il banner eventi ri-aperto dal giro viene
+richiuso dal `_comprimi_banner` successivo (regola: default chiuso, apertura
+solo per district_showdown). Best-effort: se il giro non riesce, procede con
+l'origine corrente. Chiude anche l'ipotesi storica "Store edificio da
+spostare" (non era la posizione dell'edificio).
+
+Test `tests/tasks/test_store.py`: 34/39 (5 fail pre-esistenti invariati,
+verificato via `git stash`), nessuna regressione. Sync dev+prod, restart bot
+richiesto via flag graceful (`data/restart_requested.flag`).
+
+**Prossimo step**: monitorare le prossime run store post-restart — atteso
+fail-rate → ~0% sui predecessori `messaggi`/`arena_mercato`.
+
+---
+
 ## Sessione 25/06/2026 (7) — WU178 catalogo nodi: rigenerazione automatica periodica
 
 Dopo aver verificato che l'hook "occupato" scriveva correttamente (6-7

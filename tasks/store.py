@@ -210,10 +210,27 @@ class StoreTask(Task):
             getattr(ctx, "instance_name", "_unknown"),
         )
 
-        # ── Step 0: assicura HOME ─────────────────────────────────────────────
+        # ── Step 0: assicura HOME + re-center deterministico sul rifugio ───────
+        # WU181 (26/06/2026) — l'origine (0,0) dello scan store è il pan di
+        # camera EREDITATO dal task precedente. `vai_in_home()` ri-centra sul
+        # rifugio SOLO se trova lo schermo in MAP (fa il toggle MAP→HOME);
+        # entrando da HOME già attiva (caso normale: il task prima finisce in
+        # HOME) è un no-op → la camera resta dove l'aveva lasciata il task
+        # precedente, e l'offset memorizzato (store_position) + la griglia ±600px
+        # mancano l'edificio. Diagnosi 26/06 (telemetria): TUTTI i 9 fail "Store
+        # non trovato" preceduti da messaggi/arena_mercato (pan non centrato);
+        # 0 fail su 15 run dopo raccolta/donazione (pan centrato). Forzare il
+        # giro MAP→HOME aggancia la camera al rifugio in modo deterministico,
+        # rendendo valido l'offset a prescindere dal task precedente.
         if ctx.navigator is not None:
             if not ctx.navigator.vai_in_home():
                 return TaskResult.fail("Navigator non ha raggiunto HOME", step="assicura_home")
+            # Re-center: MAP → HOME (il toggle HOME dal mondo centra sul rifugio).
+            # best-effort: se il giro non riesce, procedo con l'origine corrente.
+            if ctx.navigator.vai_in_mappa() and ctx.navigator.vai_in_home():
+                log("Re-center rifugio via MAP→HOME ✓")
+            else:
+                log("Re-center MAP→HOME non riuscito — procedo con origine corrente")
         else:
             log("Navigator non disponibile — assumo HOME corrente")
 
