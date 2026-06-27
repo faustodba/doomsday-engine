@@ -35,11 +35,29 @@ l'origine corrente. Chiude anche l'ipotesi storica "Store edificio da
 spostare" (non era la posizione dell'edificio).
 
 Test `tests/tasks/test_store.py`: 34/39 (5 fail pre-esistenti invariati,
-verificato via `git stash`), nessuna regressione. Sync dev+prod, restart bot
-richiesto via flag graceful (`data/restart_requested.flag`).
+verificato via `git stash`), nessuna regressione. Sync dev+prod. Restart bot
+eseguito dall'utente da `start.bat` (26/06 19:26 UTC) — il flag graceful è
+stato rimosso perché i `.bat` erano LF-rotti (vedi nota infra sotto).
 
-**Prossimo step**: monitorare le prossime run store post-restart — atteso
-fail-rate → ~0% sui predecessori `messaggi`/`arena_mercato`.
+**Validato sul campo 27/06** (log `Re-center rifugio via MAP→HOME ✓` attivo su
+FAU_07/08/09/10): **11 run, 0 fail (0%)** contro 9/28 (32%) pre-fix. I
+predecessori che causavano TUTTI i fail ora ne causano zero: `arena_mercato`
+7 run (6 ok, 1 skip), `messaggi` 1 run (ok). I 4 skip residui sono `Merchant
+non confermato`/`Carrello non trovato` legittimi (store trovato e aperto,
+mercante non offerente per rotazione VIP), non più "Store non trovato".
+Diagnosi e fix confermati.
+
+**Nota infra (stessa sessione)**: i `.bat` (`sync_prod.bat`, `start.bat`,
+`run_dashboard_prod.bat`, …) erano finiti in LF dopo il rename dei launcher
+(`run_prod.bat`+`riavvia_bot.bat` → `start.bat`) → `cmd.exe` non li parsava
+(eseguiva frammenti di metà riga). Convertiti a CRLF + aggiunto
+`.gitattributes` (`*.bat eol=crlf`) per evitare il regresso. Contenuto
+launcher dev↔prod verificato identico (solo EOL); `run.bat` resta
+env-specific e non sincronizzato.
+
+**Prossimo step**: monitoraggio continuo store nelle prossime ore (campione
+27/06 ancora piccolo, 11 run); chiusura definitiva issue se il trend 0%
+"Store non trovato" si conferma su più cicli.
 
 ---
 
