@@ -315,58 +315,83 @@ def ocr_risorse(img: "Screenshot | np.ndarray") -> RisorseDeposito:
     )
 
 
-def ocr_risorse_robust(device, max_attempts: int = 3,
-                       sleep_s: float = 0.5, log_fn=None) -> "RisorseDeposito":
+def ocr_risorse_robust(device, max_attempts: int = 5,
+                       sleep_s: float = 0.8, log_fn=None,
+                       consensus: int = 3) -> "RisorseDeposito":
     """
-    auto-WU25 (27/04): wrapper di ocr_risorse con retry per zone fallite.
+    Lettura risorse castello con CONSENSO (WU182, 27/06/2026).
 
-    Ogni tentativo prende uno screenshot fresco. I valori validi (!=-1) sono
-    mantenuti tra i tentativi: solo le zone fallite vengono ri-tentate.
-    Se dopo max_attempts qualche zona resta -1, ritorna comunque (caller
-    deciderà fallback con valori precedenti).
+    Sostituisce il merge "prima lettura ≠ -1 vince" (auto-WU25), che NON
+    proteggeva dai misread plausibili: es. acciaio "74.10M" letto come
+    "11.10M" sono entrambi valori validi → il primo bloccava la zona anche se
+    sbagliato. Poiché la produzione è un delta telescopico (somma giornaliera
+    ≈ ultima lettura − prima lettura), un singolo misread agli estremi del
+    giorno inquina l'INTERO totale della risorsa (es. FAU_05 acciaio 30.3M
+    fantasma 26/06).
 
-    Tipici: 1 tentativo se tutto OK al primo round; 2-3 tentativi se 1-2
-    zone sono fallite per overlay transient.
+    Strategia: per ogni risorsa si raccolgono le letture (≠ -1) da screenshot
+    FRESCHI e ravvicinati (~sleep_s). Su questa scala temporale la produzione
+    reale è trascurabile (≪ granularità display 0.1M: anche 10M/h ≈ 0.003M/s),
+    quindi ogni divergenza tra letture è errore OCR. Una risorsa è accettata
+    solo quando lo STESSO valore raggiunge `consensus` occorrenze (moda); il
+    misread di minoranza viene scartato. Early-exit quando tutte le risorse
+    hanno consenso. Dopo `max_attempts`, le risorse senza consenso restano -1
+    → il caller (main.py) usa il valore della sessione precedente (fallback
+    conservativo: meglio "0 prodotto" che uno spike).
+
+    Default 3-su-5: tollera fino a 2 misread per risorsa. `tutte_ko` (banner
+    sulla top-bar) resta rilevabile dal caller (tutte le risorse -1).
     """
     import time as _t
+    from collections import Counter
     log = log_fn or (lambda _m: None)
-    rd_acc = RisorseDeposito(-1, -1, -1, -1, -1)
     fields = ("pomodoro", "legno", "acciaio", "petrolio", "diamanti")
+    votes: dict = {f: Counter() for f in fields}
+    settled: dict = {}  # field -> valore una volta raggiunto il consenso
 
     for attempt in range(max_attempts):
+        if len(settled) == len(fields):
+            break  # tutte le risorse hanno consenso → stop
+
         try:
             shot = device.screenshot() if device is not None else None
         except Exception:
             shot = None
         if shot is None:
-            log(f"[OCR-RETRY] tent {attempt+1}: screenshot None")
+            log(f"[OCR-CONS] tent {attempt+1}: screenshot None")
             _t.sleep(sleep_s)
             continue
 
         rd_new = ocr_risorse(shot)
-        # Merge: per ogni campo, usa nuovo valore se non -1, altrimenti tieni acc
-        merged = {}
         for f in fields:
-            v_new = getattr(rd_new, f)
-            v_old = getattr(rd_acc, f)
-            merged[f] = v_new if v_new != -1 else v_old
-        rd_acc = RisorseDeposito(**merged)
+            if f in settled:
+                continue
+            v = getattr(rd_new, f)
+            if v == -1:
+                continue
+            votes[f][v] += 1
+            top_v, top_n = votes[f].most_common(1)[0]
+            if top_n >= consensus:
+                settled[f] = top_v
 
-        # All OK? exit early
-        ko_fields = [f for f in fields if getattr(rd_acc, f) == -1]
-        if not ko_fields:
-            if attempt > 0:
-                log(f"[OCR-RETRY] tutto OK al tent {attempt+1}")
-            return rd_acc
-
-        if attempt < max_attempts - 1:
-            log(f"[OCR-RETRY] tent {attempt+1}: KO {ko_fields} — retry")
+        if len(settled) < len(fields) and attempt < max_attempts - 1:
+            pending = [f for f in fields if f not in settled]
+            log(f"[OCR-CONS] tent {attempt+1}: consenso pending {pending}")
             _t.sleep(sleep_s)
 
-    ko_fields = [f for f in fields if getattr(rd_acc, f) == -1]
-    if ko_fields:
-        log(f"[OCR-RETRY] dopo {max_attempts} tent: KO finali {ko_fields}")
-    return rd_acc
+    out = {}
+    for f in fields:
+        if f in settled:
+            out[f] = settled[f]
+        else:
+            out[f] = -1
+            if votes[f]:
+                # nessun valore ha raggiunto il consenso: log diagnostico con
+                # tutte le letture viste (es. {74100000:2, 11100000:2})
+                letture = {k: n for k, n in votes[f].most_common()}
+                log(f"[OCR-CONS] {f} NESSUN CONSENSO/{consensus} dopo "
+                    f"{max_attempts} tent: {letture} → -1 (fallback prec)")
+    return RisorseDeposito(**out)
 
 
 # ==============================================================================

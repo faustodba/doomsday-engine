@@ -769,6 +769,10 @@ def _thread_istanza(ist, tasks_cls, dry_run):
         # per quella sola risorsa (es. legno=-1 osservato FAU_00 27/04).
         # Post-fix: ocr_risorse_robust (3 tentativi con merge zone valide)
         # + fallback a valore precedente se tutte le retry falliscono.
+        # WU182 (27/06): merge "prima ≠ -1 vince" sostituito da CONSENSO
+        # 3-su-5 su screenshot freschi — neutralizza i misread plausibili
+        # (es. acciaio 74.10M letto 11.10M) che inquinavano il delta
+        # telescopico della produzione. Zona senza consenso → -1 → fallback.
         # 06/05: dismiss banner ATTIVO prima di OCR. Pre-fix: dopo settings
         # alcuni banner (Equipment Report, eventi laterali) coprono la
         # top-bar risorse → 3 tentativi OCR tutti KO → fallback prec
@@ -786,7 +790,7 @@ def _thread_istanza(ist, tasks_cls, dry_run):
             from core.state import _ts_now
             ts_now = _ts_now()
             rd = ocr_risorse_robust(
-                ctx.device, max_attempts=3, sleep_s=0.5,
+                ctx.device, max_attempts=5, sleep_s=0.8, consensus=3,
                 log_fn=lambda m: _log(nome, m),
             )
             # 06/05: se TUTTE 4 risorse castello KO, ipotesi banner non
@@ -805,7 +809,7 @@ def _thread_istanza(ist, tasks_cls, dry_run):
                 except Exception:
                     pass
                 rd = ocr_risorse_robust(
-                    ctx.device, max_attempts=2, sleep_s=1.5,
+                    ctx.device, max_attempts=5, sleep_s=1.0, consensus=3,
                     log_fn=lambda m: _log(nome, m),
                 )
             # Skip-on-fail: per ogni risorsa con valore -1, usa l'ultimo

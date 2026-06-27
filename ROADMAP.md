@@ -5,6 +5,44 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 27/06/2026 — WU182 produzione risorse: lettura OCR a consenso
+
+Analisi produzione risorse su richiesta utente → valori anomali su alcune
+istanze (FAU_05 acciaio 30.3M, FAU_02 legno −0.5M).
+
+**Diagnosi** (lettura completa della catena OCR→sessione→report):
+- La produzione è un **delta telescopico**: somma giornaliera per risorsa ≈
+  (ultima lettura del giorno − prima lettura). Le oscillazioni intermedie si
+  annullano, **gli estremi no** → un singolo misread OCR su prima/ultima
+  lettura inquina l'intero totale della risorsa.
+- FAU_05 acciaio: valore vero **~74.10M stabile** (letto identico 5 volte),
+  ma misread come 11.x/41.3 agli estremi → fantasma `41.30 − 11.00 = 30.30M`.
+  FAU_02 legno: jitter ±0.2M su ~35M piatto → telescopa a −0.5M.
+- Causa nel codice: [`ocr_risorse_robust`](shared/ocr_helpers.py) usava
+  "prima lettura ≠ −1 vince" → non filtrava i **misread plausibili** (11.10M
+  e 74.10M sono entrambi validi). Il filtro outlier del report (>30M/h) è
+  per-ora e asimmetrico, non neutralizza gli estremi telescopici.
+
+**Fix (punto b)**: lettura a **consenso 3-su-5** in `ocr_risorse_robust`. Per
+ogni risorsa si raccolgono letture da screenshot FRESCHI e ravvicinati
+(~0.8s, dove la produzione reale ≪ granularità 0.1M, quindi ogni divergenza è
+errore OCR); si accetta il valore solo quando compare 3 volte (moda), il
+misread di minoranza è scartato; senza consenso → −1 → fallback al valore
+precedente (conservativo: meglio "0 prodotto" che uno spike). Early-exit a 3
+letture se stabili. Diamanti inclusi. Chiamanti `main.py` aggiornati (5 tent).
+Smoke test 4 scenari OK (oscillazione FAU_05 → 74.10M; no-consenso → −1;
+stabile → early-exit; banner → tutti −1). `py_compile` OK.
+
+**Limite noto**: il consenso intercetta i misread **frame-dipendenti** (caso
+FAU_05, dove il valore giusto è maggioranza). Punti (a) mediana mobile
+inter-tick e (c) filtro per-salto restano da discutere/valutare dopo
+osservazione runtime.
+
+**Prossimo step**: monitorare i log `[OCR-CONS]` e i totali produzione dopo
+il riavvio; verificare scomparsa dei fantasmi (FAU_05 acciaio, FAU_02 legno).
+
+---
+
 ## Sessione 26/06/2026 — WU181 store: re-center deterministico sul rifugio
 
 Verifica funzionamento task `store` su richiesta utente. Telemetria 26/06
