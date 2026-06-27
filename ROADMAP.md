@@ -5,6 +5,43 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 27/06/2026 (2) — WU183 lettura risorse: ordine boot + stabilità HOME + statistica
+
+Continuazione WU182. L'utente ha individuato un problema di **sequenza di
+avvio**: la lettura risorse girava DOPO i settings a click cieco (Graphics
+HIGH), quindi su sistema lento poteva trovare lo schermo sporco (banner /
+schermata sbagliata da tap ciechi su HOME non davvero stabile) → OCR fallita.
+
+**Ordine reale individuato**: `attendi_home` → stabilizzazione (5 poll) →
+vai_in_home → **settings (click ciechi)** → troops → (main) comprimi_banner →
+**lettura risorse**. Cioè il read avveniva a valle di ~22s di navigazione
+cieca, senza ri-verifica HOME.
+
+**Modifiche (WU183)**:
+1. **Read PRIMA dei settings**: la lettura risorse è ora iniettata in
+   `attendi_home` come callback `on_home_ready`, eseguita subito dopo il
+   `vai_in_home()` finale e **prima** dei settings. Gira sulla HOME più pulita
+   possibile. Resta una closure in `main.py` (usa `ctx.state`). File:
+   `core/launcher.py` (param `on_home_ready` + chiamata), `main.py` (closure).
+2. **Stabilizzazione HOME 5→7 poll** ([launcher.py](core/launcher.py)): +~2.5s
+   per istanza nel caso positivo (trascurabile), HOME più solida prima dei
+   click ciechi.
+3. **Statistica fallimenti lettura**: ogni lettura appende un record a
+   `data/ocr_read_stats.jsonl` (append-only, sopravvive alla rotazione log):
+   `{ts, instance, fallback:[risorse], tutte_ko, diamanti_ok}`. Nuovo tool
+   `tools/ocr_stats.py` per la sintesi (usato da Monitor). Serve a quantificare
+   quanto spesso l'OCR fallisce → decisioni future.
+
+`py_compile` OK su main/launcher/ocr_helpers. Monitor attivo fino al 28/06
+mezzanotte sui fallimenti lettura. Restart bot armato (riarmato per includere
+WU183).
+
+**Prossimo step**: domani valutare `data/ocr_read_stats.jsonl` — se i
+fallimenti residui sono concentrati su poche istanze/risorse, decidere se
+servono (a) mediana mobile inter-tick o (c) filtro per-salto, o se basta così.
+
+---
+
 ## Sessione 27/06/2026 — WU182 produzione risorse: lettura OCR a consenso
 
 Analisi produzione risorse su richiesta utente → valori anomali su alcune

@@ -747,126 +747,130 @@ def _thread_istanza(ist, tasks_cls, dry_run):
             _launcher.chiudi_istanza(ist, porta, _log_fn)  # WU163: evita zombie MuMu su timeout boot
             _aggiorna_stato_istanza(nome, {"stato": "idle"})
             return
-        if not _launcher.attendi_home(ctx, _log_fn):
+        # WU183 (27/06) — la lettura risorse è iniettata in attendi_home come
+        # on_home_ready: gira sulla HOME appena STABILIZZATA (7 poll) e PRIMA
+        # dei settings a click cieco (Graphics HIGH ecc.), che su sistema lento
+        # potevano lasciare lo schermo sporco → OCR fallita. Resta una closure
+        # in main perché usa ctx.state (apri/chiudi sessione + persistenza).
+        def _leggi_risorse():
+            # auto-WU10: chiusura definitiva banner eventi HOME post-stabilizz.
+            try:
+                from shared.ui_helpers import comprimi_banner_home
+                comprimi_banner_home(ctx, _log_fn)
+            except Exception as exc:
+                _log(nome, f"[WARN] comprimi_banner_home: {exc}")
+
+            # snapshot risorse castello + chiusura sessione prec + apertura nuova.
+            # WU182: lettura a CONSENSO 3-su-5 su screenshot freschi (neutralizza
+            # i misread plausibili che inquinavano il delta telescopico).
+            try:
+                from shared.ui_helpers import dismiss_banners_loop
+                counts = dismiss_banners_loop(ctx, max_iter=4,
+                                               log_fn=lambda m: _log(nome, m))
+                if counts:
+                    _log(nome, f"[OCR-PREDISMISS] banner chiusi pre-OCR: {counts}")
+            except Exception as exc:
+                _log(nome, f"[OCR-PREDISMISS] errore best-effort: {exc}")
+            try:
+                from shared.ocr_helpers import ocr_risorse_robust
+                from core.state import _ts_now
+                ts_now = _ts_now()
+                rd = ocr_risorse_robust(
+                    ctx.device, max_attempts=5, sleep_s=0.8, consensus=3,
+                    log_fn=lambda m: _log(nome, m),
+                )
+                # se TUTTE 4 risorse KO, ipotesi banner non smaltito dal
+                # predismiss → 1 round dismiss attivo + 1 retry finale.
+                tutte_ko = all(getattr(rd, r) == -1
+                               for r in ("pomodoro", "legno", "acciaio", "petrolio"))
+                if tutte_ko:
+                    _log(nome, "[OCR] tutte 4 risorse KO → 1 round dismiss + retry finale")
+                    try:
+                        from shared.ui_helpers import dismiss_banners_loop
+                        cs2 = dismiss_banners_loop(ctx, max_iter=4,
+                                                    log_fn=lambda m: _log(nome, m))
+                        if cs2:
+                            _log(nome, f"[OCR] post-fail banner chiusi: {cs2}")
+                    except Exception:
+                        pass
+                    rd = ocr_risorse_robust(
+                        ctx.device, max_attempts=5, sleep_s=1.0, consensus=3,
+                        log_fn=lambda m: _log(nome, m),
+                    )
+                # Skip-on-fail: per ogni risorsa con valore -1, usa l'ultimo
+                # valore valido dalla precedente sessione.
+                prev_corr = ctx.state.produzione_corrente
+                prev_init = (prev_corr.risorse_iniziali if prev_corr else None) or {}
+                risorse_now = {}
+                fallback_risorse = []   # WU183: per la statistica fallimenti lettura
+                for r in ("pomodoro", "legno", "acciaio", "petrolio"):
+                    v = getattr(rd, r)
+                    if v == -1:
+                        fallback_risorse.append(r)
+                        fallback = prev_init.get(r, -1)
+                        if fallback != -1:
+                            risorse_now[r] = fallback
+                            _log(nome,
+                                 f"[PROD-FALLBACK] {r} OCR fail → uso prec valore "
+                                 f"{fallback/1e6:.1f}M")
+                        else:
+                            risorse_now[r] = -1
+                            _log(nome, f"[PROD-FALLBACK] {r} OCR fail e nessun prec valore")
+                    else:
+                        risorse_now[r] = v
+
+                _log(nome,
+                     f"[PROD] risorse castello: pom={risorse_now['pomodoro']/1e6:.1f}M "
+                     f"leg={risorse_now['legno']/1e6:.1f}M "
+                     f"acc={risorse_now['acciaio']/1e6:.1f}M "
+                     f"pet={risorse_now['petrolio']/1e6:.1f}M dia={rd.diamanti}")
+
+                # WU183 — statistica persistente fallimenti lettura risorse
+                # (append-only, sopravvive alla rotazione dei log per-istanza).
+                # Usata per valutare quanto spesso l'OCR fallisce → operazioni
+                # future. 1 record per lettura per istanza.
+                try:
+                    _stat_path = os.path.join(ROOT, "data", "ocr_read_stats.jsonl")
+                    with open(_stat_path, "a", encoding="utf-8") as _sf:
+                        _sf.write(json.dumps({
+                            "ts": ts_now, "instance": nome,
+                            "fallback": fallback_risorse,
+                            "tutte_ko": bool(tutte_ko),
+                            "diamanti_ok": rd.diamanti != -1,
+                        }, ensure_ascii=False) + "\n")
+                except Exception:
+                    pass
+
+                # Chiudi sessione precedente (se esiste) calcolando produzione.
+                chiusa = ctx.state.chiudi_sessione_e_calcola(risorse_now, ts_now,
+                                                            diamanti_finali=rd.diamanti)
+                if chiusa is not None:
+                    po = chiusa.produzione_oraria or {}
+                    _log(nome,
+                         f"[PROD] sessione chiusa durata={chiusa.durata_sec or 0:.0f}s "
+                         f"prod/h: pom={po.get('pomodoro',0):.0f} "
+                         f"leg={po.get('legno',0):.0f} "
+                         f"acc={po.get('acciaio',0):.0f} "
+                         f"pet={po.get('petrolio',0):.0f}")
+
+                # Apri nuova sessione
+                ctx.state.apri_sessione(risorse_now, rd.diamanti, ts_now)
+                _log(nome, f"[PROD] sessione aperta @ {ts_now}")
+
+                # auto-WU20 (27/04 fix persistenza): salva state SUBITO, prima
+                # del _build_ctx che ricarica da disco e wipe produzione_corrente.
+                try:
+                    ctx.state.save(state_dir=os.path.join(ROOT, "state"))
+                except Exception as exc:
+                    _log(nome, f"[WARN] save state post-apri_sessione: {exc}")
+            except Exception as exc:
+                _log(nome, f"[WARN] produzione snapshot: {exc}")
+
+        if not _launcher.attendi_home(ctx, _log_fn, on_home_ready=_leggi_risorse):
             _log(nome, "[ERRORE] attendi_home() fallito")
             _launcher.chiudi_istanza(ist, porta, _log_fn)
             _aggiorna_stato_istanza(nome, {"stato": "idle"})
             return
-
-        # auto-WU10: chiusura definitiva banner eventi HOME post-stabilizzazione
-        # → maggiore zona visibile (+45px) per i task successivi.
-        try:
-            from shared.ui_helpers import comprimi_banner_home
-            comprimi_banner_home(ctx, _log_fn)
-        except Exception as exc:
-            _log(nome, f"[WARN] comprimi_banner_home: {exc}")
-
-        # auto-WU14: snapshot risorse castello + chiusura sessione precedente
-        # + apertura nuova sessione produzione. Le risorse top-bar sono lette
-        # qui (HOME stabile, banner chiuso) per garantire massima accuratezza.
-        # auto-WU25 (27/04): retry OCR per zone fallite + skip-on-fail.
-        # Pre-fix: ocr_risorse single-shot → se 1 zona fallisce ritorna -1
-        # per quella sola risorsa (es. legno=-1 osservato FAU_00 27/04).
-        # Post-fix: ocr_risorse_robust (3 tentativi con merge zone valide)
-        # + fallback a valore precedente se tutte le retry falliscono.
-        # WU182 (27/06): merge "prima ≠ -1 vince" sostituito da CONSENSO
-        # 3-su-5 su screenshot freschi — neutralizza i misread plausibili
-        # (es. acciaio 74.10M letto 11.10M) che inquinavano il delta
-        # telescopico della produzione. Zona senza consenso → -1 → fallback.
-        # 06/05: dismiss banner ATTIVO prima di OCR. Pre-fix: dopo settings
-        # alcuni banner (Equipment Report, eventi laterali) coprono la
-        # top-bar risorse → 3 tentativi OCR tutti KO → fallback prec
-        # (prod/h=0). Aggiunto loop dismiss che smaltisce catalog + X dorato.
-        try:
-            from shared.ui_helpers import dismiss_banners_loop
-            counts = dismiss_banners_loop(ctx, max_iter=4,
-                                           log_fn=lambda m: _log(nome, m))
-            if counts:
-                _log(nome, f"[OCR-PREDISMISS] banner chiusi pre-OCR: {counts}")
-        except Exception as exc:
-            _log(nome, f"[OCR-PREDISMISS] errore best-effort: {exc}")
-        try:
-            from shared.ocr_helpers import ocr_risorse_robust
-            from core.state import _ts_now
-            ts_now = _ts_now()
-            rd = ocr_risorse_robust(
-                ctx.device, max_attempts=5, sleep_s=0.8, consensus=3,
-                log_fn=lambda m: _log(nome, m),
-            )
-            # 06/05: se TUTTE 4 risorse castello KO, ipotesi banner non
-            # smaltito dal predismiss → 1 round dismiss attivo + 1 retry
-            # finale (sleep 1.5s tra retry per dare tempo alla UI).
-            tutte_ko = all(getattr(rd, r) == -1
-                           for r in ("pomodoro", "legno", "acciaio", "petrolio"))
-            if tutte_ko:
-                _log(nome, "[OCR] tutte 4 risorse KO → 1 round dismiss + retry finale")
-                try:
-                    from shared.ui_helpers import dismiss_banners_loop
-                    cs2 = dismiss_banners_loop(ctx, max_iter=4,
-                                                log_fn=lambda m: _log(nome, m))
-                    if cs2:
-                        _log(nome, f"[OCR] post-fail banner chiusi: {cs2}")
-                except Exception:
-                    pass
-                rd = ocr_risorse_robust(
-                    ctx.device, max_attempts=5, sleep_s=1.0, consensus=3,
-                    log_fn=lambda m: _log(nome, m),
-                )
-            # Skip-on-fail: per ogni risorsa con valore -1, usa l'ultimo
-            # valore valido dalla precedente sessione (risorse_iniziali del
-            # produzione_corrente non ancora chiuso).
-            prev_corr = ctx.state.produzione_corrente
-            prev_init = (prev_corr.risorse_iniziali if prev_corr else None) or {}
-            risorse_now = {}
-            for r in ("pomodoro", "legno", "acciaio", "petrolio"):
-                v = getattr(rd, r)
-                if v == -1:
-                    fallback = prev_init.get(r, -1)
-                    if fallback != -1:
-                        risorse_now[r] = fallback
-                        _log(nome,
-                             f"[PROD-FALLBACK] {r} OCR fail → uso prec valore "
-                             f"{fallback/1e6:.1f}M")
-                    else:
-                        risorse_now[r] = -1
-                        _log(nome, f"[PROD-FALLBACK] {r} OCR fail e nessun prec valore")
-                else:
-                    risorse_now[r] = v
-
-            _log(nome,
-                 f"[PROD] risorse castello: pom={risorse_now['pomodoro']/1e6:.1f}M "
-                 f"leg={risorse_now['legno']/1e6:.1f}M "
-                 f"acc={risorse_now['acciaio']/1e6:.1f}M "
-                 f"pet={risorse_now['petrolio']/1e6:.1f}M dia={rd.diamanti}")
-
-            # Chiudi sessione precedente (se esiste) calcolando produzione
-            # Issue #25 fix: passa rd.diamanti per calcolare delta diamanti
-            chiusa = ctx.state.chiudi_sessione_e_calcola(risorse_now, ts_now,
-                                                        diamanti_finali=rd.diamanti)
-            if chiusa is not None:
-                po = chiusa.produzione_oraria or {}
-                _log(nome,
-                     f"[PROD] sessione chiusa durata={chiusa.durata_sec or 0:.0f}s "
-                     f"prod/h: pom={po.get('pomodoro',0):.0f} "
-                     f"leg={po.get('legno',0):.0f} "
-                     f"acc={po.get('acciaio',0):.0f} "
-                     f"pet={po.get('petrolio',0):.0f}")
-
-            # Apri nuova sessione
-            ctx.state.apri_sessione(risorse_now, rd.diamanti, ts_now)
-            _log(nome, f"[PROD] sessione aperta @ {ts_now}")
-
-            # auto-WU20 (27/04 fix persistenza): salva state SUBITO,
-            # prima del _build_ctx (line 774) che ricarica da disco e
-            # wipe `produzione_corrente`/`produzione_storico` impostati.
-            # Pre-fix: sessione_aperta loggata ma mai persistita →
-            # storico sempre vuoto, dashboard "in attesa" permanente.
-            try:
-                ctx.state.save(state_dir=os.path.join(ROOT, "state"))
-            except Exception as exc:
-                _log(nome, f"[WARN] save state post-apri_sessione: {exc}")
-        except Exception as exc:
-            _log(nome, f"[WARN] produzione snapshot: {exc}")
 
     # ── 2. Rebuild context (rilegge config aggiornata) ───────────────
     _ov_raw     = load_overrides(_OVERRIDES_PATH)

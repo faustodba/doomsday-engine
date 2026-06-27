@@ -556,7 +556,8 @@ def avvia_istanza(ist: dict, log_fn: Optional[Callable] = None) -> bool:
     return True
 
 
-def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
+def attendi_home(ctx, log_fn: Optional[Callable] = None,
+                 on_home_ready: Optional[Callable] = None) -> bool:  # noqa: C901
     """[auto-WU16] Stabilizzazione adattiva: poll più rapido + tracking."""
     """
     Attende che l'istanza raggiunga la schermata HOME dopo l'avvio del gioco.
@@ -1000,8 +1001,8 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
                 schermata = Screen.UNKNOWN
             if schermata == Screen.HOME:
                 stable_count += 1
-                _log(f"[{nome}] HOME stabile {stable_count}/5", log_fn)
-                if stable_count >= 5:
+                _log(f"[{nome}] HOME stabile {stable_count}/7", log_fn)
+                if stable_count >= 7:
                     _log(f"[{nome}] HOME stabilizzata — pronti", log_fn)
                     break
             else:
@@ -1029,6 +1030,17 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None) -> bool:  # noqa: C901
             except Exception:
                 pass
             _log(f"[{nome}] HOME raggiunto in {home_total_s:.0f}s", log_fn)
+
+            # WU183 (27/06) — lettura risorse PRIMA dei settings a click cieco.
+            # Iniettata dal caller (main.py) come on_home_ready: gira sulla HOME
+            # appena stabilizzata e confermata, quando lo schermo è più pulito,
+            # prima che la navigazione cieca dei settings possa sporcarlo.
+            if on_home_ready is not None:
+                try:
+                    on_home_ready()
+                except Exception as _exc_ohr:
+                    _log(f"[{nome}] on_home_ready (lettura risorse) errore: {_exc_ohr}", log_fn)
+
             # 05/05: hook metriche spostato a FINE attendi_home (post settings
             # + troops_reader) per includere ~30-40s di overhead post-HOME nel
             # boot_home_s. Pre-fix: stima T_ciclo sotto-stimava di ~7min/ciclo
