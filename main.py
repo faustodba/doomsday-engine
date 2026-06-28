@@ -775,8 +775,23 @@ def _thread_istanza(ist, tasks_cls, dry_run):
                 from shared.ocr_helpers import ocr_risorse_robust
                 from core.state import _ts_now
                 ts_now = _ts_now()
+
+                # WU183 — callback per chiudere i banner che coprono la top-bar
+                # DURANTE la lettura (tutte le risorse -1, es. exit_game_dialog
+                # su FAU_02 dopo la stabilizzazione). Riusato da entrambe le
+                # chiamate. Recupera nel loop di consenso senza consumare i
+                # tentativi (budget max_dismiss interno).
+                def _dismiss_banner():
+                    try:
+                        from shared.ui_helpers import dismiss_banners_loop
+                        dismiss_banners_loop(ctx, max_iter=4,
+                                             log_fn=lambda m: _log(nome, m))
+                    except Exception:
+                        pass
+
                 rd = ocr_risorse_robust(
                     ctx.device, max_attempts=5, sleep_s=0.8, consensus=3,
+                    on_banner=_dismiss_banner,
                     log_fn=lambda m: _log(nome, m),
                 )
                 # se TUTTE 4 risorse KO, ipotesi banner non smaltito dal
@@ -795,6 +810,7 @@ def _thread_istanza(ist, tasks_cls, dry_run):
                         pass
                     rd = ocr_risorse_robust(
                         ctx.device, max_attempts=5, sleep_s=1.0, consensus=3,
+                        on_banner=_dismiss_banner,
                         log_fn=lambda m: _log(nome, m),
                     )
                 # Skip-on-fail: per ogni risorsa con valore -1, usa l'ultimo

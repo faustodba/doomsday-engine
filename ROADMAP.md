@@ -5,6 +5,35 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 28/06/2026 — WU183 (cont.): dismiss banner in-loop (caso FAU_02)
+
+La statistica WU183 ha subito catturato il caso che l'utente sospettava: FAU_02
+alle 04:12 ha registrato **`tutte_ko=True`** (tutte e 4 le risorse −1). Analisi
+log: dopo ~8 conferme HOME stabile (home=0.988), un **banner ha coperto la
+top-bar durante la lettura** → tutte le risorse −1 → fallback ai valori
+precedenti. Il template HOME (`pin_region`) resta 0.988 anche con la barra
+risorse coperta → la stabilizzazione conferma HOME ma **non** la barra in alto.
+FAU_02 mostra `exit_game_dialog` ricorrente (9× in ~14h + 1 `vai_in_home
+FALLITO`): instabilità a livello istanza.
+
+**Fix (punto b, era rimandato)**: dismiss del banner **dentro** il loop di
+consenso. In `ocr_risorse_robust` nuovo param `on_banner` + budget
+`max_dismiss=2`: se una lettura torna con tutte le 4 risorse −1 (banner),
+chiama `on_banner()` (= `dismiss_banners_loop`) e ritenta **senza consumare** un
+tentativo di consenso (guard `hard_cap` anti-loop). `main.py` passa
+`on_banner=_dismiss_banner` a entrambe le letture. Smoke test esteso (scenari E
+recupero post-dismiss, F budget rispettato senza loop) + A/B/C invariati, tutti
+verdi. `py_compile` OK.
+
+**Limite**: recupera i banner **transienti**; se `exit_game_dialog` ri-compare
+in continuo (instabilità MuMu FAU_02) il dismiss mitiga ma non cura — resta da
+valutare la **salute istanza FAU_02** separatamente (riavvio/reinstall MuMu).
+
+**Prossimo step**: dopo il riavvio, verificare nei log `[OCR-CONS] ... dismiss
+N/2` su FAU_02 e che i `tutte_ko` in `ocr_read_stats.jsonl` calino.
+
+---
+
 ## Sessione 27/06/2026 (2) — WU183 lettura risorse: ordine boot + stabilità HOME + statistica
 
 Continuazione WU182. L'utente ha individuato un problema di **sequenza di

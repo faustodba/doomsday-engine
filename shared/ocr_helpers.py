@@ -317,7 +317,8 @@ def ocr_risorse(img: "Screenshot | np.ndarray") -> RisorseDeposito:
 
 def ocr_risorse_robust(device, max_attempts: int = 5,
                        sleep_s: float = 0.8, log_fn=None,
-                       consensus: int = 3) -> "RisorseDeposito":
+                       consensus: int = 3, on_banner=None,
+                       max_dismiss: int = 2) -> "RisorseDeposito":
     """
     Lettura risorse castello con CONSENSO (WU182, 27/06/2026).
 
@@ -341,6 +342,12 @@ def ocr_risorse_robust(device, max_attempts: int = 5,
 
     Default 3-su-5: tollera fino a 2 misread per risorsa. `tutte_ko` (banner
     sulla top-bar) resta rilevabile dal caller (tutte le risorse -1).
+
+    WU183 (28/06): se una lettura torna con TUTTE le 4 risorse -1 (banner che
+    copre la top-bar — caso FAU_02: dopo la stabilizzazione HOME compare un
+    popup es. exit_game_dialog), invoca `on_banner()` per chiuderlo e ritenta
+    SENZA consumare un tentativo di consenso (budget `max_dismiss`). Recupera i
+    banner transienti che il singolo retry post-loop non smaltiva.
     """
     import time as _t
     from collections import Counter
@@ -349,20 +356,43 @@ def ocr_risorse_robust(device, max_attempts: int = 5,
     votes: dict = {f: Counter() for f in fields}
     settled: dict = {}  # field -> valore una volta raggiunto il consenso
 
-    for attempt in range(max_attempts):
-        if len(settled) == len(fields):
-            break  # tutte le risorse hanno consenso → stop
+    RES4 = ("pomodoro", "legno", "acciaio", "petrolio")
+    attempts_done = 0          # tentativi di consenso effettivi (escluso dismiss)
+    dismiss_done = 0           # quante volte abbiamo chiuso un banner (WU183)
+    hard_cap = max_attempts + max_dismiss + 3   # guard anti-loop infinito
+    iters = 0
+    while attempts_done < max_attempts and len(settled) < len(fields):
+        iters += 1
+        if iters > hard_cap:
+            break
 
         try:
             shot = device.screenshot() if device is not None else None
         except Exception:
             shot = None
         if shot is None:
-            log(f"[OCR-CONS] tent {attempt+1}: screenshot None")
+            log(f"[OCR-CONS] tent {attempts_done+1}: screenshot None")
+            attempts_done += 1   # conta (evita loop infinito su None persistente)
             _t.sleep(sleep_s)
             continue
 
         rd_new = ocr_risorse(shot)
+
+        # WU183 — banner sulla top-bar? TUTTE le 4 risorse -1 (diamanti escluso).
+        # Chiudi via on_banner e ritenta SENZA consumare un tentativo di consenso
+        # (budget max_dismiss). Recupera i banner transienti post-stabilizzazione.
+        risorse_ko = all(getattr(rd_new, r) == -1 for r in RES4)
+        if risorse_ko and on_banner is not None and dismiss_done < max_dismiss:
+            dismiss_done += 1
+            log(f"[OCR-CONS] risorse tutte -1 (banner sospetto) → "
+                f"dismiss {dismiss_done}/{max_dismiss} + retry")
+            try:
+                on_banner()
+            except Exception as _e:
+                log(f"[OCR-CONS] on_banner errore: {_e}")
+            _t.sleep(sleep_s)
+            continue   # NON conta come tentativo di consenso
+
         for f in fields:
             if f in settled:
                 continue
@@ -374,9 +404,10 @@ def ocr_risorse_robust(device, max_attempts: int = 5,
             if top_n >= consensus:
                 settled[f] = top_v
 
-        if len(settled) < len(fields) and attempt < max_attempts - 1:
+        attempts_done += 1
+        if len(settled) < len(fields) and attempts_done < max_attempts:
             pending = [f for f in fields if f not in settled]
-            log(f"[OCR-CONS] tent {attempt+1}: consenso pending {pending}")
+            log(f"[OCR-CONS] tent {attempts_done}: consenso pending {pending}")
             _t.sleep(sleep_s)
 
     out = {}
@@ -390,7 +421,8 @@ def ocr_risorse_robust(device, max_attempts: int = 5,
                 # tutte le letture viste (es. {74100000:2, 11100000:2})
                 letture = {k: n for k, n in votes[f].most_common()}
                 log(f"[OCR-CONS] {f} NESSUN CONSENSO/{consensus} dopo "
-                    f"{max_attempts} tent: {letture} → -1 (fallback prec)")
+                    f"{attempts_done} tent ({dismiss_done} dismiss): "
+                    f"{letture} → -1 (fallback prec)")
     return RisorseDeposito(**out)
 
 
