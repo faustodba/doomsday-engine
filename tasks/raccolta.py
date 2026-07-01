@@ -1651,14 +1651,15 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
                 f"Raccolta [{tipo}] Lv.{lv}: nodo {chiave_test} "
                 f"in blacklist fuori — provo livello successivo"
             )
-            # WU173 — dataset mappatura nodi (fase 1, solo osservazione)
-            try:
-                from shared.nodi_mappa import registra_osservazione
-                registra_osservazione(
-                    ctx.instance_name, chiave_test, tipo, lv, "fuori_territorio"
-                )
-            except Exception:
-                pass
+            # WU184 (30/06) — anagrafe nodi DISABILITATA (rifugi concentrati →
+            # relazione geografica non sfruttabile). Hook osservazione commentato.
+            # try:
+            #     from shared.nodi_mappa import registra_osservazione
+            #     registra_osservazione(
+            #         ctx.instance_name, chiave_test, tipo, lv, "fuori_territorio"
+            #     )
+            # except Exception:
+            #     pass
             _reset_to_mappa(ctx, obiettivo)
             continue
 
@@ -1704,14 +1705,14 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
                     f"Raccolta [{tipo}]: secondo nodo {chiave2} "
                     f"in blacklist fuori — skip neutro"
                 )
-                # WU173 — dataset mappatura nodi (fase 1, solo osservazione)
-                try:
-                    from shared.nodi_mappa import registra_osservazione
-                    registra_osservazione(
-                        ctx.instance_name, chiave2, tipo, lv, "fuori_territorio"
-                    )
-                except Exception:
-                    pass
+                # WU184 (30/06) — anagrafe nodi DISABILITATA. Hook commentato.
+                # try:
+                #     from shared.nodi_mappa import registra_osservazione
+                #     registra_osservazione(
+                #         ctx.instance_name, chiave2, tipo, lv, "fuori_territorio"
+                #     )
+                # except Exception:
+                #     pass
                 _reset_to_mappa(ctx, obiettivo)
                 return False, False, True
             chiave_test = chiave2
@@ -1720,12 +1721,12 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
         # ── Nodo utile trovato ─────────────────────────────────────────
         chiave = chiave_test
         ctx.log_msg(f"Raccolta: nodo trovato a Lv.{lv} — procedo")
-        # WU173 — dataset mappatura nodi (fase 1, solo osservazione)
-        try:
-            from shared.nodi_mappa import registra_osservazione
-            registra_osservazione(ctx.instance_name, chiave, tipo, lv, "trovato")
-        except Exception:
-            pass
+        # WU184 (30/06) — anagrafe nodi DISABILITATA. Hook osservazione commentato.
+        # try:
+        #     from shared.nodi_mappa import registra_osservazione
+        #     registra_osservazione(ctx.instance_name, chiave, tipo, lv, "trovato")
+        # except Exception:
+        #     pass
         break
 
     if chiave is None:
@@ -1862,13 +1863,13 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
     ttl_log = f"ETA={eta_s}s" if eta_s else f"TTL={_cfg(ctx, 'BLACKLIST_COMMITTED_TTL')}s"
     ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} COMMITTED ({ttl_log})")
 
-    # WU177 — dataset mappatura nodi: occupazione CONFERMATA (marcia riuscita,
-    # non solo nodo trovato). Distinto da "trovato" (CERCA+lettura, WU173).
-    try:
-        from shared.nodi_mappa import registra_osservazione
-        registra_osservazione(ctx.instance_name, chiave, tipo, livello_nodo, "occupato")
-    except Exception:
-        pass
+    # WU184 (30/06) — anagrafe nodi DISABILITATA (rifugi concentrati). Hook
+    # occupazione commentato (era WU177). cap_nodi_dataset sopra resta attivo.
+    # try:
+    #     from shared.nodi_mappa import registra_osservazione
+    #     registra_osservazione(ctx.instance_name, chiave, tipo, livello_nodo, "occupato")
+    # except Exception:
+    #     pass
 
     # auto-WU14 step2: hook produzione — incrementa truppe raccolta inviate
     try:

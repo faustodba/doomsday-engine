@@ -5,6 +5,41 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 30/06/2026 — WU184: disabilitazione anagrafe nodi (mappatura)
+
+Analisi correlazione feature-catalogo ↔ esiti raccolta (per istanza):
+contesa↔sec/marcia +0.40, ma **strutturale non temporale** (variazione oraria
+piatta ~92-100s), **fill slot 100%** (nessuno spreco da recuperare) e ciclo
+sequenziale (tempo totale invariante all'ordine). Conclusione: l'anagrafe nodi
+**non è sfruttabile** né per instradare i raccoglitori (non si sa a priori se un
+nodo esiste ed è libero — contesa con giocatori esterni), né per ordinare le
+istanze (differenze legate a *dove* stanno i rifugi, non a *quando* si eseguono;
+e i rifugi sono tutti concentrati → relazione geografica non utile).
+
+**Decisione utente**: disabilitare l'anagrafe nodi + pannello dashboard +
+schedulazione, alleggerendo il sistema. **Commentato (non cancellato)** per
+reversibilità:
+- `tasks/raccolta.py`: 4 hook `registra_osservazione` (trovato/occupato/fuori)
+  commentati.
+- `dashboard/app.py`: **schedulazione** `_nodi_mappa_rebuild_loop` (create_task +
+  shutdown) rimossa → niente più rebuild ogni 20 min; route `/ui/nodi-mappa` e
+  `/api/nodi-mappa/rebuild` disabilitate (decorator commentato, funzioni orfane).
+- `base.html`: link nav "nodi mappa" commentato.
+- Moduli `shared/nodi_mappa.py` e `tools/costruisci_catalogo_nodi.py` lasciati in
+  repo (non più invocati). Dati `nodi_mappa_*` non più aggiornati.
+
+**MANTENUTO** (sistema diverso, dipendenza viva): `cap_nodi_dataset` +
+`registra_cap_sample` → alimenta daily report sez.8 "Copertura Squadre"
+([daily_report.py:716](core/daily_report.py#L716)) + pagina `/ui/raccolta`.
+
+**Verifica robustezza**: `py_compile` OK, **57/57 test raccolta verdi**,
+dashboard importa OK (route nodi-mappa assenti, `/ui/raccolta` presente).
+
+**Prossimo step**: nessuno. Sistema alleggerito. I file dati `nodi_mappa_*`
+possono essere cancellati manualmente (gitignored) se si vuole liberare spazio.
+
+---
+
 ## Sessione 28/06/2026 — WU183 (cont.): dismiss banner in-loop (caso FAU_02)
 
 La statistica WU183 ha subito catturato il caso che l'utente sospettava: FAU_02

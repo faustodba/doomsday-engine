@@ -290,13 +290,17 @@ async def lifespan(app: FastAPI):
     # Avvia background task predictor recorder
     global _predictor_recorder_task, _nodi_mappa_rebuild_task
     _predictor_recorder_task = asyncio.create_task(_predictor_recorder_loop())
-    _nodi_mappa_rebuild_task = asyncio.create_task(_nodi_mappa_rebuild_loop())
+    # WU184 (30/06) — anagrafe nodi disabilitata: SCHEDULAZIONE rebuild rimossa
+    # (relazione geografica non sfruttabile, rifugi concentrati). Alleggerisce
+    # la dashboard (niente rebuild ogni 20 min su tutte le osservazioni).
+    # _nodi_mappa_rebuild_task = asyncio.create_task(_nodi_mappa_rebuild_loop())
     yield
     print(f"[DASHBOARD] {_ts()} shutdown.")
     if _predictor_recorder_task and not _predictor_recorder_task.done():
         _predictor_recorder_task.cancel()
-    if _nodi_mappa_rebuild_task and not _nodi_mappa_rebuild_task.done():
-        _nodi_mappa_rebuild_task.cancel()
+    # WU184 — rebuild task non più avviato (vedi sopra)
+    # if _nodi_mappa_rebuild_task and not _nodi_mappa_rebuild_task.done():
+    #     _nodi_mappa_rebuild_task.cancel()
 
 
 # ==============================================================================
@@ -517,9 +521,11 @@ def _load_ab_records() -> list[dict]:
     return out
 
 
-@app.get("/ui/nodi-mappa", include_in_schema=False)
+# WU184 (30/06) — pannello anagrafe nodi RIMOSSO dalla dashboard (route
+# disabilitata). Funzione lasciata orfana (non registrata) per reversibilità.
+# @app.get("/ui/nodi-mappa", include_in_schema=False)
 def ui_nodi_mappa(request: Request, tipo: str = "", min_oss: int = 1):
-    """Pagina visualizzazione dataset mappatura nodi (WU173-WU178) — tabella filtrabile."""
+    """Pagina visualizzazione dataset mappatura nodi (WU173-WU178) — DISABILITATA WU184."""
     from dashboard.services.stats_reader import get_nodi_mappa_catalogo
 
     def _fmt_local(ts_iso):
@@ -552,7 +558,8 @@ def ui_nodi_mappa(request: Request, tipo: str = "", min_oss: int = 1):
     })
 
 
-@app.post("/api/nodi-mappa/rebuild", include_in_schema=False)
+# WU184 (30/06) — endpoint rebuild manuale anagrafe nodi DISABILITATO (route non registrata).
+# @app.post("/api/nodi-mappa/rebuild", include_in_schema=False)
 def api_nodi_mappa_rebuild():
     """WU179 — forza la rigenerazione immediata del catalogo nodi mappa
     (bottone "aggiorna" in /ui/nodi-mappa), senza attendere il prossimo
