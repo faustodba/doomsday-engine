@@ -108,6 +108,7 @@ All'inizio di ogni sessione, in questo ordine:
 
 | Tema | # | Issue | Priorità | Stato |
 |------|---|-------|----------|-------|
+| arena-combat | WU185 | Arena — video introduttivo post-aggiornamento client (pulsante Skip) | MEDIA | 🔍 01/07/2026 IN OSSERVAZIONE — fix `_gestisci_video_intro()` implementato (poll Skip → tap; se persa finestra, schermata Open non skippabile → retry ingresso fino 5x; dopo 5 falliti, fallback passivo). Path di fallback mai validato in produzione — monitorare log `[ARENA] [INTRO]`. Dettagli in `docs/issues/arena-combat.md` |
 | infra-startup | 12 | Stabilizzazione HOME FAU_01/FAU_02 non converge | MEDIA | 🟡 mitigato (window 30→60s commit `9c1dfb4`) |
 | infra-startup | 49 | Ottimizzazioni startup istanza (DELAY_POLL, stable_polls, delay_carica) | BASSA | 🆕 APERTA 24/04 — guadagno stimato ~90s/ciclo, rimandata post-stabilizzazione DS |
 | arena-combat | 51 | DistrictShowdown — gate readiness popup fase 3/4/5 (tap a vuoto su MuMu lento → blocco WARFARE) | BASSA | 🆕 APERTA 24/04 (downgrade ALTA→BASSA 04/05) — proposta: `_wait_template_ready` analogo a pin_dado su sentinel di ogni popup (pin_alliance_influence / pin_achievement_rewards / pin_alliance_list / pin_vs_fund_raid). Non bloccante: DS è disabilitato dal flag dashboard (WU108) finché evento non utile o stabilizzazione MuMu |

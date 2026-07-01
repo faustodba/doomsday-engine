@@ -132,6 +132,10 @@ class FakeNavigator:
         ctx.device.tap(0, 0)
         return True
 
+    def vai_in_home(self) -> bool:
+        """Stub: ritorna lo stato _home configurato in __init__."""
+        return self._home
+
 
 class FakeTaskContext:
     """
@@ -451,6 +455,119 @@ class TestArenaTask(unittest.TestCase):
 
         self.assertTrue(result.success)
         self.assertEqual(result.data["sfide_eseguite"], 5)
+
+
+# ==============================================================================
+# WU185 (01/07) — video introduttivo post-aggiornamento client + pulsante Skip
+# ==============================================================================
+
+class TestArenaVideoIntro(unittest.TestCase):
+    """
+    Scenari coperti
+    ───────────────────────────────────────────────────────────────────────
+      1. video_gia_superato_noop           — lista già visibile → no-op, 0 tap
+      2. skip_catturato_al_primo_tentativo — Skip visibile subito → tap immediato
+      3. skip_perso_poi_catturato          — 1° tentativo Open (perso) → retry
+                                              ingresso → 2° tentativo Skip preso
+      4. skip_mai_catturato_fallback_lista — 5 tentativi falliti → fallback
+                                              passivo, gestisce Open finché
+                                              non compare lista
+    """
+
+    def setUp(self):
+        self._sleep_patcher = patch("tasks.arena.time.sleep")
+        self._mock_sleep = self._sleep_patcher.start()
+
+    def tearDown(self):
+        self._sleep_patcher.stop()
+
+    def _make_task(self):
+        from tasks.arena import ArenaTask
+        return ArenaTask()
+
+    def test_video_gia_superato_noop(self):
+        task    = self._make_task()
+        device  = FakeDevice()
+        matcher = FakeMatcher()
+        nav     = FakeNavigator(home=True)
+        ctx     = FakeTaskContext(device, matcher, nav)
+        matcher.set_score("pin/pin_arena_01_lista.png", 0.90)
+
+        task._gestisci_video_intro(ctx)
+
+        self.assertEqual(device.taps, [])
+
+    def test_skip_catturato_al_primo_tentativo(self):
+        task    = self._make_task()
+        device  = FakeDevice()
+        matcher = FakeMatcher()
+        nav     = FakeNavigator(home=True)
+        ctx     = FakeTaskContext(device, matcher, nav)
+        matcher.set_score("pin/pin_arena_01_lista.png",      0.00)  # video in corso
+        matcher.set_score("pin/pin_arena_08_skip_intro.png", 0.90)
+
+        task._gestisci_video_intro(ctx)
+
+        self.assertEqual(len(device.taps), 1)
+        self.assertEqual(nav.barra_taps, [])  # nessun retry ingresso
+
+    def test_skip_perso_poi_catturato(self):
+        task    = self._make_task()
+        device  = FakeDevice()
+        matcher = FakeMatcher()
+        nav     = FakeNavigator(home=True)
+        ctx     = FakeTaskContext(device, matcher, nav)
+
+        calls = {"skip": 0}
+
+        def fake_match(screen, tmpl, roi):
+            if tmpl == "pin/pin_arena_01_lista.png":
+                return 0.00  # video ancora in corso
+            if tmpl == "pin/pin_arena_08_skip_intro.png":
+                calls["skip"] += 1
+                return 0.90 if calls["skip"] >= 2 else 0.00
+            if tmpl == "pin/pin_arena_09_open_intro.png":
+                return 0.90  # finestra Skip persa al 1° tentativo
+            return 0.00
+
+        matcher.match = fake_match
+
+        task._gestisci_video_intro(ctx)
+
+        self.assertEqual(nav.barra_taps.count("campaign"), 1)  # 1 solo retry ingresso
+        # 3 tap complessivi: tap_barra("campaign") + re-tap Arena of Doom + tap Skip
+        self.assertEqual(len(device.taps), 3)
+
+    def test_skip_mai_catturato_fallback_lista(self):
+        task    = self._make_task()
+        device  = FakeDevice()
+        matcher = FakeMatcher()
+        nav     = FakeNavigator(home=True)
+        ctx     = FakeTaskContext(device, matcher, nav)
+
+        calls = {"lista": 0}
+
+        def fake_match(screen, tmpl, roi):
+            if tmpl == "pin/pin_arena_08_skip_intro.png":
+                return 0.00  # Skip mai catturato
+            if tmpl == "pin/pin_arena_09_open_intro.png":
+                return 0.90  # sempre su Open (video forzato)
+            if tmpl == "pin/pin_arena_01_lista.png":
+                calls["lista"] += 1
+                # trovata solo nel fallback passivo, dopo qualche poll
+                return 0.90 if calls["lista"] >= 3 else 0.00
+            return 0.00
+
+        matcher.match = fake_match
+
+        from tasks.arena import MAX_TENTATIVI_INTRO_SKIP
+        task._gestisci_video_intro(ctx)
+
+        # 5 tentativi di ingresso esauriti → 4 retry (campaign re-tap)
+        self.assertEqual(nav.barra_taps.count("campaign"), MAX_TENTATIVI_INTRO_SKIP - 1)
+        # fallback passivo deve aver tappato Open almeno una volta
+        from tasks.arena import _TAP_OPEN_INTRO
+        self.assertIn(_TAP_OPEN_INTRO, device.taps)
 
 
 if __name__ == "__main__":

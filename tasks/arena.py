@@ -23,10 +23,23 @@ PIN usati
                                     Glory Silver), che appare a inizio
                                     season o al cambio di rank. NON il
                                     banner header "Arena of Glory".
+  pin/pin_arena_08_skip_intro.png ROI=(870,  0, 960,  55)  soglia=0.80
+                                  → pulsante "Skip" in alto a destra del
+                                    video introduttivo (WU185, 01/07) che
+                                    appare al primo ingresso in Arena of
+                                    Doom dopo un aggiornamento software del
+                                    client (reinstall istanze). Resta
+                                    visibile per diversi secondi.
+  pin/pin_arena_09_open_intro.png ROI=(400,240, 565, 320)  soglia=0.80
+                                  → pulsante "Open" (busta) — compare se la
+                                    finestra Skip viene persa: il video
+                                    prosegue forzatamente e da qui NON è più
+                                    possibile saltare (indicazione utente).
 
 Navigazione
 ─────────────────────────────────────────────────────────────────────────────
-  HOME → tap Campaign → tap Arena of Doom → [gestisci popup] → lista sfide
+  HOME → tap Campaign → tap Arena of Doom → [gestisci video intro post-update]
+         → [gestisci popup] → lista sfide
   Sfide: tap ultima sfida → [check esaurite] → START CHALLENGE → attendi
          → tap-to-continue → [check glory post-sfida] → lista
   Ritorno: doppio tap centro + 4x BACK
@@ -86,6 +99,17 @@ _TAP_CONTINUE_FAILURE = (457, 515)  # WU77 "Tap to Continue" Failure (era 509)
 _TAP_CENTRO           = (480, 270)  # centro schermo (fallback)
 _TAP_CENTRO_PAUSE     = 0.8         # pausa tra i due tap centro
 _TAP_SKIP_CHECKBOX    = (723, 488)  # checkbox Skip (salta animazione battaglia)
+
+# WU185 (01/07) — video introduttivo post-aggiornamento client (reinstall
+# istanze). Pulsante Skip in alto a destra, coord fallback = centro template
+# 80x42 catturato in ROI (870,0,960,55). Pulsante Open (busta) al centro,
+# compare solo se la finestra Skip è stata persa — da lì non si può più
+# saltare (indicazione utente 01/07): meglio uscire e ritentare l'ingresso.
+_TAP_SKIP_INTRO         = (920,  29)
+_TAP_OPEN_INTRO         = (482, 280)
+MAX_TENTATIVI_INTRO_SKIP = 5   # tentativi dedicati a catturare Skip in tempo
+_POLL_INTRO_SKIP_S       = 1.2  # intervallo poll durante la finestra Skip
+_N_POLL_INTRO_SKIP       = 6    # ~7s di finestra di osservazione per tentativo
 
 # WU83 (30/04 12:20) — Rebuild truppe pre-1ª sfida del giorno.
 # Coord calibrate live FAU_06: 4 celle attive + 5ª lucchettata.
@@ -197,6 +221,9 @@ _ARENA_PIN: dict[str, _PinSpec] = {
     "glory":    _PinSpec("pin/pin_arena_07_glory.png",     (345, 405, 615, 465), 0.80),
     "skip_on":  _PinSpec("pin/pin_arena_check.png",        (700, 470, 760, 510), 0.75),
     "skip_off": _PinSpec("pin/pin_arena_no_check.png",     (700, 470, 760, 510), 0.75),
+    # WU185 (01/07) — video introduttivo post-aggiornamento client.
+    "skip_intro": _PinSpec("pin/pin_arena_08_skip_intro.png", (870,   0, 960,  55), 0.80),
+    "open_intro": _PinSpec("pin/pin_arena_09_open_intro.png", (400, 240, 565, 320), 0.80),
 }
 
 
@@ -411,6 +438,11 @@ class ArenaTask(Task):
         ctx.device.tap(*_TAP_ARENA_OF_DOOM)
         time.sleep(1.0)  # animazione minima
 
+        # WU185 (01/07) — video introduttivo post-aggiornamento client
+        # (reinstall istanze). No-op immediato (poll singolo veloce, score
+        # basso) se il video è già stato superato in precedenza.
+        self._gestisci_video_intro(ctx)
+
         # Gestione popup all'ingresso
         self._gestisci_popup_glory(ctx)
         self._gestisci_popup_congratulations(ctx)
@@ -422,6 +454,116 @@ class ArenaTask(Task):
         else:
             ctx.log_msg("[ARENA] [PRE-LISTA] ANOMALIA: lista non rilevata")
         return ok
+
+    # ── Video introduttivo post-aggiornamento (WU185, 01/07) ─────────────────
+
+    def _gestisci_video_intro(self, ctx: TaskContext) -> None:
+        """
+        Gestisce il video introduttivo che appare al primo ingresso in Arena
+        of Doom dopo un aggiornamento software del client (reinstall
+        istanze). Comportamento osservato/riportato dall'utente:
+          - il pulsante "Skip" compare in alto a destra e resta visibile
+            per diversi secondi durante il video;
+          - se non viene premuto in tempo, il video prosegue forzatamente
+            su una schermata con pulsante "Open" (busta) — da lì NON è più
+            possibile saltare.
+
+        Strategia: fino a MAX_TENTATIVI_INTRO_SKIP tentativi dedicati a
+        catturare Skip. Ogni tentativo fa un poll regolare (finestra di
+        diversi secondi, non serve reattività istantanea) cercando
+        "skip_intro"; se compare invece "open_intro" il tentativo è perso —
+        si torna in HOME e si rientra in Arena of Doom da capo (riusa la
+        stessa sequenza HOME→Campaign→Arena, incluso il recovery
+        BANNER-LOOP del navigator per l'eventuale dialogo "Exit game?"
+        innescato da un BACK durante il video — osservato in live su
+        FAU_10). Dopo MAX_TENTATIVI_INTRO_SKIP tentativi falliti si rinuncia
+        a saltare: si gestisce "open_intro" quando richiesto e si lascia
+        scorrere il video fino al ritorno naturale alla lista sfide (il
+        loop esterno dei 3 tentativi di ArenaTask resta comunque il
+        fallback finale).
+
+        No-op economico (1 screenshot + match "lista") se il video è già
+        stato superato in precedenza — safe da chiamare ad ogni ingresso.
+        """
+        screen = ctx.device.screenshot()
+        if screen is None:
+            return
+        if self._match(ctx, screen, "lista"):
+            return  # video già superato in precedenza
+
+        for tentativo in range(1, MAX_TENTATIVI_INTRO_SKIP + 1):
+            catturato = False
+            for _ in range(_N_POLL_INTRO_SKIP):
+                screen = ctx.device.screenshot()
+                if screen is None:
+                    time.sleep(_POLL_INTRO_SKIP_S)
+                    continue
+                spec = _ARENA_PIN["skip_intro"]
+                result = ctx.matcher.find_one(screen, spec.path, threshold=spec.soglia, zone=spec.roi)
+                ctx.log_msg("[ARENA-PIN] skip_intro: score=%.3f → %s",
+                            result.score, "OK" if result.found else "NON trovato")
+                if result.found:
+                    ctx.log_msg("[ARENA] [INTRO] Skip rilevato (tentativo %d/%d) — tap (%d,%d)",
+                                tentativo, MAX_TENTATIVI_INTRO_SKIP, result.cx, result.cy)
+                    ctx.device.tap(result.cx, result.cy)
+                    catturato = True
+                    break
+                if self._match(ctx, screen, "open_intro"):
+                    ctx.log_msg("[ARENA] [INTRO] finestra Skip persa — schermata Open (tentativo %d/%d)",
+                                tentativo, MAX_TENTATIVI_INTRO_SKIP)
+                    break
+                time.sleep(_POLL_INTRO_SKIP_S)
+
+            if catturato:
+                time.sleep(1.5)  # chiusura video post-skip
+                return
+
+            if tentativo >= MAX_TENTATIVI_INTRO_SKIP:
+                break
+
+            ctx.log_msg("[ARENA] [INTRO] Skip non catturato — ritento ingresso (%d/%d)",
+                        tentativo + 1, MAX_TENTATIVI_INTRO_SKIP)
+            if ctx.navigator is not None:
+                ctx.navigator.vai_in_home()  # gestisce anche l'eventuale exit_game_dialog
+            else:
+                ctx.device.back()
+                time.sleep(1.0)
+            time.sleep(0.5)
+            _navigato = False
+            if ctx.navigator is not None and hasattr(ctx.navigator, "tap_barra"):
+                _navigato = ctx.navigator.tap_barra(ctx, "campaign")
+            if not _navigato:
+                ctx.device.tap(*_TAP_CAMPAIGN)
+            time.sleep(1.0)
+            ctx.device.tap(*_TAP_ARENA_OF_DOOM)
+            time.sleep(1.0)
+
+        ctx.log_msg("[ARENA] [INTRO] Skip non catturato dopo %d tentativi — lascio scorrere il video",
+                    MAX_TENTATIVI_INTRO_SKIP)
+        self._attendi_fine_video_intro(ctx)
+
+    def _attendi_fine_video_intro(self, ctx: TaskContext, max_poll: int = 15, poll_s: float = 2.0) -> None:
+        """
+        Fallback dopo MAX_TENTATIVI_INTRO_SKIP tentativi falliti: il video
+        prosegue senza possibilità di saltarlo. Gestisce "open_intro"
+        opportunisticamente (tap ogni volta che compare) finché non si
+        raggiunge la lista sfide o si esaurisce max_poll — il loop esterno
+        di ArenaTask resta comunque il fallback finale se anche questo non
+        basta.
+        """
+        for _ in range(max_poll):
+            screen = ctx.device.screenshot()
+            if screen is None:
+                time.sleep(poll_s)
+                continue
+            if self._match(ctx, screen, "lista"):
+                ctx.log_msg("[ARENA] [INTRO] video terminato — lista raggiunta")
+                return
+            if self._match(ctx, screen, "open_intro"):
+                ctx.log_msg("[ARENA] [INTRO] tap Open (fallback passivo)")
+                ctx.device.tap(*_TAP_OPEN_INTRO)
+            time.sleep(poll_s)
+        ctx.log_msg("[ARENA] [INTRO] fallback passivo esaurito senza raggiungere lista")
 
     def _torna_home(self, ctx: TaskContext) -> None:
         """

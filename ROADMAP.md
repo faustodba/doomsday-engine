@@ -5,6 +5,57 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 01/07/2026 — WU185: Arena — video introduttivo post-aggiornamento client
+
+Dopo la reinstallazione di tutte le istanze MuMu (aggiornamento software client
+richiesto dall'utente), il task `arena` falliva sistematicamente (3/3 tentativi)
+su più istanze (FAU_01, FAU_02, FAU_05, FAU_06, FAU_08 osservati live). Diagnosi
+log: dopo il tap "Arena of Doom" il pin `lista` non veniva mai trovato (score
+0.0-0.22 costante) — segno di una schermata diversa persistente.
+
+**Osservazione live** (monitor MCP `anomalie_live`/`log_tail` + watcher ADB
+read-only dedicato, catturati screenshot reali su FAU_08/FAU_10): il client
+mostra un **video introduttivo** al primo ingresso in Arena of Doom dopo
+l'aggiornamento, con pulsante **"Skip"** in alto a destra visibile per diversi
+secondi. Indicazione utente: se la finestra Skip viene persa, il video
+prosegue forzatamente su una schermata con pulsante **"Open"** (busta) — da lì
+NON è più possibile saltare. Verificato anche che in V5 (`C:\Bot-farm`) non
+esiste alcuna gestione pregressa per questo — comportamento nuovo introdotto
+dall'aggiornamento client.
+
+**Fix** (`tasks/arena.py`): nuovo metodo `_gestisci_video_intro()` chiamato
+subito dopo il tap "Arena of Doom" (prima dei check esistenti glory/lista).
+Poll regolare cercando il pin `skip_intro` → tap dinamico appena trovato. Se
+compare `open_intro` prima (finestra persa), esce e rientra in Arena of Doom
+da capo, fino a **5 tentativi dedicati**. Dopo 5 tentativi falliti: fallback
+passivo `_attendi_fine_video_intro()` — gestisce "Open" quando richiesto e
+attende il ritorno naturale alla lista sfide (il loop esterno dei 3 tentativi
+di `ArenaTask` resta comunque il fallback finale). Nuovi template calibrati su
+screenshot reali: `pin_arena_08_skip_intro.png` (ROI 870,0,960,55) e
+`pin_arena_09_open_intro.png` (ROI 400,240,565,320).
+
+**Bonus fix incidentale**: stub `FakeNavigator` in `tests/tasks/test_arena.py`
+mancava `vai_in_home()` (necessario per il retry del nuovo codice) — la sua
+assenza faceva fallire 9 test pre-esistenti con `AttributeError`, mascherati
+fino ad ora. Aggiunto, 9 test tornano verdi.
+
+Test: 4 nuovi scenari dedicati (no-op se video già superato, skip catturato
+al 1° tentativo, skip perso poi catturato al retry, 5 tentativi falliti →
+fallback) tutti verdi. Suite arena 17/18 verde (1 fail pre-esistente e
+scollegato: `result.data["errore"]` è `""` invece di `None` in `run()`, non
+toccato da questo WU). Suite completa progetto: 0 fail riconducibili ad arena.
+
+**🔍 DA OSSERVARE**: il path di fallback (5 tentativi Skip falliti → lascia
+scorrere il video) non è mai stato osservato in produzione — comportamento
+del client oltre la schermata "Open" sconosciuto. Monitorare i prossimi cicli
+per log `[ARENA] [INTRO] Skip non catturato dopo 5 tentativi` ed eventuale
+`fallback passivo esaurito` (nessuna lista raggiunta entro 30s extra).
+
+Sync dev+prod fatto, restart one-shot armato. Nessun commit ancora quando
+questa sezione è stata scritta — vedi commit successivo per hash.
+
+---
+
 ## Sessione 30/06/2026 — WU184: disabilitazione anagrafe nodi (mappatura)
 
 Analisi correlazione feature-catalogo ↔ esiti raccolta (per istanza):
