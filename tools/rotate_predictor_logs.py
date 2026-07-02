@@ -1,4 +1,4 @@
-"""Rotazione manuale dei file JSONL append-only del sistema predittivo.
+"""Rotazione dei file JSONL append-only del sistema predittivo.
 
 WU168 (19/06) — `data/istanza_metrics.jsonl` e
 `data/predictions/cycle_snapshots.jsonl` non hanno mai retention/rotazione:
@@ -7,10 +7,21 @@ misurato in prod il 19/06). Questo tool sposta le righe più vecchie di
 --days in un archivio mensile, senza toccare i consumer (i predittori
 continuano a leggere solo il file live, più piccolo).
 
-Uso:
+WU186 (02/07) — la rotazione era rimasta SOLO manuale (mai eseguita in prod:
+istanza_metrics.jsonl a 5.4MB/6.619 righe il 02/07, nessun `data/archive/`).
+Aggiunta `run_retention()` riutilizzabile, chiamata automaticamente 1×/die da
+`dashboard/app.py::_predictor_retention_loop` con cutoff 60 giorni. Aggiunto
+anche `data/predictions/scheduler_ab.jsonl` ai target (stesso problema,
+nessuna retention nemmeno manuale).
+
+Uso CLI:
     py -3.14 tools/rotate_predictor_logs.py                  # dry-run, 180gg
-    py -3.14 tools/rotate_predictor_logs.py --days 90 --apply
+    py -3.14 tools/rotate_predictor_logs.py --days 60 --apply
     py -3.14 tools/rotate_predictor_logs.py --prod --apply
+
+Uso programmatico:
+    from tools.rotate_predictor_logs import run_retention
+    run_retention(root=Path(...), days=60, apply=True)
 
 Output: data/archive/<nome_file>_<YYYY-MM>.jsonl (una riga = un mese,
 append se il file archivio esiste già — più mesi possono confluire nello
@@ -38,7 +49,10 @@ _TARGETS = [
     ("data/istanza_metrics.jsonl", "ts"),
     ("data/predictions/cycle_snapshots.jsonl", "ts"),
     ("data/predictions/cycle_accuracy.jsonl", "ts_end"),
+    ("data/predictions/scheduler_ab.jsonl", "ts"),
 ]
+
+DEFAULT_RETENTION_DAYS = 60
 
 
 def _parse_ts(record: dict, field: str) -> datetime | None:
@@ -116,11 +130,41 @@ def rotate_file(path: Path, ts_field: str, cutoff: datetime, apply: bool) -> dic
     return result
 
 
+def run_retention(root: Path, days: int = DEFAULT_RETENTION_DAYS,
+                   apply: bool = True) -> dict:
+    """Esegue la rotazione su tutti i `_TARGETS` per `root`. Riutilizzabile
+    sia da CLI (`main()`) sia da chiamanti programmatici (dashboard loop).
+
+    Returns:
+        {
+          "cutoff": iso str,
+          "days": int,
+          "results": [ {path, n_total, n_kept, n_archived, months}, ... ],
+          "any_archived": bool,
+        }
+    """
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    results = []
+    any_archived = False
+    for rel_path, ts_field in _TARGETS:
+        res = rotate_file(root / rel_path, ts_field, cutoff, apply)
+        results.append(res)
+        if res.get("months"):
+            any_archived = True
+    return {
+        "cutoff": cutoff.isoformat(),
+        "days": days,
+        "results": results,
+        "any_archived": any_archived,
+    }
+
+
 def main() -> int:
     p = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--days", type=int, default=180,
-                   help="righe più vecchie di N giorni vengono archiviate (default 180)")
+                   help="righe più vecchie di N giorni vengono archiviate (default 180 da CLI; "
+                        f"il loop automatico usa {DEFAULT_RETENTION_DAYS}gg)")
     p.add_argument("--prod", action="store_true",
                    help=f"opera su {_ROOT_PROD} invece della working copy dev")
     p.add_argument("--apply", action="store_true",
@@ -128,16 +172,14 @@ def main() -> int:
     args = p.parse_args()
 
     root = _ROOT_PROD if args.prod else _ROOT_DEV
-    cutoff = datetime.now(timezone.utc) - timedelta(days=args.days)
 
     print(f"Root: {root}")
-    print(f"Cutoff: righe con ts < {cutoff.isoformat()} (> {args.days}gg)")
+    print(f"Cutoff: righe più vecchie di {args.days}gg")
     print(f"Modalità: {'APPLY (scrittura reale)' if args.apply else 'DRY-RUN (solo report)'}")
     print()
 
-    any_archived = False
-    for rel_path, ts_field in _TARGETS:
-        res = rotate_file(root / rel_path, ts_field, cutoff, args.apply)
+    out = run_retention(root, days=args.days, apply=args.apply)
+    for rel_path, res in zip((t[0] for t in _TARGETS), out["results"]):
         if res.get("skip"):
             print(f"  {rel_path}: {res['skip']}")
             continue
@@ -146,9 +188,8 @@ def main() -> int:
               f"restano={res['n_kept']}  ts_non_parsabile={res['n_unparsed_ts']}")
         if res["months"]:
             print(f"    mesi coinvolti: {', '.join(res['months'])}")
-            any_archived = True
 
-    if not args.apply and any_archived:
+    if not args.apply and out["any_archived"]:
         print("\nDry-run: nessuna scrittura eseguita. Rilancia con --apply per applicare.")
     return 0
 

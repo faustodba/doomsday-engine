@@ -5,6 +5,37 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 02/07/2026 — WU186: retention automatica file JSONL predittivo (60gg)
+
+Richiesta utente durante verifica del sistema predictor ("esiste un sistema di
+retention dei dati?"): `tools/rotate_predictor_logs.py` (WU168, 19/06) esisteva
+già ma era **solo manuale** — mai eseguito in prod. Verificato: `istanza_
+metrics.jsonl` 5.4MB/6.619 righe, `cycle_snapshots.jsonl` 8.0MB, nessuna
+cartella `data/archive/`. Utente conferma: 60 giorni di retention vanno bene.
+
+**Fix**: estratta `run_retention(root, days, apply)` riutilizzabile dal tool
+esistente (CLI invariata + nuovo uso programmatico). Aggiunto `data/
+predictions/scheduler_ab.jsonl` ai target (stesso problema, mai coperto
+nemmeno dal tool manuale). Nuovo background task `dashboard/app.py::
+_predictor_retention_loop` — stesso pattern già in uso per
+`_predictor_recorder_loop`/`_nodi_mappa_rebuild_loop`: poll ogni 30min,
+esegue la rotazione 1×/die (persistenza `data/predictor_retention_state.json`
+per sopravvivere ai restart dashboard), cutoff `PREDICTOR_RETENTION_DAYS=60`
+(costante in `dashboard/app.py`).
+
+Smoke test su sandbox isolata (righe sintetiche a 90/59/10 giorni): righe
+>60gg correttamente archiviate in `data/archive/<file>_<YYYY-MM>.jsonl`,
+righe recenti mantenute nel file live, nessuna perdita dati. `py_compile` OK.
+Nessun test pytest dedicato (repo non testa unitariamente `dashboard/app.py`
+né `tools/*.py`, coerente con WU168).
+
+**Effetto**: richiede riavvio della dashboard prod per attivare il loop
+(nessun riavvio bot necessario — la rotazione tocca solo file che il bot
+scrive in append, mai in lettura esclusiva; scrittura atomica tmp+replace
+già presente nel tool, sicura anche a bot live).
+
+---
+
 ## Sessione 01/07/2026 — WU185: Arena — video introduttivo post-aggiornamento client
 
 Dopo la reinstallazione di tutte le istanze MuMu (aggiornamento software client

@@ -104,6 +104,10 @@ def _is_mobile_request(request: Request) -> bool:
 
 _predictor_recorder_task = None
 
+_predictor_retention_task = None
+PREDICTOR_RETENTION_DAYS = 60
+PREDICTOR_RETENTION_INTERVAL_MIN = 24 * 60   # 1×/die
+
 _nodi_mappa_rebuild_task = None
 NODI_MAPPA_REBUILD_INTERVAL_MIN = 20
 # Stato condiviso col route /ui/nodi-mappa (stesso processo/event loop) per
@@ -274,6 +278,71 @@ async def _predictor_recorder_loop():
         await asyncio.sleep(POLL_GRANULAR_S)
 
 
+async def _predictor_retention_loop():
+    """Background task (WU186, 02/07): rotazione automatica 1×/die dei file
+    JSONL append-only del sistema predittivo (istanza_metrics, cycle_snapshots,
+    cycle_accuracy, scheduler_ab) — righe più vecchie di
+    PREDICTOR_RETENTION_DAYS spostate in `data/archive/`.
+
+    Pre-WU186: `tools/rotate_predictor_logs.py` esisteva ma era SOLO manuale,
+    mai eseguito in prod (istanza_metrics.jsonl 5.4MB/6.619 righe il 02/07,
+    nessun `data/archive/`). Persistenza `last_run` in
+    `data/predictor_retention_state.json` — sopravvive ai restart dashboard,
+    evita di ricalcolare più volte lo stesso giorno.
+
+    Poll granulare 30min (la rotazione stessa serve 1×/die, non serve
+    reattività fine — stesso ordine di grandezza di _nodi_mappa_rebuild_loop).
+    """
+    import asyncio
+    import json
+    from datetime import datetime, timezone
+
+    root = Path(os.environ.get("DOOMSDAY_ROOT", "."))
+    state_path = root / "data" / "predictor_retention_state.json"
+    interval_s = PREDICTOR_RETENTION_INTERVAL_MIN * 60
+    POLL_GRANULAR_S = 1800
+    print(f"[DASHBOARD] {_ts()} predictor retention loop avviato "
+          f"(ogni {PREDICTOR_RETENTION_INTERVAL_MIN // 60}h, cutoff {PREDICTOR_RETENTION_DAYS}gg)")
+
+    def _read_last_run() -> str | None:
+        try:
+            return json.loads(state_path.read_text(encoding="utf-8")).get("last_run")
+        except Exception:
+            return None
+
+    def _write_last_run(ts_iso: str) -> None:
+        try:
+            state_path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = state_path.with_suffix(".json.tmp")
+            tmp.write_text(json.dumps({"last_run": ts_iso}, indent=2), encoding="utf-8")
+            os.replace(tmp, state_path)
+        except Exception as exc:
+            print(f"[DASHBOARD] {_ts()} predictor retention state write error: {exc}")
+
+    while True:
+        try:
+            last_run = _read_last_run()
+            elapsed_s = float("inf")
+            if last_run:
+                try:
+                    elapsed_s = (
+                        datetime.now(timezone.utc) - datetime.fromisoformat(last_run)
+                    ).total_seconds()
+                except Exception:
+                    pass
+            if elapsed_s >= interval_s:
+                from tools.rotate_predictor_logs import run_retention
+                out = run_retention(root, days=PREDICTOR_RETENTION_DAYS, apply=True)
+                n_archived_tot = sum(r.get("n_archived", 0) for r in out["results"])
+                if out["any_archived"]:
+                    print(f"[DASHBOARD] {_ts()} predictor retention: "
+                          f"{n_archived_tot} righe archiviate (cutoff {PREDICTOR_RETENTION_DAYS}gg)")
+                _write_last_run(datetime.now(timezone.utc).isoformat())
+        except Exception as exc:
+            print(f"[DASHBOARD] {_ts()} predictor retention errore: {exc}")
+        await asyncio.sleep(POLL_GRANULAR_S)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import asyncio
@@ -288,8 +357,9 @@ async def lifespan(app: FastAPI):
     print(f"[DASHBOARD] instances:     {len(insts)} istanze")
     print(f"[DASHBOARD] API docs:      http://localhost:8765/docs")
     # Avvia background task predictor recorder
-    global _predictor_recorder_task, _nodi_mappa_rebuild_task
+    global _predictor_recorder_task, _predictor_retention_task, _nodi_mappa_rebuild_task
     _predictor_recorder_task = asyncio.create_task(_predictor_recorder_loop())
+    _predictor_retention_task = asyncio.create_task(_predictor_retention_loop())
     # WU184 (30/06) — anagrafe nodi disabilitata: SCHEDULAZIONE rebuild rimossa
     # (relazione geografica non sfruttabile, rifugi concentrati). Alleggerisce
     # la dashboard (niente rebuild ogni 20 min su tutte le osservazioni).
@@ -298,6 +368,8 @@ async def lifespan(app: FastAPI):
     print(f"[DASHBOARD] {_ts()} shutdown.")
     if _predictor_recorder_task and not _predictor_recorder_task.done():
         _predictor_recorder_task.cancel()
+    if _predictor_retention_task and not _predictor_retention_task.done():
+        _predictor_retention_task.cancel()
     # WU184 — rebuild task non più avviato (vedi sopra)
     # if _nodi_mappa_rebuild_task and not _nodi_mappa_rebuild_task.done():
     #     _nodi_mappa_rebuild_task.cancel()
