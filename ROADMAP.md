@@ -51,8 +51,47 @@ del client oltre la schermata "Open" sconosciuto. Monitorare i prossimi cicli
 per log `[ARENA] [INTRO] Skip non catturato dopo 5 tentativi` ed eventuale
 `fallback passivo esaurito` (nessuna lista raggiunta entro 30s extra).
 
-Sync dev+prod fatto, restart one-shot armato. Nessun commit ancora quando
-questa sezione è stata scritta — vedi commit successivo per hash.
+Sync dev+prod fatto, restart one-shot armato. Commit `24897dc` su `main`.
+
+### Aggiornamento 01-02/07/2026 — validazione live post-restart
+
+Monitoraggio esplicito richiesto dall'utente sul ciclo 402 (primo post-fix).
+**Skip catturato 8/8 (100%)** su tutte le istanze osservate (FAU_01/02/05/06/
+08/09/10 + FAU_04) — il fix cattura sempre correttamente il pulsante Skip.
+
+Su 3/8 istanze (FAU_02/06/09) l'arena è comunque fallita **dopo** lo Skip:
+schermo mai riconosciuto (home/map score bassi), popup "Glory Silver" letto
+come assente (score 0.08-0.11) nonostante fosse realmente presente, e
+`exit_game_dialog` ricorrente durante i tentativi di recovery.
+
+**Causa reale (non un difetto del fix)**: per diagnosticare dal vivo è stato
+usato un watcher esterno (script standalone, fuori dal processo bot) che
+catturava screenshot via `adb exec-out screencap` in parallelo alle stesse
+istanze. Verifica diretta su FAU_09: ri-applicando lo stesso template
+`pin_arena_07_glory.png` su uno screenshot catturato dal watcher nello stesso
+istante del check ufficiale del bot → score **0.999** (popup realmente
+presente e leggibile), contro lo **0.110** letto dal bot in produzione nello
+stesso momento. Il lock anti-concorrenza `_screencap_global_lock` in
+`core/device.py` protegge solo chiamate interne allo stesso processo bot, non
+un processo esterno — collisione ADB sulla stessa porta ha probabilmente
+corrotto lo screenshot del bot proprio nel momento critico del check Glory.
+
+**Conferma pulita**: interrotto ogni polling ADB esterno. Nel ciclo 403
+(senza interferenza), FAU_02 ha ritentato arena e completato **senza alcun
+video** (lista trovata immediatamente, score 0.993) — conferma che (a) il
+video è realmente un evento one-time per istanza, consumato correttamente al
+primo skip anche quando il tentativo era poi fallito per il bug di
+osservazione, e (b) il fix WU185 funziona correttamente end-to-end quando non
+disturbato. FAU_06/09 non hanno fatto in tempo a ritentare prima che scattasse
+il gate orario UTC<10 di fine giornata (nuovo giorno UTC 02/07) — ritenteranno
+automaticamente dopo le 10:00 UTC, nessuna azione richiesta.
+
+**Lezione operativa**: non usare mai script di screenshot ADB esterni al
+processo bot su istanze live in produzione — il lock di concorrenza non
+copre processi esterni. Per diagnosi live, preferire l'osservazione via log
+(`mcp__doomsday-monitor__log_tail`/`anomalie_live`, sola lettura su file)
+oppure il `DebugBuffer` interno del task (screenshot presi dal bot stesso,
+nessuna doppia richiesta ADB).
 
 ---
 
