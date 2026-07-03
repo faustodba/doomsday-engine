@@ -2198,6 +2198,14 @@ def _loop_invio_marce(ctx: TaskContext, obiettivo: int,
         if getattr(ctx, "_raccolta_no_squads", False):
             break
 
+        # WU187 — stesso problema per slot pieni dedotti via streak maschera
+        # (riga ~2186): il break lì sopra esce solo dal for, non dal while
+        # che lo contiene — "uscita immediata" era falso, il while rientrava
+        # e tentava un ultimo invio a vuoto prima di fermarsi (osservato in
+        # produzione su 8/8 occorrenze, 6 istanze). Fix simmetrico a No Squads.
+        if getattr(ctx, "_raccolta_slot_pieni", False):
+            break
+
     # ── Fine while: log finale slot da HOME ──
     if ctx.navigator is not None:
         ctx.navigator.vai_in_home()

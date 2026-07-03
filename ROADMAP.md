@@ -5,6 +5,49 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 03/07/2026 — WU187: fix break streak maschera non propagava al while esterno
+
+Richiesta utente: verifica anomalia FAU_00 raccolta — slot pieni ma il bot
+continuava a tentare invii. Diagnosi log FAU_00 (`03:48-03:52 UTC`): OCR
+iniziale legge `attive=3/5` (2 slot liberi) ma il gioco ha in realtà già
+5/5 slot occupati — stesso bug noto "3 letto invece di 5" mai risolto del
+tutto (commento pre-esistente in `ocr_helpers.py`, fix 15/04/2026). La rete
+di sicurezza WU69 (29/04) — 2 fallimenti "maschera non aperta" consecutivi
+su tipi diversi → slot pieni dedotti indipendentemente dall'OCR — riconosce
+correttamente la situazione e logga "uscita immediata", ma il bot tenta
+comunque un ulteriore invio a vuoto prima di fermarsi davvero.
+
+**Root cause** ([tasks/raccolta.py:2180-2187](tasks/raccolta.py#L2180-L2187)):
+il `break` al raggiungimento di `SOGLIA_MASK_STREAK` esce solo dal `for tipo
+in sequenza` interno, non dal `while` esterno di `_loop_invio_marce` che lo
+contiene — a differenza del pattern gemello "No Squads" (righe 2198-2199),
+che dopo il for ricontrolla il flag e fa break anche dal while. Confermato
+non essere un caso isolato: scan dei log JSONL prod (`.jsonl`+`.jsonl.bak`,
+finestra ~30/06-03/07) ha trovato **8 episodi su 6 istanze diverse**
+(FAU_00×2, FAU_02, FAU_05, FAU_06, FAU_07, FauMorfeus×2), **100% di
+riproduzione** (8/8 seguiti dal tentativo extra). Costo ~60-90s sprecati
+per episodio (confermato 77s nel caso FAU_00 03/07) — nei casi osservati
+limitato a un solo tentativo extra solo per coincidenza (`fallimenti_cons`
+che raggiunge `max_fallimenti` nello stesso momento); con `max_fallimenti`
+più alto il danno sarebbe maggiore (verificato in test: senza fix la
+chiamata a `_invia_squadra` continua fino a 10 volte con
+`RACCOLTA_MAX_FALLIMENTI=10`, invece di fermarsi a 2).
+
+**Fix**: aggiunto check `if getattr(ctx, "_raccolta_slot_pieni", False): break`
+dopo il for, simmetrico al check esistente per `_raccolta_no_squads`. Nuovo
+test di regressione `TestLoopInvioMarceSlotPieniStreak` in
+`tests/tasks/test_raccolta.py` (mock `_invia_squadra` con streak forzato,
+`RACCOLTA_MAX_FALLIMENTI` alto per isolare il bug dalla coincidenza) —
+verificato che fallisce senza il fix (`call_count == 10` invece di `2`) e
+passa con il fix. Suite raccolta 58/58 verdi, suite completa 571/712 verdi
+(141 fail pre-esistenti invariati, nessuno relativo a raccolta).
+
+Sync dev+prod fatto, commit+push, restart one-shot armato su richiesta
+esplicita dell'utente ("se non impatta sulla stabilità procederei con il
+fix ed il riarmo automatico").
+
+---
+
 ## Sessione 02/07/2026 — WU186: retention automatica file JSONL predittivo (60gg)
 
 Richiesta utente durante verifica del sistema predictor ("esiste un sistema di

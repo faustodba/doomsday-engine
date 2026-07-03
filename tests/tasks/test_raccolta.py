@@ -508,6 +508,41 @@ class TestLoopInvioMarceConGather:
 
 
 # ==============================================================================
+# 11b. _loop_invio_marce — WU187: slot pieni via streak maschera, break reale
+# ==============================================================================
+
+class TestLoopInvioMarceSlotPieniStreak:
+
+    @patch("tasks.raccolta.time.sleep")
+    def test_streak_maschera_ferma_subito_il_while(self, mock_sleep):
+        """
+        WU187 — regressione: prima del fix, il break al raggiungimento di
+        SOGLIA_MASK_STREAK usciva solo dal for interno; il while esterno
+        rientrava e tentava un ulteriore invio a vuoto prima di fermarsi
+        (osservato in produzione: 8/8 occorrenze su 6 istanze, log
+        "uscita immediata" seguito comunque da un altro "invio squadra").
+        RACCOLTA_MAX_FALLIMENTI alto per isolare il bug: senza il fix il
+        while non uscirebbe per coincidenza sul contatore fallimenti.
+        """
+        def fake_invia_squadra(ctx, tipo, *a, **kw):
+            ctx._raccolta_mask_not_opened = True
+            return False, False, False
+
+        with patch("tasks.raccolta._invia_squadra",
+                   side_effect=fake_invia_squadra) as mock_invia:
+            ctx = ctx_base(**{"RACCOLTA_MAX_FALLIMENTI": 10,
+                              "RACCOLTA_OBIETTIVO": 5})
+            bl = Blacklist()
+            inviate = _loop_invio_marce(ctx, 5, 3, bl)
+
+        assert inviate == 0
+        # SOGLIA_MASK_STREAK=2 → si ferma esattamente al 2° tentativo,
+        # non un terzo "a vuoto" dopo aver già dedotto slot pieni.
+        assert mock_invia.call_count == 2
+        assert ctx._raccolta_slot_pieni is True
+
+
+# ==============================================================================
 # 12. _loop_invio_marce — blacklist check
 # ==============================================================================
 
