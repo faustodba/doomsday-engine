@@ -498,6 +498,22 @@ class ArenaTask(Task):
                 if screen is None:
                     time.sleep(_POLL_INTRO_SKIP_S)
                     continue
+                # WU188 — il check no-op in testa alla funzione è un singolo
+                # screenshot senza retry: se la lista non ha ancora finito di
+                # renderizzarsi nell'istante del tap Arena of Doom (lag di
+                # caricamento, non video reale), qui dentro si continuava a
+                # cercare solo skip_intro/open_intro per tutti i 5 tentativi
+                # (~200s, 5 uscite/rientri) prima che il fallback
+                # _attendi_fine_video_intro si accorgesse che la lista era
+                # già raggiungibile. Controllarla anche qui, come primo
+                # check di ogni poll, evita lo spreco: la si intercetta già
+                # al 1°/2° poll (~1-2s) invece che dopo l'intero loop.
+                if self._match(ctx, screen, "lista"):
+                    ctx.log_msg(
+                        "[ARENA] [INTRO] lista rilevata durante l'attesa Skip "
+                        "(tentativo %d/%d) — video già concluso, nessun tap necessario",
+                        tentativo, MAX_TENTATIVI_INTRO_SKIP)
+                    return
                 spec = _ARENA_PIN["skip_intro"]
                 result = ctx.matcher.find_one(screen, spec.path, threshold=spec.soglia, zone=spec.roi)
                 ctx.log_msg("[ARENA-PIN] skip_intro: score=%.3f → %s",

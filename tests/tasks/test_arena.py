@@ -472,6 +472,11 @@ class TestArenaVideoIntro(unittest.TestCase):
       4. skip_mai_catturato_fallback_lista — 5 tentativi falliti → fallback
                                               passivo, gestisce Open finché
                                               non compare lista
+      5. lista_rilevata_durante_poll_ferma_ricerca — WU188: check iniziale
+                                              (no-op) troppo presto, ma lista
+                                              rilevata al 1° poll interno →
+                                              ferma subito, niente retry
+                                              ingresso né tap skip/open
     """
 
     def setUp(self):
@@ -510,6 +515,46 @@ class TestArenaVideoIntro(unittest.TestCase):
 
         self.assertEqual(len(device.taps), 1)
         self.assertEqual(nav.barra_taps, [])  # nessun retry ingresso
+
+    def test_lista_rilevata_durante_poll_ferma_ricerca(self):
+        """
+        WU188 — regressione: osservato in produzione su 6/12 istanze, ogni
+        giorno (FAU_00/03/06/07/09/10) — il check no-op iniziale (singolo
+        screenshot, no retry) manca la lista per lag di rendering, ma
+        skip_intro/open_intro non compaiono mai perché non c'è nessun video
+        reale. Pre-fix: il codice esauriva tutti i 5 tentativi (~200s, 5
+        uscite/rientri Arena) prima che il fallback passivo si accorgesse
+        che la lista era già raggiungibile. Fix: check lista anche dentro
+        il poll interno → si ferma al 1° poll di tentativo 1.
+        """
+        task    = self._make_task()
+        device  = FakeDevice()
+        matcher = FakeMatcher()
+        nav     = FakeNavigator(home=True)
+        ctx     = FakeTaskContext(device, matcher, nav)
+
+        calls = {"lista": 0}
+
+        def fake_match(screen, tmpl, roi):
+            if tmpl == "pin/pin_arena_01_lista.png":
+                calls["lista"] += 1
+                # 1a chiamata (check no-op iniziale) troppo presto; poi visibile
+                return 0.90 if calls["lista"] >= 2 else 0.00
+            if tmpl == "pin/pin_arena_08_skip_intro.png":
+                return 0.00  # Skip mai presente (nessun video reale)
+            if tmpl == "pin/pin_arena_09_open_intro.png":
+                return 0.00
+            return 0.00
+
+        matcher.match = fake_match
+
+        task._gestisci_video_intro(ctx)
+
+        # Nessun retry ingresso (0 uscite/rientri Arena) e nessun tap:
+        # la lista è stata rilevata al 1° poll interno di tentativo 1.
+        self.assertEqual(nav.barra_taps, [])
+        self.assertEqual(device.taps, [])
+        self.assertEqual(calls["lista"], 2)
 
     def test_skip_perso_poi_catturato(self):
         task    = self._make_task()
@@ -554,8 +599,14 @@ class TestArenaVideoIntro(unittest.TestCase):
                 return 0.90  # sempre su Open (video forzato)
             if tmpl == "pin/pin_arena_01_lista.png":
                 calls["lista"] += 1
-                # trovata solo nel fallback passivo, dopo qualche poll
-                return 0.90 if calls["lista"] >= 3 else 0.00
+                # WU188 — lista ora controllata anche ad ogni poll attivo
+                # (1 check no-op iniziale + 1 per ciascuno dei 5 tentativi,
+                # sempre False qui perché "sempre su Open" la fa breakare
+                # prima → 6 chiamate) — deve risultare trovata SOLO dopo
+                # almeno 1 poll del fallback passivo (7a chiamata, che deve
+                # restare False per dare tempo al fallback di tappare Open
+                # almeno una volta prima che la lista sia rilevata all'8a).
+                return 0.90 if calls["lista"] >= 8 else 0.00
             return 0.00
 
         matcher.match = fake_match

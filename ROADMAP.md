@@ -5,6 +5,52 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 03/07/2026 (2) — WU188: arena, video-intro non riconosceva la lista già raggiunta
+
+Richiesta utente: nel task arena, dopo l'introduzione del riconoscimento
+skip/open (WU185), la logica verifica solo la presenza di questi due
+oggetti ma non controlla se la maschera interna arena (`lista`) è già
+presente — cosa che dovrebbe fermare subito il loop di ricerca.
+
+**Diagnosi confermata sui log prod** (`.jsonl`+`.jsonl.bak`, tutte le 12
+istanze): **FAU_00, FAU_03, FAU_06, FAU_07, FAU_09** (e FAU_10 in
+precedenza) mostrano, **ogni giorno**, sempre lo stesso pattern — tutti i 5
+tentativi di cattura Skip falliscono (nessun video reale in corso, solo
+lag di rendering al check iniziale), poi il fallback passivo trova `lista`
+raggiungibile **1 secondo dopo** l'ultimo tentativo fallito. Costo
+stimato ~200s (3,3 min) sprecati per istanza per esecuzione, con 5
+uscite/rientri Arena inutili — su ~11-12 istanze con arena giornaliera,
+~35-40 min/giorno sprecati sulla farm.
+
+**Causa**: il check no-op in testa a `_gestisci_video_intro()`
+([tasks/arena.py:488-492](tasks/arena.py#L488-L492)) fa un singolo
+screenshot senza retry — se la lista non ha ancora finito di renderizzarsi
+nell'istante del tap "Arena of Doom" (lag di caricamento, non video
+reale), il codice imbocca l'intero percorso "gestione video intro" pur non
+essendoci alcun video. Il loop di poll interno (righe 496-515) controllava
+poi solo `skip_intro`/`open_intro`, mai `lista` — quindi non poteva
+autocorreggersi finché non esauriva tutti i 5 tentativi.
+
+**Fix**: aggiunto check `lista` come prima verifica di ogni iterazione del
+poll interno — se rilevata, ritorna immediatamente (video già concluso,
+nessun tap necessario). Risolve elegantemente anche il caso limite del
+check iniziale troppo rapido: la lista viene comunque intercettata al
+1°/2° poll (~1-2s) invece che dopo l'intero loop di 5 tentativi.
+
+Nuovo test di regressione `test_lista_rilevata_durante_poll_ferma_ricerca`
+in `tests/tasks/test_arena.py`, verificato che fallisce senza il fix (4
+retry ingresso inutili invece di 0). Aggiornato anche
+`test_skip_mai_catturato_fallback_lista` (pre-esistente) per riflettere il
+nuovo conteggio chiamate a `lista` — comportamento atteso invariato (5
+tentativi esauriti + fallback quando la lista non è davvero raggiungibile
+prima). Suite arena 18/19 verdi (1 fail pre-esistente scollegato,
+documentato in WU185: `result.data["errore"]=""` invece di `None`). Suite
+completa 573/713 verdi, nessuna nuova regressione.
+
+Sync dev+prod fatto, commit+push.
+
+---
+
 ## Sessione 03/07/2026 — WU187: fix break streak maschera non propagava al while esterno
 
 Richiesta utente: verifica anomalia FAU_00 raccolta — slot pieni ma il bot
