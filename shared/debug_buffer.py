@@ -302,3 +302,33 @@ def cleanup_old(days: int = CLEANUP_DAYS, log_fn=None) -> int:
     if log_fn is not None and total_removed > 0:
         log_fn(f"[DEBUG-CLEANUP] {total_removed} screenshot >{days}gg eliminati")
     return total_removed
+
+
+def cleanup_boot_unknown(days: int = CLEANUP_DAYS, log_fn=None) -> int:
+    """
+    Elimina file PNG >= `days` giorni in debug_task/boot_unknown/ (discovery
+    snapshot da core.launcher._save_discovery_snapshot, WU21/WU22 — Issue #54).
+    Da chiamare al boot del bot insieme a cleanup_old() (best-effort).
+
+    Senza questa pulizia la cartella cresce indefinitamente: non esiste nessun
+    processo che rilegge questi screenshot (solo revisione manuale occasionale
+    per popolare shared/banner_catalog.py), quindi vanno scaduti come gli altri
+    debug buffer.
+
+    Ritorna numero di file eliminati.
+    """
+    cutoff = time.time() - (days * 86400)
+    boot_dir = _root() / "debug_task" / "boot_unknown"
+    if not boot_dir.is_dir():
+        return 0
+    removed = 0
+    for png in boot_dir.glob("*.png"):
+        try:
+            if png.stat().st_mtime < cutoff:
+                png.unlink()
+                removed += 1
+        except Exception:
+            pass
+    if log_fn is not None and removed > 0:
+        log_fn(f"[DEBUG-CLEANUP] {removed} discovery screenshot (boot_unknown) >{days}gg eliminati")
+    return removed

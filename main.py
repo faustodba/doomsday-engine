@@ -1120,6 +1120,19 @@ def main():
     except Exception as _exc:
         _log("MAIN", f"[WARN] restart_scheduler init: {_exc}")
 
+    # Cleanup automatico screenshot debug (data/*_debug + debug_task/boot_unknown).
+    # Era documentata in shared/debug_buffer.py ma mai agganciata al boot: le
+    # cartelle crescevano indefinitamente (boot_unknown arrivata a 1.5GB/2268
+    # file su prod prima del fix del 04/07).
+    try:
+        from shared.debug_buffer import cleanup_old, cleanup_boot_unknown
+        _n_debug = cleanup_old(log_fn=lambda m: _log("MAIN", m))
+        _n_boot = cleanup_boot_unknown(log_fn=lambda m: _log("MAIN", m))
+        if _n_debug or _n_boot:
+            _log("MAIN", f"[CLEANUP] {_n_debug} debug screenshot + {_n_boot} boot_unknown eliminati (>7gg)")
+    except Exception as _exc:
+        _log("MAIN", f"[WARN] cleanup debug screenshot: {_exc}")
+
     # Step B/E Email Notifier — avvia dispatcher background se notifications
     # enabled in config (merge baseline + runtime_overrides). Best-effort: il
     # dispatcher gira anche se queue vuota. Stop su SIGINT/SIGTERM via atexit.
