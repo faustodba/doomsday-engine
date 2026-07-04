@@ -829,12 +829,15 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None,
                     # (= ~14s di blocco) per evitare tap aggressivi su transizioni
                     # normali. Il learner cattura screenshot, detect X candidate,
                     # tap+valida, registra in data/learned_banners.json se sblocca.
-                    # Flag globale `globali.auto_learn_banner` (default True)
-                    # disabilita il learner runtime via dashboard.
-                    _learner_enabled_cfg = bool(
-                        getattr(getattr(ctx, "config", None), "auto_learn_banner", True)
-                    )
-                    _enable_learner = unknown_streak >= 4 and _learner_enabled_cfg
+                    # Flag globale `globali.auto_learn_banner` (default False,
+                    # WU110) abilita il learner runtime via dashboard.
+                    # auto-WU189: prima leggeva da ctx.config (InstanceCfg
+                    # per-istanza, campo mai esistito) → getattr cadeva sempre
+                    # sul default e ignorava il valore reale configurato
+                    # (finding C14, docs/analisi_2026-06-07.md). Ora legge da
+                    # is_auto_learn_enabled() (global_config + runtime override).
+                    from shared.learned_banners import is_auto_learn_enabled
+                    _enable_learner = unknown_streak >= 4 and is_auto_learn_enabled()
                     bd = _dbl(mini, max_iter=2,
                              log_fn=lambda m: _log(f"[{nome}] {m}", log_fn),
                              enable_learner=_enable_learner)

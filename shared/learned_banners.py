@@ -77,6 +77,37 @@ def _learned_templates_dir() -> Path:
     return _resolve_root() / "templates" / "pin" / "learned"
 
 
+def is_auto_learn_enabled() -> bool:
+    """
+    Legge `globali.auto_learn_banner` con precedenza runtime_overrides.json
+    > global_config.json. Default False (decisione WU110).
+
+    Sostituisce la lettura rotta `getattr(ctx.config, "auto_learn_banner", True)`
+    in core/launcher.py (finding C14, analisi 07/06): ctx.config è l'InstanceCfg
+    per-istanza e non ha mai avuto questo campo, quindi il getattr cadeva
+    sempre sul default True ignorando il valore reale configurato.
+    """
+    root = _resolve_root()
+    enabled = False
+    try:
+        gc_path = root / "config" / "global_config.json"
+        if gc_path.exists():
+            gc = json.loads(gc_path.read_text(encoding="utf-8"))
+            enabled = bool(gc.get("auto_learn_banner", False))
+    except Exception:
+        pass
+    try:
+        ov_path = root / "config" / "runtime_overrides.json"
+        if ov_path.exists():
+            ov = json.loads(ov_path.read_text(encoding="utf-8"))
+            globali = ov.get("globali", {}) or {}
+            if "auto_learn_banner" in globali:
+                enabled = bool(globali["auto_learn_banner"])
+    except Exception:
+        pass
+    return enabled
+
+
 MAX_ENTRIES = 25
 DEDUP_SIMILARITY_THRESHOLD = 0.85
 FAIL_STREAK_DISABLE = 3

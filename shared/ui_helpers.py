@@ -388,6 +388,7 @@ def dismiss_banners_loop(ctx, max_iter: int = 8, log_fn=None,
                     threshold=0.75, zone=(700, 0, 960, 200),
                 )
                 if xres is not None and xres.found:
+                    pre_frame = getattr(screen, "frame", None)
                     ctx.device.tap(xres.cx, xres.cy)
                     counts["_unmatched_tap_x"] = counts.get("_unmatched_tap_x", 0) + 1
                     log(
@@ -395,6 +396,56 @@ def dismiss_banners_loop(ctx, max_iter: int = 8, log_fn=None,
                         f"score={xres.score:.3f} → tap@({xres.cx},{xres.cy})"
                     )
                     _t.sleep(1.0)
+
+                    # auto-WU189 — AUTOLEARN: prima il popup veniva chiuso alla
+                    # cieca e mai imparato (0 eventi [LEARNER] osservati, WU110)
+                    # perché questo step risolveva il popup prima che il
+                    # BannerLearner separato avesse mai una chance di scattare.
+                    # Verifica qui stessa se il tap ha davvero sbloccato uno
+                    # schermo pulito (stesso check del Learner: diff visivo +
+                    # HOME/MAP) e in caso registra il popup non catalogato in
+                    # learned_banners.json, senza revisione manuale. Wrappato:
+                    # se fallisce, comportamento identico a prima (solo tap+continue).
+                    if pre_frame is not None:
+                        try:
+                            from shared.learned_banners import is_auto_learn_enabled
+                            if is_auto_learn_enabled():
+                                from shared.banner_learner import (
+                                    crop_template_x, crop_title_zone,
+                                    visual_diff_score, XCandidate,
+                                )
+                                from shared.learned_banners import (
+                                    find_duplicate, register_new, record_outcome,
+                                )
+                                post_screen = ctx.device.screenshot()
+                                post_frame = (getattr(post_screen, "frame", None)
+                                              if post_screen is not None else None)
+                                if post_frame is not None:
+                                    vdiff = visual_diff_score(pre_frame, post_frame)
+                                    score_home_p = ctx.matcher.score(post_screen, "pin/pin_region.png")
+                                    score_map_p = ctx.matcher.score(post_screen, "pin/pin_shelter.png")
+                                    if vdiff >= 0.10 and (score_home_p >= 0.70 or score_map_p >= 0.70):
+                                        cx, cy = xres.cx, xres.cy
+                                        synth_cand = XCandidate(
+                                            cx=cx, cy=cy,
+                                            bbox=(max(0, cx - 27), max(0, cy - 27), 55, 55),
+                                            score=xres.score, saturation=0.0, area=55 * 55,
+                                        )
+                                        x_tmpl = crop_template_x(pre_frame, synth_cand)
+                                        title_roi = (40, max(0, cy - 30), max(400, cx - 50), min(540, cy + 20))
+                                        title_tmpl = crop_title_zone(pre_frame, title_roi)
+                                        dup = find_duplicate(title_tmpl)
+                                        if dup is not None:
+                                            record_outcome(dup.name, success=True)
+                                            log(f"[AUTOLEARN] popup già noto: {dup.name} (hit_count++)")
+                                        else:
+                                            entry = register_new(
+                                                title_img=title_tmpl, x_img=x_tmpl,
+                                                x_coords=(cx, cy), title_roi=title_roi,
+                                            )
+                                            log(f"[AUTOLEARN] nuovo banner registrato: {entry.name}")
+                        except Exception as exc:
+                            log(f"[BANNER-LOOP] autolearn errore (non bloccante): {exc}")
                     continue
             except FileNotFoundError:
                 pass  # template non deployato → step A2
