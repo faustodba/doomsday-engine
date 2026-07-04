@@ -5,6 +5,65 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 05/07/2026 — WU191: adaptive scheduler 3 fix predizione + WU192 FauMorfeus boot
+
+Richiesta utente: verifica funzionalità adaptive scheduler su tutti i cicli
+LIVE disponibili (retention log: solo `bot.log`+`.bak`, 03/07 16:09 → 04/07
+20:46), confrontando per ogni ciclo/istanza lo `slot_liberi_atteso` predetto
+al momento della decisione con lo stato reale degli slot (`attive_pre` OCR
+HOME) all'avvio del tick. Risultato: **28% match esatto** su 104 confronti
+validi (40% sottostima, 32% sovrastima, delta medio -0.09) — utente ha
+richiesto di individuare i punti critici del processo predittivo e
+proporre fix.
+
+**3 cause individuate e corrette (WU191)**, dettagli completi in
+`docs/issues/telemetria-predictor.md`:
+1. `core/empirical_slot_predictor.py` — il lookup empirico (70% del blend
+   appena `n_samples≥30`, soglia raggiunta da settimane) non aveva mai un
+   limite temporale: scansionava tutti i 59 giorni di storico, mescolando
+   il regime pre/post switch `raccolta_fast→full` (WU143 09/05). Aggiunta
+   finestra `WINDOW_DAYS=14` + soglia minima `MIN_SAMPLES=5`.
+2. Stesso file — bucket gap troppo grossolani (`>120min` sconfinato,
+   assorbiva la maggioranza dei cicli reali da 150-220min). Ora 7 fasce
+   fino a 240min + nuove funzioni pubbliche `get_full_lookup()`/
+   `bucket_labels()`: eliminata la copia duplicata e disallineata da mesi
+   nel pannello dashboard `/ui/partial/predictor-slot-distribuzione`
+   (bonus: risolto anche il path prod hardcoded, ora rispetta
+   `DOOMSDAY_ROOT`).
+3. `core/adaptive_scheduler.py::compute_slot_liberi_atteso` — il residuo
+   T_marcia era ancorato al `ts` di fine-tick invece che al `ts_invio`
+   reale di ciascuna marcia (dato già presente, mai usato) — sottostimava
+   l'elapsed per marce partite a inizio tick lungo. Confermato che
+   `ts_invio` è già catturato post-conferma reale della marcia
+   (`tasks/raccolta.py::_esegui_marcia`), non serviva altro fix lì.
+
+Smoke test isolato (sandbox `DOOMSDAY_ROOT` dedicato) 3/3 verdi, suite
+pytest 573/713 invariata. Sync dev+prod fatto, commit `6889a88` pushato.
+Effetto al prossimo restart bot (nessun restart armato — in attesa di
+conferma utente).
+
+**WU192 — scoperta durante la verifica** (richiesta utente parallela:
+"verifica la raccolta relativa FauMorfeus, sembra che il bot non stia
+mandando raccoglitori"): confermato — **non un bug del predictor/raccolta**,
+l'istanza non arriva mai a HOME. 3 episodi oggi (17:51/20:40/23:28) con
+`TIMEOUT: schermata ancora UNKNOWN dopo 300s` → istanza chiusa senza
+raccolta. Screenshot `debug_task/boot_unknown/FauMorfeus_streak5_*.png`
+(tutti e 3 gli episodi) mostrano lo stesso schermo mai catalogato: splash
+crossover "DOOMSDAY x FAIRY TAIL" (client v1.58.0), barra caricamento ferma
+a 11-23% per l'intero timeout. Isolato a FauMorfeus (altre istanze: 1 sola
+occorrenza in 29h) — non un evento di sistema generale. Dettagli
+`docs/issues/ocr-vision.md` (WU192). **Nessun fix applicato — in attesa di
+decisione utente** sull'approccio (catalogare lo splash come "boot in
+corso" simile ai banner #54, alzare il timeout, o altro).
+
+### Prossimo step
+- Decidere se e quando riavviare il bot prod per attivare WU191 (adaptive
+  scheduler) — osservare dopo il riavvio se il match rate predetto/reale
+  migliora sui prossimi cicli LIVE.
+- Decidere approccio fix WU192 (FauMorfeus boot) prima di implementare.
+
+---
+
 ## Sessione 03/07/2026 (2) — WU188: arena, video-intro non riconosceva la lista già raggiunta
 
 Richiesta utente: nel task arena, dopo l'introduzione del riconoscimento

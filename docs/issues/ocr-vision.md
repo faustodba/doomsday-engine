@@ -1,12 +1,13 @@
 # Issues — OCR · Template matching · Banner
 
 > Archivio tematico voci WU/issue (estratto verbatim da `.claude/CLAUDE.md` il 07/06/2026).
-> 17 voci totali · 2 aperte · 15 risolte. Legenda stato: ✅ risolta · 🟡 parziale · 🆕 aperta · 🔍 da osservare · ⏸ pausa.
+> 18 voci totali · 3 aperte · 15 risolte. Legenda stato: ✅ risolta · 🟡 parziale · 🆕 aperta · 🔍 da osservare · ⏸ pausa.
 
 ## 🔓 Aperti / parziali
 
 | # | Issue | Priorità | Stato |
 |---|-------|----------|-------|
+| WU192 | FauMorfeus — splash "Doomsday x Fairy Tail" (v1.58.0) non catalogato, boot abortito dopo 300s | MEDIA | 🆕 APERTA 05/07/2026 — richiesta utente ("sembra che il bot non stia mandando raccoglitori" su FauMorfeus). Verificato: NON un bug del predictor/scheduler (vedi WU191) né della raccolta — l'istanza non arriva mai a HOME. Log `bot.log`+`FauMorfeus.jsonl`: **3 episodi oggi** (17:51, 20:40, 23:28 locale — un episodio quasi ogni turno di FauMorfeus, sempre ultima in coda) con `[BANNER-LOOP] nessun banner riconosciuto` + `[NAV] score home/map <0.45` ripetuti per 300s → `TIMEOUT: schermata ancora UNKNOWN` → `attendi_home() fallito` → istanza chiusa, **zero raccolta per quel giro**. Screenshot `debug_task/boot_unknown/FauMorfeus_streak5_*.png` (3 catture, una per episodio) mostrano tutte lo stesso schermo: splash crossover "DOOMSDAY x FAIRY TAIL" (versione client 1.58.0) con barra "Initializing modules.../Loading shared assets..." ferma a 11%/23%/15% — mai riconosciuto dal catalogo banner/schermate, il polling scorre per l'intero timeout senza convergere. Le altre 11 istanze hanno avuto lo stesso tipo di timeout **1 sola volta ciascuna** nelle ultime 29h — pattern isolato per FauMorfeus, non un evento di sistema (es. update client per tutti). Ipotesi: boot più lento specificamente su questa istanza (account master, più dati/livello da caricare) unito a un timeout UNKNOWN (300s) che qui non basta. Nessun fix applicato — decisione utente pendente su approccio (catalogare lo splash come stato "boot in corso, non contare come UNKNOWN" simile ai banner #54, vs. alzare il timeout solo per FauMorfeus, vs. altro). Dettagli in memoria di sessione |
 | 54 | Banner catalog & dismissal pipeline boot stabilization — 573 UNKNOWN polls | — | 🟡 parziale — framework + 3 banner attivi (exit_game_dialog, auto_collect_afk_banner, banner_eventi_laterale) |
 | 54 | Banner catalog & dismissal pipeline boot stabilization | — | 🟡 parziale (estesa con `pin_btn_x_close` + `pin_btn_back_arrow` in WU26/66) |
 
