@@ -9,7 +9,20 @@ Espone `lookup_slot_liberi(istanza, gap_min)` che ritorna mediana/p25/p75/n_samp
 del bucket appropriato. Usato dall'adaptive scheduler (proposta A 08/05) per
 blendare la stima deterministica T_marcia con la realtà empirica osservata.
 
-Bucket: <60, 60-90, 90-120, >120 min (stessi del pannello dashboard).
+Bucket: <60, 60-90, 90-120, 120-150, 150-180, 180-240, >240 min (stessi del
+pannello dashboard `/ui/partial/predictor-slot-distribuzione`, che consuma
+questo modulo tramite `get_full_lookup()`/`bucket_labels()` — nessuna copia
+locale dei bucket, per evitare il disallineamento osservato il 05/07 quando
+il commento "il ciclo bot raramente supera 2-3h" (vero l'8/05) non rifletteva
+più i cicli reali da 150-220min osservati con l'adaptive scheduler LIVE).
+
+WU — finestra mobile 05/07: la lookup non aveva MAI un limite temporale,
+scansionava l'intero storico (fino a 59 giorni) mescolando regimi radicalmente
+diversi (switch raccolta_fast→full del 09/05, crescita truppe/livelli). Ora
+limitata a `WINDOW_DAYS` giorni più recenti. Soglia minima `MIN_SAMPLES`
+campioni per bucket, sotto la quale il lookup ritorna None (niente blend,
+resta il valore deterministico) invece di usare una mediana costruita su un
+singolo campione rumoroso.
 
 Cache TTL 60s per evitare ricalcolo della scansione JSONL ad ogni `compute_slot_liberi_atteso`.
 """
@@ -22,17 +35,21 @@ import os
 import threading
 import time
 from collections import defaultdict
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from statistics import median
 from typing import Optional
 
 _log = logging.getLogger(__name__)
 
-# Bucket (lo, hi) in minuti — coerenti col pannello dashboard
+# Bucket (lo, hi) in minuti — coerenti col pannello dashboard (letti da lì
+# via `bucket_labels()`, mai duplicati).
 BUCKETS: list[tuple[int, int]] = [
-    (0, 60), (60, 90), (90, 120), (120, 99999),
+    (0, 60), (60, 90), (90, 120), (120, 150), (150, 180), (180, 240), (240, 99999),
 ]
+
+WINDOW_DAYS  = 14   # solo record più recenti di N giorni — esclude regimi datati
+MIN_SAMPLES  = 5    # sotto questa soglia il bucket è troppo rumoroso per un blend
 
 CACHE_TTL_S = 60
 
@@ -61,8 +78,23 @@ def _bucket_idx(gap_min: float) -> Optional[int]:
     return None
 
 
-def _build_lookup() -> dict:
+def bucket_label(bucket_idx: int) -> str:
+    """Etichetta leggibile per un bucket (es. '120-150', '>240')."""
+    lo, hi = BUCKETS[bucket_idx]
+    return f"{lo}-{hi}" if hi < 99999 else f">{lo}"
+
+
+def bucket_labels() -> list[str]:
+    """Etichette di tutti i bucket, nell'ordine — usate da `core` e dashboard
+    per evitare una lista hardcoded duplicata (vedi nota di modulo)."""
+    return [bucket_label(i) for i in range(len(BUCKETS))]
+
+
+def _build_lookup(window_days: float = WINDOW_DAYS) -> dict:
     """Scansiona JSONL e costruisce dict {istanza: {bucket_idx: [slot_liberi, ...]}}.
+
+    Solo i record con `ts` più recente di `window_days` giorni entrano nel
+    lookup (esclude regimi datati — vedi nota di modulo).
 
     Returns:
         {
@@ -70,6 +102,7 @@ def _build_lookup() -> dict:
           "max_squadre":   {ist: int},
           "n_samples_tot": int,
           "ts_built":      float (epoch),
+          "window_days":   float,
         }
     """
     p = _metrics_path()
@@ -78,7 +111,7 @@ def _build_lookup() -> dict:
 
     if not p.exists():
         return {"per_inst": {}, "max_squadre": {}, "n_samples_tot": 0,
-                "ts_built": time.time()}
+                "ts_built": time.time(), "window_days": window_days}
 
     raw_by_inst: dict[str, list[dict]] = defaultdict(list)
     try:
@@ -95,7 +128,9 @@ def _build_lookup() -> dict:
     except Exception as exc:
         _log.warning("[EMP-SLOT] read failed: %s", exc)
         return {"per_inst": {}, "max_squadre": {}, "n_samples_tot": 0,
-                "ts_built": time.time()}
+                "ts_built": time.time(), "window_days": window_days}
+
+    cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
 
     n_total = 0
     for inst, records in raw_by_inst.items():
@@ -114,6 +149,8 @@ def _build_lookup() -> dict:
                 gap_min = (t_curr - t_prev).total_seconds() / 60.0
             except Exception:
                 continue
+            if t_curr < cutoff:
+                continue
             if gap_min < 1:
                 continue
             bi = _bucket_idx(gap_min)
@@ -129,6 +166,7 @@ def _build_lookup() -> dict:
         "max_squadre":   out_max_sq,
         "n_samples_tot": n_total,
         "ts_built":      time.time(),
+        "window_days":   window_days,
     }
 
 
@@ -147,6 +185,16 @@ def invalidate_cache() -> None:
     with _cache_lock:
         _cache["data"] = None
         _cache["ts"] = 0.0
+
+
+def get_full_lookup() -> dict:
+    """Espone la lookup table completa (cached) per consumer esterni al
+    modulo — es. il pannello dashboard `/ui/partial/predictor-slot-distribuzione`,
+    che prima manteneva una propria copia della scansione JSONL (bucket e
+    finestra temporale potevano disallinearsi da questo modulo, come successo
+    il 05/07). Stessa shape di `_build_lookup()`.
+    """
+    return _get_lookup()
 
 
 # ─── API principale ─────────────────────────────────────────────────────────
@@ -169,7 +217,8 @@ def lookup_slot_liberi(istanza: str, gap_min: float) -> Optional[dict]:
           "bucket_idx":  int,
           "bucket_label": str,
         }
-        oppure None se nessun sample per quel bucket/istanza.
+        oppure None se nessun sample per quel bucket/istanza, o se sotto
+        `MIN_SAMPLES` (bucket troppo rumoroso per un blend affidabile).
     """
     bi = _bucket_idx(gap_min)
     if bi is None:
@@ -177,7 +226,7 @@ def lookup_slot_liberi(istanza: str, gap_min: float) -> Optional[dict]:
     lookup = _get_lookup()
     per_inst = lookup.get("per_inst") or {}
     samples = (per_inst.get(istanza) or {}).get(bi) or []
-    if not samples:
+    if len(samples) < MIN_SAMPLES:
         return None
     samples_sorted = sorted(samples)
     n = len(samples_sorted)
@@ -188,9 +237,6 @@ def lookup_slot_liberi(istanza: str, gap_min: float) -> Optional[dict]:
         idx = int(round(p * (n - 1)))
         return float(samples_sorted[max(0, min(n - 1, idx))])
 
-    lo, hi = BUCKETS[bi]
-    label = f"{lo}-{hi}" if hi < 99999 else f">{lo}"
-
     return {
         "n_samples":    n,
         "mean":         sum(samples_sorted) / n,
@@ -199,7 +245,7 @@ def lookup_slot_liberi(istanza: str, gap_min: float) -> Optional[dict]:
         "p75":          _percentile(0.75),
         "max_squadre":  int(lookup.get("max_squadre", {}).get(istanza, 0) or 0),
         "bucket_idx":   bi,
-        "bucket_label": label,
+        "bucket_label": bucket_label(bi),
     }
 
 

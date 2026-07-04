@@ -439,15 +439,16 @@ def compute_slot_liberi_atteso(istanza: str,
         }
         return _blend_with_empirical(out, istanza, anz_min + t_offset_min)
 
-    # Calcola T_marcia per ogni invio
+    # Calcola T_marcia per ogni invio, mantenendo l'associazione col suo
+    # `ts_invio` reale (necessario per l'anchoring corretto del residuo, vedi sotto).
     invii = invii_record["raccolta"]["invii"]
-    t_marce = []
+    t_marce_ts: list[tuple[float, Optional[str]]] = []
     for inv in invii:
         t = _calc_t_marcia_min(inv, istanza)
         if t is not None:
-            t_marce.append(t)
+            t_marce_ts.append((t, inv.get("ts_invio")))
 
-    if not t_marce:
+    if not t_marce_ts:
         # Dati pre-WU116 (load=-1) → conservativo + blend empirico se disponibile.
         out = {
             "ist": istanza,
@@ -464,15 +465,35 @@ def compute_slot_liberi_atteso(istanza: str,
         }
         return _blend_with_empirical(out, istanza, anz_min + t_offset_min)
 
-    # Elapsed dal record con invii
+    # Elapsed dal record con invii — fallback quando la singola marcia non ha
+    # `ts_invio` (dati storici antecedenti al campo).
     try:
         ts_inv = datetime.fromisoformat(invii_record["ts"])
         elapsed = max(0.0, (datetime.now(timezone.utc) - ts_inv).total_seconds() / 60)
     except Exception:
         elapsed = 0.0
 
-    # T_residue dei singoli invii (da ADESSO)
-    t_residue_min = [max(0.0, t - elapsed) for t in t_marce]
+    # T_residue per singola marcia (fix 05/07 — anchoring temporale):
+    # ancorato al `ts_invio` REALE della marcia, non al `ts` di fine-tick del
+    # record. Il fine-tick sottostimava l'elapsed per le marce partite a
+    # inizio di un tick lungo (raccolta invia più squadre nell'arco di
+    # minuti), gonfiando il residuo e sottocontando i rientri attesi — bias
+    # verso la sottostima confermato empiricamente (40% sottostima vs 32%
+    # sovrastima sui cicli LIVE osservati). Fallback al vecchio `elapsed`
+    # uniforme se `ts_invio` manca o non è parsabile.
+    now_utc = datetime.now(timezone.utc)
+    t_residue_min = []
+    for t, ts_invio_raw in t_marce_ts:
+        residuo = None
+        if ts_invio_raw:
+            try:
+                dep = datetime.fromisoformat(ts_invio_raw)
+                residuo = max(0.0, t - (now_utc - dep).total_seconds() / 60)
+            except Exception:
+                residuo = None
+        if residuo is None:
+            residuo = max(0.0, t - elapsed)
+        t_residue_min.append(residuo)
 
     # Squadre che rientreranno entro `t_offset_min`
     rientri = sum(1 for t in t_residue_min if t <= t_offset_min)

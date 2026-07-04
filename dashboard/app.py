@@ -3437,94 +3437,37 @@ def partial_predictor_slot_distribuzione(request: Request):
     """
     Distribuzione empirica slot_liberi vs gap_ciclo per istanza (07/05).
 
-    Logica corretta: per ogni coppia di record consecutivi (N, N+1) della
-    STESSA istanza:
+    Logica: per ogni coppia di record consecutivi (N, N+1) della STESSA
+    istanza:
         gap_ciclo = ts(N+1) - ts(N)             // lunghezza ciclo bot per istanza
         slot_liberi = totali - attive_pre(N+1)  // quante rientrate nel gap
-    Bucket gap: <60, 60-90, 90-120, >120 (no >180 separato — il ciclo bot
-    raramente supera 2-3h).
 
     Distribuzione P(slot_liberi | gap_ciclo): dopo N campioni dice
     "quante squadre tipicamente rientrano in un gap di durata X" per istanza.
 
+    05/07 — la scansione JSONL + definizione bucket vive SOLO in
+    `core/empirical_slot_predictor.py` (bucket, finestra `WINDOW_DAYS`,
+    soglia `MIN_SAMPLES`): prima questo pannello aveva una propria copia
+    indipendente, disallineata da mesi (bucket "raramente >180min" mai
+    aggiornato). Ora consuma `get_full_lookup()`/`bucket_labels()` — un solo
+    posto dove cambiare bucket/finestra in futuro.
+
     Refresh 60s via HTMX.
     """
-    import json as _json
-    from pathlib import Path as _P
-    from collections import defaultdict
-    from datetime import datetime as _dt
+    from core.empirical_slot_predictor import (
+        get_full_lookup, bucket_labels, BUCKETS,
+    )
 
-    p = _P("C:/doomsday-engine-prod") / "data" / "istanza_metrics.jsonl"
-    if not p.exists():
-        return HTMLResponse(
-            '<div style="color:var(--text-dim);text-align:center;padding:8px;font-size:11px">'
-            'nessun dato disponibile</div>'
-        )
-
-    # 07/05 — bucket aggiornati: 4 fasce, gap_ciclo bot raramente >180min
-    BUCKETS = [(0, 60), (60, 90), (90, 120), (120, 99999)]
-    BUCKET_LABELS = ["<60", "60-90", "90-120", ">120"]
-
-    per_inst: dict[str, dict[int, list[int]]] = defaultdict(lambda: defaultdict(list))
-    max_squadre_per: dict[str, int] = {}
-
-    raw: list[dict] = []
-    try:
-        with p.open(encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    raw.append(_json.loads(line))
-                except Exception:
-                    pass
-    except Exception:
-        pass
-
-    if not raw:
-        return HTMLResponse(
-            '<div style="color:var(--text-dim);text-align:center;padding:8px;font-size:11px">'
-            'nessun record disponibile</div>'
-        )
-
-    by_inst: dict[str, list[dict]] = defaultdict(list)
-    for r in raw:
-        by_inst[r.get("instance", "?")].append(r)
-
-    # 07/05 — metrica corretta: gap fra coppie consecutive di record
-    # (qualsiasi tipo, anche skip). slot_liberi = totali - attive_pre del
-    # record N+1. Misura quante squadre rientrano nella lunghezza ciclo
-    # bot reale per quell'istanza.
-    for inst, records in by_inst.items():
-        records.sort(key=lambda r: r.get("ts", ""))
-        for i in range(1, len(records)):
-            r = records[i]
-            prev = records[i - 1]
-            rac = r.get("raccolta") or {}
-            attive_pre = rac.get("attive_pre")
-            tot = rac.get("totali", 0) or 0
-            if attive_pre is None or tot <= 0:
-                continue
-            max_squadre_per[inst] = max(max_squadre_per.get(inst, 0), tot)
-            try:
-                t_curr = _dt.fromisoformat(r["ts"])
-                t_prev = _dt.fromisoformat(prev["ts"])
-                gap_min = (t_curr - t_prev).total_seconds() / 60
-            except Exception:
-                continue
-            if gap_min < 1:   # record troppo vicini, scarto
-                continue
-            slot_liberi = max(0, tot - int(attive_pre))
-            for bi, (lo, hi) in enumerate(BUCKETS):
-                if lo <= gap_min < hi:
-                    per_inst[inst][bi].append(slot_liberi)
-                    break
+    lookup = get_full_lookup()
+    per_inst: dict[str, dict[int, list[int]]] = lookup.get("per_inst") or {}
+    max_squadre_per: dict[str, int] = lookup.get("max_squadre") or {}
+    BUCKET_LABELS = bucket_labels()
 
     if not per_inst:
         return HTMLResponse(
             '<div style="color:var(--text-dim);text-align:center;padding:8px;font-size:11px">'
-            'nessun campione (servono record con attive_pre + invii reali)</div>'
+            'nessun campione (servono record con attive_pre + invii reali, '
+            f'ultimi {lookup.get("window_days", "?")} giorni)</div>'
         )
 
     # Render tabella
