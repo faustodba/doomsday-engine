@@ -42,25 +42,39 @@ pytest 573/713 invariata. Sync dev+prod fatto, commit `6889a88` pushato.
 Effetto al prossimo restart bot (nessun restart armato — in attesa di
 conferma utente).
 
-**WU192 — scoperta durante la verifica** (richiesta utente parallela:
-"verifica la raccolta relativa FauMorfeus, sembra che il bot non stia
-mandando raccoglitori"): confermato — **non un bug del predictor/raccolta**,
-l'istanza non arriva mai a HOME. 3 episodi oggi (17:51/20:40/23:28) con
-`TIMEOUT: schermata ancora UNKNOWN dopo 300s` → istanza chiusa senza
-raccolta. Screenshot `debug_task/boot_unknown/FauMorfeus_streak5_*.png`
-(tutti e 3 gli episodi) mostrano lo stesso schermo mai catalogato: splash
-crossover "DOOMSDAY x FAIRY TAIL" (client v1.58.0), barra caricamento ferma
-a 11-23% per l'intero timeout. Isolato a FauMorfeus (altre istanze: 1 sola
-occorrenza in 29h) — non un evento di sistema generale. Dettagli
-`docs/issues/ocr-vision.md` (WU192). **Nessun fix applicato — in attesa di
-decisione utente** sull'approccio (catalogare lo splash come "boot in
-corso" simile ai banner #54, alzare il timeout, o altro).
+**WU192 — scoperta durante la verifica, poi risolta** (richiesta utente
+parallela: "verifica la raccolta relativa FauMorfeus, sembra che il bot non
+stia mandando raccoglitori"): confermato — **non un bug del
+predictor/raccolta**, l'istanza non arriva mai a HOME. Rilevati 5 episodi
+in 24h per FauMorfeus (17:51, 20:40, 23:28, 01:56, 05:14 — quasi ogni suo
+turno) con `TIMEOUT: schermata ancora UNKNOWN dopo 300s` → istanza chiusa
+senza raccolta. Screenshot `debug_task/boot_unknown/*_streak5_*.png`
+confermano lo stesso schermo anche su **FAU_01/FAU_06/FAU_07** (1 episodio
+ciascuna nelle stesse 24h) — non isolato a FauMorfeus come sembrava
+all'inizio, solo molto più frequente lì: splash crossover "DOOMSDAY x FAIRY
+TAIL" (client v1.58.0), barra caricamento ferma 6-23%.
+
+Utente ha chiesto conferma: il banner-learner (WU190, appena riattivato)
+non doveva servire proprio a questo? Verificato di no — il learner impara
+popup con una X da chiudere, uno splash di caricamento non ne ha nessuna
+(`[LEARNER] detect_x_candidates: 0 candidate` è corretto, non un bug).
+La funzione giusta è `shared/ui_helpers.py::is_loading_splash()`, già
+esistente e pensata apposta per questo (2 anchor invarianti al reskin
+evento) — ma su QUESTO splash la barra di progresso dell'evento si
+sovrappone al bordo della ROI "Live Chat", degradando il match: misurato
+score reale 0.599 contro soglia 0.75. Fix: soglia abbassata a 0.55,
+validata su screenshot reali (splash rilevato correttamente, 3 schermate
+MAP genuine restano a score -0.06/0.06/0.0 — nessun rischio falsi
+positivi). Suite pytest 572/713 invariata. Sync dev+prod, commit `0939d58`.
 
 ### Prossimo step
-- Decidere se e quando riavviare il bot prod per attivare WU191 (adaptive
-  scheduler) — osservare dopo il riavvio se il match rate predetto/reale
-  migliora sui prossimi cicli LIVE.
-- Decidere approccio fix WU192 (FauMorfeus boot) prima di implementare.
+- Decidere quando riavviare il bot prod per attivare **entrambi** i fix
+  (WU191 adaptive scheduler + WU192 splash loading) — un solo restart le
+  copre entrambe essendo sequenziali nella stessa sessione.
+- Dopo il riavvio: osservare se gli episodi `TIMEOUT: schermata ancora
+  UNKNOWN` su splash crossover scompaiono (specialmente su FauMorfeus) e se
+  il match rate predetto/reale dell'adaptive scheduler migliora sui
+  prossimi cicli LIVE.
 
 ---
 
