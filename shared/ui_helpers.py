@@ -178,19 +178,28 @@ _SPLASH_ROI_LIVECHAT  = (20, 470, 160, 525)   # basso-sx, larga
 _SPLASH_TMPL_VERSION  = "pin/pin_loading_version.png"
 _SPLASH_ROI_VERSION   = (810, 22, 900, 55)    # alto-dx, ampia per tolleranza
 
-# WU192 (05/07/2026) — soglia Live Chat abbassata 0.75→0.55. Causa: evento
-# crossover "Doomsday x Fairy Tail" (client v1.58.0) sovrappone la propria
-# barra di progresso al bordo destro di questa ROI, degradando il match
-# (misurato 0.599 su screenshot reale, sotto la vecchia soglia 0.75) →
-# is_loading_splash() tornava False durante il boot, il bot smetteva di
-# aspettare passivamente e trattava lo splash come popup sconosciuto fino al
-# timeout UNKNOWN (300s, boot abortito). Verificato su 3 screenshot reali di
-# schermate NON-splash (MAP durante raccolta): score -0.06/0.06/0.0, ampio
-# margine sotto 0.55 → nessun rischio di falso positivo. L'anchor Version
-# resta a 0.75 (rumore di fondo misurato ~0.34 su schermate reali, meno
-# margine per abbassarla in sicurezza) — non serve comunque, l'OR con Live
-# Chat già copre il caso.
-_SPLASH_SOGLIA_LIVECHAT = 0.55
+# WU192 (05/07/2026, ricalibrata 06/07/2026) — soglia Live Chat abbassata
+# 0.75→0.55→0.20. Causa: evento crossover "Doomsday x Fairy Tail" (client
+# v1.58.0) sovrappone la propria barra di progresso al bordo destro di
+# questa ROI, degradando il match → is_loading_splash() tornava False
+# durante il boot, il bot smetteva di aspettare passivamente e trattava lo
+# splash come popup sconosciuto fino al timeout UNKNOWN (300s, boot
+# abortito). Prima calibrazione (0.55) su un solo screenshot reale
+# (score 0.599) aveva eliminato il problema su FauMorfeus ma NON su altre
+# istanze (FAU_06/07/10, 5 nuovi timeout osservati il giorno dopo): il
+# match si è rivelato molto più variabile del previsto a seconda di QUANDO
+# durante il caricamento cade lo screenshot — la barra di progresso bleeda
+# in modo diverso a seconda di quanto è piena. Su 8 screenshot reali dello
+# stesso splash (percentuali 4%-23%) lo score Live Chat varia 0.277-0.629;
+# su 5 screenshot reali NON-splash (MAP durante raccolta) resta sempre
+# <=0.063. Soglia 0.20 copre con margine tutti i positivi osservati
+# restando 3x sopra il rumore di fondo misurato — nessun caso garantito al
+# 100% (un frame ancora più precoce potrebbe scendere sotto), ma il
+# fallback esistente (ciclo perso, ritentato al giro successivo) resta
+# comunque molto più economico del vecchio abort dopo 300s. L'anchor
+# Version resta a 0.75 (rumore di fondo ~0.34, meno margine per abbassarla
+# in sicurezza) — non serve comunque, l'OR con Live Chat già copre il caso.
+_SPLASH_SOGLIA_LIVECHAT = 0.20
 _SPLASH_SOGLIA_VERSION  = 0.75
 
 
