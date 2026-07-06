@@ -5,6 +5,63 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 06/07/2026 — WU192 ricalibrata + WU192-bis conflitto login altro dispositivo
+
+Richiesta utente: verificare se FauMorfeus (e le altre istanze) fossero
+ancora colpite dal timeout boot dopo il fix WU192 di ieri (soglia
+`is_loading_splash` 0.75→0.55).
+
+**Trovato**: il fix di ieri, calibrato su un solo screenshot reale (score
+0.599), non bastava — 5 nuovi timeout oggi su FAU_06/07(×3)/10. Misurato
+lo score dello stesso splash su 8 screenshot reali (percentuali 4%-23%):
+range 0.277-0.629, molto più ampio del previsto (la barra di progresso
+dell'evento bleeda diversamente nella ROI a seconda di quanto è piena).
+Soglia ricalibrata 0.55→0.20, validata stavolta su **13 campioni reali**
+(8 positivi a percentuali diverse + 5 negativi da schermate MAP genuine):
+13/13 corretti, margine 3× sopra il rumore di fondo. Sync dev+prod, commit
+`3dc3932`.
+
+**WU192-bis — scoperta collaterale**: cercando sistematicamente falsi
+positivi della soglia abbassata (girata la funzione reale su tutti i 632
+screenshot storici in `debug_task/`), trovato uno screenshot borderline
+(score 0.251) che non è affatto uno splash: dialog **"Login failed:
+session expired!"** con bottone OK, seguito da schermata "IGG Account /
+Last login". Utente ha confermato: il gioco permette un solo dispositivo
+alla volta — aprire l'account da un altro dispositivo mentre il bot lo usa
+invalida la sessione lato server, e il bot non può auto-risolvere (serve
+re-inserire credenziali).
+
+Utente ha chiesto di gestire la situazione con un **alert email**.
+Implementato: nuovo `shared/ui_helpers.py::is_login_conflict()` (template
+`pin_login_conflict.png`, soglia 0.55 su 3 positivi confermati vs cluster
+negativo ≤0.455), hook in `core/launcher.py::attendi_home()` con priorità
+sopra il check splash (che altrimenti intercetta la stessa schermata per
+primo, essendo l'icona Live Chat ancora visibile nell'angolo) — se
+rilevato, invia alert email (`core/alerts.py`, nuovo `event_type
+"login_conflict"`, cooldown 30min) e abortisce subito il boot invece di
+aspettare i 300s. Scoperto e corretto anche un problema collaterale: il
+master toggle `alerts_enabled` per gli alert real-time risultava assente
+in prod — l'intero sistema (non solo questo nuovo alert) era di fatto
+inerte dall'implementazione originale (WU137 fase 2). Attivato su
+`runtime_overrides.json` prod.
+
+Verificato end-to-end in sandbox: l'alert genera correttamente una mail in
+coda verso il destinatario configurato. Test 7/7 su screenshot reali,
+suite pytest 573/713 invariata. Sync dev+prod, commit `ae26f6d`. Dettagli
+`docs/issues/ocr-vision.md` (WU192) e `docs/issues/notifiche-alert.md`
+(WU192-bis).
+
+Nota: durante la sessione l'utente ha fermato manualmente il bot prod per
+caricare FauMorfeus a mano e osservare dal vivo la schermata di blocco.
+
+### Prossimo step
+- Riavviare il bot prod quando l'utente ha finito la verifica manuale, per
+  attivare la soglia ricalibrata (0.20) + il nuovo alert login-conflict.
+- Osservare la prossima occorrenza reale di conflitto login per confermare
+  che l'alert email arrivi davvero (finora validato solo in sandbox/dry-run).
+
+---
+
 ## Sessione 05/07/2026 — WU191: adaptive scheduler 3 fix predizione + WU192 FauMorfeus boot
 
 Richiesta utente: verifica funzionalità adaptive scheduler su tutti i cicli
