@@ -772,6 +772,48 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None,
                 except Exception:
                     pass
 
+            # WU192-bis — check conflitto login PRIORITARIO (prima di splash
+            # check): is_loading_splash() rileva erroneamente splash=True
+            # anche su questa schermata (l'icona Live Chat resta visibile
+            # nell'angolo anche col dialog di conflitto sopra), quindi va
+            # controllato qui altrimenti il wait passivo dello splash la
+            # intercetta per prima e non tenta mai il check. Il bot non può
+            # auto-risolvere (richiederebbe re-inserire credenziali) — invia
+            # alert email e abortisce subito il boot invece di aspettare
+            # invano fino al timeout UNKNOWN (300s).
+            if hasattr(ctx, 'matcher') and ctx.matcher is not None:
+                try:
+                    from shared.ui_helpers import is_login_conflict
+                    class _MiniLogin:
+                        pass
+                    mini_login = _MiniLogin()
+                    mini_login.device = device
+                    mini_login.matcher = ctx.matcher
+                    if is_login_conflict(mini_login, log_fn=lambda m: _log(f"[{nome}] {m}", log_fn)):
+                        try:
+                            from core.alerts import trigger_alert
+                            trigger_alert(
+                                event_type="login_conflict",
+                                severity="critical",
+                                title="Conflitto di login — sessione invalidata",
+                                body=(
+                                    f"L'istanza {nome} ha rilevato una sessione di gioco "
+                                    f"invalidata (schermata 'Login failed: session expired' "
+                                    f"o scelta account) — probabile accesso allo stesso "
+                                    f"account da un altro dispositivo mentre il bot lo stava "
+                                    f"usando. Il bot non può ri-autenticarsi da solo: serve "
+                                    f"un login manuale, oppure evitare di aprire l'account "
+                                    f"altrove finché il bot lo gestisce."
+                                ),
+                                instance=nome,
+                            )
+                        except Exception as exc:
+                            _log(f"[{nome}] [LOGIN-CONFLICT] alert fallito: {exc}", log_fn)
+                        _log(f"[{nome}] [LOGIN-CONFLICT] boot abortito — serve intervento manuale", log_fn)
+                        return False
+                except Exception as exc:
+                    _log(f"[{nome}] login-conflict detection errore: {exc}", log_fn)
+
             # auto-WU22 step1: check loading splash. Se siamo in caricamento
             # (template "Live Chat" rilevato), NON fare BACK — il gioco sta
             # caricando, qualsiasi BACK è inutile o controproducente

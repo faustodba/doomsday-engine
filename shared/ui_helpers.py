@@ -258,6 +258,64 @@ def is_loading_splash(ctx, log_fn=None) -> bool:
 
 
 # ==============================================================================
+# Login conflict detection (WU192-bis 06/07/2026)
+# ==============================================================================
+
+# Anchor: icona "IGG Account" (corona dorata) + testo "Last login". Compare
+# in 2 varianti osservate: (1) da sola, schermata scelta account dopo un
+# logout forzato; (2) dietro al dialog "Login failed: session expired!" che
+# appare quando lo stesso account viene aperto da un altro dispositivo
+# mentre il bot lo sta usando (la sessione lato server viene invalidata).
+# Il bot NON può risolvere da solo (richiederebbe re-inserire credenziali)
+# — l'unica azione sensata è notificare l'utente via email, non aspettare
+# invano fino al timeout UNKNOWN.
+#
+# Calibrato su 3 screenshot reali confermati (score 1.0, 0.642, 0.642) vs
+# cluster di schermate di caricamento legittime "Connecting to game
+# server..." sulla stessa ROI (score <=0.455) — soglia 0.55 a metà strada,
+# margine ~0.09 su entrambi i lati. Nota: is_loading_splash() rileva
+# erroneamente splash=True anche su questa schermata (l'icona Live Chat
+# resta visibile nell'angolo) — per questo va controllata PRIMA dello
+# splash check nel loop boot, altrimenti il wait passivo dello splash la
+# intercetta per prima e non si arriva mai qui.
+_LOGIN_CONFLICT_TMPL = "pin/pin_login_conflict.png"
+_LOGIN_CONFLICT_ROI  = (358, 378, 470, 512)
+_LOGIN_CONFLICT_SOGLIA = 0.55
+
+
+def is_login_conflict(ctx, log_fn=None) -> bool:
+    """
+    Verifica se la schermata corrente indica un conflitto di login (account
+    aperto da un altro dispositivo mentre il bot lo sta usando -> sessione
+    invalidata lato server). Il bot non può auto-risolvere: serve intervento
+    umano (non usare l'account altrove finché il bot lo sta eseguendo, o
+    ri-loggare manualmente).
+
+    Returns:
+        True se rilevato conflitto di login, False altrimenti.
+    """
+    log = log_fn or (lambda _msg: None)
+    if ctx.device is None or ctx.matcher is None:
+        return False
+    try:
+        screen = ctx.device.screenshot()
+        if screen is None:
+            return False
+        try:
+            score = ctx.matcher.score(screen, _LOGIN_CONFLICT_TMPL, zone=_LOGIN_CONFLICT_ROI)
+        except FileNotFoundError:
+            return False
+        if score >= _LOGIN_CONFLICT_SOGLIA:
+            log(f"[LOGIN-CONFLICT] rilevato (score={score:.3f}) — sessione "
+                f"probabilmente invalidata da accesso su altro dispositivo")
+            return True
+        return False
+    except Exception as exc:
+        log(f"[LOGIN-CONFLICT] errore detection: {exc}")
+        return False
+
+
+# ==============================================================================
 # Banner catalog — dismissal pipeline (auto-WU21)
 # ==============================================================================
 

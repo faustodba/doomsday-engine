@@ -59,6 +59,7 @@ COOLDOWN_S: dict[str, int] = {
     "bot_unexpected_restart": 900,      # 1×/15min
     "heartbeat_cicli":       1800,      # 1×/30min
     "cache_pulizia_mancante": 4 * 3600, # 1×/4h
+    "login_conflict":        1800,      # 1×/30min (WU192-bis)
 }
 
 DEFAULT_COOLDOWN = 1800   # 30min per event_type non listati
