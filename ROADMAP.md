@@ -5,6 +5,51 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 07/07/2026 — WU197: dashboard, "simulazione ordine adattivo" 45s → 1.2s
+
+Richiesta utente: "simulazione ordine adattivo compare con molta
+lentezza, verifica la lentezza della dashboard".
+
+**Misurato** `preview_adaptive_scheduler()` (il pannello che il poll HTMX
+di `predictor_istanze.html` richiama ogni 30s) su dati reali prod:
+**45.3 secondi** per una singola risposta.
+
+**Root cause**: `core/adaptive_scheduler.py::ordina_istanze_adaptive` è un
+greedy O(n²) (~66-78 chiamate per 11-12 istanze) e ad ogni chiamata
+`core/skip_predictor.py::load_metrics_history()` rileggeva l'INTERO file
+`data/istanza_metrics.jsonl` (6903 righe, 5.8MB) da zero, senza alcuna
+cache (428ms/call misurati → 28.2s per 66 chiamate). Scavando oltre,
+trovati altri **2 scanner indipendenti** con lo stesso bug (nessuna
+cache): `_l2_collect_samples` e `_read_units_history`, entrambi raggiunti
+da `predict_cycle_from_config()` — che da solo misurava 11.6-13.1s per
+chiamata, sempre cold.
+
+**Fix**: nuovo indice cached `{istanza: [record,...]}` in
+`core/skip_predictor.py::_load_metrics_index()`, invalidato su cambio
+`mtime` del file (zero staleness percepibile — il file cresce di poche
+righe per tick, molto più lentamente del poll dashboard). Le 3 funzioni
+duplicate ora attingono da questo indice condiviso invece di rileggere
+il file ciascuna per conto proprio.
+
+**Risultato misurato**: `preview_adaptive_scheduler()` end-to-end
+45.3s → 1.2s a processo freddo, ~0.1-0.2s a cache calda (36-450×).
+Validato bit-a-bit vecchio vs nuovo output su tutte le 12 istanze/3 task
+reali — zero mismatch. Suite pytest 573/140/4err invariata. Sync dev+prod
+verificato byte-identico. Dettagli `docs/issues/telemetria-predictor.md`
+(WU197).
+
+### Prossimo step
+- Riavviare il processo DASHBOARD (`run_dashboard_prod.bat`) per attivare
+  il fix — servizio separato dal bot, nessun riavvio bot necessario per
+  questo specifico fix (il bot beneficerà comunque al restart già
+  pianificato per WU195/196 nella stessa sessione, dato che
+  `core/skip_predictor.py` è condiviso anche da `tasks/raccolta.py`/
+  `raccolta_fast.py`).
+- Da chiedere esplicitamente all'utente prima di riavviare, come da
+  policy (mai riavviare processi senza conferma).
+
+---
+
 ## Sessione 07/07/2026 — WU196: daily report, nuova sezione 12 "Deposito attuale"
 
 Richiesta utente: verificare se il daily report mostrasse, per ogni

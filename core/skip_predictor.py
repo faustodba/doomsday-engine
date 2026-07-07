@@ -56,6 +56,8 @@ from __future__ import annotations
 
 import json
 import os
+import threading
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -129,27 +131,61 @@ def _resolve_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+_metrics_idx_lock = threading.Lock()
+_metrics_idx_cache: dict = {"mtime": None, "by_inst": None}
+
+
+def _load_metrics_index() -> dict[str, list[dict]]:
+    """Indice `{istanza: [record, ...]}` di tutto `istanza_metrics.jsonl`,
+    cache invalidata su cambio `mtime` del file (non TTL: il file cresce di
+    poche righe per tick, un rebuild ad ogni scrittura reale è economico e
+    garantisce zero staleness).
+
+    WU197 (07/07) — `load_metrics_history` rileggeva l'intero file (righe di
+    TUTTE le istanze, mesi di storico) ad ogni chiamata, senza cache. Il
+    greedy di `adaptive_scheduler.ordina_istanze_adaptive` (O(n²), ~66-78
+    chiamate per 11-12 istanze) lo chiamava una volta per candidato per ogni
+    step → 45s misurati per una singola risposta del pannello dashboard
+    "simulazione ordine adattivo" (poll ogni 30s). Con l'indice cached, il
+    file viene scansionato una sola volta finché non cambia.
+    """
+    root = _resolve_root()
+    path = root / "data" / "istanza_metrics.jsonl"
+    with _metrics_idx_lock:
+        try:
+            mtime = path.stat().st_mtime
+        except OSError:
+            return {}
+        if (_metrics_idx_cache["by_inst"] is not None
+                and _metrics_idx_cache["mtime"] == mtime):
+            return _metrics_idx_cache["by_inst"]
+
+        by_inst: dict[str, list[dict]] = defaultdict(list)
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                for line in fh:
+                    try:
+                        r = json.loads(line)
+                    except Exception:
+                        continue
+                    inst = r.get("instance")
+                    if inst:
+                        by_inst[inst].append(r)
+        except Exception:
+            by_inst = defaultdict(list)
+
+        result = dict(by_inst)
+        _metrics_idx_cache["mtime"] = mtime
+        _metrics_idx_cache["by_inst"] = result
+        return result
+
+
 def load_metrics_history(istanza: str, last_n: int = 20) -> list[dict]:
     """
     Legge ultimi N record da `data/istanza_metrics.jsonl` per l'istanza.
     Best-effort, ritorna [] su errore o file mancante.
     """
-    root = _resolve_root()
-    path = root / "data" / "istanza_metrics.jsonl"
-    if not path.exists():
-        return []
-    records = []
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            for line in fh:
-                try:
-                    r = json.loads(line)
-                except Exception:
-                    continue
-                if r.get("instance") == istanza:
-                    records.append(r)
-    except Exception:
-        return []
+    records = _load_metrics_index().get(istanza, [])
     return records[-last_n:]
 
 
@@ -392,25 +428,30 @@ def _l2_collect_samples(istanza: str,
         dict {bucket_idx: list[slot_liberi_int]} per bucket index
         (0=<60, 1=60-90, 2=90-120, 3=>120).
     """
-    from collections import defaultdict
     out: dict[int, list[int]] = defaultdict(list)
-    if metrics_path is None:
-        metrics_path = _resolve_root() / "data" / "istanza_metrics.jsonl"
-    if not metrics_path.exists():
-        return out
-    records = []
-    try:
-        for line in metrics_path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            try:
-                r = json.loads(line)
-            except Exception:
-                continue
-            if r.get("instance") == istanza:
-                records.append(r)
-    except Exception:
-        return out
+    if metrics_path is not None:
+        # Path esplicito (override raro, es. test) — bypass cache condivisa.
+        if not metrics_path.exists():
+            return out
+        records = []
+        try:
+            for line in metrics_path.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                if r.get("instance") == istanza:
+                    records.append(r)
+        except Exception:
+            return out
+    else:
+        # WU197 (07/07) — riusa l'indice cached (mtime-based) di
+        # `_load_metrics_index()` invece di riscansionare da zero l'intero
+        # file: era il 2° di 3 scanner indipendenti dello stesso JSONL,
+        # ciascuno chiamato per istanza (~12×/predizione ciclo).
+        records = list(_load_metrics_index().get(istanza, []))
     records.sort(key=lambda r: r.get("ts", ""))
     for i in range(1, len(records)):
         r = records[i]

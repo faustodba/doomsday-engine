@@ -256,9 +256,19 @@ def _read_units_history(istanza: str, task_name: str,
     è la stessa struttura → leggiamo SEMPRE da entrambi i task name. Permette
     bootstrap raccolta_fast subito post-attivazione (no dati propri ancora)
     riusando lo storico raccolta standard, e viceversa.
+
+    WU197 (07/07) — riusa l'indice cached (mtime-based) di
+    `skip_predictor._load_metrics_index()` invece di riscansionare da zero
+    l'intero `istanza_metrics.jsonl`: era il 3° di 3 scanner indipendenti
+    dello stesso file, ciascuno chiamato per istanza in
+    `predict_cycle_from_config`/`ordina_istanze_adaptive` (~12×/predizione,
+    misurato ~45s per una singola risposta del pannello dashboard
+    "simulazione ordine adattivo").
     """
-    p = _metrics_path()
-    if not p.exists():
+    try:
+        from core.skip_predictor import _load_metrics_index
+        records_all = _load_metrics_index().get(istanza, [])
+    except Exception:
         return []
     # Per raccolta variants: cerca su entrambi task_durations_s keys
     if task_name in ("raccolta", "raccolta_fast"):
@@ -266,32 +276,19 @@ def _read_units_history(istanza: str, task_name: str,
     else:
         target_keys = (task_name,)
     out: list[tuple[int, float]] = []
-    try:
-        with p.open(encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    r = json.loads(line)
-                except Exception:
-                    continue
-                if r.get("instance") != istanza:
-                    continue
-                durs = r.get("task_durations_s") or {}
-                # Trova quale key è presente (raccolta o raccolta_fast)
-                dur_key = next((k for k in target_keys if k in durs), None)
-                if dur_key is None:
-                    continue
-                if task_name in ("raccolta", "raccolta_fast"):
-                    units = len((r.get("raccolta") or {}).get("invii") or [])
-                elif task_name == "rifornimento":
-                    units = len((r.get("rifornimento") or {}).get("invii") or [])
-                else:
-                    units = 0
-                out.append((units, float(durs[dur_key])))
-    except Exception:
-        return []
+    for r in records_all:
+        durs = r.get("task_durations_s") or {}
+        # Trova quale key è presente (raccolta o raccolta_fast)
+        dur_key = next((k for k in target_keys if k in durs), None)
+        if dur_key is None:
+            continue
+        if task_name in ("raccolta", "raccolta_fast"):
+            units = len((r.get("raccolta") or {}).get("invii") or [])
+        elif task_name == "rifornimento":
+            units = len((r.get("rifornimento") or {}).get("invii") or [])
+        else:
+            units = 0
+        out.append((units, float(durs[dur_key])))
     return out[-last_n:]
 
 
