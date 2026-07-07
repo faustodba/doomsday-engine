@@ -32,7 +32,9 @@
     "donazione": false,
     "main_mission": false,
     "district_showdown": false,
-    "truppe": false
+    "truppe": false,
+    "grafica_hq": true,
+    "pulizia_cache": true
   },
   "rifugio": {
     "_note": "Coordinate edificio rifugio per rifornimento via mappa",
