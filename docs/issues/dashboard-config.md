@@ -1,12 +1,13 @@
 # Issues — Dashboard & configurazione
 
 > Archivio tematico voci WU/issue (estratto verbatim da `.claude/CLAUDE.md` il 07/06/2026).
-> 19 voci totali · 0 aperte · 19 risolte. Legenda stato: ✅ risolta · 🟡 parziale · 🆕 aperta · 🔍 da osservare · ⏸ pausa.
+> 20 voci totali · 0 aperte · 20 risolte. Legenda stato: ✅ risolta · 🟡 parziale · 🆕 aperta · 🔍 da osservare · ⏸ pausa.
 
 ## ✅ Risolti
 
 | # | Issue | Priorità | Stato |
 |---|-------|----------|-------|
+| WU193 | Card adaptive scheduler — input soglie perso durante editing (auto-refresh 30s) | MEDIA | ✅ RISOLTA 07/07/2026. Utente segnala che il campo "spedizioni oggi >" non accetta un valore inferiore a 100. Verificato che backend e reader (`core/adaptive_scheduler.py::_get_soglie`) accettano/restituiscono correttamente qualunque valore ≥0 — testato in produzione scrivendo 50 su `global_config.json`+`runtime_overrides.json` e rileggendo, esito corretto, poi ripristinato. **Causa reale**: `#adapt-card` ha `hx-trigger="load, refresh, every 30s"` che rimpiazza l'intero innerHTML (input inclusi) ogni 30s — se l'utente digita un valore ma il polling scatta prima di premere "salva", l'input viene sovrascritto dal valore server-side non ancora salvato, dando l'impressione che il valore più basso non venga mai accettato. Fix: script in `predictor_istanze.html` che ascolta `htmx:beforeRequest` su `#adapt-card` e annulla il refresh se l'utente ha il focus su un `<input>` della card. Verificato via render Jinja2 standalone (partial + pagina completa). **Trovato stesso pattern** (non ancora corretto) su `#notif-card` (email notifier) e `#tg-card` (telegram) in `config_global.html`. Sync dev+prod, commit `2484dcf`. Effetto al prossimo riavvio dashboard (non serve riavvio bot). |
 | 18 | Dashboard `/ui` mostra raw `global_config`, bot usa merged con overrides | MEDIA | ✅ RISOLTA 22/04 (get_merged_config — dashboard ora mostra valori reali bot) |
 | 20 | Dashboard V6 rewrite (FastAPI+Jinja2+HTMX) | — | ✅ CHIUSA 20/04 — commit `9773de3` + `runtime.json` orfano eliminato |
 | 22 | Dashboard `layout` istanze deprecato — rimosso dalla UI (bot usa TM) | BASSA | ✅ RISOLTA 22/04 |
