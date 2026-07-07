@@ -5,6 +5,61 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 07/07/2026 — WU195: grafica HQ + pulizia cache come task indipendenti
+
+Richiesta utente: rendere abilitabili/disabilitabili separatamente da
+dashboard le due fasi che oggi girano incondizionatamente ad ogni avvio
+istanza — impostazione Graphics Quality HIGH (WU78-rev) e pulizia cache
+giornaliera — finora accoppiate in un'unica chiamata
+`imposta_settings_lightweight()` da `core/launcher.py`, senza toggle.
+
+**Implementato**: split in due task orchestrator indipendenti, seguendo il
+pattern esistente (`tasks/donazione.py`):
+- `tasks/grafica_hq.py::GraficaHqTask` (priority 1) — Graphics/Frame/
+  Optimize HIGH, autosufficiente (propria navigazione HOME→Avatar→
+  Settings→System Settings→BACK×3→HOME).
+- `tasks/pulizia_cache.py::PuliziaCacheTask` (priority 2) — pulizia cache
+  (invariata: `_pulisci_cache`/gate giornaliero `data/cache_state.json`),
+  autosufficiente (HOME→Avatar→Settings→BACK×2→HOME).
+
+`core/settings_helper.py::imposta_settings_lightweight()` rimossa,
+sostituita da `esegui_grafica_hq()` + `esegui_pulizia_cache()`. Rimosso il
+blocco in `core/launcher.py` che le chiamava incondizionatamente (con lo
+skip `raccolta_only` ora spostato dentro i due task). Wiring completo:
+`main.py` (catalogo task), `config/task_setup.json` (2 righe `always`),
+`config/config_loader.py` (5 punti: `_DEFAULTS`, dataclass, `_from_raw`,
+`to_dict`, `task_abilitato`), `dashboard/models.py::TaskFlags`,
+`dashboard/routers/api_config_overrides.py` (`valid_tasks`),
+`dashboard/app.py::partial_task_flags_v2` (`ORDER`),
+`dashboard/templates/config_global.html` (checkbox grid + `taskList` JS,
+tenuti sincronizzati).
+
+**Verificato**: test funzionale isolato (sandbox `DOOMSDAY_ROOT`, 6
+scenari: `should_run` gating, esecuzione `run()` happy-path device fake,
+skip cache-già-pulita-oggi, skip `raccolta_only`, wiring
+`config_loader.py` end-to-end, catalogazione `main.py`) — 6/6 PASS. Render
+Jinja2 standalone di `config_global.html` con mock context — checkbox
+`grafica_hq`/`pulizia_cache` presenti, nessun errore di sintassi. Suite
+pytest completa: 573 passed / 140 failed / 4 errors — invariata rispetto
+al baseline noto (nessuna regressione, nessun failure nuovo riconducibile
+ai file toccati).
+
+Nota: la tabella `_TASK_SETUP` che `.claude/CLAUDE.md` richiede in questo
+file non è più presente qui — la documentazione task-per-task vive in
+`docs/OVERVIEW.md` §5 (ora estesa a 5.18/5.19 per i due nuovi task).
+Segnalato, non forzata una tabella inesistente.
+
+### Prossimo step
+- Sync dev→prod, commit+push.
+- Chiedere conferma esplicita all'utente prima di riavviare il bot prod
+  (necessario: la modifica tocca `main.py`/`core/launcher.py` e aggiunge
+  2 nuove classi task, effettive solo dopo restart).
+- Dopo il primo ciclo prod con i nuovi task attivi: verificare via MCP
+  monitor (`log_tail`/`istanza_launcher`) che `grafica_hq`/`pulizia_cache`
+  girino correttamente in sequenza a inizio ciclo per ogni istanza.
+
+---
+
 ## Sessione 06/07/2026 — WU192 ricalibrata + WU192-bis conflitto login altro dispositivo
 
 Richiesta utente: verificare se FauMorfeus (e le altre istanze) fossero

@@ -1,46 +1,54 @@
 """
-core/settings_helper.py — Imposta i settings lightweight nel client gioco.
+core/settings_helper.py — Imposta i settings grafici + pulizia cache nel client gioco.
 
 WU60 (29/04/2026) — Fix instabilità arena via aggiornamento MuMu + settings
-gioco "lightweight". Con Graphics Low + Frame Rate Low + Optimized Mode Low
-il flow del bot funziona pulito anche su istanze precedentemente problematiche
-(verificato su FAU_01, FAU_02, FAU_03, FAU_04 il 29/04).
+gioco lightweight (storicamente LOW, vedi WU78-rev sotto).
 
-WU64 (29/04/2026) — Pulizia cache giornaliera integrata. Dopo i settings,
-una volta al giorno per istanza, esegue Avatar → Settings → Help → Clear
-cache → polling CLOSE → CLOSE. Stato persistito in `data/cache_state.json`
-(granularità giornaliera UTC).
+WU78-rev (30/04/2026) — Il driver Vulkan→DirectX (Issue #88) ha eliminato
+la necessità di ULTRA-LOW: i settings applicati sono Graphics HIGH + Frame
+Rate MID + Optimize Mode HIGH (matching setup manuale utente FAU_10).
 
-Strategia: la funzione viene eseguita ad OGNI avvio dell'istanza per
-sicurezza (anche se i settings sono persistenti, un aggiornamento del
-client gioco potrebbe resettarli).
+WU64 (29/04/2026) — Pulizia cache giornaliera integrata: Avatar → Settings
+→ Help → Clear cache → polling CLOSE → CLOSE. Stato persistito in
+`data/cache_state.json` (granularità giornaliera UTC).
 
-GESTIONE TOGGLE STATEFUL:
-- Graphics Quality (slider): IDEMPOTENTE — tap su LOW resta su LOW
-- Frame Rate (3 radio button): IDEMPOTENTE — tap su Low resta Low
-- Optimize Mode (toggle Low/High): NON IDEMPOTENTE — un secondo tap
-  disattiva. Verifica visuale con template `pin_settings_optimize_low_active`
-  prima di tappare. Se già attivo → skip.
+WU195 (07/07/2026) — le due fasi (grafica HIGH, pulizia cache) sono state
+separate in due funzioni pubbliche indipendenti, ciascuna con la propria
+navigazione HOME→...→HOME, per diventare due task orchestrator distinti
+(`tasks/grafica_hq.py::GraficaHqTask`, `tasks/pulizia_cache.py::
+PuliziaCacheTask`) abilitabili/disabilitabili separatamente da dashboard
+(`globali.task.grafica_hq`, `globali.task.pulizia_cache`). Prima erano
+un'unica funzione `imposta_settings_lightweight()` chiamata
+incondizionatamente da `core/launcher.py` ad ogni avvio istanza — rimossa.
+
+GESTIONE TOGGLE STATEFUL (grafica):
+- Graphics Quality (slider): IDEMPOTENTE — tap su HIGH resta su HIGH
+- Frame Rate (3 radio button): IDEMPOTENTE — tap su MID resta MID
+- Optimize Mode: pulsante HIGH distinto da Low, IDEMPOTENTE (nessun
+  check visuale pre-tap necessario, a differenza del vecchio toggle LOW)
 
 Uso:
-    from core.settings_helper import imposta_settings_lightweight
-    imposta_settings_lightweight(ctx, log_fn=lambda m: ctx.log_msg(m))
+    from core.settings_helper import esegui_grafica_hq, esegui_pulizia_cache
+    esegui_grafica_hq(ctx, log_fn=lambda m: ctx.log_msg(m))
+    esegui_pulizia_cache(ctx, log_fn=lambda m: ctx.log_msg(m))
 
-Sequenza base (~22s, ~20s se Optimize già attivo):
+Sequenza grafica HIGH (~22s):
     1. HOME → tap Avatar (48, 37)
     2. → tap icona Settings (135, 478)
     3. → tap voce System Settings (399, 141)
-    4. → tap Graphics Quality LOW (695, 129) [idempotente]
-    5. → tap Frame Rate LOW (623, 215) [idempotente]
-    6. → screenshot + check template pin_settings_optimize_low_active
-    7. → se non attivo: tap Optimize Mode (153, 337)
-    8. BACK 1 (System Settings → Settings)
-    9. SE pulizia cache giornaliera da fare:
-       - tap Help (570, 235) → tap Clear cache (666, 375) → tap Clear icon
-         (480, 200) → polling CLOSE ogni 5s max 120s → tap CLOSE (480, 445)
-       - BACK extra (Help → Settings)
-       - marca cache_state per oggi
-    10. BACK × 2 (Settings → Commander → HOME)
+    4. → tap Graphics Quality HIGH (855, 130) [idempotente]
+    5. → tap Frame Rate MID (740, 215) [idempotente]
+    6. → tap Optimize Mode HIGH (228, 337) [idempotente]
+    7. BACK × 3 (System Settings → Settings → Commander → HOME)
+
+Sequenza pulizia cache (skip immediato, nessun tap, se già fatta oggi):
+    1. HOME → tap Avatar (48, 37)
+    2. → tap icona Settings (135, 478)
+    3. tap Help (570, 235) → tap Clear cache (666, 375) → tap Clear icon
+       (480, 200) → polling CLOSE ogni 5s max 20s → tap CLOSE (480, 445)
+    4. BACK extra (Help → Settings, interno a `_pulisci_cache`)
+    5. marca cache_state per oggi
+    6. BACK × 2 (Settings → Commander → HOME)
 
 Coordinate calibrate su MuMu Player 960×540, validate su FAU_10 il 29/04.
 
@@ -130,20 +138,25 @@ _DELAY_PRE_CHECK = 2.5  # prima dello screenshot per check Optimize (1.5 → 2.5
 # API pubblica
 # ──────────────────────────────────────────────────────────────────────────────
 
-def imposta_settings_lightweight(
+def esegui_grafica_hq(
     ctx,
     log_fn: Optional[Callable[[str], None]] = None,
 ) -> bool:
     """
-    Esegue la sequenza per impostare i 3 setting lightweight:
-      - Graphics Quality LOW (idempotente)
-      - Frame Rate LOW (idempotente)
-      - Optimize Mode LOW (NON idempotente — verifica visuale prima)
+    Imposta i 3 setting grafici HIGH:
+      - Graphics Quality HIGH (idempotente)
+      - Frame Rate MID (idempotente)
+      - Optimize Mode HIGH (idempotente, pulsante distinto da Low)
+
+    WU195 (07/07/2026) — estratta da `imposta_settings_lightweight()`
+    (che faceva grafica+cache insieme) per diventare un task orchestrator
+    indipendente (`tasks/grafica_hq.py::GraficaHqTask`), abilitabile/
+    disabilitabile da dashboard separatamente dalla pulizia cache.
 
     Premessa: l'istanza deve essere in HOME stabile.
     Postcondizione: l'istanza torna in HOME via 3 BACK.
 
-    Returns True se la sequenza è completata. False se device/matcher mancano
+    Returns True se la sequenza è completata. False se device mancante
     o eccezione non gestita.
     """
     log = log_fn or (lambda m: None)
@@ -152,7 +165,7 @@ def imposta_settings_lightweight(
         log("[SETTINGS] device non disponibile — skip")
         return False
 
-    log("[SETTINGS] inizio sequenza lightweight")
+    log("[SETTINGS] inizio sequenza grafica HIGH")
 
     try:
         # ── Step 1-3: navigazione HOME → System Settings ────────────────────
@@ -181,36 +194,85 @@ def imposta_settings_lightweight(
         log("[SETTINGS] tap Optimize Mode HIGH (228, 337)")
         ctx.device.tap(*_TAP_OPTIMIZE_HIGH);   time.sleep(_DELAY_TOGGLE)
 
-        # ── Step 7: BACK 1/3 (System Settings → Settings) ────────────────────
-        log("[SETTINGS] BACK 1/3 (System Settings → Settings)")
-        ctx.device.back()
-        time.sleep(_DELAY_BACK)
-
-        # ── Step 8: pulizia cache giornaliera (1x/die per istanza) ───────────
-        nome = getattr(ctx, "instance_name", None) or "_unknown"
-        if _cache_pulita_oggi(nome):
-            log(f"[SETTINGS] cache già pulita oggi per {nome} — skip")
-        else:
-            log(f"[SETTINGS] avvio pulizia cache giornaliera per {nome}")
-            _t_cache = time.time()
-            _ok_cache = _pulisci_cache(ctx, log)
-            _dt_cache = time.time() - _t_cache
-            if _ok_cache:
-                _marca_cache_pulita(nome)
-                log(f"[SETTINGS] pulizia cache OK — marcata per {nome}")
-                _log_cache_history(nome, "ok", _dt_cache, "pulizia completata")
-            else:
-                log("[SETTINGS] pulizia cache FALLITA — nessun mark")
-                _log_cache_history(nome, "fail", _dt_cache,
-                                    "timeout polling CLOSE o tap fallito")
-
-        # ── Step 9-10: BACK 2/3 + 3/3 → HOME ────────────────────────────────
-        for i in (2, 3):
+        # ── BACK ×3: System Settings → Settings → Commander → HOME ──────────
+        for i in (1, 2, 3):
             log(f"[SETTINGS] BACK {i}/3")
             ctx.device.back()
             time.sleep(_DELAY_BACK)
 
-        log("[SETTINGS] sequenza completata — istanza in HOME")
+        log("[SETTINGS] sequenza grafica HIGH completata — istanza in HOME")
+        return True
+
+    except Exception as exc:
+        log(f"[SETTINGS] ERRORE: {exc}")
+        return False
+
+
+def esegui_pulizia_cache(
+    ctx,
+    log_fn: Optional[Callable[[str], None]] = None,
+) -> bool:
+    """
+    Esegue la pulizia cache giornaliera (1×/die per istanza, via
+    `data/cache_state.json`). Flow: Avatar → Settings → Help → Clear cache
+    → polling CLOSE → CLOSE.
+
+    WU195 (07/07/2026) — estratta da `imposta_settings_lightweight()` per
+    diventare un task orchestrator indipendente
+    (`tasks/pulizia_cache.py::PuliziaCacheTask`). Uscita anticipata se la
+    cache è già stata pulita oggi: NESSUNA navigazione (prima, girando
+    sempre insieme alla grafica, la navigazione era comunque necessaria per
+    quella; ora da sola andrebbe evitata ad ogni ciclo se già fatta).
+
+    Premessa: l'istanza deve essere in HOME stabile.
+    Postcondizione: l'istanza torna in HOME (via 2 BACK se la pulizia è
+    stata eseguita, nessun movimento se già fatta oggi).
+
+    Returns True se già pulita oggi oppure se la sequenza è completata
+    (indipendentemente dall'esito della singola pulizia, che è loggato e
+    tracciato a parte in `data/cache_history.jsonl`). False se device
+    mancante o eccezione non gestita.
+    """
+    log = log_fn or (lambda m: None)
+
+    if ctx.device is None:
+        log("[SETTINGS] device non disponibile — skip")
+        return False
+
+    nome = getattr(ctx, "instance_name", None) or "_unknown"
+    if _cache_pulita_oggi(nome):
+        log(f"[SETTINGS] cache già pulita oggi per {nome} — skip (nessuna navigazione)")
+        return True
+
+    log("[SETTINGS] inizio sequenza pulizia cache")
+
+    try:
+        log("[SETTINGS] tap Avatar (48, 37)")
+        ctx.device.tap(*_TAP_AVATAR);          time.sleep(_DELAY_NAV)
+
+        log("[SETTINGS] tap icona Settings (135, 478)")
+        ctx.device.tap(*_TAP_SETTINGS_ICON);   time.sleep(_DELAY_NAV)
+
+        log(f"[SETTINGS] avvio pulizia cache giornaliera per {nome}")
+        _t_cache = time.time()
+        _ok_cache = _pulisci_cache(ctx, log)
+        _dt_cache = time.time() - _t_cache
+        if _ok_cache:
+            _marca_cache_pulita(nome)
+            log(f"[SETTINGS] pulizia cache OK — marcata per {nome}")
+            _log_cache_history(nome, "ok", _dt_cache, "pulizia completata")
+        else:
+            log("[SETTINGS] pulizia cache FALLITA — nessun mark")
+            _log_cache_history(nome, "fail", _dt_cache,
+                                "timeout polling CLOSE o tap fallito")
+
+        # ── BACK ×2: Settings → Commander → HOME ────────────────────────────
+        for i in (1, 2):
+            log(f"[SETTINGS] BACK {i}/2")
+            ctx.device.back()
+            time.sleep(_DELAY_BACK)
+
+        log("[SETTINGS] sequenza pulizia cache completata — istanza in HOME")
         return True
 
     except Exception as exc:

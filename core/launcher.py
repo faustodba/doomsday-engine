@@ -1092,25 +1092,12 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None,
             # (12 istanze × ~37s di settings/troops/banner non tracciato).
             # Predictor auto-converge in ~10 cicli via rolling stats.
 
-            # WU60 (Issue #85 prereq) — applica settings lightweight client gioco
-            # ad ogni avvio istanza dopo HOME confermata. Idempotente: Optimize
-            # Mode gestito via template check, Graphics/Frame LOW = tap su
-            # slider/radio già in posizione (no-op visivo). Costo ~22s/istanza.
-            #
-            # WU112 (03/05 notte): skip per tipologia=raccolta_only (FauMorfeus
-            # e simili master). Le istanze raccolta_only hanno task minimi
-            # (solo RaccoltaTask) e non beneficiano del settings tweak — il
-            # tap "Graphics Quality HIGH" cambiava settings utente senza motivo.
-            _tipologia_inst = (
-                getattr(getattr(ctx, "config", None), "tipologia", None)
-                or getattr(getattr(ctx, "config", None), "profilo", None)
-                or "full"
-            )
-            # 09/05: `_sctx` definito SEMPRE (anche per raccolta_only) per
-            # essere riusato da `leggi_truppe_se_necessario` sotto. Pre-fix:
-            # _sctx era nello scope dell'`else`, quindi su raccolta_only
-            # (FauMorfeus master) NameError "cannot access local variable
-            # '_sctx'" → troops reader skippato silenziosamente.
+            # WU195 (07/07) — grafica HIGH + pulizia cache RIMOSSE da qui:
+            # erano chiamate incondizionatamente ad ogni avvio istanza
+            # (WU60/WU112), ora sono due task orchestrator indipendenti
+            # (tasks/grafica_hq.py, tasks/pulizia_cache.py), abilitabili/
+            # disabilitabili separatamente da dashboard. `_sctx` resta qui
+            # perché riusato da `leggi_truppe_se_necessario` sotto.
             class _SettingsCtx:
                 pass
             _sctx = _SettingsCtx()
@@ -1118,17 +1105,6 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None,
             _sctx.matcher       = getattr(nav, "matcher", None)
             _sctx.navigator     = nav
             _sctx.instance_name = nome
-            if str(_tipologia_inst) == "raccolta_only":
-                _log(f"[{nome}] settings lightweight SKIP (tipologia=raccolta_only)", log_fn)
-            else:
-                try:
-                    from core.settings_helper import imposta_settings_lightweight
-                    _t_set = time.time()
-                    _ok_set = imposta_settings_lightweight(_sctx, log_fn=log_fn)
-                    _dt_set = time.time() - _t_set
-                    _log(f"[{nome}] settings lightweight ok={_ok_set} ({_dt_set:.1f}s)", log_fn)
-                except Exception as exc:
-                    _log(f"[{nome}] settings lightweight errore: {exc}", log_fn)
 
             # WU65 — lettura giornaliera Total Squads (storico crescita truppe).
             # Skip-on-already-done via data/storico_truppe.json.

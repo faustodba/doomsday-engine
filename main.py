@@ -54,6 +54,8 @@ from core import launcher as _launcher
 def _import_tasks() -> dict:
     tasks = {}
     _catalogue = [
+        ("tasks.grafica_hq",     "GraficaHqTask"),         # WU195 — ex settings_helper
+        ("tasks.pulizia_cache",  "PuliziaCacheTask"),       # WU195 — ex settings_helper
         ("tasks.raccolta",       "RaccoltaTask"),
         ("tasks.raccolta",       "RaccoltaChiusuraTask"),  # Issue #62 — chiusura tick
         ("tasks.raccolta_fast",  "RaccoltaFastTask"),      # WU57 — variante fast (sostituisce RaccoltaTask via tipologia=raccolta_fast)

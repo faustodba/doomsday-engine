@@ -52,6 +52,8 @@ class TaskFlags(BaseModel):
     come toggle (resta sempre ON di fatto), ma la chiave viene preservata
     nel JSON al ogni salvataggio.
     """
+    grafica_hq:         bool = True
+    pulizia_cache:      bool = True
     alleanza:           bool = True
     messaggi:           bool = True
     vip:                bool = True

@@ -736,6 +736,46 @@ Attivazione: tipologia istanza = `raccolta_fast` (alternativa a
 `raccolta_only` o `full`). Runtime swap RaccoltaTask→RaccoltaFastTask
 in `main.py` preservando priority/interval/schedule.
 
+### 5.18 GraficaHqTask (priority 1, always 0h)
+
+[tasks/grafica_hq.py](../tasks/grafica_hq.py) — Imposta Graphics Quality
+HIGH + Frame Rate MID + Optimize Mode HIGH (WU78-rev, driver
+Vulkan→DirectX). WU195 (07/07): estratto da `imposta_settings_lightweight`
+(ex `core/settings_helper.py`), che girava incondizionatamente ad ogni
+avvio istanza, in task orchestrator indipendente abilitabile/disabilitabile
+da dashboard separatamente dalla pulizia cache.
+
+**Flusso**: HOME → tap Avatar → tap icona Settings → tap System Settings
+→ tap Graphics Quality HIGH → tap Frame Rate MID → tap Optimize Mode HIGH
+→ BACK×3 → HOME. Sequenza autosufficiente in
+`shared_helper`/`core/settings_helper.py::esegui_grafica_hq()`.
+
+**Regole speciali**:
+- Skip esplicito se `tipologia == "raccolta_only"` (FauMorfeus)
+- `should_run()` → `ctx.config.task_abilitato("grafica_hq")`
+- Priority 1 (gira per prima, replicando il comportamento storico
+  "ad ogni avvio istanza, prima di ogni altro task")
+
+### 5.19 PuliziaCacheTask (priority 2, always 0h)
+
+[tasks/pulizia_cache.py](../tasks/pulizia_cache.py) — Pulizia cache
+giornaliera (Help → Clear cache → CLOSE), gestita 1×/die per istanza via
+`data/cache_state.json`. WU195 (07/07): estratto da
+`imposta_settings_lightweight` in task indipendente, separato da
+GraficaHqTask.
+
+**Flusso**: HOME → tap Avatar → tap icona Settings (si ferma al pannello
+Settings, non entra in System Settings) → `_pulisci_cache()` (invariata:
+Help → Clear cache → poll CLOSE → tap) → BACK×2 → HOME. Se cache già
+pulita oggi per l'istanza → uscita immediata, nessuna navigazione.
+
+**Regole speciali**:
+- Skip esplicito se `tipologia == "raccolta_only"` (FauMorfeus)
+- `should_run()` → `ctx.config.task_abilitato("pulizia_cache")`
+- Gate giornaliero invariato (`_cache_pulita_oggi`/`_marca_cache_pulita`
+  su `data/cache_state.json`), indipendente dal flag abilitazione task
+- Priority 2 (subito dopo GraficaHqTask)
+
 ---
 
 ## 6. Configurazione

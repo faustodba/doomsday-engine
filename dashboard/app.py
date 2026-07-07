@@ -1488,6 +1488,7 @@ def partial_task_flags_v2(request: Request):
         "messaggi", "main_mission",
         "radar", "arena_mercato",
         "district_showdown",
+        "grafica_hq", "pulizia_cache",
     ]
 
     # auto-WU22 (27/04): rewrite as 2-col checkbox rows (style rifornimento .rr-cb)

@@ -64,6 +64,8 @@ _DEFAULTS: dict[str, Any] = {
     "max_parallel": 2,
 
     # Task abilitati
+    "task_grafica_hq":        True,
+    "task_pulizia_cache":     True,
     "task_raccolta":          True,
     "task_rifornimento":      False,
     "task_donazione":         True,
@@ -769,6 +771,8 @@ class GlobalConfig:
     max_parallel: int   = 2
 
     # Task abilitati
+    task_grafica_hq:        bool = True
+    task_pulizia_cache:     bool = True
     task_raccolta:          bool = True
     task_rifornimento:      bool = False
     task_donazione:         bool = True
@@ -923,6 +927,8 @@ class GlobalConfig:
             max_parallel = int(s.get("max_parallel", 2)),
 
             # Task
+            task_grafica_hq        = bool(t.get("grafica_hq",        True)),
+            task_pulizia_cache     = bool(t.get("pulizia_cache",     True)),
             task_raccolta          = bool(t.get("raccolta",          True)),
             task_rifornimento      = bool(t.get("rifornimento",      False)),
             task_donazione         = bool(t.get("donazione",         True)),
@@ -1063,6 +1069,8 @@ class GlobalConfig:
                 "n_back_pulizia":      self.mumu.n_back_pulizia,
             },
             "task": {
+                "grafica_hq":        self.task_grafica_hq,
+                "pulizia_cache":     self.task_pulizia_cache,
                 "raccolta":          self.task_raccolta,
                 "rifornimento":      self.task_rifornimento,
                 "donazione":         self.task_donazione,
@@ -1300,6 +1308,8 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
 
         def task_abilitato(self, nome_task: str) -> bool:
             mappa = {
+                "grafica_hq":            gcfg.task_grafica_hq,
+                "pulizia_cache":         gcfg.task_pulizia_cache,
                 "raccolta":              gcfg.task_raccolta,
                 "rifornimento":          gcfg.task_rifornimento and (gcfg.rifornimento_mappa_abilitato or gcfg.rifornimento_membri_abilitato),
                 "rifornimento_mappa":    gcfg.rifornimento_mappa_abilitato,
