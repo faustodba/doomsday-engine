@@ -686,7 +686,15 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
     ctx.device.input_text(str(qta))
     time.sleep(0.5)
     ctx.device.tap(879, 487)
-    time.sleep(0.5)
+    # WU194 (07/07) — REGOLA DELAY UI (.claude/CLAUDE.md): dopo un tap che fa
+    # ridisegnare un campo, minimo 2.0s prima di screenshot/OCR. Qui il tap OK
+    # tastiera fa scattare il clamp del gioco (input enorme -> valore max
+    # realmente inviabile) e ridisegna il campo con quel valore — screen2
+    # sotto viene letto via OCR per registrare `qta_clamped_real`. Con 0.5s
+    # (sotto soglia) l'OCR poteva catturare il campo a metà ridisegno,
+    # producendo letture spurie (osservato: 999.000.000 vicino al placeholder
+    # digitato, e una volta "6" — schermata non ancora stabilizzata).
+    time.sleep(2.0)
 
     # Verifica VAI
     screen2 = ctx.device.screenshot()
