@@ -130,6 +130,27 @@
 
   <script>
     const URL_PREFIX = '{{ url_prefix }}';
+
+    // WU193 — protezione generica polling htmx vs campi in editing: molte
+    // card usano hx-trigger="... every Ns" per rinfrescare valori live, ma
+    // lo stesso hx-swap="innerHTML" rimpiazza anche gli <input> editabili
+    // della card — se l'utente sta scrivendo un valore e il poll scatta
+    // prima che prema "salva", l'input viene sovrascritto col valore
+    // server-side non ancora salvato (sintomo osservato: "il campo non
+    // accetta un valore diverso da quello di default", card adaptive
+    // scheduler). Generalizza il fix puntuale 08/05 (sotto, era scoped solo
+    // a #prod-istanze + .card-ctrl) a QUALSIASI card, presente o futura:
+    // se il focus è su un input/select/textarea dentro il container che
+    // sta per fare la richiesta, annulla quel singolo refresh.
+    document.body.addEventListener('htmx:beforeRequest', function(evt) {
+      const target = evt.detail && evt.detail.target;
+      const active  = document.activeElement;
+      if (target && active && target.contains(active) &&
+          ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName)) {
+        evt.preventDefault();
+      }
+    });
+
     // WU51 — toggle modalità manutenzione
     async function maintenanceToggle(activate) {
       try {
@@ -206,29 +227,6 @@
         setMsg('✗ ' + e.message, '#c00');
       }
     }
-
-    // 08/05 — Pausa auto-refresh produzione-istanze quando l'utente sta
-    // editando un controllo card (preserva valori che sta digitando).
-    // Il prossimo trigger ciclico riprenderà normalmente quando il focus
-    // esce dai controlli.
-    document.addEventListener('htmx:beforeRequest', function(evt) {
-      try {
-        const target = evt.detail && evt.detail.target;
-        const elt    = evt.detail && evt.detail.elt;
-        // Vincoliamo SOLO al refresh di prod-istanze, non altri pannelli
-        if (target && target.id === 'prod-istanze') {
-          // Skip se un input/select dei controlli card-ctrl è in focus
-          const focused = document.activeElement;
-          if (focused && (focused.tagName === 'INPUT' || focused.tagName === 'SELECT')) {
-            const inCtrl = focused.closest('.card-ctrl');
-            if (inCtrl) {
-              evt.preventDefault();   // cancella questo tick di refresh
-              return;
-            }
-          }
-        }
-      } catch (e) { /* failsafe — non bloccare htmx */ }
-    });
 
     // WU153 — collapsible panels (tel-card / col-box / section)
     // Click su header (.tel-head/.col-head/.sec-label) -> toggle visibilita' body.

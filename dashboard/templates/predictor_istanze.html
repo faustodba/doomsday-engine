@@ -28,26 +28,6 @@
           </div>
         </div>
       </div>
-      <script>
-      (function() {
-        // WU193 — il polling "every 30s" rimpiazzava l'intero innerHTML della
-        // card, campi <input> inclusi: se l'utente stava scrivendo una nuova
-        // soglia (es. "spedizioni oggi") il refresh la cancellava prima che
-        // potesse premere "salva", riportando il valore server-side non
-        // ancora salvato — sintomo riportato "non mi permette un numero
-        // inferiore a 100" (in realtà 100 era solo l'ultimo valore salvato,
-        // il nuovo veniva perso a ogni giro di polling). Fix: salta il
-        // refresh se l'utente ha il focus su un input dentro la card.
-        const card = document.getElementById('adapt-card');
-        if (!card) return;
-        card.addEventListener('htmx:beforeRequest', function(evt) {
-          const active = document.activeElement;
-          if (active && card.contains(active) && active.tagName === 'INPUT') {
-            evt.preventDefault();
-          }
-        });
-      })();
-      </script>
     </div>
 
     <div class="divider"></div>
