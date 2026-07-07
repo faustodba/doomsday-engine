@@ -352,14 +352,14 @@ in `shared/morfeus_state.py::load` ritorna in memoria
 `daily_recv_limit_max` come cap stimato — beneficia tutti i consumer
 (adaptive scheduler `_master_drl_residuo_m`, dashboard, daily_report).
 
-### 4.17 `core/daily_report.py` (WU137 fase 1 + revisione 10/05)
+### 4.17 `core/daily_report.py` (WU137 fase 1 + revisione 10/05 + WU196)
 
 Daily report email costruito ogni mattina (default 07:35 UTC) tramite
 `maybe_send_daily_report()` chiamato post-ciclo dal main loop.
-Architettura: 11 funzioni `_section_*` indipendenti aggregano da
+Architettura: 12 funzioni `_section_*` indipendenti aggregano da
 diverse sources, due render text/html separate dalla logica dati.
 
-**11 sezioni del report** (ordine fisso, rev 10/05):
+**12 sezioni del report** (ordine fisso, rev 10/05 + WU196):
 
 | # | Sezione | Source | Contenuto chiave |
 |---|---|---|---|
@@ -374,6 +374,18 @@ diverse sources, due render text/html separate dalla logica dati.
 | 9 | COPERTURA SQUADRE | `cap_nodi_dataset.jsonl` | load_squadra/cap_nodo per istanza, summary 100%, dettaglio underprov |
 | 10 | EVENTI RILEVANTI | cicli + mail_queue + logs + restart_state | esiti tick, alert email, rifornimento skip master, HOME stab timeout, bot restart |
 | 11 | ANOMALIE TASK | events_jsonl | aggregato per task con fail_rate%, lista istanze, causa principale (top msg) |
+| 12 | DEPOSITO ATTUALE (WU196) | `state/<ist>.json::produzione_corrente.risorse_iniziali` | ultima lettura nota risorse in deposito per istanza + timestamp — snapshot LIVE (non storico del giorno, a differenza delle altre 11 sezioni) |
+
+**Nota sezione 12**: a differenza delle altre sezioni (tutte filtrate per
+`date` = ieri UTC), la sezione 12 legge lo stato corrente
+(`produzione_corrente`, la sessione ancora aperta) — riflette quindi il
+deposito "ad ora" (ultimo ciclo completato per istanza al momento della
+generazione del report), non un valore storico associato al giorno del
+report. Fonte già esistente: l'OCR robusto a consenso di
+`main.py::_leggi_risorse()` (gira ad ogni avvio istanza, indipendente da
+`ZainoTask`), già persistito in `risorse_iniziali` della sessione aperta —
+nessuna nuova lettura OCR introdotta, solo esposizione nel report di un
+dato già raccolto.
 
 **Regole applicate** (rev 10/05):
 - **No duplicazione dati** tra sezioni: stress test eseguito su tutte le 11

@@ -5,6 +5,51 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 07/07/2026 — WU196: daily report, nuova sezione 12 "Deposito attuale"
+
+Richiesta utente: verificare se il daily report mostrasse, per ogni
+istanza, le risorse presenti nel deposito.
+
+**Verificato**: nessuna delle 11 sezioni esistenti lo faceva. Sez. 2
+(Produzione interna rifugio) mostra il *delta* di produzione, sez. 3 il
+netto spedito al master, sez. 5 (Rifornimento) ha una colonna "residuo"
+che è la quota giornaliera di invio rimanente (`provviste_residue`), non
+lo stock in magazzino.
+
+**Trovato**: il dato esiste già, raccolto ma non esposto. `tasks/zaino.py
+::_ocr_deposito()` legge la barra risorse HOME ma solo per calcolare
+quanto scaricare dallo zaino (transiente, non persistito). Fonte migliore
+individuata in `main.py::_leggi_risorse()` — hook `on_home_ready` di
+`attendi_home()`, gira ad ogni avvio istanza indipendentemente da
+ZainoTask, fa OCR robusto a consenso 3-su-5 della barra risorse e lo
+passa a `ctx.state.apri_sessione(risorse_now, ...)`, persistito come
+`state/<ist>.json::produzione_corrente.risorse_iniziali` — la sessione
+ancora aperta rappresenta quindi l'ultima lettura nota del deposito,
+aggiornata ogni ciclo per ogni istanza.
+
+**Implementato**: nuova `_section_deposito_attuale()` in
+`core/daily_report.py`, stesso pattern di lettura file-per-istanza di
+`_section_produzione_rifugio` (master FauMorfeus separato), esposta come
+**sezione 12** in testo e HTML — tabella istanza × 4 risorse + timestamp
+ultima lettura. A differenza delle altre 11 sezioni (filtrate per
+`date`=ieri UTC) è un valore **live**, non storico — documentato
+esplicitamente nel testo del report e in `docs/OVERVIEW.md` §4.17.
+Nessuna nuova lettura OCR introdotta: solo esposizione di un dato già
+raccolto.
+
+Validato con dati reali prod (12 istanze, valori e timestamp plausibili
+in entrambi i render). Suite pytest 573 passed / 140 failed / 4 errors —
+invariata. Sync dev+prod verificato byte-identico. Dettagli
+`docs/issues/notifiche-alert.md` (WU196).
+
+### Prossimo step
+- Effetto al prossimo restart bot (già armato per WU195 nella stessa
+  sessione — nessun restart aggiuntivo necessario).
+- Osservare il prossimo daily report reale per confermare che la
+  sezione 12 compaia correttamente con dati freschi per tutte le istanze.
+
+---
+
 ## Sessione 07/07/2026 — WU195: grafica HQ + pulizia cache come task indipendenti
 
 Richiesta utente: rendere abilitabili/disabilitabili separatamente da

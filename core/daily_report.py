@@ -366,6 +366,56 @@ def _section_produzione_rifugio(date: str) -> dict:
     }
 
 
+def _section_deposito_attuale() -> dict:
+    """Ultima lettura nota delle risorse in deposito (barra HOME) per
+    istanza — snapshot live, NON uno storico filtrato per giorno.
+
+    Source: `state/<istanza>.json::produzione_corrente.risorse_iniziali`,
+    popolato da `main.py::_leggi_risorse()` (OCR robusto a consenso) ad
+    ogni avvio istanza — non solo quando gira ZainoTask. Rappresenta
+    quindi il deposito "ad ora" (ultimo ciclo completato per l'istanza),
+    non un valore storico del giorno del report.
+    """
+    import glob
+    try:
+        from shared.instance_meta import is_master_instance
+    except Exception:
+        is_master_instance = lambda x: x == "FauMorfeus"
+
+    state_dir = _root() / "state"
+    ordinarie: list[dict] = []
+    master_row: dict | None = None
+
+    for fp in sorted(glob.glob(str(state_dir / "FAU_*.json")) +
+                     glob.glob(str(state_dir / "FauMorfeus.json"))):
+        try:
+            with open(fp, encoding="utf-8") as f:
+                d = json.load(f)
+        except Exception:
+            continue
+        nome = os.path.basename(fp).replace(".json", "")
+        pc = d.get("produzione_corrente") or {}
+        ris = pc.get("risorse_iniziali") or {}
+        if not ris:
+            continue
+        row = {
+            "nome":    nome,
+            "risorse": {r: float(ris.get(r) or 0) for r in _RISORSE_ORDER},
+            "ts":      pc.get("ts_inizio") or "",
+        }
+        if is_master_instance(nome):
+            master_row = row
+        else:
+            ordinarie.append(row)
+
+    ordinarie.sort(key=lambda x: x["nome"])
+    return {
+        "ordinarie":  ordinarie,
+        "master_row": master_row,
+        "n_ist":      len(ordinarie) + (1 if master_row else 0),
+    }
+
+
 def _section_produzione(date: str) -> dict:
     """Totali produzione + spedizioni dalla giornata."""
     data = _read_json("data/storico_farm.json") or {}
@@ -988,11 +1038,12 @@ def build_daily_report(date: Optional[str] = None) -> dict:
     cop = _section_copertura_squadre(date)
     eventi = _section_eventi_rilevanti(date)
     anom = _section_anomalie(date)
+    deposito = _section_deposito_attuale()
 
     sections = {
         "cicli": cicli, "rifugio": rifugio, "prod": prod, "trend": trend,
         "rifornim": rifornim, "truppe": truppe, "perf": perf, "cop": cop,
-        "eventi": eventi, "anom": anom,
+        "eventi": eventi, "anom": anom, "deposito": deposito,
     }
 
     subj = f"[Doomsday] daily report {date}"
@@ -1012,6 +1063,7 @@ def _render_text(date: str, s: dict) -> str:
     cicli, prod, trend, rifornim = s["cicli"], s["prod"], s["trend"], s["rifornim"]
     truppe, perf, cop, eventi, anom = s["truppe"], s["perf"], s["cop"], s["eventi"], s["anom"]
     rifugio = s["rifugio"]
+    deposito = s["deposito"]
 
     L: list[str] = []
     L.append(f"DAILY REPORT {date} (UTC)")
@@ -1390,6 +1442,27 @@ def _render_text(date: str, s: dict) -> str:
             L.append("  anomalie strutturate: nessuna")
     L.append("")
 
+    # 12. DEPOSITO ATTUALE — snapshot live (non storico del giorno)
+    L.append("[DEPOSITO ATTUALE] (ultima lettura nota, non storico del giorno)")
+    if deposito["n_ist"] == 0:
+        L.append("  nessuna lettura deposito disponibile")
+    else:
+        L.append(f"  {'ist':<12} {'pom':>7}  {'legno':>7}  {'acc':>7}  {'petr':>7}  aggiornato")
+        for r in deposito["ordinarie"]:
+            v = r["risorse"]
+            L.append(
+                f"  {r['nome']:<12} {v['pomodoro']/1e6:>6.1f}M {v['legno']/1e6:>6.1f}M "
+                f"{v['acciaio']/1e6:>6.1f}M {v['petrolio']/1e6:>6.1f}M  {r['ts'][:16]}"
+            )
+        if deposito["master_row"]:
+            r = deposito["master_row"]
+            v = r["risorse"]
+            L.append(
+                f"  {r['nome']:<12} {v['pomodoro']/1e6:>6.1f}M {v['legno']/1e6:>6.1f}M "
+                f"{v['acciaio']/1e6:>6.1f}M {v['petrolio']/1e6:>6.1f}M  {r['ts'][:16]} (master)"
+            )
+    L.append("")
+
     L.append("-" * 50)
     L.append(f"generato: {datetime.now(timezone.utc).isoformat()} UTC")
     return "\n".join(L)
@@ -1419,6 +1492,7 @@ def _render_html(date: str, s: dict) -> str:
     cicli, prod, trend, rifornim = s["cicli"], s["prod"], s["trend"], s["rifornim"]
     truppe, perf, cop, eventi, anom = s["truppe"], s["perf"], s["cop"], s["eventi"], s["anom"]
     rifugio = s["rifugio"]
+    deposito = s["deposito"]
 
     parts: list[str] = ["<html><head>", _CSS, "</head><body>"]
     parts.append(f"<h1>Daily Report — {date} (UTC)</h1>")
@@ -1940,6 +2014,42 @@ def _render_html(date: str, s: dict) -> str:
             parts.append("</table>")
         else:
             parts.append("<p style='color:#888'>Anomalie strutturate: nessuna</p>")
+
+    # 12. DEPOSITO ATTUALE — snapshot live (non storico del giorno)
+    parts.append("<h2>12. Deposito attuale</h2>")
+    parts.append("<p style='color:#666;font-size:90%'>Ultima lettura nota "
+                 "delle risorse in deposito per istanza (barra HOME, "
+                 "aggiornata ad ogni avvio istanza) — snapshot live, non "
+                 "uno storico del giorno del report.</p>")
+    if deposito["n_ist"] == 0:
+        parts.append("<p>nessuna lettura deposito disponibile</p>")
+    else:
+        parts.append("<table><tr><th>istanza</th><th>🍅 pomodoro</th>"
+                     "<th>🪵 legno</th><th>⚙ acciaio</th><th>🛢 petrolio</th>"
+                     "<th>aggiornato</th></tr>")
+        for r in deposito["ordinarie"]:
+            v = r["risorse"]
+            parts.append(
+                f"<tr><td>{r['nome']}</td>"
+                f"<td class='num'>{_fmt_n(v['pomodoro'])}</td>"
+                f"<td class='num'>{_fmt_n(v['legno'])}</td>"
+                f"<td class='num'>{_fmt_n(v['acciaio'])}</td>"
+                f"<td class='num'>{_fmt_n(v['petrolio'])}</td>"
+                f"<td><small>{r['ts'][:16]}</small></td></tr>"
+            )
+        if deposito["master_row"]:
+            r = deposito["master_row"]
+            v = r["risorse"]
+            parts.append(
+                f"<tr style='background:#fff7d0'><td>{r['nome']} "
+                f"<small>(master)</small></td>"
+                f"<td class='num'>{_fmt_n(v['pomodoro'])}</td>"
+                f"<td class='num'>{_fmt_n(v['legno'])}</td>"
+                f"<td class='num'>{_fmt_n(v['acciaio'])}</td>"
+                f"<td class='num'>{_fmt_n(v['petrolio'])}</td>"
+                f"<td><small>{r['ts'][:16]}</small></td></tr>"
+            )
+        parts.append("</table>")
 
     parts.append(
         f"<div class='footer'>generato: "
