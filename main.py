@@ -884,6 +884,23 @@ def _thread_istanza(ist, tasks_cls, dry_run):
             except Exception as exc:
                 _log(nome, f"[WARN] produzione snapshot: {exc}")
 
+            # WU199 (09/07) — report_raccolta: NON un task schedulato, gira
+            # qui subito dopo la conferma della lettura risorse (stesso punto
+            # del boot, stessa cadenza). Flag da abilitare esplicitamente
+            # (default OFF) — fase di test su istanza singola prima di
+            # estendere. solo_reset=True di default: per ora limitato a
+            # svuotare il report (nessuna lettura OCR), vedi
+            # shared/report_raccolta.py per il razionale.
+            if ctx.config.get("REPORT_RACCOLTA_ABILITATO", False):
+                try:
+                    from shared.report_raccolta import esegui_report_raccolta
+                    esegui_report_raccolta(
+                        ctx, log_fn=lambda m: _log(nome, m),
+                        solo_reset=ctx.config.get("REPORT_RACCOLTA_SOLO_RESET", True),
+                    )
+                except Exception as exc:
+                    _log(nome, f"[WARN] report_raccolta: {exc}")
+
         if not _launcher.attendi_home(ctx, _log_fn, on_home_ready=_leggi_risorse):
             _log(nome, "[ERRORE] attendi_home() fallito")
             _launcher.chiudi_istanza(ist, porta, _log_fn)

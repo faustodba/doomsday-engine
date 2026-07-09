@@ -1276,6 +1276,15 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
             "raccolta_fuori_territorio",
             ist.get("raccolta_fuori_territorio", False),
         ))
+        # WU199 (09/07) — report_raccolta: chiamata diretta da
+        # main.py::_leggi_risorse(), NON un task schedulato. Per-istanza
+        # (non in instances.json — nuovo, nessun default statico) così da
+        # poter testare su una sola istanza (es. FAU_00) prima di estendere.
+        # Default OFF finché non abilitato esplicitamente da runtime_overrides.
+        REPORT_RACCOLTA_ABILITATO  = bool(_ovr("report_raccolta_abilitato", False))
+        # Fase di test corrente: limita l'operazione alla sola cancellazione
+        # del report (nessuna lettura OCR) — vedi shared/report_raccolta.py.
+        REPORT_RACCOLTA_SOLO_RESET = bool(_ovr("report_raccolta_solo_reset", True))
         # WU55 — Data collection OCR slot per analisi HOME vs MAPPA.
         # Flag globale (non per istanza) — attivato per 1 ciclo di analisi.
         RACCOLTA_OCR_DEBUG = bool(getattr(gcfg, "raccolta_ocr_debug", False))

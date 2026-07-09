@@ -5,6 +5,79 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 09/07/2026 (2) — WU199: report_raccolta — lettura Gathering Report, fase 1 (reset)
+
+Richiesta utente: calcolare la produzione oraria precisa per istanza. Scoperta
+chiave: il tab **Report** della schermata Messaggi (mai usato dal bot prima —
+noto solo dal commento WU su REPORT/SENT/BOOK aggiunti il 18/06) contiene un
+log "Gathering Report" con ogni marcia di raccolta completata: coordinata
+nodo, tipo+livello, timestamp esatto, quantità raccolta (base + eventuale
+bonus), valore donato all'alleanza — dati molto più precisi dell'attuale
+OCR deposito differenziale (`main.py::_leggi_risorse`).
+
+**Piano in 3 fasi concordato con l'utente**:
+1. Pulizia report su tutte le istanze (nessuna lettura, solo reset baseline)
+2. Lettura dati + storage + gestione scroll (già implementata, da validare live)
+3. Sostituzione dell'algoritmo produzione attuale col nuovo (futura, affiancamento prima del cutover)
+
+**Fase 1 — implementata e attivata in prod stanotte**. Calibrazione OCR fatta
+live su FAU_05 (screenshot reali, bot fermo, nessuna collisione ADB) e
+validata anche su FAU_00 (istanza più avanzata — menu Report con albero
+categorie Battle/Group Battles/Jungle Crisis/Zombie/Scout/Other, ma pannello
+dati e bottone "Delete" identici). Scoperto: il tab Report è un LOG puro
+(risorse già depositate al rientro squadra), non una coda reward — "Read and
+claim all"/"Delete read" non hanno effetto, solo "Delete" (contestuale)
+svuota tutto in un tap, nessuna conferma.
+
+**Decisione architetturale importante** (corretta in corsa su richiesta
+utente): NON un Task schedulato nell'orchestrator — `esegui_report_raccolta()`
+è chiamata diretta da `main.py::_leggi_risorse()` (closure `on_home_ready` di
+`attendi_home()`), stesso punto del boot in cui si aggiorna
+`produzione_corrente`. Due flag per-istanza via `_ovr()` in
+`config_loader.py` (pattern identico a `RACCOLTA_FUORI_TERRITORIO_ABILITATA`,
+controllabili da `runtime_overrides.json::istanze.<nome>`, mai da
+`instances.json` statico): `REPORT_RACCOLTA_ABILITATO` (default False) e
+`REPORT_RACCOLTA_SOLO_RESET` (default True — fase 1 attuale, solo Delete,
+nessuna lettura OCR).
+
+**Bug trovati e corretti durante l'implementazione della fase 2** (pronta ma
+non ancora attiva, `solo_reset=False`):
+- Griglia fissa dei 79.5px di stride non reggeva lo scroll libero (non
+  "snap to row" del gioco) → `_trova_anchor_riga()` rileva dinamicamente la
+  posizione via profilo di luminosità ad ogni pagina.
+- Quantità raccolta leggeva il bonus invece della base quando presente
+  (`numeri[-1]` invece di `numeri[0]`).
+- Cifre singole confuse dall'OCR (7→2, 6→0) per crop senza upscale — aggiunto
+  upscale 3x (pattern standard del codebase, es. `_ocr_coord_box`).
+- **Rischio perdita dati** identificato e corretto: il Delete scattava anche
+  su stop anticipato ambiguo (0 righe = ancora non rilevata, non
+  necessariamente fine lista — verificato empiricamente che pagine successive
+  trovano comunque altre righe). Fix: Delete solo se `fine_lista_raggiunta`
+  è confermata da una pagina parziale con **almeno 1** riga valida.
+
+Validato: simulazione end-to-end su 13 screenshot reali in sequenza (stato
+dedup condiviso) → 37 righe nuove persistite, secondo giro identico → 0
+nuove (idempotenza confermata). Test `config_loader` 39/39 verdi.
+
+Sync dev→prod fatto e verificato byte-identico (`main.py`,
+`config/config_loader.py`, `shared/report_raccolta.py`). Flag
+`report_raccolta_abilitato: true` impostato su tutte le 12 istanze in
+`runtime_overrides.json` prod (solo questa chiave aggiunta, resto del file
+verificato intatto). **Bot riavviato dall'utente** con la fase 1 attiva.
+
+### Prossimo step
+- Osservare i log `[REPORT-RACCOLTA]` sulle prime istanze del nuovo ciclo per
+  confermare che il reset avvenga senza anomalie su tutte e 12.
+- Dopo un ciclo di reset pulito su tutte le istanze: passare a fase 2
+  (`report_raccolta_solo_reset=False`), prima su una singola istanza
+  canarino, per validare lo scroll dal vivo (mai testato in produzione, solo
+  su screenshot statici).
+- Fase 3 (sostituzione algoritmo produzione) resta non iniziata — richiede
+  affiancamento e confronto con l'algoritmo attuale prima di qualunque
+  cutover.
+
+---
+
 ## Sessione 09/07/2026 — WU198: raccolta_fast, snellimento verifiche + rimozione blacklist
 
 Richiesta utente: velocizzare ulteriormente `RaccoltaFastTask` saltando passaggi
