@@ -691,6 +691,7 @@ def _apri_lente_verificata(ctx: TaskContext, max_retry: int = 3) -> bool:
 def _cerca_nodo(ctx: TaskContext, tipo: str,
                 livello_override: int = 0,
                 skip_verifica_tipo: bool = False,
+                skip_livello_check: bool = False,
                 delay_tap_icona: Optional[float] = None,
                 delay_cerca: Optional[float] = None) -> bool:
     """
@@ -717,6 +718,15 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
         reale) — margine ampio, tap ritenuto affidabile senza verifica.
       - delay_tap_icona / delay_cerca: override dei delay standard
         (1.8s / DELAY_CERCA) per profili più aggressivi (fast).
+      - skip_livello_check: se True salta interamente lettura OCR pannello
+        + delta tap + verifica finale (2 round-trip screenshot/OCR per
+        CERCA). Tap diretto su "cerca" con qualunque livello sia già
+        impostato nel pannello. Rischio accettato esplicitamente
+        dall'utente 09/07/2026: misurato 12-30% di mismatch livello a
+        seconda dell'istanza sullo storico OCR di questo stesso check
+        (quindi già un dato reale prima del taglio, non solo teorico) —
+        una marcia su livello diverso dal target non fallisce, raccoglie
+        comunque, solo con capacità/resa diversa da quella attesa.
     """
     coord_lv    = _cfg(ctx, "COORD_LIVELLO").get(tipo, _cfg(ctx, "COORD_LIVELLO")["campo"])
     # Livello nodo dall'istanza (instances.json → livello), fallback a RACCOLTA_LIVELLO
@@ -760,6 +770,16 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
                 ctx.device.key("KEYCODE_BACK")
                 time.sleep(0.5)
                 return False
+
+    if skip_livello_check:
+        ctx.log_msg(
+            f"Raccolta: [FAST] skip verifica livello {tipo} — cerca diretta "
+            f"sul livello già impostato nel pannello"
+        )
+        ctx.device.tap(coord_lv["search"])
+        time.sleep(delay_cerca)
+        ctx.log_msg(f"Raccolta: CERCA eseguita per {tipo} (livello non verificato)")
+        return True
 
     # auto-WU11 (26/04 ottimizzazione anti-reset): leggi livello già
     # impostato nel pannello. Se == target → skip reset (7× meno + piu ×

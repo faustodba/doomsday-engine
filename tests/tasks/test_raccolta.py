@@ -218,6 +218,32 @@ class TestCercaNodoSkipVerificaTipo:
         assert 1.8 in sleep_args
         assert 1.5 in sleep_args
 
+    @patch("tasks.raccolta.time.sleep")
+    def test_skip_livello_check_non_legge_pannello(self, mock_sleep):
+        """WU199ter 09/07/2026: con skip_livello_check=True, _leggi_livello_panel
+        non deve mai essere invocata (zero round-trip OCR pannello) — tap
+        diretto su 'cerca' col livello già impostato, qualunque esso sia."""
+        ctx = ctx_base()
+        ctx.device.set_default_shot(object())
+        ctx.matcher.set_result("pin/pin_field.png", (500, 500))
+        with patch("tasks.raccolta._leggi_livello_panel") as mock_livello:
+            ok = _cerca_nodo(ctx, "segheria", skip_verifica_tipo=True,
+                             skip_livello_check=True)
+        assert ok is True
+        mock_livello.assert_not_called()
+
+    @patch("tasks.raccolta.time.sleep")
+    def test_default_skip_livello_check_false_legge_pannello(self, mock_sleep):
+        """Senza il parametro (default False, come RaccoltaTask/Chiusura),
+        _leggi_livello_panel resta chiamata — comportamento standard invariato."""
+        ctx = ctx_base()
+        ctx.device.set_default_shot(object())
+        ctx.matcher.set_result("pin/pin_field.png", (500, 500))
+        with patch("tasks.raccolta._leggi_livello_panel", return_value=6) as mock_livello:
+            ok = _cerca_nodo(ctx, "segheria", skip_verifica_tipo=True)
+        assert ok is True
+        mock_livello.assert_called()
+
 
 # ==============================================================================
 # 3. Blacklist — stati e TTL

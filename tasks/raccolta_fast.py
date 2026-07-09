@@ -428,9 +428,16 @@ class RaccoltaFastTask(Task):
         # il tap è affidabile senza il round-trip screenshot+match di
         # verifica. Delay tap_icona/cerca accelerati (FAST_DELAY_*, prima
         # mai agganciati — la CERCA girava a velocità standard anche qui).
+        # WU199ter (09/07/2026): skip_livello_check=True — nessuna lettura/
+        # verifica OCR del pannello livello, tap diretto su "cerca" col
+        # livello già impostato. Rischio accettato: 12-30% mismatch livello
+        # a seconda dell'istanza (misurato sullo storico dello stesso check
+        # in modalità standard) — la marcia riesce comunque, solo su un
+        # livello nodo potenzialmente diverso dal target.
         if not _cerca_nodo(
             ctx, tipo,
             skip_verifica_tipo=True,
+            skip_livello_check=True,
             delay_tap_icona=_fcfg(ctx, "FAST_DELAY_TAP_ICONA"),
             delay_cerca=_fcfg(ctx, "FAST_DELAY_CERCA"),
         ):
