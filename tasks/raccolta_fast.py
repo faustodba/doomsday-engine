@@ -11,15 +11,43 @@
 #
 #  DESIGN (concordato con utente):
 #    - Delay conservativi rispetto a standard ma ridotti
-#    - Skip OCR livello pannello (sempre reset standard meno×7+più×N-1)
+#    - WU198 fase 1 (09/07/2026): skip verifica tipo (icona) — coordinate
+#      fisse TAP_ICONA_TIPO validate su storico prod (score minimo 0.980
+#      su soglia 0.85, 1 fallimento reale su 1033 CERCA), niente
+#      round-trip screenshot+match. Delay tap_icona/cerca accelerati
+#      (finalmente agganciati — prima FAST_DELAY_TAP_ICONA/CERCA erano
+#      config morta).
+#    - Livello pannello: NON skippato — riusa la stessa logica OCR+delta
+#      di `_cerca_nodo` standard (WU67). Nota: su storico prod questo
+#      check ha corretto un mismatch nel 12-30% delle CERCA a seconda
+#      dell'istanza — valutazione separata, non toccato da WU198.
+#    - WU198 fase 3 (09/07/2026): NESSUNA blacklist (né RAM né
+#      fuori-territorio) e NESSUNA lettura coordinate nodo
+#      (`_leggi_coord_nodo`, che tra l'altro apre un popup UI separato
+#      solo per l'OCR X/Y — round-trip eliminato anche lui). Rischio
+#      accettato esplicitamente dall'utente: possibile invio di una
+#      seconda squadra su un nodo appena riservato da una marcia
+#      precedente non ancora "occupato" (torna indietro senza
+#      raccogliere). Mitigazione: rotazione tipo FORZATA e incondizionata
+#      nel loop di run() — mai due marce consecutive sullo stesso tipo,
+#      indipendentemente dall'esito della precedente. Il rischio
+#      cross-istanza (altra istanza sullo stesso nodo) esiste comunque a
+#      prescindere dalla blacklist RAM (che è per-istanza, non vede altre
+#      istanze) — gestito da RaccoltaChiusuraTask a fine tick.
+#    - Territorio: check visivo mantenuto (`_nodo_in_territorio`, buff
+#      resa +30%, non rischio truppe) ma SENZA database persistente
+#      (niente lookup né aggiornamento `BlacklistFuori`) — elimina il
+#      meccanismo che ha causato il deadlock WU143 (skip ripetuto sullo
+#      stesso nodo blacklistato, senza il retry multi-candidato dello
+#      standard), la rotazione forzata sopra fa da limite anche qui.
 #    - Skip OCR livello nodo (accetta livello che troviamo)
-#    - 1-shot verifiche tipo + popup gather + maschera marcia (no retry)
-#    - Mantiene: lente verificata, territorio (gratis), no_squads (informativa)
+#    - 1-shot verifiche popup gather + maschera marcia (no retry)
 #    - Pre-batch: leggi slot HOME → calcola N marce (1-5)
 #    - Post-marcia: OCR slot conferma incremento; se non incrementa → recovery
 #
 #  STIMA velocità: ~50% più veloce di RaccoltaTask standard (4 marce ~70s
-#  invece di ~140s, no errori).
+#  invece di ~140s, no errori). WU198: ulteriori risparmi da verifica tipo
+#  + delay CERCA accelerati + niente lettura coordinate/blacklist per marcia.
 #
 #  RIUSO: tutti gli helper di tasks/raccolta.py vengono importati e riusati.
 #  Niente duplicazione codice. Logica modificata solo nei punti del flow fast.
@@ -92,24 +120,26 @@ class RaccoltaFastTask(Task):
         Flow:
           1. HOME → leggi slot (OCR già funziona) → calcola libere
           2. vai_in_mappa
-          3. Loop libere: per ogni marcia
-             a. CERCA fast (lente + tipo 1-shot + reset standard livello)
-             b. leggi coord nodo
-             c. tap nodo + popup gather 1-shot
-             d. territorio check (gratis)
-             e. RACCOGLI/SQUADRA/MARCIA fast (no retry intermedi)
-             f. POST-MARCIA OCR HOME → confronto con attive_pre
+          3. Loop libere: per ogni marcia (rotazione tipo forzata, vedi sotto)
+             a. CERCA fast (lente + tipo skip verifica + reset standard livello)
+             b. tap nodo + popup gather 1-shot (nessuna lettura coordinate)
+             c. territorio 1-shot (visivo, senza database)
+             d. RACCOGLI/SQUADRA/MARCIA fast (no retry intermedi)
+             e. POST-MARCIA OCR HOME → confronto con attive_pre
                 - Se incrementato → ok, prossima marcia
                 - Se NO → recovery (BACK fino HOME + vai_in_mappa) + retry 1×
           4. Final: OCR HOME → riepilogo
+
+        WU198 fase 3 09/07/2026 — nessuna blacklist (RAM o fuori-territorio)
+        e nessuna lettura coordinate nodo nel fast: vedi header del modulo
+        per il razionale completo e il rischio accettato esplicitamente
+        dall'utente. Mitigazione principale: `idx_tipo` avanza in modo
+        INCONDIZIONATO ad ogni iterazione del loop (successo o fallimento),
+        garantendo che due marce consecutive non puntino mai allo stesso
+        tipo/nodo.
         """
         # Import differito helper raccolta standard
-        from tasks.raccolta import (
-            _cerca_nodo, _leggi_coord_nodo, _tap_nodo_e_verifica_gather,
-            _nodo_in_territorio, _reset_to_mappa,
-            _aggiorna_slot_in_mappa,        # WU55 28/04 — legge slot in mappa
-            _leggi_attive_post_marcia, Blacklist, BlacklistFuori, _cfg,
-        )
+        from tasks.raccolta import _aggiorna_slot_in_mappa, _cfg
         from shared.ocr_helpers import leggi_contatore_slot
 
         if not ctx.config.task_abilitato("raccolta_fast"):
@@ -203,12 +233,10 @@ class RaccoltaFastTask(Task):
 
         ctx.log_msg(f"RaccoltaFast: start — attive={attive_inizio}/{obiettivo} libere={libere}")
 
-        # ── Init blacklist + sequenza tipi ─────────────────────────────────
-        blacklist       = Blacklist(
-            committed_ttl=int(_cfg(ctx, "BLACKLIST_COMMITTED_TTL")),
-            reserved_ttl=int(_cfg(ctx, "BLACKLIST_RESERVED_TTL")),
-        )
-        blacklist_fuori = BlacklistFuori(data_dir=_cfg(ctx, "BLACKLIST_FUORI_DIR"))
+        # ── Sequenza tipi ────────────────────────────────────────────────
+        # WU198 fase 3: nessuna blacklist (RAM o fuori-territorio) nel fast
+        # — vedi header modulo per razionale e mitigazione (rotazione
+        # forzata, subito sotto nel loop).
         sequenza_tipi   = list(_cfg(ctx, "RACCOLTA_SEQUENZA"))
 
         # Naviga in mappa una volta
@@ -232,12 +260,17 @@ class RaccoltaFastTask(Task):
 
         for n_marcia in range(libere):
             tipo = sequenza_tipi[idx_tipo % len(sequenza_tipi)]
+            # WU198 fase 3: rotazione forzata incondizionata — avanza sempre,
+            # successo o fallimento, cosicché due marce consecutive non
+            # puntino mai allo stesso tipo/nodo (mitigazione all'assenza di
+            # blacklist RAM, vedi header modulo).
+            idx_tipo += 1
             ctx.log_msg(f"RaccoltaFast: ─── marcia {n_marcia+1}/{libere} tipo={tipo} ───")
             if debug.enabled:
                 debug.snap(f"02_marcia{n_marcia+1}_pre_{tipo}", ctx.device.screenshot())
 
             ok_marcia = self._tenta_marcia(
-                ctx, tipo, n_truppe, blacklist, blacklist_fuori, obiettivo)
+                ctx, tipo, n_truppe, obiettivo)
 
             if not ok_marcia:
                 marce_fallite += 1
@@ -253,7 +286,7 @@ class RaccoltaFastTask(Task):
                 if recovery_retry_max >= 1:
                     ctx.log_msg(f"RaccoltaFast: retry marcia {n_marcia+1} dopo recovery")
                     ok_marcia = self._tenta_marcia(
-                        ctx, tipo, n_truppe, blacklist, blacklist_fuori, obiettivo)
+                        ctx, tipo, n_truppe, obiettivo)
 
             if ok_marcia:
                 # WU55 28/04 — verifica post-marcia direttamente in MAPPA
@@ -293,14 +326,13 @@ class RaccoltaFastTask(Task):
                         ctx.log_msg(f"[INVII-HOOK-FAIL] {type(exc).__name__}: {exc}")
                     attive_corrente = attive_post
                     inviate += 1
-                    idx_tipo += 1
                 else:
                     ctx.log_msg(
                         f"RaccoltaFast: ✗ slot non incrementato "
                         f"({attive_corrente} → {attive_post}) — fallita"
                     )
                     marce_fallite += 1
-                    # Non avanzo idx_tipo, riprova stesso tipo prossima iter
+                    # idx_tipo già avanzato incondizionatamente a inizio loop
 
                 # WU55 28/04 — NIENTE vai_in_mappa: siamo gia' in mappa post
                 # _aggiorna_slot_in_mappa (no vai_in_home intermedio).
@@ -359,43 +391,42 @@ class RaccoltaFastTask(Task):
     # ──────────────────────────────────────────────────────────────────────
 
     def _tenta_marcia(self, ctx: TaskContext, tipo: str, n_truppe: int,
-                      blacklist, blacklist_fuori, obiettivo: int) -> bool:
+                      obiettivo: int) -> bool:
         """
         Esegue 1 marcia FAST (sequenza tap + 1-shot verifiche).
         Ritorna True se la marcia è stata inviata (UI conferma); False altrimenti.
         Il chiamante poi verifica via OCR HOME se davvero il contatore è salito.
+
+        WU198 fase 3: nessuna blacklist e nessuna lettura coordinate nodo —
+        vedi header modulo per il razionale completo e la mitigazione
+        (rotazione tipo forzata in run()). Il caso "nessun nodo disponibile"
+        (lista CERCA vuota) non viene più rilevato esplicitamente: si
+        manifesta comunque a valle come pin_gather non trovato dopo il tap
+        (STEP 2), stesso esito pratico.
         """
-        from tasks.raccolta import (
-            _cerca_nodo, _leggi_coord_nodo, _nodo_in_territorio, _cfg,
-        )
+        from tasks.raccolta import _cerca_nodo, _nodo_in_territorio, _cfg
 
         # ─── STEP 1 FAST: CERCA ──────────────────────────────────────────
-        # Riusa _cerca_nodo (già con _apri_lente_verificata + verifica tipo
-        # 1-shot interno + reset standard livello). NB: la verifica tipo
-        # nel codice standard ha 2 retry — il fast li accetta come essenziali
-        # perché l'OCR del tipo è critico.
-        if not _cerca_nodo(ctx, tipo):
+        # Riusa _cerca_nodo (già con _apri_lente_verificata + reset standard
+        # livello). WU198 fase 1: skip_verifica_tipo=True — coordinate
+        # TAP_ICONA_TIPO validate su storico prod (1033 CERCA, score minimo
+        # 0.980 su soglia 0.85, 1 solo fallimento reale) — margine ampio,
+        # il tap è affidabile senza il round-trip screenshot+match di
+        # verifica. Delay tap_icona/cerca accelerati (FAST_DELAY_*, prima
+        # mai agganciati — la CERCA girava a velocità standard anche qui).
+        if not _cerca_nodo(
+            ctx, tipo,
+            skip_verifica_tipo=True,
+            delay_tap_icona=_fcfg(ctx, "FAST_DELAY_TAP_ICONA"),
+            delay_cerca=_fcfg(ctx, "FAST_DELAY_CERCA"),
+        ):
             ctx.log_msg(f"RaccoltaFast [{tipo}]: CERCA fallita")
             return False
 
-        # ─── STEP 2: leggi coord ─────────────────────────────────────────
-        chiave = _leggi_coord_nodo(ctx)
-        if chiave is None:
-            ctx.log_msg(f"RaccoltaFast [{tipo}]: nessun nodo disponibile")
-            return False
-
-        # ─── Blacklist check (gratis, evita spreco) ──────────────────────
-        _fuori_terr_ok = bool(_cfg(ctx, "RACCOLTA_FUORI_TERRITORIO_ABILITATA"))
-        if blacklist_fuori.contiene(chiave) and not _fuori_terr_ok:
-            ctx.log_msg(f"RaccoltaFast [{tipo}]: nodo {chiave} in blacklist fuori — skip")
-            return False
-        if blacklist.contiene(chiave):
-            ctx.log_msg(f"RaccoltaFast [{tipo}]: nodo {chiave} in blacklist RAM — skip")
-            return False
-
-        blacklist.reserve(chiave)
-
-        # ─── STEP 3 FAST: tap nodo + popup gather 1-shot ─────────────────
+        # ─── STEP 2 FAST: tap nodo + popup gather 1-shot ─────────────────
+        # WU198 fase 3: nessuna lettura coordinate (_leggi_coord_nodo
+        # rimossa — apriva un popup UI separato solo per l'OCR X/Y,
+        # necessario unicamente per la blacklist ora eliminata).
         tap_nodo        = _cfg(ctx, "TAP_NODO")
         template_gather = _cfg(ctx, "TEMPLATE_GATHER")
         soglia          = _cfg(ctx, "TEMPLATE_SOGLIA")
@@ -407,7 +438,6 @@ class RaccoltaFastTask(Task):
 
         screen_popup = ctx.device.screenshot()
         if screen_popup is None:
-            blacklist.rollback(chiave)
             ctx.log_msg(f"RaccoltaFast [{tipo}]: screenshot None")
             return False
 
@@ -418,37 +448,31 @@ class RaccoltaFastTask(Task):
                 f"RaccoltaFast [{tipo}]: pin_gather score={r.score:.3f} → "
                 f"NON trovato (no retry)"
             )
-            blacklist.rollback(chiave)
             ctx.device.key("KEYCODE_BACK")
             time.sleep(0.5)
             return False
 
-        # ─── STEP 4: territorio (mantieni: gratis e protegge da spreco) ──
+        # ─── STEP 3 FAST: territorio (visivo, senza database) ────────────
+        # Check mantenuto (buff resa +30%, non rischio truppe) ma senza
+        # BlacklistFuori: né lookup pre-tap né aggiornamento post-tap.
+        _fuori_terr_ok = bool(_cfg(ctx, "RACCOLTA_FUORI_TERRITORIO_ABILITATA"))
         if not _fuori_terr_ok and not _nodo_in_territorio(screen_popup, tipo, ctx):
-            ctx.log_msg(
-                f"RaccoltaFast [{tipo}]: nodo {chiave} FUORI territorio — "
-                f"blacklist + back"
-            )
-            blacklist_fuori.aggiungi(chiave, tipo)
-            blacklist.rollback(chiave)
+            ctx.log_msg(f"RaccoltaFast [{tipo}]: nodo FUORI territorio — back")
             ctx.device.key("KEYCODE_BACK")
             time.sleep(0.5)
             return False
 
-        # ─── STEP 5 FAST: SKIP OCR livello nodo ──────────────────────────
+        # ─── STEP 4 FAST: SKIP OCR livello nodo ──────────────────────────
         # Accetta livello che troviamo. Reward variabile ma niente OCR fail.
 
-        # ─── STEP 6 FAST: RACCOGLI/SQUADRA/MARCIA ────────────────────────
+        # ─── STEP 5 FAST: RACCOGLI/SQUADRA/MARCIA ────────────────────────
         ok_invio = self._invia_marcia_fast(ctx, n_truppe)
         if not ok_invio:
             ctx.log_msg(f"RaccoltaFast [{tipo}]: invio marcia fallito")
-            blacklist.rollback(chiave)
             ctx.device.key("KEYCODE_BACK")
             time.sleep(0.5)
             return False
 
-        # Marcia inviata → commit blacklist (occupazione nodo)
-        blacklist.commit(chiave, eta_s=None)
         return True
 
     def _invia_marcia_fast(self, ctx: TaskContext, n_truppe: int) -> bool:

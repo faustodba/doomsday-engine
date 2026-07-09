@@ -5,6 +5,65 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 09/07/2026 — WU198: raccolta_fast, snellimento verifiche + rimozione blacklist
+
+Richiesta utente: velocizzare ulteriormente `RaccoltaFastTask` saltando passaggi
+di verifica ridondanti.
+
+**Fase 1 — skip verifica tipo + delay fast finalmente agganciati.** Verificato
+sui log storici prod (1033 CERCA, `.jsonl`+`.jsonl.bak`) che la verifica visiva
+del tipo selezionato (`_verifica_tipo`) intercetta un problema reale solo 1
+volta su 1033 (score minimo osservato 0.980 su soglia 0.85 — margine ampio,
+coordinate `TAP_ICONA_TIPO` tarate benissimo). Aggiunti a `_cerca_nodo()`
+(condivisa con lo standard) 3 parametri opt-in con default che preservano il
+comportamento esistente: `skip_verifica_tipo`, `delay_tap_icona`,
+`delay_cerca`. `RaccoltaFastTask` ora li usa; scoperto che
+`FAST_DELAY_TAP_ICONA`/`FAST_DELAY_CERCA` erano definiti in `_DEFAULTS_FAST`
+ma mai letti da nessuna parte (config morta dal WU57 originale) — ora
+finalmente agganciati.
+
+**Fase 2/3 — rimozione blacklist RAM e fuori-territorio, rotazione tipo
+forzata.** Analisi del check territorio (`_nodo_in_territorio`): non è un
+rischio per le truppe, verifica solo un buff di resa (+30%) — misurato 25.9%
+di hit rate su blacklist_fuori nello standard oggi (270/1041 CERCA, 45 nodi in
+`blacklist_fuori_globale.json`). Prima iterazione: rimosso il check
+interamente. Utente ha poi richiesto anche la rimozione della blacklist RAM
+(reserve/commit del nodo) — chiarito che protegge da un fallimento reale: se
+una seconda squadra viene mandata su un nodo appena riservato ma non ancora
+"occupato" (squadra ancora in viaggio), quella seconda squadra marcia e torna
+indietro senza raccogliere (può capitare anche fra istanze diverse — per
+questo esiste `RaccoltaChiusuraTask` a fine tick). Design finale concordato:
+blacklist RAM e fuori-territorio **rimosse entrambe** (rischio residuo
+accettato esplicitamente), ma il check territorio **reintrodotto** in forma
+solo visiva (senza database, né lookup né aggiornamento). Mitigazione al
+rischio blacklist: rotazione tipo **incondizionata** in `run()` — `idx_tipo`
+avanza ad ogni marcia del batch indipendentemente dall'esito (prima avanzava
+solo su successo confermato, quindi in caso di fallimento ripeteva lo stesso
+tipo). Bonus: rimossa anche `_leggi_coord_nodo()` (apriva un popup UI separato
+— tap lente coordinate + OCR X/Y — usato solo per generare la chiave
+blacklist, ora superfluo).
+
+Test: `test_raccolta.py` 62/62 verdi (58 preesistenti + 4 nuovi su
+`_cerca_nodo` skip_verifica_tipo/delay override). Suite estesa `tests/tasks/`
+286/378 verdi, invariata rispetto al baseline (92 fail preesistenti scollegati:
+orchestrator/radar/rifornimento/store). Nessun test dedicato per
+`raccolta_fast.py` (gap preesistente, non colmato in questa sessione).
+
+**Nota stato**: nessuna istanza usa oggi `tipologia=raccolta_fast` (tutte
+`full`/`raccolta_only` — l'ultimo utilizzo reale risale al 06/06/2026,
+FAU_00). L'utente attiverà manualmente la tipologia fast su una singola
+istanza "canarino" dopo il riavvio del bot.
+
+### Prossimo step
+- Dopo il riavvio: l'utente sceglie manualmente su quale istanza attivare
+  `tipologia=raccolta_fast`.
+- Osservare `marce_fallite`/`recovery_count` in telemetria sull'istanza
+  canarino per confermare che la rotazione forzata mitighi a sufficienza
+  l'assenza di blacklist RAM (nessun dato storico disponibile per questo
+  design specifico).
+
+---
+
 ## Sessione 07/07/2026 — WU197: dashboard, "simulazione ordine adattivo" 45s → 1.2s
 
 Richiesta utente: "simulazione ordine adattivo compare con molta

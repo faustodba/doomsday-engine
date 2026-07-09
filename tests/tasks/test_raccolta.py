@@ -21,6 +21,7 @@ from tasks.raccolta import (
     Blacklist,
     _cfg,
     _calcola_sequenza,
+    _cerca_nodo,
     _loop_invio_marce,
     _DEFAULTS,
     _TUTTI_I_TIPI,
@@ -142,6 +143,80 @@ class TestCfg:
     def test_default_tap_lente(self):
         ctx = make_ctx()
         assert _cfg(ctx, "TAP_LENTE") == (38, 325)
+
+
+# ==============================================================================
+# 2b. _cerca_nodo — WU198 09/07/2026: skip_verifica_tipo + delay override
+#     (parametri opt-in per RaccoltaFastTask, default = comportamento
+#     standard preesistente invariato).
+# ==============================================================================
+
+class TestCercaNodoSkipVerificaTipo:
+
+    @patch("tasks.raccolta.time.sleep")
+    def test_skip_verifica_tipo_ignora_match_fallito(self, mock_sleep):
+        """
+        pin_sawmill (template tipo "segheria") NON configurato → find_one
+        tornerebbe found=False. Con skip_verifica_tipo=True, _verifica_tipo
+        non viene mai invocata: _cerca_nodo deve comunque avere successo.
+        pin_field (marker lente, TMPL_TIPO["campo"]) resta configurato per
+        far aprire la lente — è un template diverso da pin_sawmill, quindi
+        non c'è ambiguità sul cosa sta verificando cosa.
+        """
+        ctx = ctx_base()
+        ctx.device.set_default_shot(object())
+        ctx.matcher.set_result("pin/pin_field.png", (500, 500))  # marker lente
+        with patch("tasks.raccolta._leggi_livello_panel", return_value=6):
+            ok = _cerca_nodo(ctx, "segheria", skip_verifica_tipo=True)
+        assert ok is True
+
+    @patch("tasks.raccolta.time.sleep")
+    def test_default_skip_false_comportamento_standard_invariato(self, mock_sleep):
+        """
+        Stesso setup del test sopra ma SENZA skip_verifica_tipo (default
+        False): pin_sawmill non trovato → _verifica_tipo fallisce sempre,
+        anche dopo i retry standard → _cerca_nodo deve fallire. Garantisce
+        che il nuovo parametro non abbia alterato il comportamento di
+        RaccoltaTask/RaccoltaChiusuraTask (che chiamano _cerca_nodo senza
+        passarlo).
+        """
+        ctx = ctx_base()
+        ctx.device.set_default_shot(object())
+        ctx.matcher.set_result("pin/pin_field.png", (500, 500))  # marker lente
+        with patch("tasks.raccolta._leggi_livello_panel", return_value=6):
+            ok = _cerca_nodo(ctx, "segheria")
+        assert ok is False
+
+    @patch("tasks.raccolta.time.sleep")
+    def test_delay_override_applicati_invece_dei_default(self, mock_sleep):
+        """delay_tap_icona/delay_cerca personalizzati (profilo fast) vengono
+        passati a time.sleep al posto dei valori standard (1.8s / DELAY_CERCA)."""
+        ctx = ctx_base(DELAY_CERCA=1.5)
+        ctx.device.set_default_shot(object())
+        ctx.matcher.set_result("pin/pin_field.png", (500, 500))
+        with patch("tasks.raccolta._leggi_livello_panel", return_value=6):
+            _cerca_nodo(ctx, "campo", skip_verifica_tipo=True,
+                       delay_tap_icona=0.3, delay_cerca=0.2)
+        sleep_args = [c.args[0] for c in mock_sleep.call_args_list]
+        assert 0.3 in sleep_args
+        assert 0.2 in sleep_args
+        assert 1.8 not in sleep_args
+        assert 1.5 not in sleep_args
+
+    @patch("tasks.raccolta.time.sleep")
+    def test_default_delay_invariati_se_non_passati(self, mock_sleep):
+        """Senza override (chiamata standard, come da RaccoltaTask), i delay
+        restano quelli storici: 1.8s dopo tap icona, DELAY_CERCA da config."""
+        ctx = ctx_base(DELAY_CERCA=1.5)
+        ctx.device.set_default_shot(object())
+        ctx.matcher.set_result("pin/pin_field.png", (500, 500))
+        ctx.matcher.set_result("pin/pin_sawmill.png", (500, 500))
+        with patch("tasks.raccolta._leggi_livello_panel", return_value=6):
+            ok = _cerca_nodo(ctx, "segheria")
+        assert ok is True
+        sleep_args = [c.args[0] for c in mock_sleep.call_args_list]
+        assert 1.8 in sleep_args
+        assert 1.5 in sleep_args
 
 
 # ==============================================================================

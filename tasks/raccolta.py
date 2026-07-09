@@ -689,7 +689,10 @@ def _apri_lente_verificata(ctx: TaskContext, max_retry: int = 3) -> bool:
 
 
 def _cerca_nodo(ctx: TaskContext, tipo: str,
-                livello_override: int = 0) -> bool:
+                livello_override: int = 0,
+                skip_verifica_tipo: bool = False,
+                delay_tap_icona: Optional[float] = None,
+                delay_cerca: Optional[float] = None) -> bool:
     """
     LENTE → tap tipo × 2 → verifica tipo → livello → CERCA.
     Ritorna True se CERCA eseguita correttamente.
@@ -705,13 +708,23 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
     `_apri_lente_verificata()` prima di tap_icona. Evita che tap (38,325)
     finisca sulla mappa (bestie) o su popup, con successivo tap_icona su
     UI sbagliata (effetto a catena Issue #9).
+
+    WU198 09/07/2026 — parametri opt-in per RaccoltaFastTask, default
+    invariati per lo standard (RaccoltaTask/RaccoltaChiusuraTask):
+      - skip_verifica_tipo: se True salta interamente `_verifica_tipo` +
+        i suoi retry. Coordinate TAP_ICONA_TIPO validate su storico prod
+        (1033 CERCA, score minimo 0.980 su soglia 0.85, 1 solo fallimento
+        reale) — margine ampio, tap ritenuto affidabile senza verifica.
+      - delay_tap_icona / delay_cerca: override dei delay standard
+        (1.8s / DELAY_CERCA) per profili più aggressivi (fast).
     """
     coord_lv    = _cfg(ctx, "COORD_LIVELLO").get(tipo, _cfg(ctx, "COORD_LIVELLO")["campo"])
     # Livello nodo dall'istanza (instances.json → livello), fallback a RACCOLTA_LIVELLO
     livello     = max(1, min(7, int(ctx.config.get("livello", _cfg(ctx, "RACCOLTA_LIVELLO")))))
     if livello_override > 0:
         livello = max(1, min(7, livello_override))
-    delay_cerca = _cfg(ctx, "DELAY_CERCA")
+    delay_cerca = delay_cerca if delay_cerca is not None else _cfg(ctx, "DELAY_CERCA")
+    delay_tap_icona = delay_tap_icona if delay_tap_icona is not None else 1.8
     tap_icona   = _cfg(ctx, "TAP_ICONA_TIPO").get(tipo, _cfg(ctx, "TAP_ICONA_TIPO")["campo"])
 
     ctx.log_msg(f"Raccolta: LENTE → {tipo} Lv.{livello}")
@@ -723,9 +736,11 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
 
     ctx.device.tap(tap_icona)
     ctx.device.tap(tap_icona)
-    time.sleep(1.8)                   # FIX F: 1.2 → 1.8
+    time.sleep(delay_tap_icona)       # FIX F: 1.2 → 1.8 (standard); WU198: override fast
 
-    if not _verifica_tipo(ctx, tipo):
+    if skip_verifica_tipo:
+        ctx.log_msg(f"Raccolta: [FAST] skip verifica tipo {tipo} (coordinate fisse)")
+    elif not _verifica_tipo(ctx, tipo):
         ctx.log_msg(f"Raccolta: tipo {tipo} NON selezionato — retry tap icona")
         ctx.device.tap(tap_icona)
         time.sleep(1.5)
