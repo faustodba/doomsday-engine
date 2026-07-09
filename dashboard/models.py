@@ -357,6 +357,13 @@ class IstanzaOverride(BaseModel):
     livello:      Optional[int]           = None   # scritto su instances.json
     # WU50 — raccolta fuori territorio (per istanza)
     raccolta_fuori_territorio: bool       = False
+    # WU199 — report_raccolta (per istanza). Campo mancante qui causava perdita
+    # silenziosa ad ogni save dashboard (stesso bug-class di WU102: Pydantic
+    # serializza solo campi noti, un save sovrascriveva runtime_overrides.json
+    # senza queste 2 chiavi). Osservato live 09/07/2026: flag impostato a mano
+    # su tutte le 12 istanze, sparito dopo un save dashboard nel giro di ~20min.
+    report_raccolta_abilitato:  bool      = False
+    report_raccolta_solo_reset: bool      = True
     # Master istanza (rifugio destinatario): esclusa dagli aggregati ordinari
     # (telemetria, predictor, ranking dashboard). Esposta in sezione UI dedicata.
     master:       bool                    = False
