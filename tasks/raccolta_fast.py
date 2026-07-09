@@ -69,8 +69,20 @@ _DEFAULTS_FAST: dict = {
     # Delay UI ottimizzati (conservativi).
     # Convenzione: < standard ma > 0.5x per stabilità.
     "FAST_DELAY_TAP_ICONA":    1.2,   # standard 1.8 (-33%)
-    "FAST_DELAY_CERCA":         0.8,   # standard 1.5 (-47%)
-    "FAST_DELAY_TAP_NODO":      1.5,   # standard 1.5 (uguale, popup essenziale)
+    # WU199quater (09/07/2026) — FAST_DELAY_CERCA e FAST_DELAY_TAP_NODO
+    # alzati dopo diagnosi live: batch raccolta_fast 0/4 riuscite, 3/4
+    # fallite su pin_gather score 0.23-0.37 (ben sotto soglia 0.75).
+    # FAST_DELAY_CERCA è il tempo tra il tap "cerca" e il tap sul nodo —
+    # troppo corto (0.8s) rischia di tappare mentre la mappa sta ancora
+    # ricentrando sul nodo trovato, PRIMA ancora di sapere se il tap
+    # cadrà nel punto giusto. Riportato al valore standard (1.5s),
+    # rimossa la riduzione -47% originale.
+    "FAST_DELAY_CERCA":         1.5,   # era 0.8 (-47%), ora uguale allo standard
+    # FAST_DELAY_TAP_NODO è il tempo tra il tap sul nodo e la lettura del
+    # popup gather — alzato oltre lo standard (1.5s) perché fast non ha
+    # rete di sicurezza (standard riprova con 2.0s se il primo fallisce,
+    # fast è un solo colpo).
+    "FAST_DELAY_TAP_NODO":      2.5,   # era 1.5 (uguale standard), ora +1.0s di margine (fast non ha retry)
     "FAST_DELAY_RACCOGLI":      0.8,   # standard 0.8 (uguale)
     "FAST_DELAY_SQUADRA":       2.0,   # WU164: 1.2→2.0 (DELAY UI vincolante: tap apre panel truppe)
     "FAST_DELAY_MARCIA":        1.2,   # standard 1.5 (-20%)
