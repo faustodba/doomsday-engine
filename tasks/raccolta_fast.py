@@ -173,9 +173,23 @@ class RaccoltaFastTask(Task):
                 if totale_ocr > 0:
                     obiettivo = totale_ocr
             if attive_inizio < 0:
-                ctx.log_msg("RaccoltaFast: OCR slot HOME fallito — skip task")
-                return TaskResult(success=True, message="OCR slot HOME fallito",
-                                  data={"inviate": 0, "fast": True})
+                # WU199bis (09/07/2026) — allineato al fallback della raccolta
+                # standard (raccolta.py): invece di arrendersi (skip totale del
+                # tick), assume 0 squadre attive (default prudente, stesso
+                # pattern standard) e procede comunque. Prima un singolo
+                # fallimento OCR transiente saltava l'intero turno raccolta —
+                # osservato live su FAU_08 (09/07): raccolta_fast a 0 marce
+                # inviate mentre grafica_hq/pulizia_cache/boost proseguivano
+                # normalmente. Rischio accettato (identico allo standard): se
+                # gli slot sono in realtà pieni, le marce falliscono su
+                # "maschera non aperta" e vengono recuperate da
+                # _recovery_marcia — costo limitato a max `libere` tentativi,
+                # non un loop infinito.
+                ctx.log_msg(
+                    "RaccoltaFast: OCR slot HOME fallito — uso default 0, "
+                    "procedo comunque"
+                )
+                attive_inizio = 0
             libere = max(0, obiettivo - attive_inizio)
         else:
             libere = slot_liberi

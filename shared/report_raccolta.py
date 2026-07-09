@@ -396,6 +396,7 @@ def registra_righe(instance: str, righe: list[ReportRow],
 
 TAP_ICONA_MESSAGGI = (928, 430)   # stessa coordinata di MessaggiConfig (tasks/messaggi.py)
 TAP_TAB_REPORT     = (71, 34)
+TAP_TAB_ALLIANCE   = (198, 34)    # stessa coordinata di MessaggiConfig.tap_tab_alliance
 TAP_DELETE         = (585, 508)
 TAP_CLOSE          = (930, 36)    # X chiusura overlay messaggi, stessa di MessaggiConfig
 SWIPE_DA           = (650, 430)
@@ -405,6 +406,7 @@ WAIT_OPEN          = 2.0
 WAIT_TAB           = 2.0
 WAIT_SCROLL        = 1.3
 WAIT_DELETE        = 1.5
+WAIT_RESTORE_TAB   = 1.5
 WAIT_CLOSE         = 1.5
 MAX_PAGINE         = 15   # cap sicurezza modalità lettura completa (non usato in solo_reset)
 
@@ -478,6 +480,17 @@ def esegui_report_raccolta(ctx, log_fn=None, solo_reset: bool = True) -> dict:
                 if screen_post is not None:
                     esito["delete_ok"] = len(leggi_pagina(screen_post.frame)) == 0
 
+        # WU199bis (09/07/2026) — il gioco RICORDA l'ultimo tab aperto in
+        # Messaggi (verificato live: riaprendo da HOME si torna su Report,
+        # non su Alliance). Senza questo tap, la prossima esecuzione di
+        # MessaggiTask trova il tab Report ancora attivo — _rileva_tab_attivo()
+        # riconosce solo Alliance/System, ritorna None → "schermata non
+        # aperta" → abort, salta il claim ricompense. Riportiamo su Alliance
+        # prima di chiudere, così lo stato resta quello che messaggi.py si
+        # aspetta di trovare.
+        device.tap(TAP_TAB_ALLIANCE)
+        time.sleep(WAIT_RESTORE_TAB)
+
         device.tap(TAP_CLOSE)
         time.sleep(WAIT_CLOSE)
 
@@ -485,6 +498,8 @@ def esegui_report_raccolta(ctx, log_fn=None, solo_reset: bool = True) -> dict:
         esito["errore"] = str(exc)
         log(f"[REPORT-RACCOLTA] [WARN] eccezione: {exc}")
         try:
+            device.tap(TAP_TAB_ALLIANCE)
+            time.sleep(WAIT_RESTORE_TAB)
             device.tap(TAP_CLOSE)
             time.sleep(WAIT_CLOSE)
         except Exception:
