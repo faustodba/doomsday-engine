@@ -77,14 +77,41 @@ retroattivo sulle istanze già passate nel ciclo corrente (config letta a
 inizio `_leggi_risorse`, non ri-letta a metà) — serve un ciclo intero dal
 momento del cambio per coprire tutte e 12.
 
+**WU199septies — riattivato hook "occupato"** (commit `2e87f3c`): nuovo
+filone di sviluppo discusso con l'utente, parallelo al calcolo produzione
+oraria. Idea: incrociare l'evento "occupato" (invio, `ts`) — riattivato in
+`tasks/raccolta.py` dopo essere spento da WU184 30/06, riusa lo schema
+esistente `shared/nodi_mappa.py` → `data/nodi_mappa_observations.jsonl` —
+con l'evento di completamento in `report_raccolta_dataset.jsonl`
+(`ts_raccolta`) per ottenere `durata_reale_s` per `(tipo, livello)`, al
+posto della stima statica attuale ("~2h per L7", `reference_capacita_nodi`
+in memoria). Il concetto era già anticipato (mai implementato) nel
+docstring di `core/istanza_metrics.py::aggiungi_invio_raccolta`
+("tempo_raccolta_empirico"). **Verifica fattibilità match 1vs1** (10/07,
+su 282 righe report_raccolta pre-reset): 271/282 coppie
+`(instance, coordinata)` uniche, solo 10 con >1 osservazione (max 3) —
+match affidabile con logica "occupazione più recente non ancora usata".
+Nota: `raccolta_fast` non produce mai l'evento "occupato" (coordinate non
+lette, rimosse in WU198) — resta fuori dallo stimatore, gap trascurabile
+oggi (solo FAU_08). FauMorfeus esclusa alla fonte (lettura coordinate
+inaffidabile, `ISTANZE_ESCLUSE`). **Piano**: far accumulare dati in
+parallelo su entrambi i dataset per ~1 settimana (target ~17/07) prima di
+costruire il job di match (periodico, fuori dal task — pattern
+`_nodi_mappa_rebuild_loop`). Dettagli in memoria
+`project_tempo_raccolta_estimator`.
+
 ### Prossimo step
-- Riavviare prod per attivare WU199sexies (toggle OFF + Read-claim+Delete-read).
+- Riavviare prod per attivare WU199sexies (toggle OFF + Read-claim+Delete-read)
+  + WU199septies (hook occupazione) insieme.
 - Lasciar completare il ciclo di reset su tutte le 12 istanze.
 - Continuare a monitorare il dataset (`data/report_raccolta_dataset.jsonl`)
   su più cicli per confermare che gli outlier smettano di comparire.
 - FauMorfeus non ha ancora prodotto righe nel dataset — verificare al
   prossimo ciclo.
 - Fase 3 (sostituzione algoritmo produzione) resta non iniziata.
+- **~17/07**: rivedere `nodi_mappa_observations.jsonl` +
+  `report_raccolta_dataset.jsonl` accumulati, poi costruire il job di
+  match/join per lo stimatore tempo di raccolta (WU199septies).
 
 ---
 
