@@ -5,7 +5,23 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
-## Sessione 10/07/2026 — WU199: report_raccolta fase 2 live + fix ordine rollout + sanity check OCR
+## Sessione 10-11/07/2026 — WU199: report_raccolta fase 2 live + fix ordine rollout + sanity check OCR
+
+**Notte 10→11/07 — WU199decies/undecies + validazione completa + flip a fase 2**:
+dopo WU199nonies (bug critico tab, sotto), altri 2 fix minori: WU199decies
+(log esplicito per check Sort Mail anche quando già OFF — utente ha
+notato che il check era silenzioso nel caso normale) e WU199undecies
+(`WAIT_OPEN`/`WAIT_TAB` allineati a `MessaggiConfig` — 2.0s→3.0s, FAU_03 e
+FAU_08 avevano mostrato "tab non confermato" al primo tentativo con
+2.0s). Utente è andato a dormire chiedendo di attivare la fase 2 "a fine
+di questo ciclo" — gestito in autonomia: atteso il completamento del
+ciclo (verificato via marker `MAIN CICLO N` successivo), **12/12 istanze
+con `delete_ok: True`, zero warning, zero anomalie** (incluso FAU_08, che
+in precedenza aveva fallito il tap tab — riuscito al primo colpo coi
+nuovi delay). Flip `report_raccolta_solo_reset=False` su tutte le 12
+eseguito subito dopo la conferma, allineato all'inizio del ciclo
+successivo (nessun rischio di flip a metà ciclo). Prima lettura vera in
+corso, verifica in monitoraggio.
 
 **WU199nonies (commit `f6040d9`) — BUG CRITICO risolto**: l'utente ha
 verificato live che FAU_03 aveva cancellato i messaggi **Alliance** invece
