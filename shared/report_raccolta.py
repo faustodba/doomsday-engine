@@ -452,8 +452,12 @@ TAP_CLOSE          = (930, 36)    # X chiusura overlay messaggi, stessa di Messa
 SWIPE_DA           = (650, 430)
 SWIPE_A            = (650, 150)
 SWIPE_DURATA_MS    = 800
-WAIT_OPEN          = 2.0
-WAIT_TAB           = 2.0
+WAIT_OPEN          = 3.0   # WU199undecies (10/07): allineato a MessaggiConfig
+                            # (tasks/messaggi.py, fix 18/06 "wait_tab 2.0→3.0"
+                            # per lo stesso identico problema di tab non
+                            # confermato) invece di un valore stimato a mano
+WAIT_TAB           = 3.0   # idem — era 2.0s, insufficiente in alcuni casi live
+                            # (FAU_03, FAU_08 — tab non confermato al primo giro)
 WAIT_SCROLL        = 1.3
 WAIT_DELETE        = 1.5
 WAIT_RESTORE_TAB   = 1.5
