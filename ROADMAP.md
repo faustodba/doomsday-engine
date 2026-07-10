@@ -7,6 +7,22 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ## Sessione 10/07/2026 — WU199: report_raccolta fase 2 live + fix ordine rollout + sanity check OCR
 
+**WU199nonies (commit `f6040d9`) — BUG CRITICO risolto**: l'utente ha
+verificato live che FAU_03 aveva cancellato i messaggi **Alliance** invece
+del report raccolta. Causa: `esegui_report_raccolta()` tappava
+`TAP_TAB_REPORT` senza mai verificare che il tab fosse davvero cambiato —
+se il tab restava su Alliance (stato in cui il flusso lo lascia
+deliberatamente a fine di ogni run precedente, WU199bis), l'azione
+"Read and claim all" + "Delete read" (WU199sexies) colpiva Alliance.
+Fix: verifica OCR positiva ("Sort Mail", presente solo sul tab Report)
+prima di qualunque azione, retry singolo + abort completo in sicurezza se
+non confermato (nessuna lettura, nessun Delete). **Mitigazione immediata**:
+`report_raccolta_abilitato=False` su tutte le 12 istanze finché il fix non
+è sincronizzato e riavviato — nessuna nuova esecuzione possibile nel
+frattempo. 4 nuovi test (2 end-to-end che validano l'assenza di tap
+distruttivi), 21/21 verdi. **Riavvio + riattivazione da fare
+esplicitamente dopo conferma utente.**
+
 Continuazione diretta della sessione 09/07 (2). Fase 1 (reset) completata su
 tutte le 12 istanze durante la notte, poi attivata la fase 2
 (`solo_reset=False`, lettura vera con dedup + Delete a fine lista).
