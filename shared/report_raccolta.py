@@ -127,6 +127,22 @@ _TIPO_MAP = {
     "oil refinery": "petrolio",
 }
 
+# WU199quinquies (10/07/2026): capacità nominale massima per (tipo, livello)
+# — vedi memoria reference_capacita_nodi.md, validata 30/04 su OCR popup
+# gather. Usata come sanity check su quantita_base: la base NON PUÒ MAI
+# superare la capacità nominale del nodo. Scoperto su dataset reale che
+# l'icona risorsa (a sinistra del numero nel crop valore) a volte "bleeda"
+# nel crop OCR e viene letta come una cifra spuria prependuta al numero
+# corretto — sempre "5" per campo, sempre "2" per segheria (deterministico
+# per forma icona, non rumore casuale). Es. reali: 51,320,000 invece di
+# 1,320,000 (campo L7), 21,200,000 invece di 1,200,000 (segheria L6).
+_CAPACITA_MAX = {
+    ("campo", 6):    1_200_000, ("campo", 7):    1_320_000,
+    ("segheria", 6): 1_200_000, ("segheria", 7): 1_320_000,
+    ("acciaio", 6):    600_000, ("acciaio", 7):    660_000,
+    ("petrolio", 6):    240_000, ("petrolio", 7):   264_000,
+}
+
 _RE_COORD  = re.compile(r"(?<!\d)(\d{3})(?!\d).*?(?<!\d)(\d{3})(?!\d)")
 _RE_LV     = re.compile(r"[Ll][vV]\D{0,3}(\d)")
 _RE_TS     = re.compile(r"(\d{4})/(\d{2})/(\d{2})\D+(\d{2}):(\d{2})")
@@ -244,6 +260,18 @@ def _estrai_riga(frame: np.ndarray, hy: int, vy: int) -> Optional[ReportRow]:
     numeri_all = _RE_NUM.findall(all_txt)
     valore_alleanza = int(numeri_all[0].replace(",", "")) if numeri_all else -1
 
+    # WU199quinquies: riga inaffidabile (tipo non riconosciuto, o base oltre
+    # la capacità nominale nota — vedi _CAPACITA_MAX sopra) → invalidiamo
+    # quantita_base per farla scartare da registra_righe() (stesso path già
+    # usato per OCR fallita: non persistita, non marcata come vista, ritenta
+    # al prossimo giro in una posizione di scroll diversa).
+    if tipo is None:
+        quantita_base = -1
+    else:
+        cap_max = _CAPACITA_MAX.get((tipo, livello))
+        if cap_max is not None and quantita_base > cap_max:
+            quantita_base = -1
+
     return ReportRow(
         coordinata=coordinata, tipo=tipo, livello=livello,
         ts_raccolta=ts_raccolta, quantita_base=quantita_base,
@@ -338,14 +366,17 @@ def registra_righe(instance: str, righe: list[ReportRow],
 
     Ritorna il numero di righe effettivamente scritte.
 
-    WU199: righe con quantita_base<=0 (OCR fallita, tipicamente l'ultima
-    riga di pagina quando il pannello valore è tagliato dalla barra
-    pulsanti — limite fisico del layout, non un bug) vengono SCARTATE
-    senza marcarle come viste: restano dedup-eligible per un prossimo
-    passaggio (in produzione lo scroll successivo o il run seguente le
-    ripropone quasi sempre in una posizione diversa, non più tagliata).
-    Se le marcassimo come "viste" qui, resterebbero perse per sempre con
-    dati spazzatura (-1) persistiti.
+    WU199: righe con quantita_base<=0 vengono SCARTATE senza marcarle come
+    viste: restano dedup-eligible per un prossimo passaggio (in produzione
+    lo scroll successivo o il run seguente le ripropone quasi sempre in una
+    posizione diversa). Se le marcassimo come "viste" qui, resterebbero
+    perse per sempre con dati spazzatura persistiti. Due cause note (vedi
+    _estrai_riga):
+    - OCR fallita, tipicamente l'ultima riga di pagina quando il pannello
+      valore è tagliato dalla barra pulsanti — limite fisico del layout.
+    - WU199quinquies: tipo non riconosciuto, o base oltre la capacità
+      nominale nota (_CAPACITA_MAX) — tipico bleed dell'icona risorsa nel
+      crop del valore, letta come cifra spuria prependuta al numero corretto.
     """
     nuove = []
     for row in righe:
