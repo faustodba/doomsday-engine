@@ -504,14 +504,21 @@ def _sort_mail_toggle_on(frame: np.ndarray) -> bool:
 def _assicura_sort_mail_off(device, log) -> None:
     """Tocca il toggle Sort Mail SOLO se rilevato ON — mai un tap alla
     cieca (rischio di accenderlo invece di spegnerlo). Best-effort: uno
-    screenshot fallito qui non blocca il resto del flusso."""
+    screenshot fallito qui non blocca il resto del flusso.
+
+    WU199decies (10/07): log esplicito in OGNI caso (non solo quando tocca
+    qualcosa) — utente ha notato che il check era silenzioso quando trovava
+    già OFF, nessuna traccia visibile che fosse stato eseguito davvero."""
     screen = device.screenshot()
     if screen is None:
+        log("[REPORT-RACCOLTA] Sort Mail — screenshot None, check saltato")
         return
     if _sort_mail_toggle_on(screen.frame):
         log("[REPORT-RACCOLTA] Sort Mail ON — riporto a OFF")
         device.tap(TAP_SORT_MAIL)
         time.sleep(WAIT_TOGGLE)
+    else:
+        log("[REPORT-RACCOLTA] Sort Mail già OFF — nessuna azione")
 
 
 def _tab_report_attivo(frame: np.ndarray) -> bool:
