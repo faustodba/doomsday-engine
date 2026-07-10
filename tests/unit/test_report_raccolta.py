@@ -21,6 +21,8 @@ from shared.report_raccolta import (
     _sort_mail_toggle_on,
     _assicura_sort_mail_off,
     _elimina_report_letto,
+    _report_vuoto_confermato,
+    leggi_pagina,
     TAP_SORT_MAIL,
     TAP_READ_CLAIM_ALL,
     TAP_DELETE_READ,
@@ -153,15 +155,46 @@ class TestSortMailToggle:
         assert device.taps == []
 
 
+class TestReportVuotoConfermato:
+    """WU199octies: verifica POSITIVA via OCR 'No mail received', non
+    assenza di righe lette (rischio falso positivo)."""
+
+    def test_testo_no_mail_received_rilevato(self):
+        with patch("shared.report_raccolta._ocr_raw", return_value="No mail received"):
+            assert _report_vuoto_confermato(_frame()) is True
+
+    def test_testo_assente_non_confermato(self):
+        with patch("shared.report_raccolta._ocr_raw", return_value=""):
+            assert _report_vuoto_confermato(_frame()) is False
+
+    def test_ancora_non_rilevata_non_e_falso_positivo(self):
+        """Caso critico WU199octies: se leggi_pagina() non trova righe per
+        un problema di rilevazione ancora (non perche' il report e' vuoto
+        davvero), il vecchio check (len==0) dava falso positivo. Il nuovo
+        check testuale non ha questo problema: un frame senza il testo
+        esplicito NON conferma il vuoto, anche se leggi_pagina() darebbe 0."""
+        frame = _frame()  # frame nero: leggi_pagina() troverebbe 0 righe
+        assert len(leggi_pagina(frame)) == 0  # comportamento vecchio: "sembra" vuoto
+        with patch("shared.report_raccolta._ocr_raw", return_value=""):
+            assert _report_vuoto_confermato(frame) is False  # nuovo check: non confermato
+
+
 class TestEliminaReportLetto:
 
     def test_sequenza_tap_read_claim_delete_read_ok(self):
         device = FakeDevice()
-        # frame vuoto post-cancellazione (nessuna riga OCR-abile)
         device.add_screenshot(Screenshot(np.zeros((540, 960, 3), dtype=np.uint8)))
-        ok = _elimina_report_letto(device)
+        with patch("shared.report_raccolta._ocr_raw", return_value="No mail received"):
+            ok = _elimina_report_letto(device)
         assert device.taps == [TAP_READ_CLAIM_ALL, TAP_DELETE_READ, TAP_CONFIRM_OK]
         assert ok is True
+
+    def test_testo_non_confermato_ritorna_false(self):
+        device = FakeDevice()
+        device.add_screenshot(Screenshot(np.zeros((540, 960, 3), dtype=np.uint8)))
+        with patch("shared.report_raccolta._ocr_raw", return_value=""):
+            ok = _elimina_report_letto(device)
+        assert ok is False
 
     def test_screenshot_finale_none_ritorna_false(self):
         device = FakeDevice()  # nessuno screenshot in coda -> None dopo i tap

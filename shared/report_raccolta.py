@@ -107,6 +107,15 @@ ROI_TS_X         = (770, 950)
 ROI_VAL_BASE_X   = (365, 630)
 ROI_VAL_ALLEANZA_X = (800, 930)
 
+# WU199octies (10/07): verifica POSITIVA di report vuoto — testo "No mail
+# received" mostrato dal gioco solo quando la lista è genuinamente vuota.
+# Sostituisce il check precedente (len(leggi_pagina())==0), che è un
+# controllo per ASSENZA: se l'ancora riga fallisce a rilevare l'header per
+# qualunque motivo (schermata non stabilizzata, popup residuo, timing),
+# leggi_pagina() ritorna comunque 0 righe — falso positivo, "sembra"
+# vuoto senza che lo sia davvero. Il testo esplicito non ha questo rischio.
+ROI_NO_MAIL = (330, 220, 950, 280)
+
 # Ricerca dinamica ancora riga (vedi nota "IMPORTANTE" sopra)
 _SCAN_Y0        = 160
 _SCAN_Y1        = 460
@@ -494,9 +503,18 @@ def _assicura_sort_mail_off(device, log) -> None:
         time.sleep(WAIT_TOGGLE)
 
 
+def _report_vuoto_confermato(frame: np.ndarray) -> bool:
+    """Verifica POSITIVA (non per assenza) che il report sia vuoto — vedi
+    nota WU199octies sopra ROI_NO_MAIL."""
+    txt = _ocr_raw(frame, ROI_NO_MAIL, _CFG_LINE).lower()
+    return "no mail" in txt or "mail received" in txt
+
+
 def _elimina_report_letto(device) -> bool:
     """Read and claim all + Delete read (vedi nota WU199sexies). Ritorna
-    True se al termine il report risulta vuoto."""
+    True SOLO se il testo "No mail received" è confermato via OCR — non
+    la semplice assenza di righe lette (rischio falso positivo, vedi
+    WU199octies)."""
     device.tap(TAP_READ_CLAIM_ALL)
     time.sleep(WAIT_READ_CLAIM)
     device.tap(TAP_DELETE_READ)
@@ -506,7 +524,7 @@ def _elimina_report_letto(device) -> bool:
     screen_post = device.screenshot()
     if screen_post is None:
         return False
-    return len(leggi_pagina(screen_post.frame)) == 0
+    return _report_vuoto_confermato(screen_post.frame)
 
 
 def esegui_report_raccolta(ctx, log_fn=None, solo_reset: bool = True) -> dict:
