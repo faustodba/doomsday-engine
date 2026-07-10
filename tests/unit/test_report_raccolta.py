@@ -11,11 +11,20 @@ import numpy as np
 import pytest
 from unittest.mock import patch
 
+from core.device import FakeDevice
+from core.device import Screenshot
 from shared.report_raccolta import (
     HEADER_Y0,
     VALUE_Y0,
     _estrai_riga,
     _CAPACITA_MAX,
+    _sort_mail_toggle_on,
+    _assicura_sort_mail_off,
+    _elimina_report_letto,
+    TAP_SORT_MAIL,
+    TAP_READ_CLAIM_ALL,
+    TAP_DELETE_READ,
+    TAP_CONFIRM_OK,
 )
 
 
@@ -105,3 +114,56 @@ class TestSanityCheckCapacitaNominale:
         assert _CAPACITA_MAX[("acciaio", 7)] == 660_000
         assert _CAPACITA_MAX[("petrolio", 6)] == 240_000
         assert _CAPACITA_MAX[("petrolio", 7)] == 264_000
+
+
+def _frame_toggle(cursore_a_sinistra: bool) -> np.ndarray:
+    """Frame sintetico 960x540 con una banda chiara nella metà sinistra o
+    destra della zona toggle (simula il cursore acceso/spento)."""
+    frame = np.full((540, 960, 3), 30, dtype=np.uint8)  # sfondo scuro uniforme
+    if cursore_a_sinistra:
+        frame[60:82, 20:47] = 220   # ROI sinistra chiara (OFF)
+    else:
+        frame[60:82, 60:87] = 220   # ROI destra chiara (ON)
+    return frame
+
+
+class TestSortMailToggle:
+
+    def test_rileva_off_cursore_a_sinistra(self):
+        assert _sort_mail_toggle_on(_frame_toggle(cursore_a_sinistra=True)) is False
+
+    def test_rileva_on_cursore_a_destra(self):
+        assert _sort_mail_toggle_on(_frame_toggle(cursore_a_sinistra=False)) is True
+
+    def test_assicura_off_non_tocca_se_gia_off(self):
+        device = FakeDevice()
+        device.add_screenshot(Screenshot(_frame_toggle(cursore_a_sinistra=True)))
+        _assicura_sort_mail_off(device, log=lambda m: None)
+        assert device.taps == []
+
+    def test_assicura_off_tappa_se_on(self):
+        device = FakeDevice()
+        device.add_screenshot(Screenshot(_frame_toggle(cursore_a_sinistra=False)))
+        _assicura_sort_mail_off(device, log=lambda m: None)
+        assert device.taps == [TAP_SORT_MAIL]
+
+    def test_assicura_off_screenshot_none_non_solleva(self):
+        device = FakeDevice()  # nessuno screenshot in coda -> None
+        _assicura_sort_mail_off(device, log=lambda m: None)
+        assert device.taps == []
+
+
+class TestEliminaReportLetto:
+
+    def test_sequenza_tap_read_claim_delete_read_ok(self):
+        device = FakeDevice()
+        # frame vuoto post-cancellazione (nessuna riga OCR-abile)
+        device.add_screenshot(Screenshot(np.zeros((540, 960, 3), dtype=np.uint8)))
+        ok = _elimina_report_letto(device)
+        assert device.taps == [TAP_READ_CLAIM_ALL, TAP_DELETE_READ, TAP_CONFIRM_OK]
+        assert ok is True
+
+    def test_screenshot_finale_none_ritorna_false(self):
+        device = FakeDevice()  # nessuno screenshot in coda -> None dopo i tap
+        ok = _elimina_report_letto(device)
+        assert ok is False

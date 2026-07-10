@@ -428,7 +428,6 @@ def registra_righe(instance: str, righe: list[ReportRow],
 TAP_ICONA_MESSAGGI = (928, 430)   # stessa coordinata di MessaggiConfig (tasks/messaggi.py)
 TAP_TAB_REPORT     = (71, 34)
 TAP_TAB_ALLIANCE   = (198, 34)    # stessa coordinata di MessaggiConfig.tap_tab_alliance
-TAP_DELETE         = (585, 508)
 TAP_CLOSE          = (930, 36)    # X chiusura overlay messaggi, stessa di MessaggiConfig
 SWIPE_DA           = (650, 430)
 SWIPE_A            = (650, 150)
@@ -441,13 +440,82 @@ WAIT_RESTORE_TAB   = 1.5
 WAIT_CLOSE         = 1.5
 MAX_PAGINE         = 15   # cap sicurezza modalità lettura completa (non usato in solo_reset)
 
+# WU199sexies (10/07/2026): toggle "Sort Mail" in alto a sinistra del tab
+# Report — verificato live su FAU_10 che NON riordina le righe (ipotesi
+# iniziale errata), ma cambia vista: OFF = "Gathering Report" diretto come
+# unico elemento in lista (quello che vogliamo), ON = vista a categorie
+# (Battle/Group Battles/Jungle Crisis/Zombie/Scout/Other, Gathering Report
+# annidato sotto "Other"). Manteniamo sempre OFF. Rilevamento stato via
+# luminosità: il cursore chiaro del toggle sta a sinistra quando OFF, si
+# sposta a destra quando ON — confrontiamo due piccole ROI invece di un
+# singolo pixel per robustezza al rumore JPEG/compressione ADB.
+TAP_SORT_MAIL      = (54, 71)
+_TOGGLE_ROI_L      = (22, 62, 45, 80)   # box sinistra cursore (x1,y1,x2,y2)
+_TOGGLE_ROI_R      = (62, 62, 85, 80)   # box destra cursore
+WAIT_TOGGLE        = 1.5
+
+# WU199sexies: sostituito il "Delete" diretto con "Read and claim all" +
+# "Delete read" su richiesta utente (2 tap invece di 1). Verificato live
+# 10/07 su FAU_10 che "Delete read" da solo produce lo stesso risultato di
+# "Delete" (conferma "you're about to delete all read mails in the current
+# tab" → OK → "No mail received") — un solo elemento mail "Gathering
+# Report" che accumula tutto, quindi nessuna differenza pratica rispetto a
+# Delete diretto, ma "Read and claim all" prima garantisce che eventuali
+# reward vengano comunque marcati/reclamati per sicurezza.
+TAP_READ_CLAIM_ALL = (50, 508)
+TAP_DELETE_READ    = (200, 508)
+TAP_CONFIRM_OK     = (588, 380)   # popup conferma "Delete read"
+WAIT_READ_CLAIM    = 1.5
+WAIT_DELETE_CONFIRM = 1.5
+
+
+def _sort_mail_toggle_on(frame: np.ndarray) -> bool:
+    """True se il toggle 'Sort Mail' è ON (vista a categorie). Confronto
+    di luminosità media tra le due metà del cursore — vedi nota WU199sexies
+    sopra le costanti _TOGGLE_ROI_L/_TOGGLE_ROI_R."""
+    gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    l = gray[_TOGGLE_ROI_L[1]:_TOGGLE_ROI_L[3], _TOGGLE_ROI_L[0]:_TOGGLE_ROI_L[2]]
+    r = gray[_TOGGLE_ROI_R[1]:_TOGGLE_ROI_R[3], _TOGGLE_ROI_R[0]:_TOGGLE_ROI_R[2]]
+    if l.size == 0 or r.size == 0:
+        return False
+    return float(r.mean()) > float(l.mean())
+
+
+def _assicura_sort_mail_off(device, log) -> None:
+    """Tocca il toggle Sort Mail SOLO se rilevato ON — mai un tap alla
+    cieca (rischio di accenderlo invece di spegnerlo). Best-effort: uno
+    screenshot fallito qui non blocca il resto del flusso."""
+    screen = device.screenshot()
+    if screen is None:
+        return
+    if _sort_mail_toggle_on(screen.frame):
+        log("[REPORT-RACCOLTA] Sort Mail ON — riporto a OFF")
+        device.tap(TAP_SORT_MAIL)
+        time.sleep(WAIT_TOGGLE)
+
+
+def _elimina_report_letto(device) -> bool:
+    """Read and claim all + Delete read (vedi nota WU199sexies). Ritorna
+    True se al termine il report risulta vuoto."""
+    device.tap(TAP_READ_CLAIM_ALL)
+    time.sleep(WAIT_READ_CLAIM)
+    device.tap(TAP_DELETE_READ)
+    time.sleep(WAIT_DELETE_CONFIRM)
+    device.tap(TAP_CONFIRM_OK)
+    time.sleep(WAIT_DELETE)
+    screen_post = device.screenshot()
+    if screen_post is None:
+        return False
+    return len(leggi_pagina(screen_post.frame)) == 0
+
 
 def esegui_report_raccolta(ctx, log_fn=None, solo_reset: bool = True) -> dict:
     """
     Va da HOME (assunta già stabile — chiamata da on_home_ready) al tab
     Report e:
       - solo_reset=True  (default, fase di test corrente): naviga e tocca
-        subito "Delete", nessuna lettura OCR. Serve a riportare ogni
+        subito "Read and claim all" + "Delete read" (WU199sexies — vedi
+        costanti sopra), nessuna lettura OCR. Serve a riportare ogni
         istanza a un report vuoto/piccolo come baseline pulita, senza
         rischiare tempi lunghi di scroll su backlog storici mai letti
         (osservato: giorni di dati su FAU_05/FAU_00 prima del primo test).
@@ -470,14 +538,11 @@ def esegui_report_raccolta(ctx, log_fn=None, solo_reset: bool = True) -> dict:
         time.sleep(WAIT_OPEN)
         device.tap(TAP_TAB_REPORT)
         time.sleep(WAIT_TAB)
+        _assicura_sort_mail_off(device, log)
 
         if solo_reset:
-            log("[REPORT-RACCOLTA] modalità solo_reset — Delete diretto, nessuna lettura")
-            device.tap(TAP_DELETE)
-            time.sleep(WAIT_DELETE)
-            screen_post = device.screenshot()
-            if screen_post is not None:
-                esito["delete_ok"] = len(leggi_pagina(screen_post.frame)) == 0
+            log("[REPORT-RACCOLTA] modalità solo_reset — Read+Delete diretto, nessuna lettura")
+            esito["delete_ok"] = _elimina_report_letto(device)
         else:
             chiavi = carica_chiavi_esistenti(ctx.instance_name)
             pagine = 0
@@ -505,11 +570,7 @@ def esegui_report_raccolta(ctx, log_fn=None, solo_reset: bool = True) -> dict:
             esito["pagine"] = pagine
 
             if esito["fine_lista_raggiunta"]:
-                device.tap(TAP_DELETE)
-                time.sleep(WAIT_DELETE)
-                screen_post = device.screenshot()
-                if screen_post is not None:
-                    esito["delete_ok"] = len(leggi_pagina(screen_post.frame)) == 0
+                esito["delete_ok"] = _elimina_report_letto(device)
 
         # WU199bis (09/07/2026) — il gioco RICORDA l'ultimo tab aperto in
         # Messaggi (verificato live: riaprendo da HOME si torna su Report,
