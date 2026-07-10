@@ -116,6 +116,17 @@ ROI_VAL_ALLEANZA_X = (800, 930)
 # vuoto senza che lo sia davvero. Il testo esplicito non ha questo rischio.
 ROI_NO_MAIL = (330, 220, 950, 280)
 
+# WU199nonies (10/07): verifica che il tab Report sia REALMENTE attivo
+# prima di qualunque azione (lettura o Delete). Bug reale osservato live
+# su FAU_03: il tap su TAP_TAB_REPORT non veniva mai verificato — se
+# falliva/non registrava, il tab restava su Alliance (stato in cui lo
+# lasciamo deliberatamente a fine di ogni run precedente, vedi WU199bis
+# sotto TAP_TAB_ALLIANCE) e Read-claim-all + Delete-read colpivano i
+# messaggi Alliance invece del report raccolta — azione distruttiva su
+# dati sbagliati. "Sort Mail" esiste SOLO sul tab Report, quindi la sua
+# presenza via OCR è una sentinella affidabile.
+ROI_TAB_LABEL = (95, 62, 260, 82)
+
 # Ricerca dinamica ancora riga (vedi nota "IMPORTANTE" sopra)
 _SCAN_Y0        = 160
 _SCAN_Y1        = 460
@@ -503,6 +514,14 @@ def _assicura_sort_mail_off(device, log) -> None:
         time.sleep(WAIT_TOGGLE)
 
 
+def _tab_report_attivo(frame: np.ndarray) -> bool:
+    """True se il tab Report è realmente quello attivo a schermo — vedi
+    nota WU199nonies sopra ROI_TAB_LABEL. OCR del testo "Sort Mail",
+    presente solo su questo tab."""
+    txt = _ocr_raw(frame, ROI_TAB_LABEL, _CFG_LINE).lower()
+    return "sort" in txt or "mail" in txt
+
+
 def _report_vuoto_confermato(frame: np.ndarray) -> bool:
     """Verifica POSITIVA (non per assenza) che il report sia vuoto — vedi
     nota WU199octies sopra ROI_NO_MAIL."""
@@ -556,6 +575,31 @@ def esegui_report_raccolta(ctx, log_fn=None, solo_reset: bool = True) -> dict:
         time.sleep(WAIT_OPEN)
         device.tap(TAP_TAB_REPORT)
         time.sleep(WAIT_TAB)
+
+        # WU199nonies — MAI procedere (lettura o Delete) senza conferma
+        # positiva del tab. Un retry singolo assorbe animazioni lente;
+        # se anche il retry fallisce, abort in sicurezza (nessuna azione
+        # distruttiva su un tab sconosciuto/sbagliato).
+        screen_tab = device.screenshot()
+        tab_ok = screen_tab is not None and _tab_report_attivo(screen_tab.frame)
+        if not tab_ok:
+            log("[REPORT-RACCOLTA] tab Report non confermato — retry tap")
+            device.tap(TAP_TAB_REPORT)
+            time.sleep(WAIT_TAB)
+            screen_tab = device.screenshot()
+            tab_ok = screen_tab is not None and _tab_report_attivo(screen_tab.frame)
+
+        if not tab_ok:
+            esito["errore"] = "tab_report_non_confermato"
+            log("[REPORT-RACCOLTA] [WARN] tab Report non raggiunto dopo retry — "
+                "abort, nessuna azione eseguita")
+            device.tap(TAP_TAB_ALLIANCE)
+            time.sleep(WAIT_RESTORE_TAB)
+            device.tap(TAP_CLOSE)
+            time.sleep(WAIT_CLOSE)
+            log(f"[REPORT-RACCOLTA] completato: {esito}")
+            return esito
+
         _assicura_sort_mail_off(device, log)
 
         if solo_reset:

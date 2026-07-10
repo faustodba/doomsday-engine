@@ -22,12 +22,24 @@ from shared.report_raccolta import (
     _assicura_sort_mail_off,
     _elimina_report_letto,
     _report_vuoto_confermato,
+    _tab_report_attivo,
     leggi_pagina,
+    esegui_report_raccolta,
     TAP_SORT_MAIL,
     TAP_READ_CLAIM_ALL,
     TAP_DELETE_READ,
     TAP_CONFIRM_OK,
+    TAP_ICONA_MESSAGGI,
+    TAP_TAB_REPORT,
+    TAP_TAB_ALLIANCE,
+    TAP_CLOSE,
 )
+
+
+class _FakeCtx:
+    def __init__(self, device, instance_name="FAU_TEST"):
+        self.device = device
+        self.instance_name = instance_name
 
 
 def _frame():
@@ -200,3 +212,78 @@ class TestEliminaReportLetto:
         device = FakeDevice()  # nessuno screenshot in coda -> None dopo i tap
         ok = _elimina_report_letto(device)
         assert ok is False
+
+
+class TestTabReportAttivo:
+    """WU199nonies: sentinella OCR 'Sort Mail', presente solo sul tab Report."""
+
+    def test_testo_sort_mail_presente_confermato(self):
+        with patch("shared.report_raccolta._ocr_raw", return_value="Sort Mail"):
+            assert _tab_report_attivo(_frame()) is True
+
+    def test_testo_assente_non_confermato(self):
+        with patch("shared.report_raccolta._ocr_raw", return_value=""):
+            assert _tab_report_attivo(_frame()) is False
+
+
+class TestEseguiReportRaccoltaAbortSuTabSbagliato:
+    """WU199nonies: bug reale osservato live 10/07 su FAU_03 -- il tap su
+    TAP_TAB_REPORT non veniva mai verificato, e Read-claim-all+Delete-read
+    hanno colpito il tab Alliance (rimasto attivo dal run precedente,
+    WU199bis) invece del report raccolta. Questi test verificano che,
+    senza conferma del tab, NESSUNA azione distruttiva venga eseguita."""
+
+    def _ocr_sempre_vuoto(self, frame, roi, cfg):
+        return ""  # nessun tab riconosciuto, né al primo tentativo né al retry
+
+    def test_tab_mai_confermato_nessun_tap_distruttivo(self):
+        device = FakeDevice()
+        # 2 screenshot: check iniziale + check dopo retry, entrambi "senza testo"
+        device.add_screenshot(Screenshot(_frame()))
+        device.add_screenshot(Screenshot(_frame()))
+        ctx = _FakeCtx(device)
+
+        with patch("shared.report_raccolta._ocr_raw", side_effect=self._ocr_sempre_vuoto):
+            esito = esegui_report_raccolta(ctx, solo_reset=True)
+
+        assert TAP_READ_CLAIM_ALL not in device.taps
+        assert TAP_DELETE_READ not in device.taps
+        assert TAP_CONFIRM_OK not in device.taps
+        assert esito["errore"] == "tab_report_non_confermato"
+        assert esito["delete_ok"] is None
+        # naviga e si richiude in sicurezza: apri messaggi, tab Report x2
+        # (primo tentativo + retry), ripristina Alliance, chiudi
+        assert device.taps == [
+            TAP_ICONA_MESSAGGI, TAP_TAB_REPORT, TAP_TAB_REPORT,
+            TAP_TAB_ALLIANCE, TAP_CLOSE,
+        ]
+
+    def test_tab_confermato_al_retry_procede_normalmente(self):
+        device = FakeDevice()
+        calls = {"n": 0}
+
+        def _ocr_side_effect(frame, roi, cfg):
+            if roi == (95, 62, 260, 82):  # ROI_TAB_LABEL
+                calls["n"] += 1
+                return "" if calls["n"] == 1 else "Sort Mail"  # fallisce 1a volta, ok al retry
+            if roi == (330, 220, 950, 280):  # ROI_NO_MAIL
+                return "No mail received"
+            return ""
+
+        # screenshot in ordine: check tab iniziale (fail), check tab retry
+        # (ok), check toggle Sort Mail dentro _assicura_sort_mail_off
+        # (pixel, non OCR -- frame nero = toggle OFF, nessun tap), check
+        # finale dentro _elimina_report_letto ("No mail received")
+        device.add_screenshot(Screenshot(_frame()))
+        device.add_screenshot(Screenshot(_frame()))
+        device.add_screenshot(Screenshot(_frame()))
+        device.add_screenshot(Screenshot(_frame()))
+        ctx = _FakeCtx(device)
+
+        with patch("shared.report_raccolta._ocr_raw", side_effect=_ocr_side_effect):
+            esito = esegui_report_raccolta(ctx, solo_reset=True)
+
+        assert esito["errore"] is None
+        assert esito["delete_ok"] is True
+        assert TAP_READ_CLAIM_ALL in device.taps
+        assert TAP_DELETE_READ in device.taps
