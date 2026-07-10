@@ -5,6 +5,58 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 10/07/2026 — WU199: report_raccolta fase 2 live + fix ordine rollout + sanity check OCR
+
+Continuazione diretta della sessione 09/07 (2). Fase 1 (reset) completata su
+tutte le 12 istanze durante la notte, poi attivata la fase 2
+(`solo_reset=False`, lettura vera con dedup + Delete a fine lista).
+
+**Bug di processo scoperto in live (non un bug di codice)**: l'utente ha
+chiesto di attivare la fase 2 "al volo" mentre il ciclo di reset era ancora
+in corso. Le istanze non ancora raggiunte da `_leggi_risorse()` in quel
+ciclo (FAU_07/06/03/02...) hanno trovato il flag già `False` al loro turno
+— partite dritte in lettura completa senza mai passare dal reset. Per
+istanze con backlog storico mai svuotato (FAU_02: 48 righe/15 pagine, cap
+`MAX_PAGINE` raggiunto senza mai trovare `fine_lista_raggiunta` → nessun
+Delete) ha riprodotto esattamente il problema che la fase 1 doveva evitare.
+Diagnosticato da osservazione diretta utente ("FAU_02 non ha eliminato
+tutti i nodi"). **Lezione generale salvata in memoria**
+(`feedback_rollout_sequenziale_flag`): su un'architettura sequenziale
+(un'istanza alla volta), un flag con semantica ordine-dipendente non va mai
+flippato a metà ciclo — verificare via log che TUTTE le istanze abbiano
+completato il passaggio precedente prima di procedere allo step successivo.
+Fix applicato: `solo_reset=True` su tutte e 12, verificato via `bot.log`
+che tutte avessero `delete_ok: True`, solo dopo flip a `solo_reset=False`
+su tutte e 12.
+
+**WU199quinquies — sanity check capacità nominale** (commit `cedbcdf`):
+ispezionando i primi dati reali del dataset (232 righe/11 istanze) emerso
+un pattern di corruzione OCR deterministico: bleed dell'icona risorsa nel
+crop del valore, letto come cifra spuria prependuta al numero corretto —
+sempre "5" per campo (es. `51,320,000` invece di `1,320,000`), sempre "2"
+per segheria (es. `21,200,000` invece di `1,200,000`). Fix in
+`shared/report_raccolta.py::_estrai_riga()`: tabella `_CAPACITA_MAX`
+(valori nominali noti, memoria `reference_capacita_nodi`) usata come
+sanity check — `quantita_base` oltre il nominale per (tipo, livello), o
+`tipo` non riconosciuto, forzano `quantita_base=-1`, che instrada la riga
+nello stesso path di scarto-e-ritenta già usato per OCR fallita (non
+persistita, non marcata vista, riletta al giro successivo a un offset di
+scroll diverso). 6 nuovi test in `tests/unit/test_report_raccolta.py`,
+nessuna regressione sulla suite `raccolta`. Sync dev→prod fatto, commit+push
+fatto. **Riavvio prod da programmare per attivare il fix** (bot già in
+esecuzione con la versione precedente del modulo in memoria).
+
+### Prossimo step
+- Riavviare prod (flag `restart_requested` o riavvio manuale utente) per
+  attivare WU199quinquies.
+- Continuare a monitorare il dataset (`data/report_raccolta_dataset.jsonl`)
+  su più cicli per confermare che gli outlier smettano di comparire.
+- FauMorfeus non ha ancora prodotto righe nel dataset — verificare al
+  prossimo ciclo.
+- Fase 3 (sostituzione algoritmo produzione) resta non iniziata.
+
+---
+
 ## Sessione 09/07/2026 (2) — WU199: report_raccolta — lettura Gathering Report, fase 1 (reset)
 
 Richiesta utente: calcolare la produzione oraria precisa per istanza. Scoperta
