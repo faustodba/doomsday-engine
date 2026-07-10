@@ -1898,13 +1898,18 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
     ttl_log = f"ETA={eta_s}s" if eta_s else f"TTL={_cfg(ctx, 'BLACKLIST_COMMITTED_TTL')}s"
     ctx.log_msg(f"Raccolta [{tipo}]: nodo {chiave} COMMITTED ({ttl_log})")
 
-    # WU184 (30/06) — anagrafe nodi DISABILITATA (rifugi concentrati). Hook
-    # occupazione commentato (era WU177). cap_nodi_dataset sopra resta attivo.
-    # try:
-    #     from shared.nodi_mappa import registra_osservazione
-    #     registra_osservazione(ctx.instance_name, chiave, tipo, livello_nodo, "occupato")
-    # except Exception:
-    #     pass
+    # WU199septies (10/07) — hook "occupato" RIATTIVATO (era WU177, spento
+    # da WU184 30/06 per l'anagrafe nodi che usava questo stesso evento).
+    # Nuovo scopo: alimentare il match con report_raccolta (ts_invio qui,
+    # ts_raccolta nel report) per uno stimatore empirico del tempo di
+    # raccolta reale per (tipo, livello) — vedi memoria
+    # project_tempo_raccolta_estimator. Il match/join gira come job
+    # periodico separato (NON qui) su data/nodi_mappa_observations.jsonl.
+    try:
+        from shared.nodi_mappa import registra_osservazione
+        registra_osservazione(ctx.instance_name, chiave, tipo, livello_nodo, "occupato")
+    except Exception:
+        pass
 
     # auto-WU14 step2: hook produzione — incrementa truppe raccolta inviate
     try:
