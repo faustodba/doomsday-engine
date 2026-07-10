@@ -42,13 +42,44 @@ sanity check — `quantita_base` oltre il nominale per (tipo, livello), o
 nello stesso path di scarto-e-ritenta già usato per OCR fallita (non
 persistita, non marcata vista, riletta al giro successivo a un offset di
 scroll diverso). 6 nuovi test in `tests/unit/test_report_raccolta.py`,
-nessuna regressione sulla suite `raccolta`. Sync dev→prod fatto, commit+push
-fatto. **Riavvio prod da programmare per attivare il fix** (bot già in
-esecuzione con la versione precedente del modulo in memoria).
+nessuna regressione sulla suite `raccolta`. Sync dev→prod + commit+push +
+riavvio prod fatti (flag `restart_requested` consumato, fix attivo).
+
+**Reset completo richiesto di nuovo** — utente ha notato ordine righe
+sospetto su FAU_09 (riga fuori sequenza nel dataset) e ha chiesto
+investigazione live. Scoperto un toggle "Sort Mail" mai considerato prima
+(in alto a sinistra nel tab Report). Test live su FAU_08/FAU_10 (screenshot
++ tap via `AdbDevice` diretto, bot in pausa manuale sull'istanza):
+- **Sort Mail NON riordina le righe** (ipotesi iniziale errata) — passa a
+  una vista a categorie (Battle/Group Battles/Jungle Crisis/Zombie/Scout/
+  Other), col Gathering Report annidato sotto "Other". Nessun impatto
+  sull'ordine interno delle righe, che resta sempre più-vecchio-in-alto
+  (bersaglio mobile, non fissabile via toggle).
+- **"Delete read"** testato con conferma reale ("You're about to delete
+  all read mails in the current tab") → produce lo stesso risultato di
+  "Delete" diretto (report azzerato a "No mail received"). Per il nostro
+  caso (un solo elemento mail che accumula tutte le righe) i due pulsanti
+  sono equivalenti — nessuna cancellazione incrementale/parziale
+  disponibile via UI.
+
+**WU199sexies** (commit `14d6404`): su richiesta utente, il flusso ora
+forza sempre il toggle OFF (rilevamento via differenza di luminosità tra
+le due metà del cursore — tap SOLO se rilevato ON, mai alla cieca) e
+sostituisce il tap diretto "Delete" con "Read and claim all" + "Delete
+read" (2 tap, stesso risultato finale, ma garantisce il claim di eventuali
+reward prima della cancellazione). 7 nuovi test, 77/77 verdi. Sync dev→prod
+fatto, commit+push fatto. **Riavvio prod da programmare.**
+
+Nel frattempo: `report_raccolta_solo_reset=True` riarmato su tutte le 12
+istanze per un nuovo ciclo di reset completo (dataset ridotto a poche righe
+per istanza, più facile da validare). Verificato che il cambio flag non è
+retroattivo sulle istanze già passate nel ciclo corrente (config letta a
+inizio `_leggi_risorse`, non ri-letta a metà) — serve un ciclo intero dal
+momento del cambio per coprire tutte e 12.
 
 ### Prossimo step
-- Riavviare prod (flag `restart_requested` o riavvio manuale utente) per
-  attivare WU199quinquies.
+- Riavviare prod per attivare WU199sexies (toggle OFF + Read-claim+Delete-read).
+- Lasciar completare il ciclo di reset su tutte le 12 istanze.
 - Continuare a monitorare il dataset (`data/report_raccolta_dataset.jsonl`)
   su più cicli per confermare che gli outlier smettano di comparire.
 - FauMorfeus non ha ancora prodotto righe nel dataset — verificare al
