@@ -194,6 +194,35 @@ class TestEseguiRiconciliazione:
         esito = esegui_riconciliazione()
         assert esito["errore"] is None  # righe malformate scartate, non un'eccezione
 
+    def test_match_prima_di_potatura_su_batch_storico(self, tmp_path):
+        """WU200quater: bug reale trovato dall'utente su FAU_02. Se
+        occupazione e report arrivano ENTRAMBI nello stesso batch di lettura
+        (es. primo run di recupero su storico gia' accumulato) ed entrambi
+        sono piu' vecchi del TTL al momento del run, il match deve comunque
+        riuscire -- non deve scattare la potatura prima che il match abbia
+        la sua occasione."""
+        # occupazione di 10h fa (ben oltre il TTL di 4h di default) con
+        # completamento 3h dopo (quindi anche il report e' vecchio, 7h fa)
+        ts_occ = _ore_fa(10)
+        ts_racc = _ore_fa(7)
+        _scrivi_jsonl(tmp_path / "data" / "nodi_mappa_observations.jsonl", [
+            _occ("FAU_02", "690_518", ts_occ),
+        ])
+        _scrivi_jsonl(tmp_path / "data" / "report_raccolta_dataset.jsonl", [
+            _report("FAU_02", "690_518", ts_racc),
+        ])
+        # primo (e unico) run: entrambi gli eventi sono letti nello stesso batch
+        esito = esegui_riconciliazione()
+
+        assert esito["match_nuovi"] == 1
+        assert esito["report_orfane"] == 0
+        assert esito["pending_attuali"] == 0
+
+        out = (tmp_path / "data" / "tempo_raccolta_dataset.jsonl").read_text(encoding="utf-8")
+        rec = json.loads(out.strip().splitlines()[0])
+        assert rec["ts_invio"] == ts_occ
+        assert abs(rec["durata_s"] - 3 * 3600) < 5
+
     def test_ttl_orfane_default_4_ore(self):
         """Guardrail anti-drift: richiesta esplicita utente 11/07."""
         assert TTL_ORFANE_ORE == 4.0

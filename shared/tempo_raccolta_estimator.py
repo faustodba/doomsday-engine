@@ -180,6 +180,8 @@ def esegui_riconciliazione(ttl_ore: float = TTL_ORFANE_ORE) -> dict:
             state = _carica_stato()
             pending: dict[str, list[dict]] = state["pending"]
 
+            ora = datetime.now(timezone.utc)
+
             nuove_occ, nuovo_cursor_occ = _leggi_righe_nuove(
                 _path_occupazioni(), state["cursor_occupazioni"])
             for o in nuove_occ:
@@ -195,28 +197,16 @@ def esegui_riconciliazione(ttl_ore: float = TTL_ORFANE_ORE) -> dict:
                     "ts": ts, "tipo": o.get("tipo"), "livello": o.get("livello"),
                 })
 
-            # Pruning TTL — occupazioni troppo vecchie senza match non sono
-            # più abbinabili in modo affidabile (rischio respawn nodo).
-            ora = datetime.now(timezone.utc)
-            potate = 0
-            for key in list(pending.keys()):
-                vive = []
-                for o in pending[key]:
-                    try:
-                        eta_h = (ora - _parse_ts(o["ts"])).total_seconds() / 3600
-                    except Exception:
-                        potate += 1
-                        continue
-                    if eta_h < ttl_ore:
-                        vive.append(o)
-                    else:
-                        potate += 1
-                if vive:
-                    pending[key] = vive
-                else:
-                    pending.pop(key, None)
-            esito["occupazioni_potate"] = potate
-
+            # WU200quater (11/07) — MATCH prima della potatura, non dopo.
+            # Bug reale trovato dall'utente: se un'occupazione e il suo
+            # report arrivano entrambi nello stesso batch di lettura (tipico
+            # al primo run "di recupero" su storico già accumulato, o dopo
+            # un'interruzione del loop), potare per età PRIMA di aver
+            # provato il match eliminava occupazioni che avevano già un
+            # completamento valido e recente nello stesso batch — coppie
+            # perse per sempre nonostante fossero abbinabili. Ora si tenta
+            # SEMPRE il match contro tutto il pool corrente (indipendente
+            # dall'età) prima di scartare qualunque cosa.
             nuove_report, nuovo_cursor_report = _leggi_righe_nuove(
                 _path_report(), state["cursor_report"])
 
@@ -269,6 +259,28 @@ def esegui_riconciliazione(ttl_ore: float = TTL_ORFANE_ORE) -> dict:
                 lines = [json.dumps(m, ensure_ascii=False) for m in nuovi_match]
                 with _path_output().open("a", encoding="utf-8") as f:
                     f.write("\n".join(lines) + "\n")
+
+            # Pruning TTL — SOLO ora, su ciò che resta invenduto dopo il
+            # match. Un'occupazione senza match entro TTL_ORFANE_ORE non è
+            # più abbinabile in modo affidabile (rischio respawn nodo).
+            potate = 0
+            for key in list(pending.keys()):
+                vive = []
+                for o in pending[key]:
+                    try:
+                        eta_h = (ora - _parse_ts(o["ts"])).total_seconds() / 3600
+                    except Exception:
+                        potate += 1
+                        continue
+                    if eta_h < ttl_ore:
+                        vive.append(o)
+                    else:
+                        potate += 1
+                if vive:
+                    pending[key] = vive
+                else:
+                    pending.pop(key, None)
+            esito["occupazioni_potate"] = potate
 
             state["cursor_occupazioni"] = nuovo_cursor_occ
             state["cursor_report"] = nuovo_cursor_report
