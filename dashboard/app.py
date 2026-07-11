@@ -760,6 +760,163 @@ def ui_raccolta(request: Request, days: int = 7):
     })
 
 
+@app.get("/ui/report-raccolta", include_in_schema=False)
+def ui_report_raccolta(request: Request):
+    """Pannello di appoggio (WU200bis, 11/07) — fase di validazione live
+    di report_raccolta (WU199) + tempo_raccolta_estimator (WU200).
+
+    Mostra lo stato dei due dataset sorgente (invii/completamenti), i
+    raccoglitori attualmente "in volo" con stima arrivo, gli ultimi eventi
+    in ordine cronologico e gli ultimi match riconciliati (con evidenza
+    mismatch livello_invio vs livello fonte di verità). Solo lettura,
+    nessun impatto sullo scheduling — pannello di osservazione.
+    """
+    return templates.TemplateResponse(request, "report_raccolta.html", {
+        "active": "report_raccolta",
+        **_env_label(),
+    })
+
+
+@app.get("/ui/partial/report-raccolta-riepilogo", include_in_schema=False)
+def partial_report_raccolta_riepilogo(request: Request):
+    from dashboard.services.report_raccolta_reader import get_riepilogo
+    r = get_riepilogo()
+    mismatch_str = (
+        f'{r["mismatch_pct"]:.1f}% <span style="color:var(--text-dim);font-size:10px">'
+        f'({r["mismatch_count"]}/{r["mismatch_campioni"]})</span>'
+        if r["mismatch_pct"] is not None else
+        '<span style="color:var(--text-dim)">n/d</span>'
+    )
+    cards = [
+        ("occupazioni (invii)", r["occupazioni_totali"], None),
+        ("report (completamenti)", r["report_totali"], None),
+        ("match riconciliati", r["match_totali"], None),
+        ("in volo (pending)", r["pending_attuali"], None),
+        ("mismatch livello", mismatch_str, None),
+        ("TTL orfane / retention", f'{r["ttl_orfane_ore"]:.0f}h / {r["retention_giorni"]:.0f}g', None),
+    ]
+    body = "".join(
+        f'<div class="tel-card">'
+        f'<div class="tel-head">{label}</div>'
+        f'<div style="padding:10px 14px;font-size:20px;font-weight:700;color:var(--text)">{val}</div>'
+        f'</div>'
+        for label, val, _ in cards
+    )
+    return HTMLResponse(f'<div class="tel-grid">{body}</div>')
+
+
+@app.get("/ui/partial/report-raccolta-in-volo", include_in_schema=False)
+def partial_report_raccolta_in_volo(request: Request):
+    from dashboard.services.report_raccolta_reader import get_occupati_in_volo
+    righe = get_occupati_in_volo()
+    if not righe:
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:12px;font-size:11px">'
+            'nessun raccoglitore in volo (pending pool vuoto).</div>'
+        )
+    body = []
+    for r in righe:
+        lv = r["livello"] if r["livello"] is not None else "?"
+        elapsed = r["elapsed_min"]
+        if r["residuo_min"] is not None:
+            if r["residuo_min"] < 0:
+                stato = f'<span style="color:#ff9800">in ritardo di {abs(r["residuo_min"]):.0f}min</span>'
+            else:
+                stato = f'<span style="color:#4caf50">arrivo tra ~{r["residuo_min"]:.0f}min</span>'
+        else:
+            stato = '<span style="color:var(--text-dim)">n/d (pochi campioni)</span>'
+        body.append(
+            f'<tr>'
+            f'<td style="font-weight:600">{r["instance"]}</td>'
+            f'<td>{r["coordinata"]}</td>'
+            f'<td>{r["tipo"]} Lv{lv}</td>'
+            f'<td style="white-space:nowrap">{r["partenza_local"]}</td>'
+            f'<td style="text-align:right;font-family:monospace">{elapsed:.0f}min</td>'
+            f'<td style="font-size:10px">{stato}</td>'
+            f'</tr>'
+        )
+    return HTMLResponse(
+        '<table class="tel-table"><thead><tr>'
+        '<th>ist</th><th>coord</th><th>tipo/lv</th><th>partenza</th>'
+        '<th style="text-align:right">trascorso</th><th>stima</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table>'
+    )
+
+
+@app.get("/ui/partial/report-raccolta-eventi", include_in_schema=False)
+def partial_report_raccolta_eventi(request: Request):
+    from dashboard.services.report_raccolta_reader import get_ultimi_eventi
+    righe = get_ultimi_eventi(n=20)
+    if not righe:
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:12px;font-size:11px">'
+            'nessun evento registrato.</div>'
+        )
+    body = []
+    for e in righe:
+        lv = e["livello"] if e["livello"] is not None else "?"
+        if e["tipo_evento"] == "invio":
+            badge = '<span style="color:var(--accent);font-weight:600;font-size:10px">INVIO</span>'
+        else:
+            badge = '<span style="color:#4caf50;font-weight:600;font-size:10px">REPORT</span>'
+        dett = e["dettaglio"] or "—"
+        body.append(
+            f'<tr>'
+            f'<td style="color:var(--text-dim);font-size:10px;white-space:nowrap">{e["ts_local"]}</td>'
+            f'<td>{badge}</td>'
+            f'<td style="font-weight:600">{e["instance"]}</td>'
+            f'<td>{e["coordinata"]}</td>'
+            f'<td>{e["tipo"]} Lv{lv}</td>'
+            f'<td style="text-align:right;font-family:monospace;font-size:10px">{dett}</td>'
+            f'</tr>'
+        )
+    return HTMLResponse(
+        '<table class="tel-table"><thead><tr>'
+        '<th>quando</th><th>evento</th><th>ist</th><th>coord</th><th>tipo/lv</th>'
+        '<th style="text-align:right">qtà</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table>'
+    )
+
+
+@app.get("/ui/partial/report-raccolta-match", include_in_schema=False)
+def partial_report_raccolta_match(request: Request):
+    from dashboard.services.report_raccolta_reader import get_ultimi_match
+    righe = get_ultimi_match(n=25)
+    if not righe:
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:12px;font-size:11px">'
+            'nessun match riconciliato ancora.</div>'
+        )
+    body = []
+    for m in righe:
+        lv = m.get("livello")
+        lv_str = f"Lv{lv}" if lv is not None else "Lv?"
+        if m["mismatch"]:
+            lv_str += (f' <span style="color:#ff9800;font-size:10px">'
+                       f'(invio Lv{m.get("livello_invio")})</span>')
+        durata_h = m.get("durata_h")
+        durata_str = f"{durata_h:.2f}h" if durata_h is not None else "—"
+        body.append(
+            f'<tr>'
+            f'<td style="color:var(--text-dim);font-size:10px;white-space:nowrap">{m["ts_match_local"]}</td>'
+            f'<td style="font-weight:600">{m["instance"]}</td>'
+            f'<td>{m["coordinata"]}</td>'
+            f'<td>{m.get("tipo")} {lv_str}</td>'
+            f'<td style="white-space:nowrap;font-size:10px">{m["ts_invio_local"]} → {m["ts_raccolta_local"]}</td>'
+            f'<td style="text-align:right;font-family:monospace">{durata_str}</td>'
+            f'</tr>'
+        )
+    return HTMLResponse(
+        '<table class="tel-table"><thead><tr>'
+        '<th>match</th><th>ist</th><th>coord</th><th>tipo/lv</th>'
+        '<th>invio → completamento</th><th style="text-align:right">durata</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table>'
+    )
+
+
 @app.get("/ui/partial/ab-test-summary", include_in_schema=False)
 def partial_ab_test_summary(request: Request):
     """Card riepilogo sintetico AB test."""

@@ -1,0 +1,105 @@
+{% extends "base.html" %}
+{% block title %}Doomsday V6 — Report raccolta{% endblock %}
+{% block content %}
+
+<div class="page-layout">
+  <div class="main-col" style="width:100%">
+
+    {# WU200bis (11/07) — pannello di appoggio per la fase di validazione
+       live di report_raccolta (WU199) e tempo_raccolta_estimator (WU200).
+       Solo lettura, nessun impatto sullo scheduling. #}
+
+    <!-- ──────────────────────────────────────────────────────
+         SEZIONE 1 — RIEPILOGO
+         ────────────────────────────────────────────────────── -->
+    <div class="section">
+      <div class="sec-label">📋 riepilogo dataset · invii, completamenti, match, pending</div>
+      <div id="rr-riepilogo"
+           hx-get="{{ url_prefix }}/ui/partial/report-raccolta-riepilogo"
+           hx-trigger="load, every 30s"
+           hx-swap="innerHTML">
+        <div class="tel-grid">
+          <div class="tel-card tel-full">
+            <div class="tel-head">caricamento…</div>
+            <div style="padding:14px;color:var(--text-dim);font-size:12px">…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ──────────────────────────────────────────────────────
+         SEZIONE 2 — RACCOGLITORI IN VOLO
+         ────────────────────────────────────────────────────── -->
+    <div class="section">
+      <div class="sec-label">🛰 raccoglitori in volo · pending pool (non ancora abbinati a un report)</div>
+      <div class="tel-grid">
+        <div class="tel-card tel-full">
+          <div class="tel-head">occupazioni pending per istanza</div>
+          <div id="rr-in-volo"
+               hx-get="{{ url_prefix }}/ui/partial/report-raccolta-in-volo"
+               hx-trigger="load, every 15s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">
+            stima arrivo da <code>stima_tempo_raccolta()</code> (mediana per cella istanza+tipo+livello,
+            fallback tipo+livello globale, min 3 campioni) · refresh 15s
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ──────────────────────────────────────────────────────
+         SEZIONE 3 — ULTIMI EVENTI
+         ────────────────────────────────────────────────────── -->
+    <div class="section">
+      <div class="sec-label">🕒 ultimi eventi · invii e completamenti in ordine cronologico</div>
+      <div class="tel-grid">
+        <div class="tel-card tel-full">
+          <div class="tel-head">timeline live</div>
+          <div id="rr-eventi"
+               hx-get="{{ url_prefix }}/ui/partial/report-raccolta-eventi"
+               hx-trigger="load, every 20s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">
+            ultimi 20 eventi combinati (invio = <code>nodi_mappa_observations.jsonl</code>,
+            completamento = <code>report_raccolta_dataset.jsonl</code>) · refresh 20s
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ──────────────────────────────────────────────────────
+         SEZIONE 4 — ULTIMI MATCH RICONCILIATI
+         ────────────────────────────────────────────────────── -->
+    <div class="section">
+      <div class="sec-label">🔗 ultimi match riconciliati · tempo_raccolta_estimator (WU200)</div>
+      <div class="tel-grid">
+        <div class="tel-card tel-full">
+          <div class="tel-head">invio ↔ completamento abbinati</div>
+          <div id="rr-match"
+               hx-get="{{ url_prefix }}/ui/partial/report-raccolta-match"
+               hx-trigger="load, every 30s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">
+            il livello mostrato è sempre quello del report (fonte di verità) · quando diverge dal livello
+            registrato all'invio (target di ricerca) è evidenziato in arancione · refresh 30s
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+{% endblock %}
