@@ -104,6 +104,32 @@ def _path_state() -> Path:
     return _root_dir() / "data" / "tempo_raccolta_match_state.json"
 
 
+def _migra_pending_a_chiave_tipizzata(pending: dict) -> dict:
+    """WU200sexies (11/07) — migra il pending pool dal vecchio formato
+    chiave `istanza|coordinata` al nuovo `istanza|coordinata|tipo|livello`.
+    Ogni voce porta già con sé tipo/livello, quindi la migrazione è senza
+    perdita di dati — ricostruisce la chiave corretta per ciascuna voce
+    invece di scartarle. Idempotente: le chiavi già nel nuovo formato
+    (4 parti) passano invariate."""
+    nuovo: dict[str, list] = {}
+    for key, voci in pending.items():
+        parti = key.split("|")
+        if len(parti) == 4:
+            nuovo.setdefault(key, []).extend(voci)
+            continue
+        if len(parti) != 2:
+            continue  # formato inatteso, scarta difensivamente
+        instance, chiave = parti
+        for v in voci:
+            tipo = v.get("tipo")
+            livello = v.get("livello")
+            if not tipo or not livello:
+                continue  # voce vecchia senza tipo/livello leggibile, non migrabile
+            nuova_key = f"{instance}|{chiave}|{tipo}|{livello}"
+            nuovo.setdefault(nuova_key, []).append(v)
+    return nuovo
+
+
 def _carica_stato() -> dict:
     p = _path_state()
     if not p.exists():
@@ -113,6 +139,7 @@ def _carica_stato() -> dict:
         stato.setdefault("cursor_occupazioni", 0)
         stato.setdefault("cursor_report", 0)
         stato.setdefault("pending", {})
+        stato["pending"] = _migra_pending_a_chiave_tipizzata(stato["pending"])
         return stato
     except Exception:
         return {"cursor_occupazioni": 0, "cursor_report": 0, "pending": {}}
@@ -190,11 +217,18 @@ def esegui_riconciliazione(ttl_ore: float = TTL_ORFANE_ORE) -> dict:
                 ts = o.get("ts")
                 instance = o.get("instance")
                 chiave = o.get("chiave")
-                if not ts or not instance or not chiave:
+                tipo = o.get("tipo")
+                livello = o.get("livello")
+                if not ts or not instance or not chiave or not tipo or not livello:
                     continue
-                key = f"{instance}|{chiave}"
+                # WU200sexies — chiave a 4 componenti: la stessa coordinata
+                # può respawnare con tipo/livello diverso (vedi
+                # shared/nodi_mappa.py), quindi l'identità univoca di un
+                # record è istanza+coordinata+tipo+livello, non solo
+                # istanza+coordinata.
+                key = f"{instance}|{chiave}|{tipo}|{livello}"
                 pending.setdefault(key, []).append({
-                    "ts": ts, "tipo": o.get("tipo"), "livello": o.get("livello"),
+                    "ts": ts, "tipo": tipo, "livello": livello,
                 })
 
             # WU200quater (11/07) — MATCH prima della potatura, non dopo.
@@ -222,25 +256,24 @@ def esegui_riconciliazione(ttl_ore: float = TTL_ORFANE_ORE) -> dict:
                 except Exception:
                     continue
 
-                # WU200quinquies (11/07) — richiesto anche tipo+livello
-                # identici tra occupazione e report, non solo istanza+
-                # coordinata. Bug reale segnalato dall'utente: lo stesso
-                # nodo (stessa coordinata) può respawnare con tipo/livello
-                # diverso (documentato in shared/nodi_mappa.py) — senza
-                # questo controllo, un'occupazione di tipo diverso ma più
-                # recente veniva scelta comunque come "best" solo perché
-                # temporalmente più vicina, producendo una durata calcolata
-                # su una coppia invio/completamento che non rappresenta la
-                # stessa raccolta reale.
-                key = f"{instance}|{coordinata}"
-                candidati = pending.get(key, [])
+                # WU200sexies (11/07) — chiave a 4 componenti: l'identità
+                # univoca di un record è istanza+coordinata+tipo+livello,
+                # non solo istanza+coordinata. Lo stesso nodo (stessa
+                # coordinata) può respawnare con tipo/livello diverso
+                # (documentato in shared/nodi_mappa.py) — un report senza
+                # tipo/livello leggibile non può formare una chiave valida
+                # e resta orfano (mai abbinato per prossimità temporale a
+                # un'occupazione di tipo diverso).
                 tipo_r = r.get("tipo")
                 livello_r = r.get("livello")
+                if not tipo_r or not livello_r:
+                    esito["report_orfane"] += 1
+                    continue
+                key = f"{instance}|{coordinata}|{tipo_r}|{livello_r}"
+                candidati = pending.get(key, [])
                 best = None
                 best_ts = None
                 for o in candidati:
-                    if o.get("tipo") != tipo_r or o.get("livello") != livello_r:
-                        continue
                     try:
                         ts_o = _parse_ts(o["ts"])
                     except Exception:

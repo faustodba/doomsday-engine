@@ -15,6 +15,9 @@ from shared.tempo_raccolta_estimator import (
     stima_tempo_raccolta,
     pota_dataset_vecchio,
     _leggi_righe_nuove,
+    _migra_pending_a_chiave_tipizzata,
+    _carica_stato,
+    _salva_stato,
     TTL_ORFANE_ORE,
 )
 
@@ -356,3 +359,96 @@ class TestStimaTempoRaccolta:
         esegui_riconciliazione()
         stima = stima_tempo_raccolta("FAU_00", "petrolio", 7, min_campioni=3)
         assert stima == 2 * 3600
+
+
+class TestMigrazionePendingChiaveTipizzata:
+    """WU200sexies (11/07): migrazione dal vecchio formato chiave
+    'istanza|coordinata' al nuovo 'istanza|coordinata|tipo|livello',
+    richiesta esplicita utente dopo il fix WU200quinquies."""
+
+    def test_migra_voce_vecchio_formato(self):
+        vecchio = {
+            "FAU_00|700_500": [
+                {"ts": "2026-07-11T01:00:00+00:00", "tipo": "petrolio", "livello": 7},
+            ],
+        }
+        nuovo = _migra_pending_a_chiave_tipizzata(vecchio)
+        assert nuovo == {
+            "FAU_00|700_500|petrolio|7": [
+                {"ts": "2026-07-11T01:00:00+00:00", "tipo": "petrolio", "livello": 7},
+            ],
+        }
+
+    def test_chiave_gia_nuovo_formato_passa_invariata(self):
+        gia_nuovo = {
+            "FAU_00|700_500|petrolio|7": [{"ts": "2026-07-11T01:00:00+00:00"}],
+        }
+        nuovo = _migra_pending_a_chiave_tipizzata(gia_nuovo)
+        assert nuovo == gia_nuovo
+
+    def test_due_voci_stessa_coordinata_tipi_diversi_migrano_a_chiavi_separate(self):
+        vecchio = {
+            "FAU_00|700_500": [
+                {"ts": "2026-07-11T01:00:00+00:00", "tipo": "petrolio", "livello": 6},
+                {"ts": "2026-07-11T02:00:00+00:00", "tipo": "campo", "livello": 7},
+            ],
+        }
+        nuovo = _migra_pending_a_chiave_tipizzata(vecchio)
+        assert set(nuovo.keys()) == {"FAU_00|700_500|petrolio|6", "FAU_00|700_500|campo|7"}
+        assert len(nuovo["FAU_00|700_500|petrolio|6"]) == 1
+        assert len(nuovo["FAU_00|700_500|campo|7"]) == 1
+
+    def test_voce_senza_tipo_livello_scartata_difensivamente(self):
+        vecchio = {
+            "FAU_00|700_500": [
+                {"ts": "2026-07-11T01:00:00+00:00", "tipo": None, "livello": None},
+            ],
+        }
+        nuovo = _migra_pending_a_chiave_tipizzata(vecchio)
+        assert nuovo == {}
+
+    def test_migrazione_automatica_al_caricamento_stato(self, tmp_path):
+        """Uno stato salvato nel vecchio formato viene migrato in modo
+        trasparente al primo _carica_stato() -- nessun'azione manuale
+        richiesta, nessuna occupazione persa."""
+        stato_vecchio = {
+            "cursor_occupazioni": 100,
+            "cursor_report": 50,
+            "pending": {
+                "FAU_00|700_500": [
+                    {"ts": "2026-07-11T01:00:00+00:00", "tipo": "petrolio", "livello": 7},
+                ],
+            },
+        }
+        _salva_stato(stato_vecchio)
+        stato_migrato = _carica_stato()
+        assert stato_migrato["pending"] == {
+            "FAU_00|700_500|petrolio|7": [
+                {"ts": "2026-07-11T01:00:00+00:00", "tipo": "petrolio", "livello": 7},
+            ],
+        }
+        # i cursori restano intatti, solo il pending viene ristrutturato
+        assert stato_migrato["cursor_occupazioni"] == 100
+        assert stato_migrato["cursor_report"] == 50
+
+    def test_occupazione_pending_vecchio_formato_matcha_dopo_migrazione(self, tmp_path):
+        """End-to-end: un'occupazione salvata nel pending col vecchio
+        formato deve continuare a trovare il suo match dopo la migrazione
+        automatica -- nessuna occupazione in volo va persa dal refactor."""
+        ts_occ = _ore_fa(2)
+        stato_vecchio = {
+            "cursor_occupazioni": 999999,  # gia' letta, non ri-leggere da capo
+            "cursor_report": 0,
+            "pending": {
+                "FAU_00|700_500": [
+                    {"ts": ts_occ, "tipo": "petrolio", "livello": 7},
+                ],
+            },
+        }
+        _salva_stato(stato_vecchio)
+        _scrivi_jsonl(tmp_path / "data" / "report_raccolta_dataset.jsonl", [
+            _report("FAU_00", "700_500", _ore_fa(0)),
+        ])
+        esito = esegui_riconciliazione()
+        assert esito["match_nuovi"] == 1
+        assert esito["report_orfane"] == 0
