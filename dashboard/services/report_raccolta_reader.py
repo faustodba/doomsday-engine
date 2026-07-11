@@ -12,7 +12,7 @@
 #    get_riepilogo()          -> dict   statistiche aggregate + config TTL/retention
 #    get_occupati_in_volo()   -> list   raccoglitori pending (non ancora matchati)
 #    get_ultimi_eventi(n)     -> list   merge invii+completamenti, ordine cronologico inverso
-#    get_ultimi_match(n)      -> list   ultimi match riconciliati, con flag mismatch livello
+#    get_stima_per_cella()    -> list   tempo raccolta aggregato per (istanza, tipo, livello)
 # ==============================================================================
 
 from __future__ import annotations
@@ -191,26 +191,38 @@ def get_ultimi_eventi(n: int = 15) -> list[dict]:
     return eventi
 
 
-def get_ultimi_match(n: int = 20) -> list[dict]:
-    """Ultimi match riconciliati (invio+completamento abbinati), con flag
-    di mismatch fra livello registrato all'invio (target ricerca) e livello
-    reale confermato dal report (fonte di verità)."""
+def get_stima_per_cella() -> list[dict]:
+    """Tempo di raccolta stimato per cella (istanza, tipo, livello),
+    aggregando l'intero dataset match — mediana/media/range/n campioni.
+    Rappresentazione compatta per confronto rapido fra istanze, stessa
+    granularità e stessa soglia di affidabilità (MIN_CAMPIONI_CELLA) usate
+    da stima_tempo_raccolta() in shared/tempo_raccolta_estimator.py."""
+    from shared.tempo_raccolta_estimator import MIN_CAMPIONI_CELLA
+
     match = _load_jsonl(_PATH_MATCH)
-    match.sort(key=lambda m: m.get("ts_match", ""), reverse=True)
-    match = match[:n]
+    celle: dict[tuple, list[float]] = {}
+    for m in match:
+        instance = m.get("instance")
+        tipo = m.get("tipo")
+        livello = m.get("livello")
+        durata_s = m.get("durata_s")
+        if not instance or not tipo or livello is None or not isinstance(durata_s, (int, float)):
+            continue
+        celle.setdefault((instance, tipo, livello), []).append(durata_s)
 
     righe: list[dict] = []
-    for m in match:
-        livello_invio = m.get("livello_invio")
-        livello = m.get("livello")
-        mismatch = livello_invio is not None and livello_invio != livello
-        durata_s = m.get("durata_s")
+    for (instance, tipo, livello), durate in celle.items():
+        n = len(durate)
         righe.append({
-            **m,
-            "ts_match_local": _ts_local_full(m.get("ts_match", "")),
-            "ts_invio_local": _ts_local_hhmm(m.get("ts_invio", "")),
-            "ts_raccolta_local": _ts_local_hhmm(m.get("ts_raccolta", "")),
-            "durata_h": (durata_s / 3600) if isinstance(durata_s, (int, float)) else None,
-            "mismatch": mismatch,
+            "instance":   instance,
+            "tipo":       tipo,
+            "livello":    livello,
+            "n":          n,
+            "mediana_h":  statistics.median(durate) / 3600,
+            "media_h":    (sum(durate) / n) / 3600,
+            "min_h":      min(durate) / 3600,
+            "max_h":      max(durate) / 3600,
+            "affidabile": n >= MIN_CAMPIONI_CELLA,
         })
+    righe.sort(key=lambda r: (r["instance"], r["tipo"], r["livello"]))
     return righe

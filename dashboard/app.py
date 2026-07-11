@@ -880,38 +880,37 @@ def partial_report_raccolta_eventi(request: Request):
     )
 
 
-@app.get("/ui/partial/report-raccolta-match", include_in_schema=False)
-def partial_report_raccolta_match(request: Request):
-    from dashboard.services.report_raccolta_reader import get_ultimi_match
-    righe = get_ultimi_match(n=25)
+@app.get("/ui/partial/report-raccolta-stima", include_in_schema=False)
+def partial_report_raccolta_stima(request: Request):
+    from dashboard.services.report_raccolta_reader import get_stima_per_cella
+    righe = get_stima_per_cella()
     if not righe:
         return HTMLResponse(
             '<div style="color:var(--text-dim);text-align:center;padding:12px;font-size:11px">'
             'nessun match riconciliato ancora.</div>'
         )
     body = []
-    for m in righe:
-        lv = m.get("livello")
-        lv_str = f"Lv{lv}" if lv is not None else "Lv?"
-        if m["mismatch"]:
-            lv_str += (f' <span style="color:#ff9800;font-size:10px">'
-                       f'(invio Lv{m.get("livello_invio")})</span>')
-        durata_h = m.get("durata_h")
-        durata_str = f"{durata_h:.2f}h" if durata_h is not None else "—"
+    for r in righe:
+        if r["affidabile"]:
+            n_str = f'<span style="color:#4caf50">{r["n"]}</span>'
+        else:
+            n_str = f'<span style="color:#ff9800">{r["n"]}</span>'
         body.append(
             f'<tr>'
-            f'<td style="color:var(--text-dim);font-size:10px;white-space:nowrap">{m["ts_match_local"]}</td>'
-            f'<td style="font-weight:600">{m["instance"]}</td>'
-            f'<td>{m["coordinata"]}</td>'
-            f'<td>{m.get("tipo")} {lv_str}</td>'
-            f'<td style="white-space:nowrap;font-size:10px">{m["ts_invio_local"]} → {m["ts_raccolta_local"]}</td>'
-            f'<td style="text-align:right;font-family:monospace">{durata_str}</td>'
+            f'<td style="font-weight:600">{r["instance"]}</td>'
+            f'<td>{r["tipo"]} Lv{r["livello"]}</td>'
+            f'<td style="text-align:right;font-family:monospace">{n_str}</td>'
+            f'<td style="text-align:right;font-family:monospace;font-weight:600">{r["mediana_h"]:.2f}h</td>'
+            f'<td style="text-align:right;font-family:monospace">{r["media_h"]:.2f}h</td>'
+            f'<td style="text-align:right;font-family:monospace;font-size:10px;color:var(--text-dim)">'
+            f'{r["min_h"]:.2f}–{r["max_h"]:.2f}h</td>'
             f'</tr>'
         )
     return HTMLResponse(
         '<table class="tel-table"><thead><tr>'
-        '<th>match</th><th>ist</th><th>coord</th><th>tipo/lv</th>'
-        '<th>invio → completamento</th><th style="text-align:right">durata</th>'
+        '<th>ist</th><th>tipo/lv</th><th style="text-align:right">n</th>'
+        '<th style="text-align:right">mediana</th><th style="text-align:right">media</th>'
+        '<th style="text-align:right">range</th>'
         '</tr></thead>'
         f'<tbody>{"".join(body)}</tbody></table>'
     )

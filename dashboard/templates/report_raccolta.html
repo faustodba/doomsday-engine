@@ -78,22 +78,22 @@
     <div class="divider"></div>
 
     <!-- ──────────────────────────────────────────────────────
-         SEZIONE 4 — ULTIMI MATCH RICONCILIATI
+         SEZIONE 4 — TEMPO DI RACCOLTA STIMATO PER CELLA
          ────────────────────────────────────────────────────── -->
     <div class="section">
-      <div class="sec-label">🔗 ultimi match riconciliati · tempo_raccolta_estimator (WU200)</div>
+      <div class="sec-label">📐 tempo di raccolta stimato · per istanza, tipo, livello</div>
       <div class="tel-grid">
         <div class="tel-card tel-full">
-          <div class="tel-head">invio ↔ completamento abbinati</div>
-          <div id="rr-match"
-               hx-get="{{ url_prefix }}/ui/partial/report-raccolta-match"
+          <div class="tel-head">mediana/media aggregata sull'intero dataset match</div>
+          <div id="rr-stima"
+               hx-get="{{ url_prefix }}/ui/partial/report-raccolta-stima"
                hx-trigger="load, every 30s"
                hx-swap="innerHTML">
             <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
           </div>
           <div class="tel-foot">
-            il livello mostrato è sempre quello del report (fonte di verità) · quando diverge dal livello
-            registrato all'invio (target di ricerca) è evidenziato in arancione · refresh 30s
+            livello sempre quello del report (fonte di verità) · n in verde = cella affidabile (≥3 campioni,
+            stessa soglia usata da <code>stima_tempo_raccolta()</code>), arancione = pochi campioni · refresh 30s
           </div>
         </div>
       </div>
