@@ -108,6 +108,70 @@ _predictor_retention_task = None
 PREDICTOR_RETENTION_DAYS = 60
 PREDICTOR_RETENTION_INTERVAL_MIN = 24 * 60   # 1×/die
 
+_tempo_raccolta_task = None
+TEMPO_RACCOLTA_INTERVAL_MIN = 15
+# Stato condiviso per eventuale UI futura (ultimo/prossimo run, ultimo esito).
+_tempo_raccolta_state: dict = {"last_ts": None, "next_ts": None, "last_esito": None}
+
+
+def _tempo_raccolta_esegui() -> dict:
+    """Esegue un passo di riconciliazione e aggiorna lo stato condiviso.
+    Chiamata dal loop periodico (WU200) — mai dal task raccolta stesso."""
+    from datetime import datetime, timezone, timedelta
+    from shared.tempo_raccolta_estimator import esegui_riconciliazione
+
+    esito = esegui_riconciliazione()
+    now = datetime.now(timezone.utc)
+    interval_s = TEMPO_RACCOLTA_INTERVAL_MIN * 60
+    _tempo_raccolta_state["last_ts"] = now.isoformat()
+    _tempo_raccolta_state["next_ts"] = (now + timedelta(seconds=interval_s)).isoformat()
+    _tempo_raccolta_state["last_esito"] = esito
+    return esito
+
+
+async def _tempo_raccolta_loop():
+    """Background task (WU200, 11/07): riconciliazione periodica tra
+    l'evento "occupato" (invio, nodi_mappa_observations.jsonl) e il
+    completamento letto da report_raccolta (report_raccolta_dataset.jsonl)
+    per lo stimatore empirico del tempo di raccolta reale per (istanza,
+    tipo, livello). Stesso pattern poll-granulare di
+    _nodi_mappa_rebuild_loop/_predictor_recorder_loop.
+
+    Richiesta esplicita utente 10/07: "il match deve essere non nel task
+    ma lanciato periodicamente" — girare frequentemente (15 min, non
+    settimanale) riduce la finestra di rischio di sovrapposizione tra
+    occupazioni consecutive dello stesso nodo (respawn)."""
+    import asyncio
+    from datetime import datetime, timezone
+    interval_s = TEMPO_RACCOLTA_INTERVAL_MIN * 60
+    POLL_GRANULAR_S = 30
+    print(f"[DASHBOARD] {_ts()} tempo_raccolta reconciliation loop avviato "
+          f"(ogni {TEMPO_RACCOLTA_INTERVAL_MIN}min, poll {POLL_GRANULAR_S}s)")
+    while True:
+        try:
+            last_ts = _tempo_raccolta_state.get("last_ts")
+            elapsed_s = float("inf")
+            if last_ts:
+                try:
+                    elapsed_s = (
+                        datetime.now(timezone.utc) - datetime.fromisoformat(last_ts)
+                    ).total_seconds()
+                except Exception:
+                    pass
+            if elapsed_s >= interval_s:
+                esito = _tempo_raccolta_esegui()
+                if not esito.get("errore"):
+                    print(f"[DASHBOARD] {_ts()} tempo_raccolta: "
+                          f"{esito['match_nuovi']} match nuovi, "
+                          f"{esito['occupazioni_potate']} potate, "
+                          f"{esito['pending_attuali']} pending")
+                else:
+                    print(f"[DASHBOARD] {_ts()} tempo_raccolta errore: {esito['errore']}")
+        except Exception as exc:
+            print(f"[DASHBOARD] {_ts()} tempo_raccolta loop errore: {exc}")
+        await asyncio.sleep(POLL_GRANULAR_S)
+
+
 _nodi_mappa_rebuild_task = None
 NODI_MAPPA_REBUILD_INTERVAL_MIN = 20
 # Stato condiviso col route /ui/nodi-mappa (stesso processo/event loop) per
@@ -358,8 +422,10 @@ async def lifespan(app: FastAPI):
     print(f"[DASHBOARD] API docs:      http://localhost:8765/docs")
     # Avvia background task predictor recorder
     global _predictor_recorder_task, _predictor_retention_task, _nodi_mappa_rebuild_task
+    global _tempo_raccolta_task
     _predictor_recorder_task = asyncio.create_task(_predictor_recorder_loop())
     _predictor_retention_task = asyncio.create_task(_predictor_retention_loop())
+    _tempo_raccolta_task = asyncio.create_task(_tempo_raccolta_loop())
     # WU184 (30/06) — anagrafe nodi disabilitata: SCHEDULAZIONE rebuild rimossa
     # (relazione geografica non sfruttabile, rifugi concentrati). Alleggerisce
     # la dashboard (niente rebuild ogni 20 min su tutte le osservazioni).
@@ -370,6 +436,8 @@ async def lifespan(app: FastAPI):
         _predictor_recorder_task.cancel()
     if _predictor_retention_task and not _predictor_retention_task.done():
         _predictor_retention_task.cancel()
+    if _tempo_raccolta_task and not _tempo_raccolta_task.done():
+        _tempo_raccolta_task.cancel()
     # WU184 — rebuild task non più avviato (vedi sopra)
     # if _nodi_mappa_rebuild_task and not _nodi_mappa_rebuild_task.done():
     #     _nodi_mappa_rebuild_task.cancel()
