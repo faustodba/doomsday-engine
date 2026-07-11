@@ -619,6 +619,7 @@ def esegui_report_raccolta(ctx, log_fn=None, solo_reset: bool = True) -> dict:
         else:
             chiavi = carica_chiavi_esistenti(ctx.instance_name)
             pagine = 0
+            chiavi_pagina_precedente = None
             while pagine < MAX_PAGINE:
                 screen = device.screenshot()
                 if screen is None:
@@ -635,8 +636,27 @@ def esegui_report_raccolta(ctx, log_fn=None, solo_reset: bool = True) -> dict:
                 if 0 < len(righe_pagina) < ROWS_PER_PAGE:
                     esito["fine_lista_raggiunta"] = True
                     break
-                if len(righe_pagina) > 0 and nuove_pagina == 0 and pagine > 1:
+
+                # WU199duodecies (11/07): lo scroll non ha prodotto contenuto
+                # diverso dalla pagina precedente (stesso giro di lettura) —
+                # segnale LOCALE che siamo fisicamente in fondo alla lista
+                # (il gioco non scrolla oltre). Sostituisce il vecchio check
+                # "pagina piena ma tutta già nota nello storico globale", che
+                # poteva scattare anche a metà lista rileggendo una riga nota
+                # da tempo, non necessariamente il vero fondo — osservato live
+                # 11/07: fermava la lettura troppo presto, Delete quasi mai
+                # raggiunto. Chiave (coordinata, ts_raccolta): stabile anche
+                # con rumore OCR sulle quantità.
+                chiavi_pagina = {(r.coordinata, r.ts_raccolta) for r in righe_pagina}
+                if (chiavi_pagina_precedente is not None
+                        and chiavi_pagina == chiavi_pagina_precedente
+                        and len(righe_pagina) > 0):
+                    esito["fine_lista_raggiunta"] = True
+                    log("[REPORT-RACCOLTA] scroll fermo (stessa pagina di prima) "
+                        "— fondo lista confermato")
                     break
+                chiavi_pagina_precedente = chiavi_pagina
+
                 device.swipe(SWIPE_DA[0], SWIPE_DA[1], SWIPE_A[0], SWIPE_A[1],
                             duration_ms=SWIPE_DURATA_MS)
                 time.sleep(WAIT_SCROLL)

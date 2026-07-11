@@ -25,6 +25,7 @@ from shared.report_raccolta import (
     _tab_report_attivo,
     leggi_pagina,
     esegui_report_raccolta,
+    ReportRow,
     TAP_SORT_MAIL,
     TAP_READ_CLAIM_ALL,
     TAP_DELETE_READ,
@@ -34,6 +35,28 @@ from shared.report_raccolta import (
     TAP_TAB_ALLIANCE,
     TAP_CLOSE,
 )
+
+
+@pytest.fixture(autouse=True)
+def _isola_data_dir(tmp_path, monkeypatch):
+    """Isola data/report_raccolta_dataset.jsonl nella tmp_path -- senza
+    questo, i test che esercitano registra_righe()/carica_chiavi_esistenti()
+    scriverebbero nel vero dataset dev (pattern gia' usato in
+    tests/tasks/test_raccolta.py)."""
+    monkeypatch.setenv("DOOMSDAY_ROOT", str(tmp_path))
+
+
+def _riga(coord, ts, tipo="petrolio", livello=7, base=264_000):
+    return ReportRow(coordinata=coord, tipo=tipo, livello=livello, ts_raccolta=ts,
+                      quantita_base=base, quantita_bonus=0, valore_alleanza=2640)
+
+
+def _ocr_tab_e_nomail(frame, roi, cfg):
+    if roi == (95, 62, 260, 82):      # ROI_TAB_LABEL
+        return "Sort Mail"
+    if roi == (330, 220, 950, 280):   # ROI_NO_MAIL
+        return "No mail received"
+    return ""
 
 
 class _FakeCtx:
@@ -287,3 +310,61 @@ class TestEseguiReportRaccoltaAbortSuTabSbagliato:
         assert esito["delete_ok"] is True
         assert TAP_READ_CLAIM_ALL in device.taps
         assert TAP_DELETE_READ in device.taps
+
+
+class TestScrollFermoConfermaFineLista:
+    """WU199duodecies: idea utente 11/07 -- se lo scroll produce la stessa
+    pagina di prima (stesso giro di lettura), è un segnale locale e
+    affidabile che siamo in fondo alla lista (il gioco non scrolla oltre).
+    Sostituisce il vecchio check contro lo storico globale (poteva
+    scattare a metà lista rileggendo una riga nota da tempo)."""
+
+    def _righe_full_page(self, prefix, ts_base):
+        return [
+            _riga(f"70{i}_50{i}", f"2026-07-11T0{ts_base}:0{i}:00+00:00")
+            for i in range(4)
+        ]
+
+    def test_pagina_identica_dopo_scroll_conferma_fine_lista(self):
+        device = FakeDevice()
+        device.add_screenshot(Screenshot(_frame()))  # tab check
+        device.add_screenshot(Screenshot(_frame()))  # toggle check
+        device.add_screenshot(Screenshot(_frame()))  # pagina 1
+        device.add_screenshot(Screenshot(_frame()))  # pagina 2 (identica)
+        device.add_screenshot(Screenshot(_frame()))  # finale _elimina_report_letto
+        ctx = _FakeCtx(device)
+
+        pagina = self._righe_full_page("70", 1)
+
+        with patch("shared.report_raccolta._ocr_raw", side_effect=_ocr_tab_e_nomail), \
+             patch("shared.report_raccolta.leggi_pagina", side_effect=[pagina, pagina]):
+            esito = esegui_report_raccolta(ctx, solo_reset=False)
+
+        assert esito["pagine"] == 2
+        assert esito["fine_lista_raggiunta"] is True
+        assert esito["delete_ok"] is True
+        assert esito["nuove"] == 4  # solo dalla prima pagina, la seconda è tutta dedup
+        assert len(device.swipe_calls) == 1  # un solo swipe, tra pagina 1 e 2
+
+    def test_pagine_diverse_non_scattano_falso_positivo(self):
+        device = FakeDevice()
+        device.add_screenshot(Screenshot(_frame()))  # tab check
+        device.add_screenshot(Screenshot(_frame()))  # toggle check
+        device.add_screenshot(Screenshot(_frame()))  # pagina 1
+        device.add_screenshot(Screenshot(_frame()))  # pagina 2 (diversa)
+        ctx = _FakeCtx(device)
+
+        pagina1 = self._righe_full_page("70", 1)
+        pagina2 = [
+            _riga(f"71{i}_51{i}", f"2026-07-11T0{2}:0{i}:00+00:00")
+            for i in range(4)
+        ]
+
+        with patch("shared.report_raccolta._ocr_raw", side_effect=_ocr_tab_e_nomail), \
+             patch("shared.report_raccolta.leggi_pagina", side_effect=[pagina1, pagina2]):
+            esito = esegui_report_raccolta(ctx, solo_reset=False)
+
+        assert esito["fine_lista_raggiunta"] is False
+        assert esito["delete_ok"] is None
+        assert esito["pagine"] == 2
+        assert esito["nuove"] == 8
