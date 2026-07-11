@@ -9,10 +9,11 @@
 #  (fonte di verità = report, vedi shared/tempo_raccolta_estimator.py).
 #
 #  API pubblica:
-#    get_riepilogo()          -> dict   statistiche aggregate + config TTL/retention
-#    get_occupati_in_volo()   -> list   raccoglitori pending (non ancora matchati)
-#    get_ultimi_eventi(n)     -> list   merge invii+completamenti, ordine cronologico inverso
-#    get_stima_per_cella()    -> list   tempo raccolta aggregato per (istanza, tipo, livello)
+#    get_riepilogo()            -> dict   statistiche aggregate + config TTL/retention
+#    get_occupati_in_volo()     -> list   raccoglitori pending (non ancora matchati)
+#    get_ultimi_eventi(n)       -> list   merge invii+completamenti, ordine cronologico inverso
+#    get_stima_per_cella()      -> list   tempo raccolta aggregato per (istanza, tipo, livello)
+#    get_produzione_unificata() -> dict   prod. oraria unificata per istanza + totali farm
 # ==============================================================================
 
 from __future__ import annotations
@@ -226,3 +227,62 @@ def get_stima_per_cella() -> list[dict]:
         })
     righe.sort(key=lambda r: (r["instance"], r["tipo"], r["livello"]))
     return righe
+
+
+_RISORSE = ("pomodoro", "legno", "acciaio", "petrolio")
+
+
+def get_produzione_unificata() -> dict:
+    """Produzione oraria unificata (pom-eq) per istanza e per tipo di
+    risorsa, e totale farm — riusa la stessa metrica già in produzione su
+    /ui (get_produzione_istanze -> shared/prod_unificata.py): finestra
+    fissa 24h su produzione_storico (sessioni chiuse), pesi
+    {pomodoro:1, legno:1, acciaio:2, petrolio:5}. Master esclusa
+    (produzione_qty include risorse ricevute da alleati via rifornimento,
+    non produzione interna castello) — stessa convenzione di
+    get_risorse_farm()/prod_unif_agg in dashboard/app.py.
+
+    prod_unif_h è già una velocità oraria (Σpom_eq nella finestra 24h / 24)
+    nonostante il nome storico — non richiede ulteriore normalizzazione."""
+    from dashboard.services.stats_reader import get_produzione_istanze
+
+    dati = get_produzione_istanze(include_master=False)
+
+    per_istanza: list[dict] = []
+    tot_pom_eq = 0
+    tot_per_risorsa: dict[str, dict] = {r: {"qta_tot": 0, "pom_eq": 0} for r in _RISORSE}
+
+    for entry in dati:
+        pu = entry.get("prod_unificata") or {}
+        pom_eq_tot = int(pu.get("pom_eq_totale", 0) or 0)
+        per_r_raw = pu.get("per_risorsa") or {}
+        per_r: dict[str, dict] = {}
+        for r in _RISORSE:
+            v = per_r_raw.get(r) or {}
+            qta = int(v.get("qta_tot", 0) or 0)
+            pe = int(v.get("pom_eq", 0) or 0)
+            per_r[r] = {"qta_h": qta / 24.0}
+            tot_per_risorsa[r]["qta_tot"] += qta
+            tot_per_risorsa[r]["pom_eq"] += pe
+        prod_unif_h = float(pu.get("prod_unif_h", -1.0) or -1.0)
+        per_istanza.append({
+            "nome":         entry.get("nome"),
+            "prod_unif_h":  prod_unif_h if prod_unif_h > 0 else 0.0,
+            "per_risorsa":  per_r,
+        })
+        tot_pom_eq += pom_eq_tot
+
+    per_istanza.sort(key=lambda r: r["nome"] or "")
+
+    totale_prod_unif_h = tot_pom_eq / 24.0 / 1_000_000
+    totale_per_risorsa = {
+        r: {"qta_h": tot_per_risorsa[r]["qta_tot"] / 24.0,
+            "pom_eq_h": tot_per_risorsa[r]["pom_eq"] / 24.0 / 1_000_000}
+        for r in _RISORSE
+    }
+
+    return {
+        "per_istanza":         per_istanza,
+        "totale_prod_unif_h":  totale_prod_unif_h,
+        "totale_per_risorsa":  totale_per_risorsa,
+    }

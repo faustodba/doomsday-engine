@@ -916,6 +916,67 @@ def partial_report_raccolta_stima(request: Request):
     )
 
 
+_RR_RISORSE_ICO = [("pomodoro", "🍅"), ("legno", "🪵"), ("acciaio", "⚙"), ("petrolio", "🛢")]
+
+
+@app.get("/ui/partial/report-raccolta-produzione-istanze", include_in_schema=False)
+def partial_report_raccolta_produzione_istanze(request: Request):
+    from dashboard.services.report_raccolta_reader import get_produzione_unificata
+    dati = get_produzione_unificata()
+    righe = dati["per_istanza"]
+    if not righe:
+        return HTMLResponse(
+            '<div style="color:var(--text-dim);text-align:center;padding:12px;font-size:11px">'
+            'nessuna istanza con dati produzione.</div>'
+        )
+    body = []
+    for r in righe:
+        pu_lbl = f'{r["prod_unif_h"]:.2f} M/h' if r["prod_unif_h"] > 0 else "—"
+        risorse_cells = "".join(
+            f'<td style="text-align:right;font-family:monospace;font-size:10px">'
+            f'{ico} {_fmt_m(r["per_risorsa"][tipo]["qta_h"])}/h</td>'
+            for tipo, ico in _RR_RISORSE_ICO
+        )
+        body.append(
+            f'<tr>'
+            f'<td style="font-weight:600">{r["nome"]}</td>'
+            f'<td style="text-align:right;font-family:monospace;color:#7cf;font-weight:600">{pu_lbl}</td>'
+            f'{risorse_cells}'
+            f'</tr>'
+        )
+    return HTMLResponse(
+        '<table class="tel-table"><thead><tr>'
+        '<th>ist</th><th style="text-align:right">prod. unif.</th>'
+        '<th style="text-align:right">pomodoro/h</th><th style="text-align:right">legno/h</th>'
+        '<th style="text-align:right">acciaio/h</th><th style="text-align:right">petrolio/h</th>'
+        '</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table>'
+    )
+
+
+@app.get("/ui/partial/report-raccolta-produzione-totale", include_in_schema=False)
+def partial_report_raccolta_produzione_totale(request: Request):
+    from dashboard.services.report_raccolta_reader import get_produzione_unificata
+    dati = get_produzione_unificata()
+    tot_pu = dati["totale_prod_unif_h"]
+    tot_r = dati["totale_per_risorsa"]
+
+    cards = [("prod. unif. totale farm", f'{tot_pu:.2f} M/h' if tot_pu > 0 else "—", "#7cf")]
+    for tipo, ico in _RR_RISORSE_ICO:
+        v = tot_r.get(tipo, {})
+        qta_lbl = _fmt_m(v.get("qta_h", 0))
+        cards.append((f"{ico} {tipo}/h", f"{qta_lbl}/h", "var(--text)"))
+
+    body = "".join(
+        f'<div class="tel-card">'
+        f'<div class="tel-head">{label}</div>'
+        f'<div style="padding:10px 14px;font-size:20px;font-weight:700;color:{color}">{val}</div>'
+        f'</div>'
+        for label, val, color in cards
+    )
+    return HTMLResponse(f'<div class="tel-grid">{body}</div>')
+
+
 @app.get("/ui/partial/ab-test-summary", include_in_schema=False)
 def partial_ab_test_summary(request: Request):
     """Card riepilogo sintetico AB test."""

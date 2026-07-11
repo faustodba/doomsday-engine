@@ -99,6 +99,51 @@
       </div>
     </div>
 
+    <div class="divider"></div>
+
+    <!-- ──────────────────────────────────────────────────────
+         SEZIONE 5 — PRODUZIONE ORARIA UNIFICATA PER ISTANZA
+         ────────────────────────────────────────────────────── -->
+    <div class="section">
+      <div class="sec-label">🍅 produzione oraria unificata · per istanza e per tipo risorsa</div>
+      <div class="tel-grid">
+        <div class="tel-card tel-full">
+          <div class="tel-head">pom-eq/h per istanza + quantità/h per risorsa</div>
+          <div id="rr-prod-istanze"
+               hx-get="{{ url_prefix }}/ui/partial/report-raccolta-produzione-istanze"
+               hx-trigger="load, every 30s"
+               hx-swap="innerHTML">
+            <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
+          </div>
+          <div class="tel-foot">
+            stessa metrica di <code>shared/prod_unificata.py</code> (pesi pomodoro=1 legno=1 acciaio=2
+            petrolio=5) · finestra fissa 24h su sessioni chiuse (<code>produzione_storico</code>) · master
+            esclusa (produzione_qty include risorse ricevute da alleati) · refresh 30s
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ──────────────────────────────────────────────────────
+         SEZIONE 6 — PRODUZIONE TOTALE FARM
+         ────────────────────────────────────────────────────── -->
+    <div class="section">
+      <div class="sec-label">🌾 produzione totale farm · unificata e per tipo risorsa</div>
+      <div id="rr-prod-totale"
+           hx-get="{{ url_prefix }}/ui/partial/report-raccolta-produzione-totale"
+           hx-trigger="load, every 30s"
+           hx-swap="innerHTML">
+        <div class="tel-grid">
+          <div class="tel-card tel-full">
+            <div class="tel-head">caricamento…</div>
+            <div style="padding:14px;color:var(--text-dim);font-size:12px">…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
   </div>
 </div>
 
