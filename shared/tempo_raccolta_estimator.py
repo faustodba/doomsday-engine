@@ -26,12 +26,25 @@
 #  _nodi_mappa_rebuild_loop/_predictor_recorder_loop).
 #
 #  MATCH: per ogni riga report non ancora abbinata, cerca nel pool delle
-#  occupazioni pending (stessa chiave instance|coordinata) quella con
+#  occupazioni pending (chiave instance|coordinata|tipo) quella con
 #  ts_invio più recente MA precedente a ts_raccolta. L'occupazione usata
 #  viene rimossa dal pool (mai riusata per un match successivo) — evita
 #  il rischio segnalato dall'utente 10/07: nodo che si ricrea alla stessa
-#  coordinata/tipo/livello e viene occupato una seconda volta prima che
-#  la prima occupazione trovi il suo match.
+#  coordinata/tipo e viene occupato una seconda volta prima che la prima
+#  occupazione trovi il suo match.
+#
+#  WU200septies (11/07) — il LIVELLO non fa parte della chiave di match.
+#  Motivo: `livello_nodo` registrato da tasks/raccolta.py all'invio non è
+#  letto dal nodo reale, è il livello TARGET della ricerca (`lv` in
+#  sequenza_livelli) — se l'aggiustamento del pannello livello prima di
+#  CERCA non atterra esattamente sul target, il nodo trovato è di un
+#  livello diverso da quello registrato. Fenomeno noto e già misurato
+#  (12-30% di mismatch a seconda dell'istanza, vedi docstring
+#  tasks/raccolta.py::_cerca_nodo). Il Tab Report è la fonte di verità
+#  (livello letto dal completamento reale in-game) — il campo `livello`
+#  del match finale viene SEMPRE dal report, mai dall'occupazione. Il
+#  livello originale registrato all'invio resta comunque in
+#  `livello_invio` per confronto/debug futuro sul tasso di mismatch.
 #
 #  STATO: data/tempo_raccolta_match_state.json — cursori byte sui due
 #  dataset sorgente (append-only, si leggono solo le righe nuove da un
@@ -105,28 +118,36 @@ def _path_state() -> Path:
 
 
 def _migra_pending_a_chiave_tipizzata(pending: dict) -> dict:
-    """WU200sexies (11/07) — migra il pending pool dal vecchio formato
-    chiave `istanza|coordinata` al nuovo `istanza|coordinata|tipo|livello`.
-    Ogni voce porta già con sé tipo/livello, quindi la migrazione è senza
-    perdita di dati — ricostruisce la chiave corretta per ciascuna voce
-    invece di scartarle. Idempotente: le chiavi già nel nuovo formato
-    (4 parti) passano invariate."""
+    """WU200septies (11/07) — migra il pending pool al formato chiave
+    corrente `istanza|coordinata|tipo` (SENZA livello — vedi nota in testa
+    al modulo, il Tab Report è la fonte di verità sul livello, non
+    l'occupazione). Gestisce entrambi i formati precedenti senza perdita
+    di dati:
+      - vecchissimo `istanza|coordinata` (2 parti, pre-WU200sexies)
+      - intermedio `istanza|coordinata|tipo|livello` (4 parti, WU200sexies)
+    Idempotente: chiavi già nel formato corrente (3 parti) passano
+    invariate."""
     nuovo: dict[str, list] = {}
     for key, voci in pending.items():
         parti = key.split("|")
-        if len(parti) == 4:
+        if len(parti) == 3:
             nuovo.setdefault(key, []).extend(voci)
             continue
-        if len(parti) != 2:
-            continue  # formato inatteso, scarta difensivamente
-        instance, chiave = parti
-        for v in voci:
-            tipo = v.get("tipo")
-            livello = v.get("livello")
-            if not tipo or not livello:
-                continue  # voce vecchia senza tipo/livello leggibile, non migrabile
-            nuova_key = f"{instance}|{chiave}|{tipo}|{livello}"
-            nuovo.setdefault(nuova_key, []).append(v)
+        if len(parti) == 4:
+            instance, chiave, tipo, _livello = parti
+            nuova_key = f"{instance}|{chiave}|{tipo}"
+            nuovo.setdefault(nuova_key, []).extend(voci)
+            continue
+        if len(parti) == 2:
+            instance, chiave = parti
+            for v in voci:
+                tipo = v.get("tipo")
+                if not tipo:
+                    continue  # voce vecchia senza tipo leggibile, non migrabile
+                nuova_key = f"{instance}|{chiave}|{tipo}"
+                nuovo.setdefault(nuova_key, []).append(v)
+            continue
+        # formato inatteso, scarta difensivamente
     return nuovo
 
 
@@ -218,15 +239,16 @@ def esegui_riconciliazione(ttl_ore: float = TTL_ORFANE_ORE) -> dict:
                 instance = o.get("instance")
                 chiave = o.get("chiave")
                 tipo = o.get("tipo")
-                livello = o.get("livello")
-                if not ts or not instance or not chiave or not tipo or not livello:
+                livello = o.get("livello")  # conservato per riferimento/debug, non nella chiave
+                if not ts or not instance or not chiave or not tipo:
                     continue
-                # WU200sexies — chiave a 4 componenti: la stessa coordinata
-                # può respawnare con tipo/livello diverso (vedi
-                # shared/nodi_mappa.py), quindi l'identità univoca di un
-                # record è istanza+coordinata+tipo+livello, non solo
-                # istanza+coordinata.
-                key = f"{instance}|{chiave}|{tipo}|{livello}"
+                # WU200septies — chiave a 3 componenti (niente livello, vedi
+                # nota in testa al modulo): la stessa coordinata può
+                # respawnare con tipo diverso (shared/nodi_mappa.py), quindi
+                # l'identità univoca è istanza+coordinata+tipo. Il livello
+                # registrato qui è solo il TARGET di ricerca, non il livello
+                # reale del nodo — il report è la fonte di verità su quello.
+                key = f"{instance}|{chiave}|{tipo}"
                 pending.setdefault(key, []).append({
                     "ts": ts, "tipo": tipo, "livello": livello,
                 })
@@ -256,20 +278,19 @@ def esegui_riconciliazione(ttl_ore: float = TTL_ORFANE_ORE) -> dict:
                 except Exception:
                     continue
 
-                # WU200sexies (11/07) — chiave a 4 componenti: l'identità
-                # univoca di un record è istanza+coordinata+tipo+livello,
-                # non solo istanza+coordinata. Lo stesso nodo (stessa
-                # coordinata) può respawnare con tipo/livello diverso
-                # (documentato in shared/nodi_mappa.py) — un report senza
-                # tipo/livello leggibile non può formare una chiave valida
-                # e resta orfano (mai abbinato per prossimità temporale a
-                # un'occupazione di tipo diverso).
+                # WU200septies (11/07) — chiave a 3 componenti, SENZA
+                # livello: il Tab Report è la fonte di verità sul livello
+                # (vedi nota in testa al modulo), non l'occupazione — il
+                # livello registrato all'invio è solo il target di ricerca
+                # e può divergere dal livello reale del nodo (12-30% di
+                # mismatch misurato, vedi tasks/raccolta.py::_cerca_nodo).
+                # Un report senza tipo leggibile resta orfano.
                 tipo_r = r.get("tipo")
                 livello_r = r.get("livello")
-                if not tipo_r or not livello_r:
+                if not tipo_r:
                     esito["report_orfane"] += 1
                     continue
-                key = f"{instance}|{coordinata}|{tipo_r}|{livello_r}"
+                key = f"{instance}|{coordinata}|{tipo_r}"
                 candidati = pending.get(key, [])
                 best = None
                 best_ts = None
@@ -291,8 +312,9 @@ def esegui_riconciliazione(ttl_ore: float = TTL_ORFANE_ORE) -> dict:
                     "ts_match": ora.isoformat(),
                     "instance": instance,
                     "coordinata": coordinata,
-                    "tipo": r.get("tipo"),
-                    "livello": r.get("livello"),
+                    "tipo": tipo_r,
+                    "livello": livello_r,          # fonte di verità: report
+                    "livello_invio": best.get("livello"),  # target registrato all'invio, per confronto/debug
                     "ts_invio": best["ts"],
                     "ts_raccolta": ts_racc_raw,
                     "durata_s": durata_s,

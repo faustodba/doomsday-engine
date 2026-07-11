@@ -173,6 +173,30 @@ class TestEseguiRiconciliazione:
         assert rec["ts_invio"] == ts_occ_tipo_giusto  # NON quella più recente di tipo diverso
         assert abs(rec["durata_s"] - 3 * 3600) < 5
 
+    def test_livello_disallineato_matcha_comunque_report_fonte_di_verita(self, tmp_path):
+        """WU200septies: richiesta esplicita utente. Il livello registrato
+        all'invio (raccolta.py) e' solo il target di ricerca, non il
+        livello reale del nodo (12-30% di mismatch misurato, vedi
+        tasks/raccolta.py::_cerca_nodo). Un'occupazione con livello
+        diverso dal report DEVE comunque matchare (stesso tipo) -- il
+        livello persistito viene sempre dal report, mai dall'occupazione."""
+        ts_occ = _ore_fa(3)
+        _scrivi_jsonl(tmp_path / "data" / "nodi_mappa_observations.jsonl", [
+            _occ("FAU_00", "700_500", ts_occ, tipo="petrolio", livello=6),  # target registrato: Lv6
+        ])
+        _scrivi_jsonl(tmp_path / "data" / "report_raccolta_dataset.jsonl", [
+            _report("FAU_00", "700_500", _ore_fa(0), tipo="petrolio", livello=7),  # nodo reale: Lv7
+        ])
+        esito = esegui_riconciliazione()
+        assert esito["match_nuovi"] == 1
+        assert esito["report_orfane"] == 0
+
+        out = (tmp_path / "data" / "tempo_raccolta_dataset.jsonl").read_text(encoding="utf-8")
+        rec = json.loads(out.strip().splitlines()[0])
+        assert rec["livello"] == 7          # dal report -- fonte di verita'
+        assert rec["livello_invio"] == 6    # target originale, conservato per confronto/debug
+        assert abs(rec["durata_s"] - 3 * 3600) < 5
+
     def test_nessuna_occupazione_tipo_corretto_resta_orfana(self, tmp_path):
         """Se esiste un'occupazione per la stessa coordinata ma di tipo
         diverso (nessuna di tipo corretto), il report deve restare orfano
@@ -362,11 +386,13 @@ class TestStimaTempoRaccolta:
 
 
 class TestMigrazionePendingChiaveTipizzata:
-    """WU200sexies (11/07): migrazione dal vecchio formato chiave
-    'istanza|coordinata' al nuovo 'istanza|coordinata|tipo|livello',
-    richiesta esplicita utente dopo il fix WU200quinquies."""
+    """WU200septies (11/07): migrazione al formato chiave corrente
+    'istanza|coordinata|tipo' (SENZA livello — il Tab Report è la fonte
+    di verità sul livello, non l'occupazione, vedi nota in testa al
+    modulo). Gestisce sia il vecchissimo formato 2 parti sia
+    l'intermedio WU200sexies a 4 parti."""
 
-    def test_migra_voce_vecchio_formato(self):
+    def test_migra_voce_vecchissimo_formato_2_parti(self):
         vecchio = {
             "FAU_00|700_500": [
                 {"ts": "2026-07-11T01:00:00+00:00", "tipo": "petrolio", "livello": 7},
@@ -374,17 +400,46 @@ class TestMigrazionePendingChiaveTipizzata:
         }
         nuovo = _migra_pending_a_chiave_tipizzata(vecchio)
         assert nuovo == {
-            "FAU_00|700_500|petrolio|7": [
+            "FAU_00|700_500|petrolio": [
                 {"ts": "2026-07-11T01:00:00+00:00", "tipo": "petrolio", "livello": 7},
             ],
         }
 
-    def test_chiave_gia_nuovo_formato_passa_invariata(self):
-        gia_nuovo = {
-            "FAU_00|700_500|petrolio|7": [{"ts": "2026-07-11T01:00:00+00:00"}],
+    def test_migra_voce_formato_intermedio_4_parti_wu200sexies(self):
+        intermedio = {
+            "FAU_00|700_500|petrolio|7": [
+                {"ts": "2026-07-11T01:00:00+00:00", "tipo": "petrolio", "livello": 7},
+            ],
         }
-        nuovo = _migra_pending_a_chiave_tipizzata(gia_nuovo)
-        assert nuovo == gia_nuovo
+        nuovo = _migra_pending_a_chiave_tipizzata(intermedio)
+        assert nuovo == {
+            "FAU_00|700_500|petrolio": [
+                {"ts": "2026-07-11T01:00:00+00:00", "tipo": "petrolio", "livello": 7},
+            ],
+        }
+
+    def test_chiave_gia_formato_corrente_passa_invariata(self):
+        gia_corrente = {
+            "FAU_00|700_500|petrolio": [{"ts": "2026-07-11T01:00:00+00:00"}],
+        }
+        nuovo = _migra_pending_a_chiave_tipizzata(gia_corrente)
+        assert nuovo == gia_corrente
+
+    def test_due_voci_stesso_nodo_livelli_diversi_migrano_alla_stessa_chiave(self):
+        """A differenza di WU200sexies, due occupazioni con stesso tipo ma
+        livello diverso (target di ricerca diverso) finiscono ORA nella
+        stessa chiave -- il livello non distingue più i bucket."""
+        formato_intermedio = {
+            "FAU_00|700_500|petrolio|6": [
+                {"ts": "2026-07-11T01:00:00+00:00", "tipo": "petrolio", "livello": 6},
+            ],
+            "FAU_00|700_500|petrolio|7": [
+                {"ts": "2026-07-11T02:00:00+00:00", "tipo": "petrolio", "livello": 7},
+            ],
+        }
+        nuovo = _migra_pending_a_chiave_tipizzata(formato_intermedio)
+        assert set(nuovo.keys()) == {"FAU_00|700_500|petrolio"}
+        assert len(nuovo["FAU_00|700_500|petrolio"]) == 2
 
     def test_due_voci_stessa_coordinata_tipi_diversi_migrano_a_chiavi_separate(self):
         vecchio = {
@@ -394,11 +449,11 @@ class TestMigrazionePendingChiaveTipizzata:
             ],
         }
         nuovo = _migra_pending_a_chiave_tipizzata(vecchio)
-        assert set(nuovo.keys()) == {"FAU_00|700_500|petrolio|6", "FAU_00|700_500|campo|7"}
-        assert len(nuovo["FAU_00|700_500|petrolio|6"]) == 1
-        assert len(nuovo["FAU_00|700_500|campo|7"]) == 1
+        assert set(nuovo.keys()) == {"FAU_00|700_500|petrolio", "FAU_00|700_500|campo"}
+        assert len(nuovo["FAU_00|700_500|petrolio"]) == 1
+        assert len(nuovo["FAU_00|700_500|campo"]) == 1
 
-    def test_voce_senza_tipo_livello_scartata_difensivamente(self):
+    def test_voce_senza_tipo_scartata_difensivamente(self):
         vecchio = {
             "FAU_00|700_500": [
                 {"ts": "2026-07-11T01:00:00+00:00", "tipo": None, "livello": None},
@@ -423,7 +478,7 @@ class TestMigrazionePendingChiaveTipizzata:
         _salva_stato(stato_vecchio)
         stato_migrato = _carica_stato()
         assert stato_migrato["pending"] == {
-            "FAU_00|700_500|petrolio|7": [
+            "FAU_00|700_500|petrolio": [
                 {"ts": "2026-07-11T01:00:00+00:00", "tipo": "petrolio", "livello": 7},
             ],
         }
