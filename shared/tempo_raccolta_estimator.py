@@ -222,11 +222,25 @@ def esegui_riconciliazione(ttl_ore: float = TTL_ORFANE_ORE) -> dict:
                 except Exception:
                     continue
 
+                # WU200quinquies (11/07) — richiesto anche tipo+livello
+                # identici tra occupazione e report, non solo istanza+
+                # coordinata. Bug reale segnalato dall'utente: lo stesso
+                # nodo (stessa coordinata) può respawnare con tipo/livello
+                # diverso (documentato in shared/nodi_mappa.py) — senza
+                # questo controllo, un'occupazione di tipo diverso ma più
+                # recente veniva scelta comunque come "best" solo perché
+                # temporalmente più vicina, producendo una durata calcolata
+                # su una coppia invio/completamento che non rappresenta la
+                # stessa raccolta reale.
                 key = f"{instance}|{coordinata}"
                 candidati = pending.get(key, [])
+                tipo_r = r.get("tipo")
+                livello_r = r.get("livello")
                 best = None
                 best_ts = None
                 for o in candidati:
+                    if o.get("tipo") != tipo_r or o.get("livello") != livello_r:
+                        continue
                     try:
                         ts_o = _parse_ts(o["ts"])
                     except Exception:

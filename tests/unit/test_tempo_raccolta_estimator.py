@@ -146,6 +146,45 @@ class TestEseguiRiconciliazione:
         assert rec["ts_invio"] == ts_occ_recente
         assert abs(rec["durata_s"] - 2 * 3600) < 5
 
+    def test_respawn_tipo_diverso_non_matcha_occupazione_sbagliata(self, tmp_path):
+        """WU200quinquies: segnalato dall'utente. Lo stesso nodo (stessa
+        coordinata) può respawnare con tipo/livello diverso. Un'occupazione
+        di tipo diverso ma temporalmente più vicina al completamento NON
+        deve essere scelta al posto di quella con tipo/livello corretto,
+        anche se più vecchia."""
+        ts_occ_tipo_giusto = _ore_fa(3)   # petrolio Lv6 -- quella corretta
+        ts_occ_tipo_sbagliato = _ore_fa(2)  # campo Lv7 -- respawn diverso, piu' recente
+        _scrivi_jsonl(tmp_path / "data" / "nodi_mappa_observations.jsonl", [
+            _occ("FAU_00", "700_500", ts_occ_tipo_giusto, tipo="petrolio", livello=6),
+            _occ("FAU_00", "700_500", ts_occ_tipo_sbagliato, tipo="campo", livello=7),
+        ])
+        _scrivi_jsonl(tmp_path / "data" / "report_raccolta_dataset.jsonl", [
+            _report("FAU_00", "700_500", _ore_fa(0), tipo="petrolio", livello=6),
+        ])
+        esito = esegui_riconciliazione()
+        assert esito["match_nuovi"] == 1
+        assert esito["pending_attuali"] == 1  # quella di tipo sbagliato resta pending
+
+        out = (tmp_path / "data" / "tempo_raccolta_dataset.jsonl").read_text(encoding="utf-8")
+        rec = json.loads(out.strip().splitlines()[0])
+        assert rec["ts_invio"] == ts_occ_tipo_giusto  # NON quella più recente di tipo diverso
+        assert abs(rec["durata_s"] - 3 * 3600) < 5
+
+    def test_nessuna_occupazione_tipo_corretto_resta_orfana(self, tmp_path):
+        """Se esiste un'occupazione per la stessa coordinata ma di tipo
+        diverso (nessuna di tipo corretto), il report deve restare orfano
+        -- non abbinato per errore alla occupazione di tipo sbagliato."""
+        _scrivi_jsonl(tmp_path / "data" / "nodi_mappa_observations.jsonl", [
+            _occ("FAU_00", "700_500", _ore_fa(2), tipo="campo", livello=7),
+        ])
+        _scrivi_jsonl(tmp_path / "data" / "report_raccolta_dataset.jsonl", [
+            _report("FAU_00", "700_500", _ore_fa(0), tipo="petrolio", livello=6),
+        ])
+        esito = esegui_riconciliazione()
+        assert esito["match_nuovi"] == 0
+        assert esito["report_orfane"] == 1
+        assert esito["pending_attuali"] == 1  # l'occupazione di tipo campo resta li', intatta
+
     def test_occupazione_riusata_rimossa_dal_pool(self, tmp_path):
         """Un'occupazione consumata da un match non deve mai essere
         riusata per un secondo match (stesso giro o giro successivo)."""
