@@ -110,8 +110,10 @@ PREDICTOR_RETENTION_INTERVAL_MIN = 24 * 60   # 1×/die
 
 _tempo_raccolta_task = None
 TEMPO_RACCOLTA_INTERVAL_MIN = 15
+TEMPO_RACCOLTA_RETENTION_INTERVAL_MIN = 24 * 60   # 1×/die, richiesta utente 11/07
 # Stato condiviso per eventuale UI futura (ultimo/prossimo run, ultimo esito).
-_tempo_raccolta_state: dict = {"last_ts": None, "next_ts": None, "last_esito": None}
+_tempo_raccolta_state: dict = {"last_ts": None, "next_ts": None, "last_esito": None,
+                                 "last_retention_ts": None, "last_retention_esito": None}
 
 
 def _tempo_raccolta_esegui() -> dict:
@@ -143,10 +145,14 @@ async def _tempo_raccolta_loop():
     occupazioni consecutive dello stesso nodo (respawn)."""
     import asyncio
     from datetime import datetime, timezone
+    from shared.tempo_raccolta_estimator import pota_dataset_vecchio
+
     interval_s = TEMPO_RACCOLTA_INTERVAL_MIN * 60
+    retention_interval_s = TEMPO_RACCOLTA_RETENTION_INTERVAL_MIN * 60
     POLL_GRANULAR_S = 30
     print(f"[DASHBOARD] {_ts()} tempo_raccolta reconciliation loop avviato "
-          f"(ogni {TEMPO_RACCOLTA_INTERVAL_MIN}min, poll {POLL_GRANULAR_S}s)")
+          f"(ogni {TEMPO_RACCOLTA_INTERVAL_MIN}min, poll {POLL_GRANULAR_S}s, "
+          f"retention {TEMPO_RACCOLTA_RETENTION_INTERVAL_MIN // 60}h)")
     while True:
         try:
             last_ts = _tempo_raccolta_state.get("last_ts")
@@ -167,6 +173,25 @@ async def _tempo_raccolta_loop():
                           f"{esito['pending_attuali']} pending")
                 else:
                     print(f"[DASHBOARD] {_ts()} tempo_raccolta errore: {esito['errore']}")
+
+            # WU200bis (11/07): retention giornaliera dataset output —
+            # richiesta utente, poca variabilità attesa nel tempo di
+            # raccolta reale, non serve conservare storia lunga.
+            last_ret_ts = _tempo_raccolta_state.get("last_retention_ts")
+            elapsed_ret_s = float("inf")
+            if last_ret_ts:
+                try:
+                    elapsed_ret_s = (
+                        datetime.now(timezone.utc) - datetime.fromisoformat(last_ret_ts)
+                    ).total_seconds()
+                except Exception:
+                    pass
+            if elapsed_ret_s >= retention_interval_s:
+                ret_esito = pota_dataset_vecchio()
+                _tempo_raccolta_state["last_retention_ts"] = datetime.now(timezone.utc).isoformat()
+                _tempo_raccolta_state["last_retention_esito"] = ret_esito
+                print(f"[DASHBOARD] {_ts()} tempo_raccolta retention: "
+                      f"{ret_esito['rimosse']} rimosse, {ret_esito['rimaste']} rimaste")
         except Exception as exc:
             print(f"[DASHBOARD] {_ts()} tempo_raccolta loop errore: {exc}")
         await asyncio.sleep(POLL_GRANULAR_S)

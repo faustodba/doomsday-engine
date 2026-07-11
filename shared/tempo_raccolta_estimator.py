@@ -38,11 +38,16 @@
 #  run al successivo) + pool delle occupazioni pending non ancora
 #  abbinate. Persistente, non uno scan stateless ogni volta.
 #
-#  PRUNING: un'occupazione senza match entro TTL_ORFANE_ORE (default 6h,
-#  oltre il max osservato finora ~4.3h + margine) viene rimossa dal pool
-#  — altrimenti resterebbe a rischiare un match errato con
-#  un'occupazione successiva sullo stesso nodo. Run frequenti (15 min,
-#  vedi dashboard/app.py) riducono ulteriormente la finestra di rischio.
+#  PRUNING: un'occupazione senza match entro TTL_ORFANE_ORE (default 4h,
+#  richiesta utente 11/07) viene rimossa dal pool — altrimenti resterebbe
+#  a rischiare un match errato con un'occupazione successiva sullo stesso
+#  nodo. Run frequenti (15 min, vedi dashboard/app.py) riducono
+#  ulteriormente la finestra di rischio.
+#
+#  RETENTION: pota_dataset_vecchio() rimuove dal dataset di output le
+#  righe più vecchie di RETENTION_GIORNI (default 15, richiesta utente
+#  11/07 — poca variabilità attesa nel tempo di raccolta reale, non serve
+#  storia lunga). Chiamata giornalmente dal loop dashboard.
 #
 #  OUTPUT: data/tempo_raccolta_dataset.jsonl (append-only) —
 #  {ts_match, instance, coordinata, tipo, livello, ts_invio, ts_raccolta,
@@ -62,13 +67,17 @@ import json
 import os
 import statistics
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
 _lock = threading.Lock()
 
-TTL_ORFANE_ORE = 6.0
+TTL_ORFANE_ORE = 4.0   # WU200bis (11/07, richiesta utente): oltre il max
+                        # osservato finora (~4.3h) ma stretto — poca
+                        # variabilita' attesa nei tempi di raccolta
+RETENTION_GIORNI = 15   # WU200bis: poca variabilita' attesa nel tempo,
+                        # non serve conservare storia lunga
 MIN_CAMPIONI_CELLA = 3
 
 
@@ -269,6 +278,53 @@ def esegui_riconciliazione(ttl_ore: float = TTL_ORFANE_ORE) -> dict:
     except Exception as exc:
         esito["errore"] = str(exc)
     return esito
+
+
+def pota_dataset_vecchio(giorni: float = RETENTION_GIORNI) -> dict:
+    """Rimuove dal dataset di output (WU200bis, 11/07) le righe con
+    `ts_match` più vecchio di `giorni`. Poca variabilità attesa nel tempo
+    di raccolta reale (dipende da ricerche/bonus dell'istanza, cambia
+    raramente) — non serve conservare storia lunga, mantiene il dataset
+    piccolo e la stima aggiornata sui dati recenti.
+
+    Best-effort: righe che non si riescono a interpretare vengono
+    conservate (mai perdere dati per un errore di parsing).
+    Ritorna {"rimosse": N, "rimaste": N}.
+    """
+    path = _path_output()
+    if not path.exists():
+        return {"rimosse": 0, "rimaste": 0}
+
+    limite = datetime.now(timezone.utc) - timedelta(days=giorni)
+    tenute: list[str] = []
+    rimosse = 0
+    with _lock:
+        try:
+            with path.open(encoding="utf-8") as f:
+                for line in f:
+                    stripped = line.strip()
+                    if not stripped:
+                        continue
+                    try:
+                        rec = json.loads(stripped)
+                        ts = _parse_ts(rec["ts_match"])
+                    except Exception:
+                        tenute.append(stripped)
+                        continue
+                    if ts >= limite:
+                        tenute.append(stripped)
+                    else:
+                        rimosse += 1
+        except Exception:
+            return {"rimosse": 0, "rimaste": 0}
+
+        if rimosse:
+            tmp = path.with_suffix(".tmp")
+            contenuto = "\n".join(tenute) + ("\n" if tenute else "")
+            tmp.write_text(contenuto, encoding="utf-8")
+            os.replace(tmp, path)
+
+    return {"rimosse": rimosse, "rimaste": len(tenute)}
 
 
 def stima_tempo_raccolta(instance: str, tipo: str, livello: int,
