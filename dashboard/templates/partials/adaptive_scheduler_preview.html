@@ -8,6 +8,67 @@
 
 <div class="tel-grid">
 
+  <!-- Card 0: confronto tempo raccolta empirico vs statico (WU200ter/WU202, shadow) -->
+  {% set ns = namespace(n=0) %}
+  {% for r in live %}
+    {% for c in (r.get('confronto_tempo_raccolta') or []) %}{% set ns.n = ns.n + 1 %}{% endfor %}
+  {% endfor %}
+  <div class="tel-card tel-full">
+    <div class="tel-head">
+      📊 confronto tempo raccolta · empirico vs statico
+      <span style="float:right;font-weight:400;font-size:11px;color:var(--text-dim)">
+        osservativo · {{ ns.n }} marce con dato empirico
+      </span>
+    </div>
+    <div style="padding:8px 14px">
+      {% if ns.n > 0 %}
+      <div style="overflow-x:auto">
+      <table style="width:100%;font-size:11px;border-collapse:collapse">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border);color:var(--text-dim)">
+            <th style="padding:5px 6px;text-align:left">istanza</th>
+            <th style="padding:5px 6px;text-align:left">tipo·liv</th>
+            <th style="padding:5px 6px;text-align:right" title="modello statico attuale (T_marcia predittore)">statico</th>
+            <th style="padding:5px 6px;text-align:right" title="misura empirica reale (durata invio→completamento + eta)">empirico</th>
+            <th style="padding:5px 6px;text-align:right" title="empirico − statico (Δ>0 = reale più lento del previsto)">Δ min</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in live %}
+            {% for c in (r.get('confronto_tempo_raccolta') or []) %}
+            <tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:4px 6px;font-family:var(--font-mono)">{{ r.ist }}</td>
+              <td style="padding:4px 6px;font-family:var(--font-mono);color:var(--text-dim)">{{ c.tipo[:4] }}·{{ c.livello }}</td>
+              <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono)">{{ "%.1f"|format(c.t_det_min) }}</td>
+              <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono)">{{ "%.1f"|format(c.t_emp_min) }}</td>
+              {% set d = c.diff_min %}
+              <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono)
+                         {% if d > 5 %};color:#c00;font-weight:600{% elif d < -5 %};color:#0066cc{% else %};color:#0a8000{% endif %}">
+                {{ "%+.1f"|format(d) }}
+              </td>
+            </tr>
+            {% endfor %}
+          {% endfor %}
+        </tbody>
+      </table>
+      </div>
+      {% else %}
+      <div style="padding:8px;color:var(--text-dim);font-size:11px">
+        nessun confronto disponibile ora — richiede istanze con raccoglitori in
+        volo su celle (istanza,tipo,livello) che abbiano già ≥3 campioni
+        empirici nel dataset. Compare man mano che le marce attive ricadono su
+        celle misurate (dati in <code>/ui/report-raccolta</code>).
+      </div>
+      {% endif %}
+    </div>
+    <div class="tel-foot">
+      statico = modello T_marcia del predictor · empirico = mediana reale
+      invio→completamento + eta · Δ&gt;0 = il reale è più lento del previsto.
+      <b>Solo osservazione</b>: non influenza lo scheduling finché il toggle
+      «tempo raccolta empirico» resta OFF (WU202 Fase B).
+    </div>
+  </div>
+
   <!-- Card 1: ordine LIVE -->
   <div class="tel-card tel-full">
     <div class="tel-head">
