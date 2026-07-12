@@ -5,6 +5,86 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 11-12/07/2026 — WU200: tempo_raccolta_estimator + pannello dashboard + verifica live cicli notturni
+
+**WU200 — stimatore empirico tempo di raccolta** (11/07, dettagli completi in
+`docs/issues/telemetria-predictor.md`): costruito su richiesta utente
+("possiamo già implementare il sistema, abbiamo tutti gli elementi") il
+job di riconciliazione fra evento invio (`nodi_mappa_observations.jsonl`,
+esito `occupato`) e completamento (`report_raccolta_dataset.jsonl`, vedi
+WU199 in `docs/issues/raccolta.md`) — nuovo modulo
+`shared/tempo_raccolta_estimator.py`, loop periodico in
+`dashboard/app.py::_tempo_raccolta_loop()` (15 min, mai nel task raccolta).
+4 bug trovati e corretti durante lo sviluppo, tutti scoperti da richieste
+di verifica dati live dell'utente (WU200quater ordine match/potatura,
+WU200quinquies filtro tipo/livello, WU200sexies chiave esplicita a 4
+componenti, WU200septies — decisione finale: il Tab Report è fonte di
+verità sul livello, non l'occupazione all'invio, che registra solo il
+target di ricerca). WU200ter collega il risultato all'adaptive scheduler
+in sola osservazione (`confronto_tempo_raccolta`, zero regressione
+verificata via test dedicato).
+
+**Pannello dashboard `/ui/report-raccolta`** (11-12/07, richiesta utente
+"puoi costruire una pannello di appoggio per visualizzare in questa
+fase?"): nuovo `dashboard/services/report_raccolta_reader.py` + 6
+partial HTMX + template dedicato. 6 sezioni: riepilogo dataset,
+raccoglitori in volo con stima arrivo, timeline eventi, tempo di
+raccolta aggregato per (istanza,tipo,livello) — **sostituita su feedback
+utente** rispetto alla prima versione (lista raw per-match, giudicata
+poco utile) — e produzione oraria unificata per istanza/totale farm
+(riusa `shared/prod_unificata.py`, nessun nuovo calcolo). Nota di
+processo: 2 commit sono stati etichettati `WU200bis`/`WU200quater`
+riusando per errore numerazione già impiegata l'11/07 per il fix
+TTL/retention e per il fix ordine match/potatura — disambiguato nei
+`docs/issues/` per hash commit, nessun impatto sul codice.
+
+**Analisi cicli notturni** (12/07, richiesta utente): cicli 490-492
+(sera→notte→primo mattino) tutti completati, **zero fail rate** in
+telemetria (230 eventi, 0 `success=False`, 0 anomalie). Ciclo 491 (283min
+vs 203/177min degli altri due) non è un'istanza rotta ma **clustering di
+task periodici** (rifornimento/store/vip/donazione/alleanza/messaggi/
+arena_mercato/boost tutti scaduti insieme su più istanze) — lavoro reale
+in più, non retry. Il cycle duration predictor sottostima pesantemente
+proprio in presenza di clustering (37-50% di errore sul ciclo 491, vs
+0.4-5% sul ciclo 492 "pulito") — non approfondito oltre, area di
+miglioramento futura per `core/cycle_duration_predictor.py` se si vorrà
+riprendere. 47 report riconciliati overnight, durata reale media 2.68h,
+FAU_00 in testa (10 completamenti).
+
+**WU201 — cluster boot-timeout mattutino** (12/07, dettagli in
+`docs/issues/infra-startup.md`): utente ha segnalato istanze non
+avviate — prima verifica su log JSONL/telemetria ha dato falso negativo
+(evento invisibile lì), trovato poi in `bot.log`: 8/11 istanze hanno
+colpito il timeout 300s "schermata ancora UNKNOWN" fra le 06:56 e le
+09:00 locali, ciascuna chiusa e rimandata al ciclo successivo senza
+retry immediato. Causa sistemica non diagnosticata (sospetto
+rallentamento host). Mitigazione: `timeout_carica_s` 300→400s in
+`runtime_overrides.json` (dynamic). **Scoperta collaterale**: un boot
+fallito non viene marcato come tale in `data/telemetry/cicli.json` (resta
+`esito: "ok"`) — bug di tracciamento noto, non corretto in questa
+sessione.
+
+**Task zaino riattivato in modalità `svuota`** (12/07): dopo 25 giorni
+di gap (task disabilitato dal 17/06), riattivato su tutte le 11 istanze
+ordinarie — 100% successo, zero anomalie, ~2.6 miliardi di unità totali
+scaricate (accumulo storico). Confermato con l'utente: questo tipo di
+evento (dump one-time nel castello) è uno dei motivi per cui è in corso
+la seconda finalità di WU200 — un futuro calcolo produzione basato su
+`report_raccolta` (resa per nodo raccolto), svincolato dalle variazioni
+di deposito castello non correlate a produzione reale (zaino, rifornimento
+ricevuto). Nessun codice scritto per questa seconda finalità in questa
+sessione — solo la direzione confermata (memoria
+`project_tempo_raccolta_estimator.md`).
+
+**Chiarito** (non un bug): la dashboard mostra `risorse_iniziali`, uno
+snapshot fatto all'apertura sessione/tick — non si aggiorna finché la
+sessione non si chiude (`risorse_finali`, al tick successivo della stessa
+istanza). Un evento che modifica il deposito a metà tick (es. zaino
+svuota, se gira dopo rifornimento nell'ordine task) resta invisibile in
+quel campo fino al giro successivo. Nessun fix applicato, solo spiegato.
+
+---
+
 ## Sessione 10-11/07/2026 — WU199: report_raccolta fase 2 live + fix ordine rollout + sanity check OCR
 
 **Notte 10→11/07 — WU199decies/undecies + validazione completa + flip a fase 2**:
