@@ -28,8 +28,34 @@ import os
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Optional
 
 _lock = threading.Lock()
+
+
+# ==============================================================================
+#  Capacità nominale nodo (senza extra/bonus) per (tipo, livello).
+#  Fonte di verità condivisa: confermata sui dati reali del report
+#  (report_raccolta_dataset.jsonl::quantita_base — identica su tutti i
+#  campioni per cella). Usata da:
+#    - core.skip_predictor._calc_t_marcia_min  (saturazione = load / cap)
+#    - shared.tempo_raccolta_estimator         (proporzione tempo fra livelli)
+#  Costante di gioco: cambia solo se il gioco ridefinisce i nodi.
+# ==============================================================================
+CAP_NOMINALE: dict[tuple[str, int], int] = {
+    ("campo", 6):    1_200_000, ("campo", 7):    1_320_000,
+    ("segheria", 6): 1_200_000, ("segheria", 7): 1_320_000,
+    ("acciaio", 6):    600_000, ("acciaio", 7):    660_000,
+    ("petrolio", 6):   240_000, ("petrolio", 7):   264_000,
+}
+
+
+def cap_nominale(tipo: str, livello) -> Optional[int]:
+    """Capacità nominale (senza extra) per (tipo, livello). None se non nota."""
+    try:
+        return CAP_NOMINALE.get((tipo, int(livello)))
+    except (TypeError, ValueError):
+        return None
 
 
 def _root_dir() -> Path:

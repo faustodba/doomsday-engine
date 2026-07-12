@@ -230,13 +230,11 @@ def load_truppe(istanza: str) -> int:
 # con: T_marcia = 2 × eta_marcia + saturazione × T_L_max[livello, istanza]
 # ==============================================================================
 
-# Capacità nominale max per (tipo, livello). Coerente con tools/analisi_cap_nodi.
-CAP_NOMINALE = {
-    ("campo", 6):    1_200_000, ("campo", 7):    1_320_000,
-    ("segheria", 6): 1_200_000, ("segheria", 7): 1_320_000,
-    ("acciaio", 6):    600_000, ("acciaio", 7):    660_000,
-    ("petrolio", 6):   240_000, ("petrolio", 7):   264_000,
-}
+# Capacità nominale max per (tipo, livello). Fonte di verità condivisa in
+# shared/cap_nodi_dataset (usata anche da tempo_raccolta_estimator per la
+# proporzione fra livelli). Re-export locale per retrocompatibilità dei
+# riferimenti esistenti (`CAP_NOMINALE` in questo modulo).
+from shared.cap_nodi_dataset import CAP_NOMINALE  # noqa: E402
 
 _t_l_max_cache: dict = {"loaded_at": 0.0, "data": None}
 

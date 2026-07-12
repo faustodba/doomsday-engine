@@ -341,10 +341,11 @@ class TestStimaTempoRaccolta:
     def test_nessun_dato_ritorna_none(self):
         assert stima_tempo_raccolta("FAU_00", "petrolio", 7) is None
 
-    def test_campioni_insufficienti_per_cella_fallback_globale(self, tmp_path):
-        # occ tutte recenti (sopravvivono al TTL 4h); il gap verso il
-        # completamento (che puo' cadere "nel futuro" rispetto a adesso)
-        # e' pura logica di confronto tra timestamp, non legato all'orologio.
+    def test_cella_magra_senza_ancora_ritorna_none(self, tmp_path):
+        """Cella (istanza,tipo,livello) sotto soglia e nessun ALTRO livello
+        della stessa (istanza,tipo) per la proporzione -> None. NESSUN
+        fallback cross-istanza (decisione utente 12/07): i dati di FAU_01/02
+        NON devono contaminare la stima di FAU_00."""
         occ_ts = _ore_fa(0.5)
         occ_dt = datetime.now(timezone.utc) - timedelta(hours=0.5)
         _scrivi_jsonl(tmp_path / "data" / "nodi_mappa_observations.jsonl", [
@@ -358,10 +359,9 @@ class TestStimaTempoRaccolta:
             _report("FAU_02", "702_502", (occ_dt + timedelta(hours=5)).isoformat()),
         ])
         esegui_riconciliazione()
-        # FAU_00 ha solo 1 campione (< min_campioni default 3) -> fallback
-        # alla mediana globale (tipo+livello, tutte le istanze): 4h
-        stima = stima_tempo_raccolta("FAU_00", "petrolio", 7, min_campioni=3)
-        assert abs(stima - 4 * 3600) < 1
+        # FAU_00: 1 solo campione (petrolio L7), nessun altro livello ->
+        # niente proporzione, niente cross-istanza -> None (userà lo statico)
+        assert stima_tempo_raccolta("FAU_00", "petrolio", 7, min_campioni=3) is None
 
     def test_campioni_sufficienti_usa_cella_specifica(self, tmp_path):
         base = datetime.now(timezone.utc) - timedelta(hours=1)
@@ -383,6 +383,30 @@ class TestStimaTempoRaccolta:
         esegui_riconciliazione()
         stima = stima_tempo_raccolta("FAU_00", "petrolio", 7, min_campioni=3)
         assert stima == 2 * 3600
+
+    def test_fallback_proporzione_da_altro_livello(self, tmp_path):
+        """WU202 (12/07, regola utente): livello non censito -> proporzione
+        da un altro livello della STESSA istanza+tipo, scalato per il rapporto
+        delle capacità nominali. FAU_00 campo L7 misurato (2h), L6 NON
+        misurato -> stima L6 = 2h × cap[campo,6]/cap[campo,7]."""
+        base = datetime.now(timezone.utc) - timedelta(hours=1)
+        occ = [_occ("FAU_00", f"80{i}_60{i}", (base + timedelta(minutes=i)).isoformat(),
+                    tipo="campo", livello=7) for i in range(3)]
+        rep = [_report("FAU_00", f"80{i}_60{i}",
+                       (base + timedelta(minutes=i, hours=2)).isoformat(),
+                       tipo="campo", livello=7) for i in range(3)]
+        _scrivi_jsonl(tmp_path / "data" / "nodi_mappa_observations.jsonl", occ)
+        _scrivi_jsonl(tmp_path / "data" / "report_raccolta_dataset.jsonl", rep)
+        esegui_riconciliazione()
+
+        # L7 diretto = 2h (mediana delle 3 marce)
+        assert stima_tempo_raccolta("FAU_00", "campo", 7, min_campioni=3) == 2 * 3600
+        # L6 per proporzione: 7200 × 1_200_000 / 1_320_000
+        atteso = 7200 * 1_200_000 / 1_320_000
+        got = stima_tempo_raccolta("FAU_00", "campo", 6, min_campioni=3)
+        assert got is not None and abs(got - atteso) < 1
+        # sanity: L6 < L7 (nodo più piccolo -> raccolta più breve)
+        assert got < 2 * 3600
 
 
 class TestMigrazionePendingChiaveTipizzata:

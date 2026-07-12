@@ -80,9 +80,12 @@ import json
 import os
 import statistics
 import threading
+from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
+
+from shared.cap_nodi_dataset import cap_nominale
 
 _lock = threading.Lock()
 
@@ -459,28 +462,58 @@ def _carica_dataset_output() -> list[dict]:
 def stima_tempo_raccolta(instance: str, tipo: str, livello: int,
                           min_campioni: int = MIN_CAMPIONI_CELLA) -> Optional[float]:
     """Stima in secondi il tempo di raccolta atteso per (istanza, tipo,
-    livello), mediana delle osservazioni reali. Fallback a granularità
-    più larga (tipo+livello, tutte le istanze insieme) se i campioni per
-    la cella specifica sono insufficienti. None se anche il fallback non
-    ha abbastanza dati — il chiamante userà la stima statica esistente.
+    livello). Ladder di fallback (decisione utente 12/07):
+
+      1. `(istanza, tipo, livello)` — mediana diretta, se >= min_campioni.
+      2. **Proporzione fra livelli** — se un ALTRO livello della STESSA
+         `(istanza, tipo)` ha >= min_campioni, scala la sua mediana per il
+         rapporto delle capacità nominali:
+             T[livello] = mediana[ancora] × cap[livello] / cap[ancora]
+         (il tempo di raccolta è proporzionale alla dimensione del nodo a
+         rate squadra costante). Ancora scelta con più campioni, tie-break
+         livello più vicino. Un solo livello misurato copre così tutti i
+         livelli di quella istanza+tipo.
+      3. `None` — il chiamante userà la stima statica esistente.
+
+    NB: nessun fallback cross-istanza (l'istanza è la dimensione dominante,
+    ~+46% vs ~+10% del livello — mescolare istanze distorce la stima). Se
+    l'istanza non ha dati per quel tipo → None → statico.
     """
     rows = _carica_dataset_output()
     if not rows:
         return None
-    cella: list[float] = []
-    globale: list[float] = []
+
+    # durate per livello, ristrette a (istanza, tipo)
+    per_livello: dict[int, list[float]] = defaultdict(list)
     for rec in rows:
-        if rec.get("tipo") != tipo or rec.get("livello") != livello:
+        if rec.get("tipo") != tipo or rec.get("instance") != instance:
             continue
         durata = rec.get("durata_s")
-        if not isinstance(durata, (int, float)):
-            continue
-        globale.append(durata)
-        if rec.get("instance") == instance:
-            cella.append(durata)
+        lv = rec.get("livello")
+        if isinstance(durata, (int, float)) and lv is not None:
+            per_livello[int(lv)].append(durata)
 
-    if len(cella) >= min_campioni:
-        return statistics.median(cella)
-    if len(globale) >= min_campioni:
-        return statistics.median(globale)
+    # 1. cella esatta
+    diretta = per_livello.get(int(livello), [])
+    if len(diretta) >= min_campioni:
+        return statistics.median(diretta)
+
+    # 2. proporzione da un altro livello della stessa (istanza, tipo)
+    cap_target = cap_nominale(tipo, livello)
+    if cap_target:
+        best = None   # (n_campioni, -distanza_livello), durate, cap_ancora
+        for lv, durate in per_livello.items():
+            if lv == int(livello) or len(durate) < min_campioni:
+                continue
+            cap_anchor = cap_nominale(tipo, lv)
+            if not cap_anchor:
+                continue
+            chiave = (len(durate), -abs(lv - int(livello)))
+            if best is None or chiave > best[0]:
+                best = (chiave, durate, cap_anchor)
+        if best is not None:
+            _, durate_a, cap_a = best
+            return statistics.median(durate_a) * cap_target / cap_a
+
+    # 3. nessun dato per questa istanza+tipo → statico
     return None

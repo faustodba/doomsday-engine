@@ -180,6 +180,30 @@ di `adaptive_scheduler_enabled` (`config/config_loader.py` GlobalConfig +
 `global_config.json` + toggle `/ui/config/global`). Hot-reload al tick, nessun
 riavvio necessario per attivarlo.
 
+### 5.2.1 Ladder di fallback dentro `stima_tempo_raccolta` (WU202b, 12/07)
+
+Decisione utente su come stimare quando la cella esatta è magra. La dimensione
+**istanza** domina (~+46% fra istanze) sul **livello** (~+10% fra L6/L7); il
+livello registrato è inoltre incerto (~5% target≠reale, errore accettato senza
+correzione). Quindi:
+
+```
+1. (istanza, tipo, livello)                         se ≥3 campioni → mediana diretta
+2. PROPORZIONE da un altro livello della stessa (istanza, tipo):
+     T[livello] = mediana[ancora] × cap[livello] / cap[ancora]
+   (tempo ∝ capacità nodo a rate squadra costante; ancora = livello con più
+    campioni). Un solo livello misurato copre tutti i livelli dell'istanza.
+3. None → stima statica
+```
+
+**Niente fallback cross-istanza** (rimosso il vecchio `(tipo,livello)` globale:
+mescolava FAU_00 veloce con le farm lente — buttava via la dimensione forte per
+tenere la debole). Capacità nominale canonica consolidata in
+`shared/cap_nodi_dataset.CAP_NOMINALE` (confermata sui `quantita_base` reali del
+report), importata sia dall'estimator sia da `core/skip_predictor` (una sola
+fonte). Verifica prod: FAU_10 campo L6=2h29m → L7 via proporzione = 2h44m
+(×1,10); celle senza ancora valida → None → statico.
+
 ### 5.3 Fasi (step-by-step, reversibile)
 
 | Fase | Contenuto | Rollback |
