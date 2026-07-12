@@ -47,6 +47,11 @@
       <input type="checkbox" id="adapt-shadow" {% if d.shadow_only %}checked{% endif %}>
       shadow only
     </label>
+    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-weight:400;font-size:11px"
+           title="WU200 Fase B — T_marcia da misura empirica reale (durata invio→completamento) invece del modello statico. Fallback statico se la cella (istanza,tipo,livello) ha pochi campioni.">
+      <input type="checkbox" id="adapt-tr-empirico" {% if d.tempo_raccolta_empirico %}checked{% endif %}>
+      tempo raccolta empirico
+    </label>
     <button class="btn btn-primary" type="button" onclick="adaptSave()"
             style="padding:2px 10px;font-size:11px">⬡ salva</button>
     <span id="adapt-msg" style="font-size:11px"></span>
@@ -122,6 +127,7 @@
       threshold_drl_residuo_m:    parseInt($('adapt-th-drl-m').value || 50),
       threshold_pct_istanze_sat:  parseInt($('adapt-th-sat').value || 50),
       threshold_spedizioni_oggi:  parseInt($('adapt-th-sped').value || 100),
+      tempo_raccolta_empirico_enabled: $('adapt-tr-empirico').checked,
     };
     try {
       const r = await fetch(URL_PREFIX + '/api/adaptive-scheduler', {

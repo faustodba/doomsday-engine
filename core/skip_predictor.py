@@ -275,35 +275,103 @@ def _get_t_l_max_min(istanza: str, livello: int) -> float:
     return float(base) * float(mult)
 
 
+# WU200 Fase B — flag stima empirica tempo di raccolta.
+_tr_empirico_cache: dict = {"loaded_at": 0.0, "value": None}
+
+
+def _read_tempo_raccolta_empirico_flag() -> bool:
+    """Lettura FRESCA del flag `tempo_raccolta_empirico_enabled`.
+
+    Priorità DYNAMIC (`runtime_overrides.json::globali`) > STATIC
+    (`global_config.json`), coerente con architecture_config_static_dynamic.md
+    e con `core.adaptive_scheduler._flags_status`. Default False (sicuro:
+    percorso statico invariato). Nessuna cache — usarla quando serve il valore
+    corrente (es. status dashboard). Per l'hot-path per-invio usare
+    `_tempo_raccolta_empirico_attivo()` (cache TTL 15s)."""
+    val = None
+    try:
+        root = _resolve_root()
+        ov_path = root / "config" / "runtime_overrides.json"
+        if ov_path.exists():
+            ov = json.loads(ov_path.read_text(encoding="utf-8"))
+            globali = ov.get("globali") or {}
+            if "tempo_raccolta_empirico_enabled" in globali:
+                val = bool(globali["tempo_raccolta_empirico_enabled"])
+        if val is None:
+            gc_path = root / "config" / "global_config.json"
+            if gc_path.exists():
+                gc = json.loads(gc_path.read_text(encoding="utf-8"))
+                val = bool(gc.get("tempo_raccolta_empirico_enabled", False))
+    except Exception:
+        val = None
+    return bool(val) if val is not None else False
+
+
+def _tempo_raccolta_empirico_attivo() -> bool:
+    """Come `_read_tempo_raccolta_empirico_flag()` ma con cache TTL 15s — il
+    flag è letto per-invio nel greedy dello scheduler, evita I/O ripetuto.
+    Hot-reload entro ~15s dall'attivazione da dashboard."""
+    import time as _t
+    if (_tr_empirico_cache["value"] is not None
+            and (_t.time() - _tr_empirico_cache["loaded_at"]) < 15):
+        return _tr_empirico_cache["value"]
+    val = _read_tempo_raccolta_empirico_flag()
+    _tr_empirico_cache["value"] = val
+    _tr_empirico_cache["loaded_at"] = _t.time()
+    return val
+
+
 def _calc_t_marcia_min(invio: dict, istanza: str) -> Optional[float]:
     """
     Stima T_marcia totale (andata + raccolta + ritorno) in minuti per 1 invio.
 
-    Formula: T_marcia = 2 × eta_marcia_min + (saturazione × T_L_max[livello, istanza]) × coef
+    WU200 Fase B (12/07) — TIERED, flag-gated:
 
-    WU168 (19/06) — `coef` applicato SOLO al termine di raccolta
-    (saturazione × T_L_max), non più all'intera T_marcia. `eta_marcia_min`
-    viene da OCR diretto sul singolo invio (misura, non stima), correggerlo
-    con un coefficiente aggregato per (istanza, livello) introduceva rumore
-    su una quantità già accurata. `coef` da calibrazione closed-loop
-    (proposta B 08/05): coefficiente moltiplicativo per (istanza, livello)
-    auto-calibrato dal bias storico predicted vs real
-    (file `data/predictor_t_l_calibration.json`). Default 1.0 quando
-    insufficienti samples o bias < trigger.
+      1. PRIMARIO (se flag `tempo_raccolta_empirico_enabled` ON e cella con
+         abbastanza campioni): misura empirica diretta dalle durate reali
+         invio→completamento (shared/tempo_raccolta_estimator.stima_tempo_raccolta).
+         `durata_s` = andata + raccolta reale (il report è emesso a raccolta
+         completata); lo slot si libera al RIENTRO squadra, quindi
+         T_marcia = durata_s + eta_ritorno (~eta). Non richiede load_squadra:
+         copre anche invii pre-WU116 dove la formula statica ritorna None.
 
-    Ritorna None se dati insufficienti (livello o load_squadra mancanti).
+      2. FALLBACK (flag OFF, oppure cella sotto soglia → stima_tempo_raccolta
+         None): formula statica invariata
+         T_marcia = 2 × eta_marcia_min + (saturazione × T_L_max[livello, istanza]) × coef
+         WU168 (19/06) — `coef` (calibrazione closed-loop, proposta B 08/05)
+         applicato SOLO al termine di raccolta. Default 1.0 se pochi samples.
+
+    Con flag OFF il risultato è byte-identico alla versione pre-Fase B:
+    None se livello<1 o load_squadra<=0, altrimenti la formula statica.
+
+    Ritorna None se dati insufficienti (livello mancante, oppure fallback con
+    load_squadra mancante).
     """
     livello = int(invio.get("livello", -1))
     tipo    = invio.get("tipo", "")
-    load    = int(invio.get("load_squadra", -1))
     eta_s   = int(invio.get("eta_marcia_s", 0) or 0)
-    if livello < 1 or load <= 0:
+    eta_min = eta_s / 60.0
+    if livello < 1:
+        return None
+
+    # 1. PRIMARIO — misura empirica diretta (flag-gated)
+    if tipo and _tempo_raccolta_empirico_attivo():
+        try:
+            from shared.tempo_raccolta_estimator import stima_tempo_raccolta
+            t_emp_s = stima_tempo_raccolta(istanza, tipo, livello)
+        except Exception:
+            t_emp_s = None
+        if t_emp_s is not None:
+            return t_emp_s / 60.0 + eta_min   # durata_s + eta_ritorno
+
+    # 2. FALLBACK — formula statica (richiede load_squadra)
+    load = int(invio.get("load_squadra", -1))
+    if load <= 0:
         return None
     cap = CAP_NOMINALE.get((tipo, livello))
     if not cap or cap <= 0:
         return None
     saturazione = min(1.0, load / cap)
-    eta_min = eta_s / 60.0
     t_l_max = _get_t_l_max_min(istanza, livello)
     raccolta_min = saturazione * t_l_max
     # Calibrazione closed-loop (proposta B 08/05) — solo sul termine di raccolta

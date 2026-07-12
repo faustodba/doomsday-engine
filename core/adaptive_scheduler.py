@@ -336,12 +336,20 @@ def get_status() -> dict:
     pct_sat = _percentuale_istanze_sature()
     sped = _spedizioni_oggi_totali()
     active, reasons = should_activate_scheduler()
+    # WU200 Fase B — flag stima empirica tempo di raccolta (lettura fresca,
+    # DYNAMIC>STATIC) per il toggle nella card predictor.
+    try:
+        from core.skip_predictor import _read_tempo_raccolta_empirico_flag
+        tempo_raccolta_empirico = _read_tempo_raccolta_empirico_flag()
+    except Exception:
+        tempo_raccolta_empirico = False
     return {
         "enabled":      enabled,
         "shadow_only":  shadow,
         "active":       active,
         "reasons":      reasons,
         "thresholds":   soglie,
+        "tempo_raccolta_empirico": tempo_raccolta_empirico,
         "live": {
             "drl_residuo_m":    round(drl_m, 1) if drl_m >= 0 else None,
             "rifornimento_on":  rif_on,
@@ -474,7 +482,13 @@ def compute_slot_liberi_atteso(istanza: str,
                     t_emp_s = None
                 if t_emp_s is not None:
                     eta_s = int(inv.get("eta_marcia_s") or 0)
-                    t_emp_min = (2 * eta_s + t_emp_s) / 60.0
+                    # WU200 Fase B — `t_emp_s` (durata_s) include GIÀ l'andata
+                    # (report a raccolta completata). Per l'equivalente
+                    # round-trip (slot libero al rientro) si aggiunge SOLO
+                    # l'eta di ritorno, non 2×eta. Pre-fix WU200ter usava
+                    # 2×eta (un eta di troppo, ~1min con eta mediano 59s):
+                    # cosmetico ma corretto per coerenza con _calc_t_marcia_min.
+                    t_emp_min = (eta_s + t_emp_s) / 60.0
                     confronto_tempo_raccolta.append({
                         "tipo": tipo_inv, "livello": livello_inv,
                         "t_det_min": round(t, 1),

@@ -103,6 +103,7 @@
     "spedizioni_oggi": 100,
     "drl_residuo_m": 50
   },
+  "tempo_raccolta_empirico_enabled": false,
   "notifications": {
     "enabled": true,
     "daily_report_enabled": true,

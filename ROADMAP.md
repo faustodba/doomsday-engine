@@ -5,6 +5,43 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 12/07/2026 — WU202: cutover predictor Fase B (T_marcia empirico, flag-gated)
+
+**Contesto** (richiesta utente: "estrai, verifica e progetta" → "procedi con la
+fase B completa, poi allinea la documentazione"): il sistema
+report_raccolta + tempo_raccolta_estimator (WU199/WU200) misura il tempo di
+raccolta reale per (istanza,tipo,livello). Obiettivo: inserirlo come parametro
+del predictor T_marcia, sostituendo il modello statico dove ci sono dati.
+
+**Estrazione + analisi** — nuovo documento `docs/issues/predictor-cutover-plan.md`:
+mappa dei 3 consumer di `_calc_t_marcia_min`, snapshot dati prod (155 match,
+24/40 celle ≥3 campioni, calibrazione closed-loop quasi inerte 5/21 coef attivi,
+eta mediano 59s), e **revisione sui dati** dell'elenco eliminazioni della
+memoria WU200ter: confermato eliminare `core/t_marcia_calibration.py`, ma
+`config/predictor_t_l_max.json` va **declassato a fallback** (non eliminato —
+acciaio/campo-L6 scarni), swap **tiered** non secco, `empirical_slot_predictor`
+rimandato.
+
+**Fase B implementata** (flag OFF, zero regressione):
+- `core/skip_predictor.py::_calc_t_marcia_min` TIERED — stima empirica primaria
+  (`stima_tempo_raccolta`, `durata_s + eta`) se cella ≥3 campioni, altrimenti
+  fallback statico invariato. Gate `tempo_raccolta_empirico_enabled` (default
+  OFF, DYNAMIC>STATIC, cache 15s). Firma invariata → 3 consumer coperti.
+- Fix confronto WU200ter `2×eta → eta` (un eta di troppo, ~1min).
+- Cache mtime sul dataset (`shared/tempo_raccolta_estimator._carica_dataset_output`,
+  pattern WU197) — il confronto già oggi rileggeva l'intero file per-invio.
+- Flag in `config/config_loader.py` + `global_config.json`; toggle UI nella
+  card adaptive scheduler (`/api/adaptive-scheduler` PATCH dual-write).
+- Test `tests/unit/test_calc_t_marcia_tiered.py` (6). Suite correlata 42/42.
+  Verifica end-to-end su dati prod: FAU_00 +3.2%, FAU_02 (lento) **+15.6%**,
+  acciaio L6 (cella scarna) fallback identico. Baseline pytest invariata
+  (51 failure pre-esistenti, async/deps/fixture stale).
+
+**Pending utente**: attivare shadow → LIVE pilota → estendere. Fase C (rimozione
+`t_marcia_calibration`) non iniziata.
+
+---
+
 ## Sessione 11-12/07/2026 — WU200: tempo_raccolta_estimator + pannello dashboard + verifica live cicli notturni
 
 **WU200 — stimatore empirico tempo di raccolta** (11/07, dettagli completi in

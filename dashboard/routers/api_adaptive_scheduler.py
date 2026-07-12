@@ -133,6 +133,8 @@ class AdaptiveSchedulerPatch(BaseModel):
     threshold_drl_residuo_m:    Optional[int]  = None
     threshold_pct_istanze_sat:  Optional[int]  = None
     threshold_spedizioni_oggi:  Optional[int]  = None
+    # WU200 Fase B — stima empirica tempo di raccolta come parametro predictor
+    tempo_raccolta_empirico_enabled: Optional[bool] = None
 
 
 def _global_config_path() -> Path:
@@ -170,6 +172,12 @@ def patch_adaptive_scheduler(payload: AdaptiveSchedulerPatch) -> dict:
         gc["adaptive_scheduler_shadow_only"] = v
         globali["adaptive_scheduler_shadow_only"] = v
         changed["shadow_only"] = v
+    # WU200 Fase B — flag stima empirica tempo di raccolta (dual-write, hot)
+    if payload.tempo_raccolta_empirico_enabled is not None:
+        v = bool(payload.tempo_raccolta_empirico_enabled)
+        gc["tempo_raccolta_empirico_enabled"] = v
+        globali["tempo_raccolta_empirico_enabled"] = v
+        changed["tempo_raccolta_empirico_enabled"] = v
 
     # Thresholds (validati). 08/05: drl_residuo_m sostituisce drl_residuo_pct.
     # Cleanup automatico: se la chiave legacy è ancora presente, rimossa.

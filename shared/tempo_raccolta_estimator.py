@@ -86,6 +86,17 @@ from typing import Optional
 
 _lock = threading.Lock()
 
+# WU200 Fase B — cache del dataset di output per letture ripetute.
+# stima_tempo_raccolta viene chiamata molte volte per run dello scheduler
+# (greedy O(n^2) × invii per istanza): il confronto osservativo WU200ter la
+# invoca già per ogni invio, e col cutover diventa la stima primaria. Senza
+# cache ogni chiamata rileggeva l'intero file (stesso anti-pattern corretto in
+# WU197 per istanza_metrics.jsonl). Invalidazione su (path, mtime_ns, size) —
+# zero staleness percepibile: il file cresce per append e lo stat coglie anche
+# le scritture di un altro processo (il bot legge, la dashboard scrive).
+_dataset_cache: dict = {"key": None, "rows": None}
+_dataset_cache_lock = threading.Lock()
+
 TTL_ORFANE_ORE = 4.0   # WU200bis (11/07, richiesta utente): oltre il max
                         # osservato finora (~4.3h) ma stretto — poca
                         # variabilita' attesa nei tempi di raccolta
@@ -408,6 +419,43 @@ def pota_dataset_vecchio(giorni: float = RETENTION_GIORNI) -> dict:
     return {"rimosse": rimosse, "rimaste": len(tenute)}
 
 
+def _carica_dataset_output() -> list[dict]:
+    """Righe del dataset di output, con cache invalidata su (path, mtime, size).
+    Best-effort: su errore di lettura ritorna l'ultima cache valida o [].
+    File assente → [] (e cache azzerata)."""
+    path = _path_output()
+    if not path.exists():
+        with _dataset_cache_lock:
+            _dataset_cache["key"] = None
+            _dataset_cache["rows"] = []
+        return []
+    try:
+        st = path.stat()
+        key = (str(path), st.st_mtime_ns, st.st_size)
+    except Exception:
+        key = None
+    with _dataset_cache_lock:
+        if (key is not None and _dataset_cache["key"] == key
+                and _dataset_cache["rows"] is not None):
+            return _dataset_cache["rows"]
+        rows: list[dict] = []
+        try:
+            with path.open(encoding="utf-8") as f:
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rows.append(json.loads(line))
+                    except Exception:
+                        continue
+        except Exception:
+            return _dataset_cache["rows"] or []
+        _dataset_cache["key"] = key
+        _dataset_cache["rows"] = rows
+        return rows
+
+
 def stima_tempo_raccolta(instance: str, tipo: str, livello: int,
                           min_campioni: int = MIN_CAMPIONI_CELLA) -> Optional[float]:
     """Stima in secondi il tempo di raccolta atteso per (istanza, tipo,
@@ -416,31 +464,20 @@ def stima_tempo_raccolta(instance: str, tipo: str, livello: int,
     la cella specifica sono insufficienti. None se anche il fallback non
     ha abbastanza dati — il chiamante userà la stima statica esistente.
     """
-    path = _path_output()
-    if not path.exists():
+    rows = _carica_dataset_output()
+    if not rows:
         return None
     cella: list[float] = []
     globale: list[float] = []
-    try:
-        with path.open(encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    rec = json.loads(line)
-                except Exception:
-                    continue
-                if rec.get("tipo") != tipo or rec.get("livello") != livello:
-                    continue
-                durata = rec.get("durata_s")
-                if not isinstance(durata, (int, float)):
-                    continue
-                globale.append(durata)
-                if rec.get("instance") == instance:
-                    cella.append(durata)
-    except Exception:
-        return None
+    for rec in rows:
+        if rec.get("tipo") != tipo or rec.get("livello") != livello:
+            continue
+        durata = rec.get("durata_s")
+        if not isinstance(durata, (int, float)):
+            continue
+        globale.append(durata)
+        if rec.get("instance") == instance:
+            cella.append(durata)
 
     if len(cella) >= min_campioni:
         return statistics.median(cella)
