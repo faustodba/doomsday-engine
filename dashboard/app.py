@@ -531,11 +531,23 @@ templates.env.globals["url_prefix"] = _DynamicPrefix()
 @app.middleware("http")
 async def _url_prefix_middleware(request: Request, call_next):
     """Imposta url_prefix nel ContextVar in base all'origine della request.
-    Locale (http diretto): prefix vuoto. Via Caddy/ngrok (https): _URL_PREFIX."""
+    Locale (http diretto): prefix vuoto. Via Caddy/ngrok (https): _URL_PREFIX.
+
+    12/07 — inoltre impedisce il caching HTTP delle risposte HTMX. I partial
+    `/ui/partial/*` sono dati live ripollati ogni pochi secondi (hx-trigger
+    "every Ns"); senza header di cache il browser poteva servire una versione
+    cachata pre-riavvio della dashboard (es. toggle "tempo raccolta empirico"
+    non visibile fino a hard refresh). `HX-Request` è inviato da ogni richiesta
+    HTMX → no-store su quelle (+ fallback sul path `/ui/partial/`). Gli asset
+    statici (`/static/*`, non HTMX) restano cacheabili."""
     proto = request.headers.get("x-forwarded-proto", "")
     token = _url_prefix_ctx.set(_URL_PREFIX if proto == "https" else "")
     try:
-        return await call_next(request)
+        response = await call_next(request)
+        if request.headers.get("hx-request") or "/ui/partial/" in request.url.path:
+            response.headers["Cache-Control"] = "no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+        return response
     finally:
         _url_prefix_ctx.reset(token)
 
