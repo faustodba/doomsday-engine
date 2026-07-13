@@ -748,6 +748,14 @@ def _thread_istanza(ist, tasks_cls, dry_run):
             _log(nome, "[ERRORE] avvia_istanza() fallito")
             _launcher.chiudi_istanza(ist, porta, _log_fn)  # WU163: evita zombie MuMu su timeout boot
             _aggiorna_stato_istanza(nome, {"stato": "idle"})
+            # WU208 — alert boot fallito (istanza saltata, passa alla successiva
+            # senza retry). Escala a critical se ricorre N cicli consecutivi.
+            try:
+                from core.alerts import report_boot_timeout
+                report_boot_timeout(nome, fase="avvio istanza (ADB/Android)",
+                                    timeout_s=gcfg.mumu.timeout_adb_s)
+            except Exception as _exc:
+                _log(nome, f"[WARN] alert boot_timeout: {_exc}")
             return
         # WU183 (27/06) — la lettura risorse è iniettata in attendi_home come
         # on_home_ready: gira sulla HOME appena STABILIZZATA (7 poll) e PRIMA
@@ -905,7 +913,22 @@ def _thread_istanza(ist, tasks_cls, dry_run):
             _log(nome, "[ERRORE] attendi_home() fallito")
             _launcher.chiudi_istanza(ist, porta, _log_fn)
             _aggiorna_stato_istanza(nome, {"stato": "idle"})
+            # WU208 — alert boot timeout (HOME non raggiunta entro timeout_carica_s;
+            # istanza saltata, nessun retry nel tick). Escala a critical se la
+            # stessa istanza fallisce N cicli consecutivi.
+            try:
+                from core.alerts import report_boot_timeout
+                report_boot_timeout(nome, fase="caricamento HOME",
+                                    timeout_s=gcfg.mumu.timeout_carica_s)
+            except Exception as _exc:
+                _log(nome, f"[WARN] alert boot_timeout: {_exc}")
             return
+        # WU208 — boot riuscito: azzera lo streak dei timeout consecutivi.
+        try:
+            from core.alerts import report_boot_ok
+            report_boot_ok(nome)
+        except Exception:
+            pass
 
     # ── 2. Rebuild context (rilegge config aggiornata) ───────────────
     _ov_raw     = load_overrides(_OVERRIDES_PATH)

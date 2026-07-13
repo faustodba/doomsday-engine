@@ -60,6 +60,8 @@ COOLDOWN_S: dict[str, int] = {
     "heartbeat_cicli":       1800,      # 1×/30min
     "cache_pulizia_mancante": 4 * 3600, # 1×/4h
     "login_conflict":        1800,      # 1×/30min (WU192-bis)
+    "boot_timeout":          3600,      # 1×/ora per istanza (warn) — WU208
+    "boot_timeout_crit":     2 * 3600,  # 1×/2h per istanza (escalation critical)
 }
 
 DEFAULT_COOLDOWN = 1800   # 30min per event_type non listati
@@ -134,12 +136,23 @@ def _alerts_enabled() -> bool:
 
 
 def _alert_disabled(event_type: str) -> bool:
-    """Specifico evento disabilitato via lista `alerts_disabled`."""
+    """Specifico evento disabilitato via lista `alerts_disabled`.
+
+    Match esatto OPPURE per prefisso col confine `_`: una voce base come
+    `cascade_adb` o `boot_timeout` nella lista disabilita anche gli event_type
+    per-istanza derivati (`cascade_adb_FAU_04`, `boot_timeout_FAU_04`,
+    `boot_timeout_crit_FAU_04`). Il confine `d + "_"` evita match parziali su
+    parole diverse. Pre-WU208 il match era solo esatto, quindi il toggle
+    dashboard `cascade_adb` non disabilitava davvero i cascade per-istanza.
+    """
     try:
         from config.config_loader import load_effective_notifications
         n = load_effective_notifications() or {}
         disabled = n.get("alerts_disabled", []) or []
-        return event_type in disabled
+        for d in disabled:
+            if event_type == d or event_type.startswith(f"{d}_"):
+                return True
+        return False
     except Exception:
         return False
 
@@ -550,6 +563,85 @@ def report_cascade_adb(instance: str) -> bool:
         body=body,
         instance=instance,
         cooldown_s=COOLDOWN_S["cascade_adb"],
+    )
+
+
+# In-memory tracker per "boot timeout consecutivi" per istanza (WU208). Un boot
+# OK (report_boot_ok) azzera lo streak. Persiste finché il bot è vivo (reset su
+# restart, come _cascade_tracker). Serve all'escalation warn→critical quando la
+# stessa istanza non carica per N cicli di fila (istanza persistentemente
+# bloccata, non lentezza occasionale).
+_boot_timeout_streak: dict[str, int] = {}
+_boot_timeout_lock = threading.Lock()
+BOOT_TIMEOUT_ESCALATION = 3     # >=3 timeout consecutivi stessa istanza → critical
+
+
+def report_boot_ok(instance: str) -> None:
+    """Hook da `main.py` quando l'istanza raggiunge la HOME (boot riuscito):
+    azzera lo streak di timeout consecutivi. No-op se non c'era streak."""
+    with _boot_timeout_lock:
+        _boot_timeout_streak.pop(instance, None)
+
+
+def report_boot_timeout(instance: str,
+                        fase: str = "caricamento HOME",
+                        timeout_s: Optional[int] = None) -> bool:
+    """Hook da `main.py` quando il boot di un'istanza fallisce e il bot la
+    salta passando alla successiva (`avvia_istanza` o `attendi_home` falliti).
+
+    Invia alert `warn`; escala a `critical` quando la STESSA istanza va in
+    timeout per >= BOOT_TIMEOUT_ESCALATION cicli consecutivi (segnale di istanza
+    persistentemente non caricabile — splash infinito, update richiesto,
+    reconnect, VM non responsiva — non semplice lentezza occasionale).
+
+    Rate-limit per istanza; l'escalation usa un event_type dedicato
+    (`boot_timeout_crit_<istanza>`) così il `critical` non viene soppresso dal
+    cooldown del `warn` precedente. Entrambi disattivabili dal toggle dashboard
+    `boot_timeout` (match per prefisso in `_alert_disabled`).
+    """
+    if not _alerts_enabled():
+        return False
+
+    with _boot_timeout_lock:
+        n = _boot_timeout_streak.get(instance, 0) + 1
+        _boot_timeout_streak[instance] = n
+
+    to_txt = f"{timeout_s}s" if timeout_s else "timeout"
+
+    if n >= BOOT_TIMEOUT_ESCALATION:
+        body = (
+            f"L'istanza {instance} ha fallito il boot ({fase}) per {n} cicli "
+            f"CONSECUTIVI — saltata ogni volta.\n"
+            f"\nNon è più una lentezza occasionale: il client di gioco o "
+            f"l'istanza MuMu è probabilmente bloccato (splash infinito, update "
+            f"richiesto, reconnect, o VM non responsiva). Serve un intervento "
+            f"manuale: aprire l'istanza {instance} e verificare lo stato del "
+            f"gioco.\n"
+        )
+        return trigger_alert(
+            event_type=f"boot_timeout_crit_{instance}",
+            severity="critical",
+            title=f"boot timeout · {n}× consecutivi",
+            body=body,
+            instance=instance,
+            cooldown_s=COOLDOWN_S["boot_timeout_crit"],
+        )
+
+    body = (
+        f"L'istanza {instance} non ha raggiunto la HOME entro il timeout "
+        f"({fase}, {to_txt}): boot fallito, istanza saltata — il bot è passato "
+        f"alla successiva senza retry nel tick.\n"
+        f"\nCausa tipica: caricamento gioco lento o bloccato sullo splash. "
+        f"Ritenterà al prossimo ciclo. Se ricorre {BOOT_TIMEOUT_ESCALATION}× di "
+        f"fila l'alert diventa critical.\n"
+    )
+    return trigger_alert(
+        event_type=f"boot_timeout_{instance}",
+        severity="warn",
+        title=f"boot timeout ({to_txt})",
+        body=body,
+        instance=instance,
+        cooldown_s=COOLDOWN_S["boot_timeout"],
     )
 
 
