@@ -227,119 +227,64 @@ _RIS_EMOJI = {"pomodoro": "🍅", "legno": "🪵", "acciaio": "⚙", "petrolio":
 
 
 def _section_produzione_rifugio(date: str) -> dict:
-    """Produzione INTERNA effettiva del rifugio per ogni istanza, sommata
-    dalle sessioni di tick chiuse nel giorno UTC `date`.
+    """Produzione INTERNA del rifugio per ogni istanza nel giorno UTC `date`,
+    come RESA REALE DELLA RACCOLTA dal Tab Report.
 
-    Rev 10/05 (post-feedback): scorpora master FauMorfeus dalle ordinarie
-    (coerente con sez 6 TRUPPE).
+    WU204 step 3 (13/07): passa dalla metrica castello
+    (`produzione_storico::produzione_qty = Δcastello − zaino + rifornimento`,
+    che un rifornimento/zaino gonfia enormemente — es. FAU_00 = 209 M/h) alla
+    resa reale dei nodi raccolti (`report_raccolta_dataset` via
+    `shared/produzione_report`). Immune alle anomalie castello, quindi **non
+    serve più il filtro outlier 30M/h** (n_sess_anomali sempre 0).
 
-    Schema sessione (`state/<istanza>.json::produzione_storico[]`):
-      - `ts_fine`: timestamp UTC chiusura sessione (filtro per giorno)
-      - `produzione_qty`: dict per risorsa, già depurato di:
-          * delta_castle - zaino_delta + rifornimento_inviato_lordo (per ordinarie)
-          * (master) sottrae anche ricevuto da alleati (WU128)
-      - `durata_sec`: durata sessione
-
-    Output: totali aggregati + ordinarie + master_row separata.
+    Master FauMorfeus scorporato dalle ordinarie (coerente con sez 6 TRUPPE).
+    `n_sess` ora = numero di raccolte completate (report), `durata_s` non
+    applicabile (0). Struttura di ritorno invariata (renderer aggiornati nei
+    soli label).
     """
-    import glob
     try:
         from shared.instance_meta import is_master_instance
     except Exception:
         is_master_instance = lambda x: x == "FauMorfeus"
+    from shared.produzione_report import produzione_per_istanza, PESI as _PESI
 
-    # Outlier filter: scarta sessioni con OCR palesemente rotto (delta_castle
-    # gonfiato per OCR fail su risorsa). Soglia conservativa: 30M/h per risorsa.
-    # Non blocca master (che può ricevere alleati) perché WU128 sottrae già
-    # ricevuto, ma se ricevuto OCR fail la sessione mostra valori assurdi.
-    PROD_ORARIA_CAP_M = 30.0   # 30M/h per risorsa = upper bound plausibile
+    prod = produzione_per_istanza(giorno=date).get("per_istanza", {})
 
-    state_dir = _root() / "state"
     totali_ord    = {r: 0 for r in _RISORSE_ORDER}
     totali_master = {r: 0 for r in _RISORSE_ORDER}
     ordinarie: list[dict] = []
     master_row: dict | None = None
-    durata_ord_s    = 0.0
-    durata_master_s = 0.0
-    n_sess_anomali  = 0   # sessioni scartate per outlier OCR
 
-    for fp in sorted(glob.glob(str(state_dir / "FAU_*.json")) +
-                     glob.glob(str(state_dir / "FauMorfeus.json"))):
-        try:
-            with open(fp, encoding="utf-8") as f:
-                d = json.load(f)
-        except Exception:
+    for nome in sorted(prod.keys()):
+        p = prod[nome]
+        ist_tot = {r: int(p["risorse"].get(r, 0)) for r in _RISORSE_ORDER}
+        if sum(ist_tot.values()) <= 0:
             continue
-        nome = os.path.basename(fp).replace(".json", "")
-        ph = d.get("produzione_storico") or []
-        ist_tot = {r: 0 for r in _RISORSE_ORDER}
-        n_sess = 0
-        ist_durata_s = 0.0
-        for s in ph:
-            ts_fine = (s.get("ts_fine") or "")[:10]
-            if ts_fine != date:
-                continue
-            pq = s.get("produzione_qty") or {}
-            if not pq:
-                continue
-            durata_sec = float(s.get("durata_sec") or 0)
-            # Outlier filter: scarta sessione se qualunque risorsa ha
-            # produzione/h > soglia (OCR rotto). Soglia anche per neg estremi.
-            durata_h = durata_sec / 3600 if durata_sec > 0 else 1.0
-            anomalia = False
-            for r in _RISORSE_ORDER:
-                v = float(pq.get(r) or 0)
-                prod_oraria_m = abs(v) / durata_h / 1_000_000
-                if prod_oraria_m > PROD_ORARIA_CAP_M:
-                    anomalia = True
-                    break
-            if anomalia:
-                n_sess_anomali += 1
-                continue
-            for r in _RISORSE_ORDER:
-                v = int(pq.get(r) or 0)
-                ist_tot[r] += v
-            ist_durata_s += durata_sec
-            n_sess += 1
-        if n_sess == 0:
-            continue
+        pom_eq = sum(max(0, ist_tot[r]) * _PESI[r] for r in _RISORSE_ORDER)
         row = {
-            "nome":     nome,
-            "tot":      sum(ist_tot.values()),
-            "risorse":  ist_tot,
-            "n_sess":   n_sess,
-            "durata_s": ist_durata_s,
+            "nome":        nome,
+            "tot":         sum(ist_tot.values()),
+            "risorse":     ist_tot,
+            "n_sess":      int(p.get("n_report", 0)),   # n. raccolte completate
+            "durata_s":    0.0,                          # non applicabile al report
+            "prod_unif_h": round(pom_eq / 24.0 / 1_000_000, 3) if pom_eq > 0 else 0.0,
         }
         if is_master_instance(nome):
             master_row = row
             for r in _RISORSE_ORDER:
                 totali_master[r] += ist_tot[r]
-            durata_master_s += ist_durata_s
         else:
             ordinarie.append(row)
             for r in _RISORSE_ORDER:
                 totali_ord[r] += ist_tot[r]
-            durata_ord_s += ist_durata_s
 
     ordinarie.sort(key=lambda x: x["tot"], reverse=True)
 
-    # Totali aggregati (master + ordinarie) per riga emoji 4 risorse
-    totali_all = {r: totali_ord[r] + totali_master[r] for r in _RISORSE_ORDER}
+    totali_all   = {r: totali_ord[r] + totali_master[r] for r in _RISORSE_ORDER}
     tot_ord_4    = sum(totali_ord.values())
     tot_master_4 = sum(totali_master.values())
 
-    # Produzione unificata: Σ(qty × peso) / 24h / 1M  per istanza e farm.
-    # Pesi derivati da cap L7: pomodoro=1, legno=1, acciaio=2, petrolio=5.
-    # Master escluso: produzione_qty include risorse RICEVUTE dalle farm.
-    _PESI_RIF = {"pomodoro": 1.0, "legno": 1.0, "acciaio": 2.0, "petrolio": 5.0}
-    for row in ordinarie:
-        pom_eq = sum(max(0, row["risorse"].get(r, 0)) * _PESI_RIF[r] for r in _RISORSE_ORDER)
-        row["prod_unif_h"] = round(pom_eq / 24.0 / 1_000_000, 3) if pom_eq > 0 else 0.0
-    if master_row:
-        master_row["prod_unif_h"] = 0.0  # non affidabile: include risorse ricevute
-    farm_pom_eq = sum(
-        max(0, totali_ord[r]) * _PESI_RIF[r] for r in _RISORSE_ORDER
-    )
+    farm_pom_eq = sum(max(0, totali_ord[r]) * _PESI[r] for r in _RISORSE_ORDER)
     prod_unif_farm_h = round(farm_pom_eq / 24.0 / 1_000_000, 3) if farm_pom_eq > 0 else 0.0
 
     return {
@@ -354,15 +299,16 @@ def _section_produzione_rifugio(date: str) -> dict:
         "ordinarie":       ordinarie,
         "master_row":      master_row,
         "n_ord":           len(ordinarie),
-        "durata_ord_s":    durata_ord_s,
-        "durata_master_s": durata_master_s,
-        "n_sess_anomali":  n_sess_anomali,
+        "durata_ord_s":    0.0,
+        "durata_master_s": 0.0,
+        "n_sess_anomali":  0,   # report pulito: nessun filtro outlier necessario
         # legacy (per_ist usato in qualche compat HTML)
         "per_ist":         ordinarie + ([master_row] if master_row else []),
         "n_ist":           len(ordinarie) + (1 if master_row else 0),
-        "durata_tot_s":    durata_ord_s + durata_master_s,
-        # produzione unificata (M pom-eq/h, 24h, pesi L7)
+        "durata_tot_s":    0.0,
+        # produzione unificata (M pom-eq/h, 24h, pesi L7) — resa raccolta report
         "prod_unif_farm_h": prod_unif_farm_h,
+        "fonte":           "report",
     }
 
 
@@ -1100,13 +1046,12 @@ def _render_text(date: str, s: dict) -> str:
     # (rev 10/05 — no duplicazione)
     L.append("")
 
-    # 2. PRODUZIONE INTERNA RIFUGIO (rev 10/05 post-feedback) — scorporato
-    # master FauMorfeus dalle ordinarie (coerente con sez 6 TRUPPE).
-    # Outlier filter: sessioni con OCR rotto (>30M/h per risorsa) escluse.
-    L.append("[PRODUZIONE INTERNA RIFUGIO] (effettiva, per istanza, sommata "
-             "dalle sessioni del giorno)")
+    # 2. PRODUZIONE INTERNA RIFUGIO — WU204: resa raccolta reale dal Tab Report
+    # (immune ad anomalie castello). Master FauMorfeus scorporato.
+    L.append("[PRODUZIONE INTERNA RIFUGIO] (resa raccolta dal Tab Report, "
+             "per istanza, giorno UTC)")
     if rifugio["n_ist"] == 0:
-        L.append("  nessuna sessione chiusa nel giorno con dati produzione")
+        L.append("  nessuna raccolta registrata nel giorno (Tab Report)")
     else:
         denom_h_rif = (cicli["denom_s"] / 3600) if cicli.get("denom_s") else 24
         if rifugio["master_row"]:
@@ -1144,13 +1089,13 @@ def _render_text(date: str, s: dict) -> str:
             L.append(f"  top 5 ordinarie:")
             for r in rifugio["ordinarie"][:5]:
                 L.append(f"    {r['nome']:12s} {_fmt_n(r['tot']):>8s}  "
-                         f"({r['n_sess']} sess, {_fmt_dur_s(r['durata_s'])})")
+                         f"({r['n_sess']} raccolte)")
         # Master in coda
         if rifugio["master_row"]:
             mr = rifugio["master_row"]
             L.append(f"  master:")
             L.append(f"    {mr['nome']:12s} {_fmt_n(mr['tot']):>8s}  "
-                     f"({mr['n_sess']} sess, {_fmt_dur_s(mr['durata_s'])})")
+                     f"({mr['n_sess']} raccolte)")
         if rifugio.get("n_sess_anomali"):
             L.append(f"  ⚠ {rifugio['n_sess_anomali']} sessione/i scartate "
                      f"(OCR sospetto: >30M/h per risorsa)")
@@ -1578,26 +1523,24 @@ def _render_html(date: str, s: dict) -> str:
         if rifugio["ordinarie"]:
             parts.append("<p><b>Top 5 ordinarie per produzione:</b></p>")
             parts.append("<table><tr><th>istanza</th><th>totale</th>"
-                         "<th>sessioni</th><th>durata</th></tr>")
+                         "<th>raccolte</th></tr>")
             for r in rifugio["ordinarie"][:5]:
                 parts.append(
                     f"<tr><td>{r['nome']}</td>"
                     f"<td class='num'>{_fmt_n(r['tot'])}</td>"
-                    f"<td class='num'>{r['n_sess']}</td>"
-                    f"<td>{_fmt_dur_s(r['durata_s'])}</td></tr>"
+                    f"<td class='num'>{r['n_sess']}</td></tr>"
                 )
             parts.append("</table>")
         # Master in tabella separata (sfondo dorato come sez 6)
         if rifugio["master_row"]:
             mr = rifugio["master_row"]
             parts.append("<table><tr><th>master</th><th>totale</th>"
-                         "<th>sessioni</th><th>durata</th></tr>")
+                         "<th>raccolte</th></tr>")
             parts.append(
                 f"<tr style='background:#fff7d0'><td>{mr['nome']} "
                 f"<small>(master)</small></td>"
                 f"<td class='num'>{_fmt_n(mr['tot'])}</td>"
-                f"<td class='num'>{mr['n_sess']}</td>"
-                f"<td>{_fmt_dur_s(mr['durata_s'])}</td></tr></table>"
+                f"<td class='num'>{mr['n_sess']}</td></tr></table>"
             )
         if rifugio.get("n_sess_anomali"):
             parts.append(
@@ -1610,7 +1553,7 @@ def _render_html(date: str, s: dict) -> str:
         if puf and puf > 0:
             parts.append(
                 f"<p><b>Produzione unificata farm: {puf:.2f} M pom-eq/h</b> "
-                f"<small>(🍅×1 🪵×1 ⚙×2 🛢×5 · delta deposito 24h)</small></p>"
+                f"<small>(🍅×1 🪵×1 ⚙×2 🛢×5 · resa raccolta dal Tab Report · 24h)</small></p>"
             )
             top_pu = sorted(
                 [r for r in rifugio.get("ordinarie", []) if r.get("prod_unif_h", 0) > 0],
