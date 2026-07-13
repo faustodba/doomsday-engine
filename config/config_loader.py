@@ -166,6 +166,34 @@ def load_global(path: str | Path | None = None) -> "GlobalConfig":
     return GlobalConfig._from_raw(raw)
 
 
+def load_effective_global(path: str | Path | None = None) -> "GlobalConfig":
+    """GlobalConfig EFFETTIVA = `global_config.json` (static) MERGED con
+    `runtime_overrides.json` (dynamic), come la vede il bot ad ogni tick (stessa
+    pipeline di `main.py`: `merge_config` → `_from_raw`).
+
+    I moduli launcher DEVONO usare QUESTA per leggere i timeout `mumu.*`
+    (`timeout_carica_s`, `timeout_adb_s`, ...). `load_global()` legge SOLO lo
+    static, quindi gli override dynamic di quei campi (es. WU201 `timeout_carica_s`
+    300→400, propagato via `sistema.timeout_carica_s` → `mumu.timeout_carica_s`)
+    NON avrebbero mai effetto a runtime — bug WU209.
+    """
+    p = Path(path) if path else _GLOBAL_CONFIG_PATH
+    static_raw: dict = {}
+    if p.exists():
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                static_raw = json.load(f)
+        except Exception as exc:
+            print(f"[CONFIG] WARN: global_config.json non leggibile ({exc}) — uso default")
+    ov = load_overrides(p.parent / "runtime_overrides.json")
+    try:
+        merged = merge_config(static_raw, ov)
+    except Exception as exc:
+        print(f"[CONFIG] WARN: merge_config fallito ({exc}) — uso solo static")
+        merged = static_raw
+    return GlobalConfig._from_raw(merged)
+
+
 def save_global(gcfg: "GlobalConfig", path: str | Path | None = None) -> bool:
     """
     Serializza GlobalConfig in global_config.json.

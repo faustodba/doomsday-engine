@@ -35,7 +35,7 @@ from typing import Callable, Optional
 
 from core.navigator import Screen
 from core.adaptive_timing import AdaptiveTiming
-from config.config_loader import load_global
+from config.config_loader import load_effective_global
 
 
 # ==============================================================================
@@ -348,7 +348,7 @@ def avvia_player(log_fn: Optional[Callable] = None) -> bool:
         True  — player già in esecuzione o avviato con successo
         False — timeout avvio
     """
-    _cfg    = load_global().mumu
+    _cfg    = load_effective_global().mumu
     timeout = _cfg.timeout_player_s
 
     # Già in esecuzione?
@@ -358,7 +358,7 @@ def avvia_player(log_fn: Optional[Callable] = None) -> bool:
         # il player è pronto ad accettare comandi, non solo "in esecuzione").
         # Necessario su Windows 11 dove MuMuNxMain.exe può essere in lista
         # ma non ancora inizializzato → MuMuManager launch fallisce silenziosamente.
-        _manager = _resolve_manager(load_global().mumu.manager)
+        _manager = _resolve_manager(load_effective_global().mumu.manager)
         try:
             # 'version' non richiede parametri — check readiness affidabile
             result = subprocess.run(
@@ -444,7 +444,7 @@ def avvia_istanza(ist: dict, log_fn: Optional[Callable] = None) -> bool:
         True  — gioco avviato
         False — timeout o errore
     """
-    _cfg     = load_global().mumu
+    _cfg     = load_effective_global().mumu
     _manager = _resolve_manager(_cfg.manager)
     _adb     = os.environ.get("MUMU_ADB_PATH") or _cfg.adb
 
@@ -582,7 +582,7 @@ def attendi_home(ctx, log_fn: Optional[Callable] = None,
         True  — HOME raggiunto
         False — timeout
     """
-    _cfg = load_global().mumu
+    _cfg = load_effective_global().mumu
     nome = getattr(ctx, "instance_name", "?")
     nav    = getattr(ctx, "navigator", None)
     device = getattr(ctx, "device", None)
@@ -1145,7 +1145,7 @@ def reset_istanza(ist: dict, log_fn: Optional[Callable] = None) -> None:
       3. Polling is_android_started == False (max 30s)
       4. adb disconnect
     """
-    _cfg     = load_global().mumu
+    _cfg     = load_effective_global().mumu
     _manager = _resolve_manager(_cfg.manager)
     _adb     = os.environ.get("MUMU_ADB_PATH") or _cfg.adb
 
@@ -1208,7 +1208,7 @@ def chiudi_istanza(ist: dict, porta: int,
         ist:  dict istanza (campi: "indice", "nome")
         porta: porta ADB dell'istanza
     """
-    _cfg     = load_global().mumu
+    _cfg     = load_effective_global().mumu
     _manager = _resolve_manager(_cfg.manager)
     _adb     = os.environ.get("MUMU_ADB_PATH") or _cfg.adb
 
