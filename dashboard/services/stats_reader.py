@@ -604,6 +604,34 @@ def get_storico(n: int = 50) -> list[StoricoEntry]:
         return []
 
 
+def _pu_da_report(p: Optional[dict]) -> dict:
+    """WU204 step 2 — converte i dati report-based
+    (shared.produzione_report.produzione_per_istanza) nella struttura
+    `prod_unificata` attesa dai consumer (stessa forma di
+    shared.prod_unificata.compute_from_storico, così nulla a valle cambia).
+    `p=None` → struttura vuota (istanza senza raccolte in finestra, o master).
+    Finestra 24h fissa (denominatore coerente con la metrica precedente)."""
+    from shared.produzione_report import PESI as _PESI, RISORSE as _RIS
+    if not p:
+        return {"prod_unif_h": -1.0, "pom_eq_totale": 0, "n_sped": 0,
+                "per_risorsa": {}, "fonte": "report", "n_sessioni": 0,
+                "durata_coperta_s": 0.0}
+    risorse = p.get("risorse") or {}
+    per_risorsa: dict[str, dict] = {}
+    pom_eq_tot = 0
+    for r in _RIS:
+        q = int(risorse.get(r, 0) or 0)
+        if q > 0:
+            pe = int(q * _PESI[r])
+            per_risorsa[r] = {"qta_tot": q, "n": p.get("n_report", 0), "pom_eq": pe}
+            pom_eq_tot += pe
+    prod_unif_h = round(pom_eq_tot / 24.0 / 1_000_000, 3) if pom_eq_tot > 0 else -1.0
+    return {"prod_unif_h": prod_unif_h, "pom_eq_totale": pom_eq_tot,
+            "n_sped": p.get("n_report", 0), "per_risorsa": per_risorsa,
+            "fonte": "report", "n_sessioni": p.get("n_report", 0),
+            "durata_coperta_s": 24 * 3600.0}
+
+
 def get_produzione_istanze(include_master: bool = False, only_master: bool = False) -> list[dict]:
     """
     Auto-WU14 step3: ritorna dati produzione per ogni istanza.
@@ -635,6 +663,15 @@ def get_produzione_istanze(include_master: bool = False, only_master: bool = Fal
         insts = get_instances()
         engine = get_engine_status()
         result: list[dict] = []
+        # WU204 step 2 — produzione unificata REPORT-based (resa reale dei nodi
+        # dal Tab Report), letta una volta per tutte le istanze (rolling 24h).
+        # Sostituisce compute_from_storico (metrica castello, gonfiata da
+        # rifornimento/zaino). Master escluso come prima (convenzione invariata).
+        try:
+            from shared.produzione_report import produzione_per_istanza
+            _prod_report = produzione_per_istanza(window_h=24.0).get("per_istanza", {})
+        except Exception:
+            _prod_report = {}
         # Soglie rifornimento comune — per calcolo inv_effettivo_netta
         try:
             _ovr = get_overrides()
@@ -747,23 +784,11 @@ def get_produzione_istanze(include_master: bool = False, only_master: bool = Fal
             else:
                 provviste_res_netta = provviste_res
 
-            # Produzione unificata 24h: delta-based da produzione_storico.
-            # Esclusa per il master: produzione_qty include risorse ricevute
-            # da alleati (rifornimento), non misura produzione interna castello.
-            try:
-                from shared.prod_unificata import compute_from_storico, compute_from_dettaglio, empty_result as _pu_empty
-                if is_m:
-                    _pu = _pu_empty()
-                else:
-                    _storico_valido = [s for s in storico if s.get("produzione_qty")]
-                    if _storico_valido:
-                        _pu = compute_from_storico(_storico_valido)
-                    else:
-                        det_oggi = rif.get("dettaglio_oggi") or []
-                        _pu = compute_from_dettaglio(det_oggi) if det_oggi else _pu_empty()
-            except Exception:
-                from shared.prod_unificata import empty_result as _pu_empty
-                _pu = _pu_empty()
+            # Produzione unificata 24h: REPORT-based (WU204 step 2). Resa reale
+            # dei nodi dal Tab Report (immune a rifornimento/zaino/OCR castello),
+            # non più delta-based da produzione_storico. Master escluso
+            # (convenzione invariata: prod_unificata non calcolata per il master).
+            _pu = _pu_da_report(None if is_m else _prod_report.get(nome))
 
             # inv_effettivo_netta: quanto l'istanza può REALMENTE spedire ORA.
             # = min(quota_residua_netta, headroom_depositi_netto)

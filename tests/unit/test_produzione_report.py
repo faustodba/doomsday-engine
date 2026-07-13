@@ -97,3 +97,23 @@ def test_righe_malformate_o_incomplete_scartate(tmp_path):
 def test_pesi_e_risorse_coerenti():
     assert set(RISORSE) == {"pomodoro", "legno", "acciaio", "petrolio"}
     assert PESI == {"pomodoro": 1.0, "legno": 1.0, "acciaio": 2.0, "petrolio": 5.0}
+
+
+def test_pu_da_report_conversione_struttura():
+    """WU204 step 2: stats_reader._pu_da_report converte i dati report-based
+    nella forma `prod_unificata` attesa dai consumer (come compute_from_storico)."""
+    from dashboard.services.stats_reader import _pu_da_report
+    # None -> struttura vuota (master o istanza senza dati)
+    e = _pu_da_report(None)
+    assert e["prod_unif_h"] == -1.0 and e["per_risorsa"] == {} and e["fonte"] == "report"
+    # con dati
+    p = {"risorse": {"pomodoro": 1_320_000, "legno": 0, "acciaio": 0, "petrolio": 264_000},
+         "qta_h": {}, "pom_eq_h": 0.0, "n_report": 3}
+    pu = _pu_da_report(p)
+    assert pu["fonte"] == "report"
+    assert pu["per_risorsa"]["petrolio"]["qta_tot"] == 264_000
+    assert pu["per_risorsa"]["petrolio"]["pom_eq"] == 264_000 * 5
+    assert "legno" not in pu["per_risorsa"]     # risorsa a 0 omessa (come castello)
+    atteso = 1_320_000 * 1 + 264_000 * 5
+    assert pu["pom_eq_totale"] == atteso
+    assert abs(pu["prod_unif_h"] - atteso / 24 / 1_000_000) < 1e-3
