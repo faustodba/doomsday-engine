@@ -1208,6 +1208,19 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         v = ovr.get(key)
         return fallback if v is None else v
 
+    # WU205 — allocazione raccolta per-istanza (override runtime > globale).
+    # Normalizza a frazioni somma=1 (robusto a % o frazioni). Somma 0/assente
+    # → None → fallback ai globali gcfg.allocazione_*. Retrocompatibile: nessun
+    # override oggi ⇒ tutte le istanze usano il globale, comportamento invariato.
+    _RIS_ALLOC = ("pomodoro", "legno", "petrolio", "acciaio")
+    _alloc_ovr_raw = ovr.get("allocazione")
+    _alloc_resolved = None
+    if isinstance(_alloc_ovr_raw, dict):
+        _av = {r: float(_alloc_ovr_raw.get(r, 0) or 0) for r in _RIS_ALLOC}
+        _asum = sum(_av.values())
+        if _asum > 0:
+            _alloc_resolved = {r: _av[r] / _asum for r in _RIS_ALLOC}
+
     class _InstanceCfg:
         # ── Identità istanza ─────────────────────────────────────────────────
         # 08/05 — Regola architetturale: campi per-istanza configurabili
@@ -1277,10 +1290,11 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         # LIVELLO_NODO usa il valore per-istanza (con override runtime) invece
         # del globale gcfg.livello_nodo. FAU_00 livello=7 → cerca nodi L7.
         LIVELLO_NODO         = livello
-        ALLOCAZIONE_POMODORO = gcfg.allocazione_pomodoro
-        ALLOCAZIONE_LEGNO    = gcfg.allocazione_legno
-        ALLOCAZIONE_PETROLIO = gcfg.allocazione_petrolio
-        ALLOCAZIONE_ACCIAIO  = gcfg.allocazione_acciaio
+        # WU205 — override per-istanza (frazioni normalizzate) o fallback globale
+        ALLOCAZIONE_POMODORO = _alloc_resolved["pomodoro"] if _alloc_resolved else gcfg.allocazione_pomodoro
+        ALLOCAZIONE_LEGNO    = _alloc_resolved["legno"]    if _alloc_resolved else gcfg.allocazione_legno
+        ALLOCAZIONE_PETROLIO = _alloc_resolved["petrolio"] if _alloc_resolved else gcfg.allocazione_petrolio
+        ALLOCAZIONE_ACCIAIO  = _alloc_resolved["acciaio"]  if _alloc_resolved else gcfg.allocazione_acciaio
         # WU50 — modalità fuori territorio (per istanza).
         # Precedenza: override runtime > instances.json (default statico).
         RACCOLTA_FUORI_TERRITORIO_ABILITATA = bool(_ovr(
