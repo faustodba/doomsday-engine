@@ -229,6 +229,51 @@ def get_stima_per_cella() -> list[dict]:
     return righe
 
 
+# Etichette risorsa per la matrice (dataset usa i nomi dei nodi).
+_TIPO_LABEL = {"campo": "pomodoro", "segheria": "legno",
+               "acciaio": "acciaio", "petrolio": "petrolio"}
+# Ordine righe della matrice: 4 tipi × livelli 6/7 (8 righe fisse).
+_MATRICE_RIGHE = [("campo", 6), ("campo", 7), ("segheria", 6), ("segheria", 7),
+                  ("acciaio", 6), ("acciaio", 7), ("petrolio", 6), ("petrolio", 7)]
+_MATRICE_N_BUCKET = 5
+
+
+def get_stima_matrice() -> dict:
+    """Pivot di get_stima_per_cella() in MATRICE: righe = (tipo, livello) in
+    ordine fisso (8: pomodoro/legno/acciaio/petrolio × L6/L7), colonne =
+    istanze. Ogni cella riporta i campi di get_stima_per_cella + `bucket`
+    (0..N-1 = heat sequenziale sulla mediana, calcolato solo sulle celle
+    affidabili, min/max delle mediane affidabili). Etichette: campo=pomodoro,
+    segheria=legno.
+    """
+    celle = get_stima_per_cella()
+    istanze = sorted({c["instance"] for c in celle})
+    idx = {(c["instance"], c["tipo"], c["livello"]): c for c in celle}
+
+    med_aff = [c["mediana_h"] for c in celle if c["affidabile"]]
+    lo = min(med_aff) if med_aff else 0.0
+    hi = max(med_aff) if med_aff else 1.0
+    span = (hi - lo) or 1.0
+
+    righe: list[dict] = []
+    for tipo, liv in _MATRICE_RIGHE:
+        riga_celle: dict[str, dict] = {}
+        for ist in istanze:
+            c = idx.get((ist, tipo, liv))
+            if not c:
+                continue
+            bucket = None
+            if c["affidabile"]:
+                t = (c["mediana_h"] - lo) / span
+                bucket = min(_MATRICE_N_BUCKET - 1, max(0, int(t * _MATRICE_N_BUCKET)))
+            riga_celle[ist] = dict(c, bucket=bucket)
+        righe.append({"tipo": tipo, "label": _TIPO_LABEL.get(tipo, tipo),
+                      "livello": liv, "celle": riga_celle})
+
+    return {"istanze": istanze, "righe": righe,
+            "min_h": lo, "max_h": hi, "n_bucket": _MATRICE_N_BUCKET}
+
+
 _RISORSE = ("pomodoro", "legno", "acciaio", "petrolio")
 
 

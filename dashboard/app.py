@@ -964,37 +964,79 @@ def partial_report_raccolta_eventi(request: Request):
 
 @app.get("/ui/partial/report-raccolta-stima", include_in_schema=False)
 def partial_report_raccolta_stima(request: Request):
-    from dashboard.services.report_raccolta_reader import get_stima_per_cella
-    righe = get_stima_per_cella()
-    if not righe:
+    """Matrice tempo di raccolta: righe = tipo·livello (pomodoro/legno/acciaio/
+    petrolio × L6/L7), colonne = istanze. Heat sequenziale (una tinta ambra,
+    chiaro=veloce → intenso=lento) sulla mediana; valore in ogni cella
+    (encoding ridondante); celle n<3 in corsivo/grigio; hover per il dettaglio."""
+    from dashboard.services.report_raccolta_reader import get_stima_matrice
+    m = get_stima_matrice()
+    istanze = m["istanze"]
+    if not istanze:
         return HTMLResponse(
             '<div style="color:var(--text-dim);text-align:center;padding:12px;font-size:11px">'
             'nessun match riconciliato ancora.</div>'
         )
+
+    ico = dict(_RR_RISORSE_ICO)
+    # Rampa sequenziale a tinta unica (accent ambra #e8a020), 5 step su fondo
+    # scuro. Alpha max 0.46: oltre, il testo chiaro (--text) scende sotto ~4.5:1
+    # di contrasto (heatmap illeggibile). Il valore in cella resta l'encoding
+    # primario, la tinta è cue secondario.
+    HEAT = ["rgba(232,160,32,0.09)", "rgba(232,160,32,0.18)", "rgba(232,160,32,0.28)",
+            "rgba(232,160,32,0.37)", "rgba(232,160,32,0.46)"]
+    STICKY = "position:sticky;left:0;background:var(--bg2);z-index:1"
+
+    def _fmt_h(h: float) -> str:
+        mm = int(round(h * 60))
+        return f"{mm // 60}h{mm % 60:02d}m"
+
+    def _col(ist: str) -> str:
+        return ist[4:] if ist.startswith("FAU_") else ist
+
+    ths = [f'<th style="{STICKY};z-index:3;text-align:left">tipo · liv</th>']
+    for ist in istanze:
+        ths.append(f'<th style="text-align:center" title="{ist}">{_col(ist)}</th>')
+
     body = []
-    for r in righe:
-        if r["affidabile"]:
-            n_str = f'<span style="color:#4caf50">{r["n"]}</span>'
-        else:
-            n_str = f'<span style="color:#ff9800">{r["n"]}</span>'
-        body.append(
-            f'<tr>'
-            f'<td style="font-weight:600">{r["instance"]}</td>'
-            f'<td>{r["tipo"]} Lv{r["livello"]}</td>'
-            f'<td style="text-align:right;font-family:monospace">{n_str}</td>'
-            f'<td style="text-align:right;font-family:monospace;font-weight:600">{r["mediana_h"]:.2f}h</td>'
-            f'<td style="text-align:right;font-family:monospace">{r["media_h"]:.2f}h</td>'
-            f'<td style="text-align:right;font-family:monospace;font-size:10px;color:var(--text-dim)">'
-            f'{r["min_h"]:.2f}–{r["max_h"]:.2f}h</td>'
-            f'</tr>'
-        )
+    for r in m["righe"]:
+        cells = [f'<td style="{STICKY};white-space:nowrap;font-weight:600">'
+                 f'{ico.get(r["label"], "")} {r["label"]} '
+                 f'<span style="color:var(--text-dim);font-weight:400">L{r["livello"]}</span></td>']
+        for ist in istanze:
+            c = r["celle"].get(ist)
+            if not c:
+                cells.append('<td style="text-align:center;color:var(--text-dim)">·</td>')
+                continue
+            fmt = _fmt_h(c["mediana_h"])
+            title = (f'{ist} · {r["label"]} L{r["livello"]} — mediana {fmt}, '
+                     f'media {_fmt_h(c["media_h"])}, n={c["n"]}, '
+                     f'range {_fmt_h(c["min_h"])}–{_fmt_h(c["max_h"])}')
+            if c["affidabile"]:
+                bg = HEAT[c["bucket"] if c["bucket"] is not None else 0]
+                cells.append(f'<td title="{title}" style="text-align:center;'
+                             f'font-family:var(--mono);background:{bg}">{fmt}</td>')
+            else:
+                cells.append(f'<td title="{title}" style="text-align:center;'
+                             f'font-family:var(--mono);color:var(--text-dim);'
+                             f'font-style:italic">{fmt}<sup style="font-size:8px">{c["n"]}</sup></td>')
+        body.append(f'<tr>{"".join(cells)}</tr>')
+
+    leg_sw = "".join(
+        f'<span style="display:inline-block;width:18px;height:11px;background:{h};'
+        f'border:0.5px solid var(--border)"></span>' for h in HEAT)
+    legenda = (
+        '<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;'
+        'padding:7px 2px 0;font-size:10px;color:var(--text-dim)">'
+        f'<span>veloce {_fmt_h(m["min_h"])}</span>{leg_sw}<span>lento {_fmt_h(m["max_h"])}</span>'
+        '<span style="margin-left:10px"><i>corsivo<sup>n</sup></i> = n&lt;3 poco affidabile '
+        '· <b>·</b> = nessun dato · passa il mouse per media/range</span></div>'
+    )
+
     return HTMLResponse(
-        '<table class="tel-table"><thead><tr>'
-        '<th>ist</th><th>tipo/lv</th><th style="text-align:right">n</th>'
-        '<th style="text-align:right">mediana</th><th style="text-align:right">media</th>'
-        '<th style="text-align:right">range</th>'
-        '</tr></thead>'
-        f'<tbody>{"".join(body)}</tbody></table>'
+        '<div style="overflow-x:auto">'
+        '<table class="tel-table" style="border-collapse:collapse">'
+        f'<thead><tr>{"".join(ths)}</tr></thead>'
+        f'<tbody>{"".join(body)}</tbody></table></div>{legenda}'
     )
 
 
