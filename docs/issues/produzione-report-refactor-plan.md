@@ -88,12 +88,24 @@ Ogni step: implementa → test → **validazione su dati prod reali** → commit
 Nessun riavvio dashboard/bot fino a decisione utente (il flag non c'è: è un
 cambio diretto di fonte, quindi l'effetto è al riavvio del servizio interessato).
 
-| Step | Contenuto | Validazione |
-|---|---|---|
-| **1** | Creare `shared/produzione_report.py` (funzione canonica) + unit test. Rifattorizzare `get_produzione_unificata()` (WU203) per usarla — **dedup**, stessi numeri. | Pannello report-raccolta invariato (FAU_00=1.71); test verdi |
-| **2** | `stats_reader.get_produzione_istanze()`: sostituire il campo `prod_unificata` con report-based (rolling 24h). | Pannelli `/ui` mostrano FAU_00 sano; altri campi invariati |
-| **3** | `daily_report._section_produzione_rifugio` → report-based (modalità giorno). Aggiornare testo/HTML sezione. | Genera daily report di prova: FAU_00 sano, ranking coerente |
-| **4** | `tg_handlers_monitoring._build_produzione` → report-based (rolling 24h). | Output `/produzione` sano |
+| Step | Contenuto | Validazione | Stato |
+|---|---|---|---|
+| **1** | Creare `shared/produzione_report.py` (funzione canonica) + unit test. Rifattorizzare `get_produzione_unificata()` (WU203) per usarla — **dedup**, stessi numeri. | Pannello report-raccolta invariato (FAU_00=1.71); test verdi | ✅ `8efb7d2` |
+| **2** | `stats_reader.get_produzione_istanze()`: sostituire il campo `prod_unificata` con report-based (rolling 24h). | Pannelli `/ui` FAU_00 209→1.71; altri campi invariati | ✅ `07867c7` |
+| **3** | `daily_report._section_produzione_rifugio` → report-based (modalità giorno). Aggiornare testo/HTML sezione. | Render prova 12/07: FAU_00 209→2.04 M/h, 0 anomalie, label "raccolte" | ✅ `055297e` |
+| **4** | `tg_handlers_monitoring._build_produzione` → report-based (rolling 24h). | `/produzione` FAU_00 209→2.05 M/h; +fix bug glob file `_timing` | ✅ `12ed89b` |
+
+**WU204 COMPLETATO** (13/07). Effetto ai prossimi riavvii: dashboard (step 1-2)
+e bot (step 3-4, daily report + telegram). Metrica castello non rimossa.
+
+### Residui noti (fuori scope, candidati futuri)
+- `stats_reader.get_produzione_storico_24h` → **sparkline farm** (trend orario
+  aggregato in sidebar), ancora castello (`produzione_oraria`): può mostrare un
+  picco dalla sessione rifornimento. Farm-level, non per-istanza.
+- Bug alla radice: `rifornimento_inviato`/`storico_farm.json` registrano il cap
+  di config (999M) invece dell'importo reale spedito — in `tasks/rifornimento`.
+  Rende sporca la metrica castello (ancora usata da telemetria/trend) e la sez 3
+  "inviato al master" del daily report.
 
 ### Rollback
 Ogni step è un commit isolato → `git revert` del singolo step. La funzione
