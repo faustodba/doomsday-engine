@@ -37,12 +37,18 @@ Il pattern per-istanza esiste già (`_ovr(key, fallback)` in
 
 ## 3. Piano step-by-step (con validazione, come WU204)
 
-| Step | Contenuto | Validazione |
+| Step | Contenuto | Stato |
 |---|---|---|
-| **1** | `config_loader._InstanceCfg`: `ALLOCAZIONE_*` da override per-istanza (normalizzato) con fallback globale + unit test. | Istanza con override → sue frazioni; senza → globale invariato |
-| **2** | `dashboard/models.py::IstanzaOverride`: campo `allocazione: Optional[AllocazioneOverride]`. Verifica che il save per-istanza lo persista su runtime_overrides. | Round-trip save/read di un'istanza con allocazione |
-| **3** | Reader `get_allocazione_istanze()` → per-istanza `{risorse %, is_override}` (override o globale) per la matrice. | Su dati prod: istanze correnti tutte "globale" |
-| **4** | **UI matrice** (Variante A): endpoint `/ui/partial/allocazione-raccolta` + template (input % per cella + barra 100% + totale + salva per riga) + link nav. Save via PATCH per-istanza. | Render + save di prova su un'istanza, riletto correttamente |
+| **1** | `config_loader._InstanceCfg`: `ALLOCAZIONE_*` da override per-istanza (normalizzato) con fallback globale + unit test. | ✅ `a3ee410` (7 test) |
+| **2** | `IstanzaOverride.allocazione` + whitelist `patch_istanza` + merge-safe. | ✅ `e41e4b7` (10 test) |
+| **3** | Reader `config_manager.get_allocazione_istanze()`. | ✅ `1f8d11b` |
+| **4** | **UI matrice** (Variante A) in `/ui/raccolta`: endpoint + template (input % + barra mix + totale + salva/reset per riga) via PATCH per-istanza. | ✅ `1f8d11b` |
+
+**WU205 COMPLETATO** (13/07). Validato end-to-end su dati prod: render 12
+istanze (tutte "globale" = retrocompat), PATCH custom → persiste + badge, reset
+→ globale. Effetto al prossimo tick raccolta (nessun riavvio bot necessario,
+`runtime_overrides` riletto a inizio ciclo). **Fase 2 opzionale** (non fatta):
+barra read-only compatta nella card HOME (Variante C).
 
 Ogni step: commit isolato + sync + validazione. Nessun riavvio necessario per
 il salvataggio config (il bot rilegge `runtime_overrides` a inizio ciclo, come
