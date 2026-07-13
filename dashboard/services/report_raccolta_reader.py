@@ -21,7 +21,7 @@ from __future__ import annotations
 import json
 import os
 import statistics
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -276,53 +276,89 @@ def get_stima_matrice() -> dict:
 
 _RISORSE = ("pomodoro", "legno", "acciaio", "petrolio")
 
+# WU200 finalità 2 (13/07) — produzione oraria unificata DAL TAB REPORT.
+# Pesi pom-equivalente (coerenti con shared/prod_unificata.py::PESI) e mapping
+# dai nomi-nodo del report (campo/segheria) ai nomi-risorsa (pomodoro/legno).
+_PESI_PROD = {"pomodoro": 1.0, "legno": 1.0, "acciaio": 2.0, "petrolio": 5.0}
+_TIPO2RISORSA = {"campo": "pomodoro", "segheria": "legno",
+                 "acciaio": "acciaio", "petrolio": "petrolio"}
+_PROD_WINDOW_H = 24.0
+
 
 def get_produzione_unificata() -> dict:
-    """Produzione oraria unificata (pom-eq) per istanza e per tipo di
-    risorsa, e totale farm — riusa la stessa metrica già in produzione su
-    /ui (get_produzione_istanze -> shared/prod_unificata.py): finestra
-    fissa 24h su produzione_storico (sessioni chiuse), pesi
-    {pomodoro:1, legno:1, acciaio:2, petrolio:5}. Master esclusa
-    (produzione_qty include risorse ricevute da alleati via rifornimento,
-    non produzione interna castello) — stessa convenzione di
-    get_risorse_farm()/prod_unif_agg in dashboard/app.py.
+    """Produzione oraria unificata (pom-eq) per istanza, per tipo di risorsa e
+    totale farm, calcolata DAL TAB REPORT (WU200 finalità 2, 13/07).
 
-    prod_unif_h è già una velocità oraria (Σpom_eq nella finestra 24h / 24)
-    nonostante il nome storico — non richiede ulteriore normalizzazione."""
-    from dashboard.services.stats_reader import get_produzione_istanze
+    Somma le quantità REALMENTE raccolte dai nodi
+    (report_raccolta_dataset.jsonl::quantita_totale) nelle ultime
+    _PROD_WINDOW_H ore per (istanza, risorsa), pesate {pomodoro:1, legno:1,
+    acciaio:2, petrolio:5}, e le normalizza a velocità oraria (Σ / finestra).
 
-    dati = get_produzione_istanze(include_master=False)
+    Perché dal report e non da produzione_storico: la metrica delta-castello
+    (compute_from_storico) somma `rifornimento_inviato` e sottrae `zaino_delta`,
+    ed è quindi esposta ad anomalie enormi quando una spedizione di rifornimento
+    o uno svuotamento zaino attraversa il deposito (es. FAU_00 = 209 M/h per un
+    rifornimento_inviato di 999M petrolio pari al cap di config). Il report
+    misura la resa diretta dei nodi raccolti → immune a rifornimento/zaino/OCR
+    castello. Master (FauMorfeus) esclusa dagli aggregati.
+
+    Struttura di ritorno invariata (endpoint/template non cambiano)."""
+    from shared.instance_meta import is_master_instance
+
+    rows = _load_jsonl(_PATH_REPORT)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=_PROD_WINDOW_H)
+
+    agg: dict[str, dict[str, float]] = {}
+    for r in rows:
+        tr = r.get("ts_raccolta")
+        if not tr:
+            continue
+        try:
+            t = datetime.fromisoformat(tr)
+        except Exception:
+            continue
+        if t < cutoff:
+            continue
+        ris = _TIPO2RISORSA.get(r.get("tipo"))
+        inst = r.get("instance")
+        q = r.get("quantita_totale")
+        if not inst or not ris or not isinstance(q, (int, float)):
+            continue
+        agg.setdefault(inst, {})[ris] = agg.setdefault(inst, {}).get(ris, 0.0) + float(q)
+
+    # Colonne: tutte le istanze ordinarie note (config) + eventuali presenti nel
+    # report, master esclusa. Istanze senza raccolte nella finestra → 0.
+    try:
+        from dashboard.services.config_manager import get_instances
+        nomi_cfg = [i.get("nome") for i in (get_instances() or []) if i.get("nome")]
+    except Exception:
+        nomi_cfg = []
+    istanze = sorted(set(nomi_cfg) | set(agg.keys()))
 
     per_istanza: list[dict] = []
-    tot_pom_eq = 0
-    tot_per_risorsa: dict[str, dict] = {r: {"qta_tot": 0, "pom_eq": 0} for r in _RISORSE}
-
-    for entry in dati:
-        pu = entry.get("prod_unificata") or {}
-        pom_eq_tot = int(pu.get("pom_eq_totale", 0) or 0)
-        per_r_raw = pu.get("per_risorsa") or {}
+    tot_qta: dict[str, float] = {r: 0.0 for r in _RISORSE}
+    for inst in istanze:
+        if is_master_instance(inst):
+            continue
+        a = agg.get(inst, {})
         per_r: dict[str, dict] = {}
+        pom_eq = 0.0
         for r in _RISORSE:
-            v = per_r_raw.get(r) or {}
-            qta = int(v.get("qta_tot", 0) or 0)
-            pe = int(v.get("pom_eq", 0) or 0)
-            per_r[r] = {"qta_h": qta / 24.0}
-            tot_per_risorsa[r]["qta_tot"] += qta
-            tot_per_risorsa[r]["pom_eq"] += pe
-        prod_unif_h = float(pu.get("prod_unif_h", -1.0) or -1.0)
+            q = a.get(r, 0.0)
+            per_r[r] = {"qta_h": q / _PROD_WINDOW_H}
+            tot_qta[r] += q
+            pom_eq += q * _PESI_PROD[r]
         per_istanza.append({
-            "nome":         entry.get("nome"),
-            "prod_unif_h":  prod_unif_h if prod_unif_h > 0 else 0.0,
-            "per_risorsa":  per_r,
+            "nome":        inst,
+            "prod_unif_h": pom_eq / _PROD_WINDOW_H / 1_000_000,
+            "per_risorsa": per_r,
         })
-        tot_pom_eq += pom_eq_tot
 
-    per_istanza.sort(key=lambda r: r["nome"] or "")
-
-    totale_prod_unif_h = tot_pom_eq / 24.0 / 1_000_000
+    totale_prod_unif_h = (sum(tot_qta[r] * _PESI_PROD[r] for r in _RISORSE)
+                          / _PROD_WINDOW_H / 1_000_000)
     totale_per_risorsa = {
-        r: {"qta_h": tot_per_risorsa[r]["qta_tot"] / 24.0,
-            "pom_eq_h": tot_per_risorsa[r]["pom_eq"] / 24.0 / 1_000_000}
+        r: {"qta_h":    tot_qta[r] / _PROD_WINDOW_H,
+            "pom_eq_h": tot_qta[r] * _PESI_PROD[r] / _PROD_WINDOW_H / 1_000_000}
         for r in _RISORSE
     }
 
