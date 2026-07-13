@@ -53,6 +53,26 @@
     <div class="divider"></div>
 
     <!-- ──────────────────────────────────────────────────────
+         SEZIONE 2b — BACKTEST STATICO vs EMPIRICO (WU202)
+         ────────────────────────────────────────────────────── -->
+    <div class="section">
+      <div class="sec-label">📈 backtest T_marcia · statico vs empirico (finestra pulita che cresce → cutover)</div>
+      <div id="backtest-empirico"
+           hx-get="{{ url_prefix }}/ui/partial/backtest-empirico"
+           hx-trigger="load, every 120s"
+           hx-swap="innerHTML">
+        <div class="tel-grid">
+          <div class="tel-card tel-full">
+            <div class="tel-head">caricamento backtest…</div>
+            <div style="padding:14px;color:var(--text-dim);font-size:12px">…</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <!-- ──────────────────────────────────────────────────────
          SEZIONE 2 — CYCLE DURATION PREDICTOR
          ────────────────────────────────────────────────────── -->
     <div class="section">

@@ -319,67 +319,62 @@ def _tempo_raccolta_empirico_attivo() -> bool:
     return val
 
 
-def _calc_t_marcia_min(invio: dict, istanza: str) -> Optional[float]:
-    """
-    Stima T_marcia totale (andata + raccolta + ritorno) in minuti per 1 invio.
+def _calc_t_marcia_static(invio: dict, istanza: str) -> Optional[float]:
+    """Formula STATICA T_marcia (andata + raccolta + ritorno) in minuti, senza
+    dipendere da alcun flag:
+        T_marcia = 2 × eta_marcia_min + (saturazione × T_L_max[livello, istanza]) × coef
+        saturazione = min(1, load_squadra / CAP_NOMINALE[tipo, livello])
+    WU168 (19/06) — `coef` (calibrazione closed-loop, proposta B 08/05) applicato
+    SOLO al termine di raccolta. Ritorna None se livello o load_squadra mancanti.
 
-    WU200 Fase B (12/07) — TIERED, flag-gated:
-
-      1. PRIMARIO (se flag `tempo_raccolta_empirico_enabled` ON e cella con
-         abbastanza campioni): misura empirica diretta dalle durate reali
-         invio→completamento (shared/tempo_raccolta_estimator.stima_tempo_raccolta).
-         `durata_s` = andata + raccolta reale (il report è emesso a raccolta
-         completata); lo slot si libera al RIENTRO squadra, quindi
-         T_marcia = durata_s + eta_ritorno (~eta). Non richiede load_squadra:
-         copre anche invii pre-WU116 dove la formula statica ritorna None.
-
-      2. FALLBACK (flag OFF, oppure cella sotto soglia → stima_tempo_raccolta
-         None): formula statica invariata
-         T_marcia = 2 × eta_marcia_min + (saturazione × T_L_max[livello, istanza]) × coef
-         WU168 (19/06) — `coef` (calibrazione closed-loop, proposta B 08/05)
-         applicato SOLO al termine di raccolta. Default 1.0 se pochi samples.
-
-    Con flag OFF il risultato è byte-identico alla versione pre-Fase B:
-    None se livello<1 o load_squadra<=0, altrimenti la formula statica.
-
-    Ritorna None se dati insufficienti (livello mancante, oppure fallback con
-    load_squadra mancante).
-    """
+    Estratta da `_calc_t_marcia_min` (WU202) per permettere al backtest
+    (`tools/predictor_backtest_empirico`) di calcolare la stima statica in modo
+    deterministico e THREAD-SAFE (senza monkeypatch del flag, che nel processo
+    dashboard produrrebbe una race col preview scheduler live)."""
     livello = int(invio.get("livello", -1))
     tipo    = invio.get("tipo", "")
-    eta_s   = int(invio.get("eta_marcia_s", 0) or 0)
-    eta_min = eta_s / 60.0
+    eta_min = int(invio.get("eta_marcia_s", 0) or 0) / 60.0
     if livello < 1:
         return None
-
-    # 1. PRIMARIO — misura empirica diretta (flag-gated)
-    if tipo and _tempo_raccolta_empirico_attivo():
-        try:
-            from shared.tempo_raccolta_estimator import stima_tempo_raccolta
-            t_emp_s = stima_tempo_raccolta(istanza, tipo, livello)
-        except Exception:
-            t_emp_s = None
-        if t_emp_s is not None:
-            return t_emp_s / 60.0 + eta_min   # durata_s + eta_ritorno
-
-    # 2. FALLBACK — formula statica (richiede load_squadra)
     load = int(invio.get("load_squadra", -1))
     if load <= 0:
         return None
     cap = CAP_NOMINALE.get((tipo, livello))
     if not cap or cap <= 0:
         return None
-    saturazione = min(1.0, load / cap)
-    t_l_max = _get_t_l_max_min(istanza, livello)
-    raccolta_min = saturazione * t_l_max
-    # Calibrazione closed-loop (proposta B 08/05) — solo sul termine di raccolta
+    raccolta_min = min(1.0, load / cap) * _get_t_l_max_min(istanza, livello)
     try:
         from core.t_marcia_calibration import get_calibration_coef
-        coef = get_calibration_coef(istanza, livello)
-        raccolta_min *= coef
+        raccolta_min *= get_calibration_coef(istanza, livello)
     except Exception:
         pass
     return 2 * eta_min + raccolta_min
+
+
+def _calc_t_marcia_min(invio: dict, istanza: str) -> Optional[float]:
+    """Stima T_marcia (andata + raccolta + ritorno) in minuti per 1 invio.
+
+    WU200 Fase B (12/07) — TIERED, flag-gated:
+      1. PRIMARIO (flag `tempo_raccolta_empirico_enabled` ON + cella con dati):
+         misura empirica diretta `durata_s + eta_ritorno`
+         (shared/tempo_raccolta_estimator.stima_tempo_raccolta). Non richiede
+         load_squadra: copre anche invii pre-WU116 dove lo statico è None.
+      2. FALLBACK (flag OFF, o cella sotto soglia): `_calc_t_marcia_static`.
+
+    Con flag OFF il risultato è byte-identico alla versione pre-Fase B.
+    """
+    livello = int(invio.get("livello", -1))
+    tipo    = invio.get("tipo", "")
+    if livello >= 1 and tipo and _tempo_raccolta_empirico_attivo():
+        try:
+            from shared.tempo_raccolta_estimator import stima_tempo_raccolta
+            t_emp_s = stima_tempo_raccolta(istanza, tipo, livello)
+        except Exception:
+            t_emp_s = None
+        if t_emp_s is not None:
+            eta_min = int(invio.get("eta_marcia_s", 0) or 0) / 60.0
+            return t_emp_s / 60.0 + eta_min   # durata_s + eta_ritorno
+    return _calc_t_marcia_static(invio, istanza)
 
 
 def _predict_gap_minutes() -> float:
