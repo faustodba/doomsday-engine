@@ -358,58 +358,65 @@ def _build_rifornimento() -> str:
 
 
 def _build_produzione() -> str:
+    # WU204 step 4: produzione unificata REPORT-based (resa reale dei nodi dal
+    # Tab Report), non più delta-based da produzione_storico (metrica castello
+    # gonfiata da rifornimento/zaino — es. FAU_00 = 209 M/h per un
+    # rifornimento_inviato pari al cap di config).
     try:
-        from shared.prod_unificata import compute_from_storico, empty_result as _pu_empty
+        from shared.produzione_report import produzione_per_istanza, PESI, RISORSE
     except Exception as exc:
-        return f"⚠ prod_unificata non disponibile: {exc}"
+        return f"⚠ produzione_report non disponibile: {exc}"
 
-    state_dir = _root() / "state"
     _RICO = {"pomodoro": "🍅", "legno": "🪵", "acciaio": "⚙", "petrolio": "🛢"}
+    prod = produzione_per_istanza(window_h=24.0).get("per_istanza", {})
 
-    rows: list[tuple[str, dict]] = []
-    farm_pom_eq = 0
-
-    for fp in sorted(state_dir.glob("FAU_*.json")):
-        nome    = fp.stem
-        d       = _read_state(nome)
-        storico = d.get("produzione_storico") or []
-        valido  = [s for s in storico if s.get("produzione_qty")]
-        pu      = compute_from_storico(valido) if valido else _pu_empty()
-        rows.append((nome, pu))
-        if pu["prod_unif_h"] > 0:
-            farm_pom_eq += pu["pom_eq_totale"]
-
-    if not rows:
+    # Set istanze: FAU_NN con state (master + file *_timing esclusi), fallback
+    # al report (senza master) se non ci sono file state.
+    state_dir = _root() / "state"
+    nomi = sorted(fp.stem for fp in state_dir.glob("FAU_*.json") if fp.stem[4:].isdigit())
+    if not nomi:
+        try:
+            from shared.instance_meta import is_master_instance
+        except Exception:
+            is_master_instance = lambda x: x == "FauMorfeus"
+        nomi = sorted(n for n in prod.keys() if not is_master_instance(n))
+    if not nomi:
         return "⚠ Nessun dato produzione disponibile"
 
+    rows: list[tuple[str, dict | None]] = [(n, prod.get(n)) for n in nomi]
+    farm_qta = {r: 0.0 for r in RISORSE}
+    for _n, p in rows:
+        if p:
+            for r in RISORSE:
+                farm_qta[r] += p["risorse"].get(r, 0.0)
+    farm_pom_eq = sum(farm_qta[r] * PESI[r] for r in RISORSE)
     farm_h = round(farm_pom_eq / 24.0 / 1_000_000, 2) if farm_pom_eq > 0 else -1.0
-    rows.sort(key=lambda x: x[1]["prod_unif_h"], reverse=True)
 
-    lines: list[str] = ["<b>📊 Produzione unificata — 24h</b>", ""]
-    for nome, pu in rows:
-        h  = pu["prod_unif_h"]
-        ns = pu.get("n_sessioni", pu.get("n_sped", 0))
-        pr = pu.get("per_risorsa") or {}
-        if h > 0:
+    rows.sort(key=lambda x: (x[1]["pom_eq_h"] if x[1] else -1.0), reverse=True)
+
+    lines: list[str] = ["<b>📊 Produzione unificata — 24h (dal Tab Report)</b>", ""]
+    for nome, p in rows:
+        h = p["pom_eq_h"] if p else 0.0
+        if p and h > 0:
             det = "  ".join(
-                f"{_RICO.get(r,'?')}{pr[r]['qta_tot'] / 1e6:.1f}M"
-                for r in ("pomodoro", "legno", "acciaio", "petrolio")
-                if r in pr and pr[r].get("qta_tot", 0) > 0
+                f"{_RICO.get(r,'?')}{p['risorse'][r] / 1e6:.1f}M"
+                for r in RISORSE
+                if p["risorse"].get(r, 0) > 0
             )
             lines.append(
                 f"<code>{nome:12s}</code> <b>{h:.2f}</b> M/h"
                 + (f"  <i>({det})</i>" if det else "")
-                + f"  [{ns}s]"
+                + f"  [{p.get('n_report', 0)} racc]"
             )
         else:
-            lines.append(f"<code>{nome:12s}</code> —  (nessuna sessione)")
+            lines.append(f"<code>{nome:12s}</code> —  (nessuna raccolta)")
 
     lines.append("")
     if farm_h >= 0:
         lines.append(f"<b>Farm totale: {farm_h:.2f} M pom-eq/h</b>")
     else:
         lines.append("Farm totale: nessun dato")
-    lines.append("<i>🍅×1 🪵×1 ⚙×2 🛢×5 · delta deposito 24h</i>")
+    lines.append("<i>🍅×1 🪵×1 ⚙×2 🛢×5 · resa raccolta dal Tab Report · 24h</i>")
 
     return "\n".join(lines)
 
