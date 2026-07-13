@@ -78,3 +78,48 @@ def test_istanze_diverse_target_diversi():
                                                  "petrolio": 10, "acciaio": 10}})
     assert _alloc(c_petr) == (0.1, 0.1, 0.7, 0.1)
     assert _alloc(c_bulk) == (0.4, 0.4, 0.1, 0.1)
+
+
+# ── Step 2: schema IstanzaOverride + persistenza runtime_overrides ────────────
+
+def test_round_trip_runtime_overrides(tmp_path):
+    """Save→load di runtime_overrides con allocazione per-istanza + risoluzione
+    config_loader dal dict serializzato (end-to-end schema → bot)."""
+    from dashboard.models import RuntimeOverrides, IstanzaOverride, AllocazioneOverride
+    ov = RuntimeOverrides()
+    ov.istanze["FAU_00"] = IstanzaOverride(
+        allocazione=AllocazioneOverride(pomodoro=10, legno=10, petrolio=70, acciaio=10))
+    p = tmp_path / "runtime_overrides.json"
+    ov.save(p)
+
+    ov2 = RuntimeOverrides.load(p)
+    a = ov2.istanze["FAU_00"].allocazione
+    assert a is not None and a.petrolio == 70
+
+    ovr_dict = ov2.istanze["FAU_00"].model_dump(exclude_none=True)
+    c = build_instance_cfg({"nome": "FAU_00"}, _gcfg(), ovr_dict)
+    assert _alloc(c) == (0.1, 0.1, 0.7, 0.1)
+
+
+def test_istanza_senza_allocazione_omessa_dal_json(tmp_path):
+    """allocazione None → esclusa dal JSON (exclude_none) → fallback globale."""
+    import json
+    from dashboard.models import RuntimeOverrides, IstanzaOverride
+    ov = RuntimeOverrides()
+    ov.istanze["FAU_00"] = IstanzaOverride(abilitata=True)
+    p = tmp_path / "runtime_overrides.json"
+    ov.save(p)
+    d = json.loads(p.read_text(encoding="utf-8"))
+    assert "allocazione" not in d["istanze"]["FAU_00"]
+
+
+def test_merge_patch_preserva_allocazione():
+    """Bug-class WU199: patchare un ALTRO campo (via il merge di patch_istanza)
+    NON deve perdere l'allocazione esistente."""
+    from dashboard.models import IstanzaOverride, AllocazioneOverride
+    current = IstanzaOverride(
+        allocazione=AllocazioneOverride(pomodoro=10, legno=10, petrolio=70, acciaio=10))
+    current_dict = current.model_dump()     # include allocazione
+    current_dict["abilitata"] = False       # patch di un altro campo (whitelist)
+    new = IstanzaOverride.model_validate(current_dict)
+    assert new.allocazione is not None and new.allocazione.petrolio == 70

@@ -369,6 +369,11 @@ class IstanzaOverride(BaseModel):
     master:       bool                    = False
     # 06/05 — override TruppeTask per istanza (caserme on/off, completo)
     truppe_override: Optional[TruppeIstanzaOverride] = None
+    # WU205 — allocazione raccolta per-istanza (percentuali). None = usa il
+    # globale raccolta.allocazione. Il bot (config_loader._InstanceCfg)
+    # normalizza a frazioni somma=1. NB: campo necessario qui, altrimenti un
+    # save dashboard lo perderebbe silenziosamente (bug-class WU199/WU102).
+    allocazione: Optional[AllocazioneOverride] = None
 
 
 # ==============================================================================

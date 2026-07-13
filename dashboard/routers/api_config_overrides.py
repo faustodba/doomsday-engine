@@ -688,8 +688,11 @@ def patch_istanza(nome: str, data: dict):
     current_dict = current.model_dump()
 
     # 08/05: rimosso 'layout' (deprecato WU22)
+    # WU205: `allocazione` (dict {pomodoro,legno,petrolio,acciaio} %) per la
+    # matrice allocazione per-istanza. `None` = reset al globale.
     allowed = {"abilitata", "truppe", "tipologia", "fascia_oraria",
-               "max_squadre", "livello", "raccolta_fuori_territorio"}
+               "max_squadre", "livello", "raccolta_fuori_territorio",
+               "allocazione"}
     for k, v in data.items():
         if k in allowed:
             current_dict[k] = v
