@@ -1,75 +1,54 @@
 {# 08/05 — Adaptive Scheduler — pannello simulazione ordine pianificato.
    Endpoint: /ui/partial/adaptive-scheduler-preview  (refresh ogni 30s)
-
    Layout uniforme col resto della pagina (tel-card · tel-head · tel-foot).
+   WU206 (13/07) — riordinato: ORDINE DI ESECUZIONE (persisted, ciclo in volo)
+   in cima, poi l'ordine calcolato adesso, poi il confronto empirico/statico.
 #}
 {% set live = data.ordine_live %}
 {% set persisted = data.ordine_persisted %}
 
 <div class="tel-grid">
 
-  <!-- Card 0: confronto tempo raccolta empirico vs statico (WU200ter/WU202, shadow) -->
-  {% set ns = namespace(n=0) %}
-  {% for r in live %}
-    {% for c in (r.get('confronto_tempo_raccolta') or []) %}{% set ns.n = ns.n + 1 %}{% endfor %}
-  {% endfor %}
+  {# ── Card A: ORDINE DI ESECUZIONE (ciclo in volo) — PRIMA, con avanzamento ── #}
+  {% if persisted %}
   <div class="tel-card tel-full">
     <div class="tel-head">
-      📊 confronto tempo raccolta · empirico vs statico
-      <span style="float:right;font-weight:400;font-size:11px;color:var(--text-dim)">
-        osservativo · {{ ns.n }} marce con dato empirico
+      📌 ordine di esecuzione · ciclo in volo
+      <span style="float:right;font-weight:400;color:var(--text-dim);font-size:11px">
+        TTL 4h · saved {{ persisted.get('ts_saved','')[:19] }}
       </span>
     </div>
-    <div style="padding:8px 14px">
-      {% if ns.n > 0 %}
-      <div style="overflow-x:auto">
-      <table style="width:100%;font-size:11px;border-collapse:collapse">
-        <thead>
-          <tr style="border-bottom:1px solid var(--border);color:var(--text-dim)">
-            <th style="padding:5px 6px;text-align:left">istanza</th>
-            <th style="padding:5px 6px;text-align:left">tipo·liv</th>
-            <th style="padding:5px 6px;text-align:right" title="modello statico attuale (T_marcia predittore)">statico</th>
-            <th style="padding:5px 6px;text-align:right" title="misura empirica reale (durata invio→completamento + eta)">empirico</th>
-            <th style="padding:5px 6px;text-align:right" title="empirico − statico (Δ>0 = reale più lento del previsto)">Δ min</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in live %}
-            {% for c in (r.get('confronto_tempo_raccolta') or []) %}
-            <tr style="border-bottom:1px solid var(--border)">
-              <td style="padding:4px 6px;font-family:var(--font-mono)">{{ r.ist }}</td>
-              <td style="padding:4px 6px;font-family:var(--font-mono);color:var(--text-dim)">{{ c.tipo[:4] }}·{{ c.livello }}</td>
-              <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono)">{{ "%.1f"|format(c.t_det_min) }}</td>
-              <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono)">{{ "%.1f"|format(c.t_emp_min) }}</td>
-              {% set d = c.diff_min %}
-              <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono)
-                         {% if d > 5 %};color:#c00;font-weight:600{% elif d < -5 %};color:#0066cc{% else %};color:#0a8000{% endif %}">
-                {{ "%+.1f"|format(d) }}
-              </td>
-            </tr>
-            {% endfor %}
-          {% endfor %}
-        </tbody>
-      </table>
+    <div style="padding:10px 14px">
+      <div style="font-family:var(--font-mono);font-size:13px;line-height:1.9">
+        {% set comp = (persisted.get('completate') or []) %}
+        {% for item in (persisted.get('ordine') or []) %}
+          {% set nome = item.get('ist','') %}
+          {% if nome in comp %}
+            <span style="color:var(--text-dim);text-decoration:line-through">{{ nome }}</span>
+          {% else %}
+            <span style="color:var(--text)">{{ nome }}</span>
+          {% endif %}
+          {% if not loop.last %} <span style="color:var(--text-dim)">→</span> {% endif %}
+        {% endfor %}
       </div>
-      {% else %}
-      <div style="padding:8px;color:var(--text-dim);font-size:11px">
-        nessun confronto disponibile ora — richiede istanze con raccoglitori in
-        volo su celle (istanza,tipo,livello) che abbiano già ≥3 campioni
-        empirici nel dataset. Compare man mano che le marce attive ricadono su
-        celle misurate (dati in <code>/ui/report-raccolta</code>).
-      </div>
-      {% endif %}
     </div>
     <div class="tel-foot">
-      statico = modello T_marcia del predictor · empirico = mediana reale
-      invio→completamento + eta · Δ&gt;0 = il reale è più lento del previsto.
-      <b>Solo osservazione</b>: non influenza lo scheduling finché il toggle
-      «tempo raccolta empirico» resta OFF (WU202 Fase B).
+      <b>{{ comp | length }}/{{ (persisted.get('ordine') or []) | length }}</b> completate ·
+      <span style="text-decoration:line-through">barrate</span> = già processate ·
+      reasons: {{ (persisted.get('reasons') or []) | join(', ') or '—' }}
     </div>
   </div>
+  {% else %}
+  <div class="tel-card tel-full">
+    <div class="tel-head">📌 ordine di esecuzione · ciclo in volo</div>
+    <div style="padding:12px 14px;color:var(--text-dim);font-size:12px">
+      nessun ordine persisted per il ciclo corrente (scheduler non attivo, o tra
+      un ciclo e l'altro). L'ordine calcolato adesso è qui sotto.
+    </div>
+  </div>
+  {% endif %}
 
-  <!-- Card 1: ordine LIVE -->
+  {# ── Card B: ordine LIVE (calcolato adesso, greedy) ── #}
   <div class="tel-card tel-full">
     <div class="tel-head">
       🧮 ordine calcolato adesso
@@ -156,35 +135,62 @@
     </div>
   </div>
 
-  {% if persisted %}
-  <!-- Card 2: ordine PERSISTED (ciclo in volo) -->
+  {# ── Card C: confronto tempo raccolta empirico vs statico (osservativo) ── #}
+  {% set ns = namespace(n=0) %}
+  {% for r in live %}
+    {% for c in (r.get('confronto_tempo_raccolta') or []) %}{% set ns.n = ns.n + 1 %}{% endfor %}
+  {% endfor %}
   <div class="tel-card tel-full">
     <div class="tel-head">
-      📌 ordine persisted (ciclo in volo)
-      <span style="float:right;font-weight:400;color:var(--text-dim);font-size:11px">
-        TTL 4h · saved {{ persisted.get('ts_saved','')[:19] }}
+      📊 confronto tempo raccolta · empirico vs statico
+      <span style="float:right;font-weight:400;font-size:11px;color:var(--text-dim)">
+        osservativo · {{ ns.n }} marce con dato empirico
       </span>
     </div>
-    <div style="padding:10px 14px">
-      <div style="font-family:var(--font-mono);font-size:11px;line-height:1.7">
-        {% set comp = (persisted.get('completate') or []) %}
-        {% for item in (persisted.get('ordine') or []) %}
-          {% set nome = item.get('ist','') %}
-          {% if nome in comp %}
-            <span style="color:var(--text-dim);text-decoration:line-through">{{ nome }}</span>
-          {% else %}
-            <span>{{ nome }}</span>
-          {% endif %}
-          {% if not loop.last %} → {% endif %}
-        {% endfor %}
+    <div style="padding:8px 14px">
+      {% if ns.n > 0 %}
+      <div style="overflow-x:auto">
+      <table style="width:100%;font-size:11px;border-collapse:collapse">
+        <thead>
+          <tr style="border-bottom:1px solid var(--border);color:var(--text-dim)">
+            <th style="padding:5px 6px;text-align:left">istanza</th>
+            <th style="padding:5px 6px;text-align:left">tipo·liv</th>
+            <th style="padding:5px 6px;text-align:right" title="modello statico attuale (T_marcia predittore)">statico</th>
+            <th style="padding:5px 6px;text-align:right" title="misura empirica reale (durata invio→completamento + eta)">empirico</th>
+            <th style="padding:5px 6px;text-align:right" title="empirico − statico (Δ>0 = reale più lento del previsto)">Δ min</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for r in live %}
+            {% for c in (r.get('confronto_tempo_raccolta') or []) %}
+            <tr style="border-bottom:1px solid var(--border)">
+              <td style="padding:4px 6px;font-family:var(--font-mono)">{{ r.ist }}</td>
+              <td style="padding:4px 6px;font-family:var(--font-mono);color:var(--text-dim)">{{ c.tipo[:4] }}·{{ c.livello }}</td>
+              <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono)">{{ "%.1f"|format(c.t_det_min) }}</td>
+              <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono)">{{ "%.1f"|format(c.t_emp_min) }}</td>
+              {% set d = c.diff_min %}
+              <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono)
+                         {% if d > 5 %};color:#c00;font-weight:600{% elif d < -5 %};color:#0066cc{% else %};color:#0a8000{% endif %}">
+                {{ "%+.1f"|format(d) }}
+              </td>
+            </tr>
+            {% endfor %}
+          {% endfor %}
+        </tbody>
+      </table>
       </div>
+      {% else %}
+      <div style="padding:8px;color:var(--text-dim);font-size:11px">
+        nessun confronto disponibile ora — richiede istanze con raccoglitori in
+        volo su celle (istanza,tipo,livello) che abbiano già ≥3 campioni
+        empirici nel dataset.
+      </div>
+      {% endif %}
     </div>
     <div class="tel-foot">
-      {{ comp | length }}/{{ (persisted.get('ordine') or []) | length }} completate ·
-      barrate = già processate ·
-      reasons: {{ (persisted.get('reasons') or []) | join(', ') or '—' }}
+      statico = modello T_marcia del predictor · empirico = mediana reale
+      invio→completamento + eta · Δ&gt;0 = il reale è più lento del previsto.
     </div>
   </div>
-  {% endif %}
 
 </div>
