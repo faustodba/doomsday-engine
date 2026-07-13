@@ -209,8 +209,8 @@ fonte). Verifica prod: FAU_10 campo L6=2h29m → L7 via proporzione = 2h44m
 | Fase | Contenuto | Rollback |
 |---|---|---|
 | **A** ✅ fatta | WU200ter: confronto osservativo in `compute_slot_liberi_atteso`. | — |
-| **B — swap flag-gated** ✅ **implementata 12/07 (WU202)** | `_calc_t_marcia_min` tiered + flag `tempo_raccolta_empirico_enabled` OFF (no-op, bot identico) + fix `durata_s + eta` nel confronto + cache mtime sul dataset. **Resta da fare (utente)**: attivare shadow → LIVE pilota (FAU_00 allineato + FAU_02 lento) → estendere a tutte. | Flag OFF = ritorno immediato allo statico. |
-| **C — cleanup** | Dopo N giorni LIVE stabile: rimuovi chiamata a `t_marcia_calibration`, elimina modulo + rimuovi `predictor_t_l_calibration.json` dai target retention. Declassa `predictor_t_l_max.json` a fallback ultimo (commento esplicito). | Il fallback statico resta nel codice; ripristino calib = git revert. |
+| **B — swap flag-gated** ✅ implementata 12/07 (WU202) · **ATTIVATA 13/07** | `_calc_t_marcia_min` tiered + flag `tempo_raccolta_empirico_enabled` + fix `durata_s + eta` + cache mtime. Flag **ON in prod dal 13/07** (via PATCH `/api/adaptive-scheduler`, DYNAMIC+STATIC). Effettivo al riavvio bot (codice tiered). | Flag OFF = ritorno immediato allo statico. |
+| **C — cleanup / "empirico standard"** 📋 pianificata (§5.3.2) | Dopo N giorni LIVE stabile: collassare il flag (empirico non più opzionale), rimuovere `t_marcia_calibration` + file + retention, rimuovere UI di transizione (toggle, card confronto/backtest). Declassare `predictor_t_l_max.json` a fallback ultimo. | Fallback statico resta; ripristino = git revert. |
 | **D — futuro (non ora)** | Valutare scaling per load atipico (vedi rischi) e revisione blend `empirical_slot_predictor`. | — |
 
 ### 5.3.1 Fase B — implementata (WU202, 12/07)
@@ -235,6 +235,50 @@ Test: `tests/unit/test_calc_t_marcia_tiered.py` (6). Suite correlata 42/42.
 Con flag OFF: risultato byte-identico allo statico su tutte le celle
 (verificato nei test + baseline pytest 51 failure pre-esistenti invariate).
 
+### 5.3.2 Fase C — piano dettagliato: empirico standard + rimozioni (13/07)
+
+Direzione utente (13/07): «al tendere dovrà essere standard e non più a scelta
+questo tipo di modalità, ed elimineremo sia visivamente che funzionalmente
+alcuni elementi del predictor che non vengono più utilizzati».
+
+**Prerequisito (gate):** eseguire Fase C SOLO dopo che l'empirico è
+**effettivamente LIVE** (bot ripartito col codice tiered) e **stabile** per
+qualche giorno — backtest finestra pulita che regge (empirico ≤ statico con n
+che cresce) e zero regressioni sui cicli reali. Fino ad allora il toggle resta
+l'**interruttore di sicurezza**. NON rimuovere il flag prima.
+
+**🔴 Rimozioni funzionali (codice):**
+1. `core/t_marcia_calibration.py` — intero modulo (closed-loop `coef`): con
+   l'empirico primario, il `coef` moltiplica solo il ramo statico ormai raro;
+   già quasi inerte (5/21 coef ≠ 1.0, marginali). Rimuovere la chiamata in
+   `_calc_t_marcia_static`, il modulo, `data/predictor_t_l_calibration.json` e
+   il suo target in `_predictor_retention_loop`. Eventuale display dashboard.
+2. **Collasso del flag**: `_calc_t_marcia_min` diventa "empirico primario →
+   fallback statico" **senza gate**. Rimuovere `tempo_raccolta_empirico_enabled`
+   (`config_loader` dataclass+parse+whitelist, `global_config.json`,
+   `_read_tempo_raccolta_empirico_flag`/`_tempo_raccolta_empirico_attivo`, il
+   campo nel PATCH `api_adaptive_scheduler`, il toggle nella card).
+
+**🔴 Rimozioni visive (UI di transizione):**
+3. Toggle "tempo raccolta empirico" nella card adaptive scheduler.
+4. Card "confronto tempo raccolta" (empirico vs statico) in preview — strumento
+   di transizione. Il campo `confronto_tempo_raccolta` in
+   `compute_slot_liberi_atteso` può restare (leggero) o essere rimosso.
+5. Card "backtest statico vs empirico" + job `_backtest_empirico_loop` + tool —
+   servivano a DECIDERE il cutover. Valutare se tenere (monitoraggio continuo)
+   o rimuovere. Decisione a fine transizione.
+
+**🟢 Da NON rimuovere (rete di fallback):**
+- `_calc_t_marcia_static` + `config/predictor_t_l_max.json` (**declassare** a
+  fallback ultimo, commento esplicito) + `shared/cap_nodi_dataset.CAP_NOMINALE`
+  — servono per celle scarne (acciaio L6, livelli/tipi nuovi).
+- `core/empirical_slot_predictor.py` (blend, ortogonale), `core/cycle_duration_predictor.py`
+  (durata tick), `core/istanza_metrics.py` (logger).
+
+**Esecuzione:** step-by-step con validazione (come WU204), un commit isolato per
+rimozione, `git revert` per rollback. Da pianificare in dettaglio al momento
+dell'esecuzione (post-stabilizzazione).
+
 ### 5.4 Criterio di prontezza al go-live Fase B
 
 Al 12/07: 24/40 celle ≥3 campioni + fallback `(tipo,livello)` solido sui 4 tipi
@@ -252,11 +296,20 @@ ground truth `attive_pre` (OCR). **Metrica di decisione = MAE sulla "finestra
 pulita"** (arrivi ≥ `empirical_start`, senza look-ahead). Job 1×/die in
 dashboard (`_backtest_empirico_loop` → `data/predictions/backtest_empirico.json`)
 + card `/ui/predictor-istanze` che mostra la finestra crescere. **Criterio
-cutover: n≥150 e empirico stabilmente sotto lo statico.** Lettura 13/07:
-n=139, MAE statico 1.101 vs empirico 1.072 (+2.6%), bias empirico più
-bilanciato — segnale a favore ma **n<150, non ancora decisione-grade**.
-Impatto comunque bounded: l'empirico cambia la decisione solo in ~5% dei casi
-(dove però è nettamente più accurato: recent_flip MAE 1.18 vs 1.55).
+cutover: n≥150 e empirico stabilmente sotto lo statico.**
+
+Evoluzione finestra pulita (sempre a favore dell'empirico, segnale coerente):
+| data | n | MAE statico | MAE empirico | Δ |
+|---|---|---|---|---|
+| 13/07 mattina | 9-10 | 1.20 | 1.10 | +8% |
+| 13/07 (n=139) | 139 | 1.101 | 1.072 | +2.6% |
+| **13/07 (n=150)** | **150** | **1.087** | **1.047** | **+3.7%** ✅ |
+
+**Criterio raggiunto** al n=150: empirico MAE 1.047 < statico 1.087 (+3.7%),
+bias più bilanciato (−0.03 vs +0.09), e sui casi che cambiano davvero la
+decisione (recent_flip n=14) empirico nettamente meglio (MAE 1.14 vs 1.57,
++27%). Impatto complessivo comunque **bounded** (~5% delle decisioni cambiano).
+→ **Flag attivato in prod il 13/07** (Fase B ATTIVATA). Effettivo al riavvio bot.
 
 ---
 
