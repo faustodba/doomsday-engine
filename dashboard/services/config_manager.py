@@ -135,13 +135,18 @@ def get_allocazione_istanze() -> dict:
     Per ogni istanza: override runtime (`istanze.<nome>.allocazione`, %) se
     presente, altrimenti il globale (`raccolta.allocazione`, %).
 
+    WU205c — il "globale" (default) è la config **DYNAMIC-merged** (come la vede
+    il bot ad ogni tick: `merge_config` prioritizza `runtime_overrides.globali`
+    sullo static), non lo static puro. Coerente con la regola "config sempre su
+    dynamic" e col fallback del bot (`gcfg` costruito via merge_config in main.py).
+
     Ritorna: {
       "risorse": ["pomodoro","legno","petrolio","acciaio"],
       "globale": {risorsa: %},
       "istanze": [{"nome", "is_override": bool, "alloc": {risorsa: %}, "tot": %}],
     }
     """
-    gc = get_global_config()
+    gc = get_merged_config()
     glob_raw = (gc.get("raccolta") or {}).get("allocazione") or {}
     globale = {r: round(float(glob_raw.get(r, 0) or 0), 1) for r in _RIS_ALLOC}
     ov_ist = (get_overrides() or {}).get("istanze") or {}
