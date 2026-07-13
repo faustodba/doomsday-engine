@@ -115,12 +115,6 @@ TEMPO_RACCOLTA_RETENTION_INTERVAL_MIN = 24 * 60   # 1×/die, richiesta utente 11
 _tempo_raccolta_state: dict = {"last_ts": None, "next_ts": None, "last_esito": None,
                                  "last_retention_ts": None, "last_retention_esito": None}
 
-# WU202 (13/07) — backtest statico-vs-empirico T_marcia, 1×/die (job pesante
-# ~50s, girato in executor). Serve a guardare la "finestra pulita" crescere e
-# decidere il cutover su un numero. Output data/predictions/backtest_empirico.json.
-_backtest_empirico_task = None
-BACKTEST_EMPIRICO_POLL_S = 3 * 3600   # check ogni 3h, esegue 1×/die
-
 
 def _tempo_raccolta_esegui() -> dict:
     """Esegue un passo di riconciliazione e aggiorna lo stato condiviso.
@@ -438,67 +432,6 @@ async def _predictor_retention_loop():
         await asyncio.sleep(POLL_GRANULAR_S)
 
 
-async def _backtest_empirico_loop():
-    """Background task (WU202, 13/07): esegue 1×/die il backtest statico-vs-
-    empirico di T_marcia contro il ground truth reale (slot liberi osservati),
-    e accumula una storia giornaliera in `data/predictions/backtest_empirico.json`
-    (`latest` = risultato completo, `history` = 1 riga/giorno con n coppie e MAE
-    dei due modelli nella finestra pulita). Job pesante (~50s): girato in
-    executor per non bloccare l'event loop. Poll 3h, esecuzione 1×/die
-    (guardia su data del `latest.ts`), stesso spirito di _predictor_retention_loop.
-
-    Serve a osservare la finestra pulita (arrivi >= empirical_start) crescere
-    fino a n>=150, quando il confronto MAE diventa decisione-grade per il cutover.
-    """
-    import asyncio
-    import json
-    from datetime import datetime, timezone
-
-    root = Path(os.environ.get("DOOMSDAY_ROOT", "."))
-    out_path = root / "data" / "predictions" / "backtest_empirico.json"
-    print(f"[DASHBOARD] {_ts()} backtest empirico loop avviato (1×/die, output {out_path.name})")
-
-    def _read() -> dict:
-        try:
-            return json.loads(out_path.read_text(encoding="utf-8"))
-        except Exception:
-            return {"latest": None, "history": []}
-
-    def _done_today(data: dict) -> bool:
-        try:
-            last = (data.get("latest") or {}).get("ts", "")
-            return datetime.fromisoformat(last).date() == datetime.now(timezone.utc).date()
-        except Exception:
-            return False
-
-    while True:
-        try:
-            data = _read()
-            if not _done_today(data):
-                from tools.predictor_backtest_empirico import run_backtest
-                res = await asyncio.get_event_loop().run_in_executor(None, run_backtest)
-                rec = res.get("recent", {})
-                oggi = datetime.now(timezone.utc).date().isoformat()
-                hist = [h for h in data.get("history", []) if h.get("date") != oggi]
-                hist.append({
-                    "date": oggi,
-                    "n": (rec.get("static") or {}).get("n"),
-                    "mae_static": (rec.get("static") or {}).get("mae"),
-                    "mae_emp": (rec.get("emp") or {}).get("mae"),
-                })
-                hist = hist[-60:]
-                out = {"latest": res, "history": hist}
-                out_path.parent.mkdir(parents=True, exist_ok=True)
-                tmp = out_path.with_suffix(".json.tmp")
-                tmp.write_text(json.dumps(out, indent=2, ensure_ascii=False), encoding="utf-8")
-                os.replace(tmp, out_path)
-                print(f"[DASHBOARD] {_ts()} backtest empirico aggiornato "
-                      f"(recent n={(rec.get('static') or {}).get('n')})")
-        except Exception as exc:
-            print(f"[DASHBOARD] {_ts()} backtest empirico errore: {exc}")
-        await asyncio.sleep(BACKTEST_EMPIRICO_POLL_S)
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     import asyncio
@@ -514,11 +447,10 @@ async def lifespan(app: FastAPI):
     print(f"[DASHBOARD] API docs:      http://localhost:8765/docs")
     # Avvia background task predictor recorder
     global _predictor_recorder_task, _predictor_retention_task, _nodi_mappa_rebuild_task
-    global _tempo_raccolta_task, _backtest_empirico_task
+    global _tempo_raccolta_task
     _predictor_recorder_task = asyncio.create_task(_predictor_recorder_loop())
     _predictor_retention_task = asyncio.create_task(_predictor_retention_loop())
     _tempo_raccolta_task = asyncio.create_task(_tempo_raccolta_loop())
-    _backtest_empirico_task = asyncio.create_task(_backtest_empirico_loop())
     # WU184 (30/06) — anagrafe nodi disabilitata: SCHEDULAZIONE rebuild rimossa
     # (relazione geografica non sfruttabile, rifugi concentrati). Alleggerisce
     # la dashboard (niente rebuild ogni 20 min su tutte le osservazioni).
@@ -531,8 +463,6 @@ async def lifespan(app: FastAPI):
         _predictor_retention_task.cancel()
     if _tempo_raccolta_task and not _tempo_raccolta_task.done():
         _tempo_raccolta_task.cancel()
-    if _backtest_empirico_task and not _backtest_empirico_task.done():
-        _backtest_empirico_task.cancel()
     # WU184 — rebuild task non più avviato (vedi sopra)
     # if _nodi_mappa_rebuild_task and not _nodi_mappa_rebuild_task.done():
     #     _nodi_mappa_rebuild_task.cancel()
@@ -1825,22 +1755,6 @@ def ui_partial_allocazione_raccolta(request: Request):
     return templates.TemplateResponse(
         request, "partials/allocazione_raccolta_card.html",
         {"data": get_allocazione_istanze()},
-    )
-
-
-@app.get("/ui/partial/backtest-empirico", include_in_schema=False)
-def ui_partial_backtest_empirico(request: Request):
-    """WU202 (13/07) — card backtest statico-vs-empirico T_marcia. Legge il JSON
-    prodotto 1×/die da `_backtest_empirico_loop` (nessun calcolo sincrono qui)."""
-    import json as _json
-    p = Path(os.environ.get("DOOMSDAY_ROOT", ".")) / "data" / "predictions" / "backtest_empirico.json"
-    data = {"latest": None, "history": []}
-    try:
-        data = _json.loads(p.read_text(encoding="utf-8"))
-    except Exception:
-        pass
-    return templates.TemplateResponse(
-        request, "partials/backtest_empirico_card.html", {"data": data},
     )
 
 

@@ -260,13 +260,19 @@ l'**interruttore di sicurezza**. NON rimuovere il flag prima.
    campo nel PATCH `api_adaptive_scheduler`, il toggle nella card).
 
 **🔴 Rimozioni visive (UI di transizione):**
-3. Toggle "tempo raccolta empirico" nella card adaptive scheduler.
-4. Card "confronto tempo raccolta" (empirico vs statico) in preview — strumento
-   di transizione. Il campo `confronto_tempo_raccolta` in
-   `compute_slot_liberi_atteso` può restare (leggero) o essere rimosso.
-5. Card "backtest statico vs empirico" + job `_backtest_empirico_loop` + tool —
-   servivano a DECIDERE il cutover. Valutare se tenere (monitoraggio continuo)
-   o rimuovere. Decisione a fine transizione.
+3. Toggle "tempo raccolta empirico" nella card adaptive scheduler. 🟡 **PENDING**
+   — resta come interruttore di sicurezza finché il flag non viene collassato
+   (punto 2). Descrizione aggiornata 13/07: "modalità standard in prod, flag
+   rimosso in Fase C".
+4. Card "confronto tempo raccolta" (empirico vs statico) in preview. ✅ **RIMOSSA
+   13/07** — con l'empirico primario Δ→≈0, la card non ha più valore diagnostico.
+   Il campo `confronto_tempo_raccolta` in `compute_slot_liberi_atteso` resta
+   (leggero, per il CLI/monitoraggio); rimozione rimandata al collasso del flag.
+5. Card "backtest statico vs empirico" + endpoint `/ui/partial/backtest-empirico`
+   + job `_backtest_empirico_loop` (+ `data/predictions/backtest_empirico.json`).
+   ✅ **RIMOSSI 13/07** — servivano a DECIDERE il cutover (deciso a n=150, +3.7%).
+   **Il CLI `tools/predictor_backtest_empirico.py` è TENUTO** (rilancio manuale
+   on-demand per monitoraggio continuo, nessun job periodico).
 
 **🟢 Da NON rimuovere (rete di fallback):**
 - `_calc_t_marcia_static` + `config/predictor_t_l_max.json` (**declassare** a

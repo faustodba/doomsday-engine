@@ -1,8 +1,9 @@
 {# 08/05 — Adaptive Scheduler — pannello simulazione ordine pianificato.
    Endpoint: /ui/partial/adaptive-scheduler-preview  (refresh ogni 30s)
    Layout uniforme col resto della pagina (tel-card · tel-head · tel-foot).
-   WU206 (13/07) — riordinato: ORDINE DI ESECUZIONE (persisted, ciclo in volo)
-   in cima, poi l'ordine calcolato adesso, poi il confronto empirico/statico.
+   WU206 (13/07) — ORDINE DI ESECUZIONE (persisted, ciclo in volo) in cima,
+   poi l'ordine calcolato adesso. Card "confronto empirico/statico" rimossa
+   (obsoleta post-cutover: T_marcia è empirico, Δ sempre ≈0).
 #}
 {% set live = data.ordine_live %}
 {% set persisted = data.ordine_persisted %}
@@ -132,64 +133,6 @@
       greedy: ad ogni step sceglie istanza con max <code>slot_liberi_atteso</code> al
       tempo <code>t_avvio</code>. master sempre in fondo. score = slot_liberi_atteso a t_avvio:
       maggiore = più produttivo. ✓ data completa · ∼ metrics parziali (default)
-    </div>
-  </div>
-
-  {# ── Card C: confronto tempo raccolta empirico vs statico (osservativo) ── #}
-  {% set ns = namespace(n=0) %}
-  {% for r in live %}
-    {% for c in (r.get('confronto_tempo_raccolta') or []) %}{% set ns.n = ns.n + 1 %}{% endfor %}
-  {% endfor %}
-  <div class="tel-card tel-full">
-    <div class="tel-head">
-      📊 confronto tempo raccolta · empirico vs statico
-      <span style="float:right;font-weight:400;font-size:11px;color:var(--text-dim)">
-        osservativo · {{ ns.n }} marce con dato empirico
-      </span>
-    </div>
-    <div style="padding:8px 14px">
-      {% if ns.n > 0 %}
-      <div style="overflow-x:auto">
-      <table style="width:100%;font-size:11px;border-collapse:collapse">
-        <thead>
-          <tr style="border-bottom:1px solid var(--border);color:var(--text-dim)">
-            <th style="padding:5px 6px;text-align:left">istanza</th>
-            <th style="padding:5px 6px;text-align:left">tipo·liv</th>
-            <th style="padding:5px 6px;text-align:right" title="modello statico attuale (T_marcia predittore)">statico</th>
-            <th style="padding:5px 6px;text-align:right" title="misura empirica reale (durata invio→completamento + eta)">empirico</th>
-            <th style="padding:5px 6px;text-align:right" title="empirico − statico (Δ>0 = reale più lento del previsto)">Δ min</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for r in live %}
-            {% for c in (r.get('confronto_tempo_raccolta') or []) %}
-            <tr style="border-bottom:1px solid var(--border)">
-              <td style="padding:4px 6px;font-family:var(--font-mono)">{{ r.ist }}</td>
-              <td style="padding:4px 6px;font-family:var(--font-mono);color:var(--text-dim)">{{ c.tipo[:4] }}·{{ c.livello }}</td>
-              <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono)">{{ "%.1f"|format(c.t_det_min) }}</td>
-              <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono)">{{ "%.1f"|format(c.t_emp_min) }}</td>
-              {% set d = c.diff_min %}
-              <td style="padding:4px 6px;text-align:right;font-family:var(--font-mono)
-                         {% if d > 5 %};color:#c00;font-weight:600{% elif d < -5 %};color:#0066cc{% else %};color:#0a8000{% endif %}">
-                {{ "%+.1f"|format(d) }}
-              </td>
-            </tr>
-            {% endfor %}
-          {% endfor %}
-        </tbody>
-      </table>
-      </div>
-      {% else %}
-      <div style="padding:8px;color:var(--text-dim);font-size:11px">
-        nessun confronto disponibile ora — richiede istanze con raccoglitori in
-        volo su celle (istanza,tipo,livello) che abbiano già ≥3 campioni
-        empirici nel dataset.
-      </div>
-      {% endif %}
-    </div>
-    <div class="tel-foot">
-      statico = modello T_marcia del predictor · empirico = mediana reale
-      invio→completamento + eta · Δ&gt;0 = il reale è più lento del previsto.
     </div>
   </div>
 
