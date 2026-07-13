@@ -1,9 +1,9 @@
 {# WU205 — matrice allocazione raccolta per-istanza (Variante A).
+   WU205b — + deposito attuale (M) per istanza + validazione somma=100.
    Endpoint: /ui/partial/allocazione-raccolta
    Salva: PATCH /api/config/overrides/istanze/{nome}  {allocazione:{...}} | {allocazione:null}
 #}
 <style>
-.al-col-pom{--c:#e0574e}.al-col-legno{--c:#c08a3e}.al-col-acc{--c:#8593a8}.al-col-petr{--c:#3f86b3}
 .al-tab{width:100%;border-collapse:collapse;font-size:12px}
 .al-tab th{color:var(--text-dim);font-weight:400;font-size:10px;text-transform:uppercase;letter-spacing:1px;padding:5px 6px;border-bottom:.5px solid var(--border);text-align:center}
 .al-tab td{padding:5px 6px;border-bottom:.5px solid rgba(255,255,255,.05)}
@@ -12,16 +12,18 @@
 .abar span{display:block}
 .al-btn{background:var(--bg3);border:1px solid var(--border);color:var(--text-dim);font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:3px;cursor:pointer}
 .al-btn.save{border-color:var(--accent);color:var(--accent)}
+.al-btn:disabled{opacity:.4;cursor:not-allowed}
 .al-pill{font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(232,160,32,.15);color:var(--accent)}
 .al-leg{display:flex;gap:14px;font-size:11px;color:var(--text-dim);flex-wrap:wrap;align-items:center}
 .al-leg b{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:middle}
+.al-dep span{font-family:var(--mono);font-size:10px}
 </style>
 
 <div class="tel-card tel-full">
   <div class="tel-head" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
     <span>🎯 allocazione raccolta · per istanza</span>
     <span class="al-leg" style="margin-left:auto">
-      <span><b class="al-col-pom" style="background:#e0574e"></b>🍅 pomodoro</span>
+      <span><b style="background:#e0574e"></b>🍅 pomodoro</span>
       <span><b style="background:#c08a3e"></b>🪵 legno</span>
       <span><b style="background:#8593a8"></b>⚙ acciaio</span>
       <span><b style="background:#3f86b3"></b>🛢 petrolio</span>
@@ -29,8 +31,9 @@
   </div>
 
   <div style="padding:2px 12px 8px;font-size:11px;color:var(--text-dim)">
-    target di raccolta per tipo (bias soft: il bot si adatta comunque al deposito) ·
-    le % si normalizzano · <b>vuoto/reset → usa il globale</b>
+    target di raccolta per tipo (bias soft: il bot si adatta al deposito) ·
+    <b>la somma deve essere 100 per salvare</b> · <b>reset → usa il globale</b> ·
+    <i>deposito (M)</i> = livelli castello attuali
   </div>
 
   <div style="overflow-x:auto;padding:0 8px 8px">
@@ -38,7 +41,9 @@
     <thead><tr>
       <th style="text-align:left">istanza</th>
       <th>🍅 pom</th><th>🪵 legno</th><th>⚙ acc</th><th>🛢 petr</th>
-      <th style="text-align:left">mix</th><th>tot</th><th></th>
+      <th style="text-align:left">mix</th>
+      <th title="deposito castello attuale (M)">deposito (M)</th>
+      <th>tot</th><th></th>
     </tr></thead>
     <tbody>
       {# riga globale (default, read-only) #}
@@ -50,19 +55,21 @@
         <td style="text-align:right;font-family:var(--mono);color:var(--text-dim)">{{ g.legno }}</td>
         <td style="text-align:right;font-family:var(--mono);color:var(--text-dim)">{{ g.acciaio }}</td>
         <td style="text-align:right;font-family:var(--mono);color:var(--text-dim)">{{ g.petrolio }}</td>
-        <td><div class="abar" style="width:170px;opacity:.7">
+        <td><div class="abar" style="width:150px;opacity:.7">
           <span style="width:{{ (g.pomodoro/gtot*100)|round(1) }}%;background:#e0574e"></span>
           <span style="width:{{ (g.legno/gtot*100)|round(1) }}%;background:#c08a3e"></span>
           <span style="width:{{ (g.acciaio/gtot*100)|round(1) }}%;background:#8593a8"></span>
           <span style="width:{{ (g.petrolio/gtot*100)|round(1) }}%;background:#3f86b3"></span>
         </div></td>
+        <td style="color:var(--text-dim)">—</td>
         <td style="text-align:right;font-family:var(--mono);color:var(--text-dim)">{{ gtot|round(0)|int }}</td>
         <td></td>
       </tr>
 
       {% for r in data.istanze %}
-      {% set n = r.nome %}{% set a = r.alloc %}
+      {% set n = r.nome %}{% set a = r.alloc %}{% set dep = r.deposito %}
       {% set tot = (a.pomodoro + a.legno + a.petrolio + a.acciaio) or 1 %}
+      {% set valid = (r.tot - 100)|abs < 0.5 %}
       <tr>
         <td style="font-family:var(--sans);font-weight:700;letter-spacing:1px;white-space:nowrap">
           {{ n }} {% if r.is_override %}<span class="al-pill">custom</span>{% else %}<span style="color:var(--text-dim);font-size:9px">globale</span>{% endif %}
@@ -71,16 +78,20 @@
         <td><input class="ainp" id="a-{{n}}-legno"    value="{{ a.legno }}"    oninput="allocBar('{{n}}')"></td>
         <td><input class="ainp" id="a-{{n}}-acciaio"  value="{{ a.acciaio }}"  oninput="allocBar('{{n}}')"></td>
         <td><input class="ainp" id="a-{{n}}-petrolio" value="{{ a.petrolio }}" oninput="allocBar('{{n}}')"></td>
-        <td><div class="abar" id="bar-{{n}}" style="width:170px">
+        <td><div class="abar" id="bar-{{n}}" style="width:150px">
           <span style="width:{{ (a.pomodoro/tot*100)|round(1) }}%;background:#e0574e"></span>
           <span style="width:{{ (a.legno/tot*100)|round(1) }}%;background:#c08a3e"></span>
           <span style="width:{{ (a.acciaio/tot*100)|round(1) }}%;background:#8593a8"></span>
           <span style="width:{{ (a.petrolio/tot*100)|round(1) }}%;background:#3f86b3"></span>
         </div></td>
+        <td class="al-dep" style="white-space:nowrap">
+          {% if dep %}<span style="color:#e0574e">{{ dep.pomodoro }}</span> <span style="color:#c08a3e">{{ dep.legno }}</span> <span style="color:#8593a8">{{ dep.acciaio }}</span> <span style="color:#3f86b3">{{ dep.petrolio }}</span>
+          {% else %}<span style="color:var(--text-dim)">—</span>{% endif %}
+        </td>
         <td style="text-align:right;font-family:var(--mono)"><span id="tot-{{n}}"
-            style="color:{% if (r.tot-100)|abs < 0.5 %}var(--green){% else %}var(--accent){% endif %}">{{ r.tot|round(0)|int }}</span></td>
+            style="color:{% if valid %}var(--green){% else %}#c00{% endif %}">{{ r.tot|round(0)|int }}</span></td>
         <td style="white-space:nowrap">
-          <button class="al-btn save" onclick="allocSave('{{n}}')">salva</button>
+          <button class="al-btn save" id="save-{{n}}" onclick="allocSave('{{n}}')" {% if not valid %}disabled{% endif %}>salva</button>
           <button class="al-btn" onclick="allocReset('{{n}}')" title="torna al globale">reset</button>
         </td>
       </tr>
@@ -90,7 +101,7 @@
   </div>
   <div class="tel-foot" style="padding:2px 12px">
     <span id="al-msg"></span> · salvataggio su <code>runtime_overrides</code> per-istanza ·
-    effetto al prossimo tick raccolta dell'istanza (nessun riavvio)
+    effetto al prossimo tick raccolta (nessun riavvio)
   </div>
 </div>
 
@@ -104,8 +115,9 @@
     const v = vals(n), tot = v.reduce((a,b)=>a+b,0);
     const bar = $('bar-'+n); if(bar) bar.innerHTML = RIS.map((r,i)=>
       `<span style="width:${tot>0?(v[i]/tot*100):0}%;background:${COL[r]}"></span>`).join('');
-    const t = $('tot-'+n); if(t){ t.textContent = Math.round(tot);
-      t.style.color = Math.abs(tot-100)<0.5 ? 'var(--green)' : 'var(--accent)'; }
+    const ok = Math.abs(tot-100) < 0.5;
+    const t = $('tot-'+n); if(t){ t.textContent = Math.round(tot); t.style.color = ok ? 'var(--green)' : '#c00'; }
+    const b = $('save-'+n); if(b){ b.disabled = !ok; }
   };
   function msg(txt,c){ const m=$('al-msg'); if(m){ m.textContent=txt; m.style.color=c||'var(--text-dim)'; } }
   async function patch(n, body){
@@ -114,7 +126,8 @@
     return r.ok;
   }
   window.allocSave = async function(n){
-    const v = vals(n);
+    const v = vals(n), tot = v.reduce((a,b)=>a+b,0);
+    if(Math.abs(tot-100) >= 0.5){ msg('✗ '+n+': somma '+Math.round(tot)+' ≠ 100 — correggi prima di salvare', '#c00'); return; }
     const ok = await patch(n, {allocazione:{pomodoro:v[0],legno:v[1],acciaio:v[2],petrolio:v[3]}});
     msg(ok?('✓ '+n+' salvato'):('✗ '+n+' errore'), ok?'#0a8000':'#c00');
     if(ok && typeof htmx!=='undefined') htmx.trigger('#alloc-matrix','refresh');

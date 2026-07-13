@@ -111,6 +111,24 @@ def get_instance(nome: str) -> Optional[dict]:
 _RIS_ALLOC = ("pomodoro", "legno", "petrolio", "acciaio")
 
 
+def _deposito_istanza(nome: str) -> Optional[dict]:
+    """WU205b — deposito castello corrente per istanza (M per risorsa), letto da
+    state/<nome>.json (produzione_corrente.risorse_iniziali, fallback ultima
+    sessione chiusa). None se non disponibile."""
+    try:
+        d = json.loads((_PROD_ROOT / "state" / f"{nome}.json").read_text(encoding="utf-8"))
+    except Exception:
+        return None
+    pc = d.get("produzione_corrente") or {}
+    dep = pc.get("risorse_iniziali") or pc.get("risorse_finali")
+    if not isinstance(dep, dict):
+        st = d.get("produzione_storico") or []
+        dep = (st[-1] or {}).get("risorse_finali") if st else None
+    if isinstance(dep, dict):
+        return {r: round(float(dep.get(r, 0) or 0) / 1_000_000, 1) for r in _RIS_ALLOC}
+    return None
+
+
 def get_allocazione_istanze() -> dict:
     """WU205 — allocazione raccolta per-istanza per la matrice editor.
 
@@ -141,7 +159,8 @@ def get_allocazione_istanze() -> dict:
             alloc = dict(globale)
             is_ov = False
         righe.append({"nome": nome, "is_override": is_ov, "alloc": alloc,
-                      "tot": round(sum(alloc.values()), 1)})
+                      "tot": round(sum(alloc.values()), 1),
+                      "deposito": _deposito_istanza(nome)})
     righe.sort(key=lambda r: r["nome"])
     return {"risorse": list(_RIS_ALLOC), "globale": globale, "istanze": righe}
 
