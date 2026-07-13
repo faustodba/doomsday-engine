@@ -244,6 +244,20 @@ criterio è soddisfatto per lo shadow; per il LIVE pilota basta confermare 2-3
 giorni di `confronto_tempo_raccolta` con `diff_min` stabile (no oscillazioni da
 under-sampling).
 
+### 5.4.1 Backtest quantitativo — decidere su un numero (WU202c, 13/07)
+
+`tools/predictor_backtest_empirico.py` ricostruisce, su ogni arrivo storico
+reale, gli slot liberi predetti da statico ed empirico e li confronta col
+ground truth `attive_pre` (OCR). **Metrica di decisione = MAE sulla "finestra
+pulita"** (arrivi ≥ `empirical_start`, senza look-ahead). Job 1×/die in
+dashboard (`_backtest_empirico_loop` → `data/predictions/backtest_empirico.json`)
++ card `/ui/predictor-istanze` che mostra la finestra crescere. **Criterio
+cutover: n≥150 e empirico stabilmente sotto lo statico.** Lettura 13/07:
+n=139, MAE statico 1.101 vs empirico 1.072 (+2.6%), bias empirico più
+bilanciato — segnale a favore ma **n<150, non ancora decisione-grade**.
+Impatto comunque bounded: l'empirico cambia la decisione solo in ~5% dei casi
+(dove però è nettamente più accurato: recent_flip MAE 1.18 vs 1.55).
+
 ---
 
 ## 6. Rischi e guardrail
