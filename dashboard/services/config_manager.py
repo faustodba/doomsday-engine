@@ -108,6 +108,44 @@ def get_instance(nome: str) -> Optional[dict]:
     )
 
 
+_RIS_ALLOC = ("pomodoro", "legno", "petrolio", "acciaio")
+
+
+def get_allocazione_istanze() -> dict:
+    """WU205 — allocazione raccolta per-istanza per la matrice editor.
+
+    Per ogni istanza: override runtime (`istanze.<nome>.allocazione`, %) se
+    presente, altrimenti il globale (`raccolta.allocazione`, %).
+
+    Ritorna: {
+      "risorse": ["pomodoro","legno","petrolio","acciaio"],
+      "globale": {risorsa: %},
+      "istanze": [{"nome", "is_override": bool, "alloc": {risorsa: %}, "tot": %}],
+    }
+    """
+    gc = get_global_config()
+    glob_raw = (gc.get("raccolta") or {}).get("allocazione") or {}
+    globale = {r: round(float(glob_raw.get(r, 0) or 0), 1) for r in _RIS_ALLOC}
+    ov_ist = (get_overrides() or {}).get("istanze") or {}
+
+    righe: list[dict] = []
+    for i in get_instances() or []:
+        nome = i.get("nome")
+        if not nome:
+            continue
+        ov_alloc = (ov_ist.get(nome) or {}).get("allocazione")
+        if isinstance(ov_alloc, dict):
+            alloc = {r: round(float(ov_alloc.get(r, 0) or 0), 1) for r in _RIS_ALLOC}
+            is_ov = True
+        else:
+            alloc = dict(globale)
+            is_ov = False
+        righe.append({"nome": nome, "is_override": is_ov, "alloc": alloc,
+                      "tot": round(sum(alloc.values()), 1)})
+    righe.sort(key=lambda r: r["nome"])
+    return {"risorse": list(_RIS_ALLOC), "globale": globale, "istanze": righe}
+
+
 # ==============================================================================
 # Write — runtime_overrides.json
 # ==============================================================================

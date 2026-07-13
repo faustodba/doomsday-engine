@@ -1817,6 +1817,17 @@ def ui_partial_adaptive_scheduler(request: Request):
     )
 
 
+@app.get("/ui/partial/allocazione-raccolta", include_in_schema=False)
+def ui_partial_allocazione_raccolta(request: Request):
+    """WU205 — matrice allocazione raccolta per-istanza (editor). Legge da
+    config_manager; salva via PATCH /api/config/overrides/istanze/{nome}."""
+    from dashboard.services.config_manager import get_allocazione_istanze
+    return templates.TemplateResponse(
+        request, "partials/allocazione_raccolta_card.html",
+        {"data": get_allocazione_istanze()},
+    )
+
+
 @app.get("/ui/partial/backtest-empirico", include_in_schema=False)
 def ui_partial_backtest_empirico(request: Request):
     """WU202 (13/07) — card backtest statico-vs-empirico T_marcia. Legge il JSON

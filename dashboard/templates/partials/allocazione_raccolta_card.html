@@ -1,0 +1,128 @@
+{# WU205 — matrice allocazione raccolta per-istanza (Variante A).
+   Endpoint: /ui/partial/allocazione-raccolta
+   Salva: PATCH /api/config/overrides/istanze/{nome}  {allocazione:{...}} | {allocazione:null}
+#}
+<style>
+.al-col-pom{--c:#e0574e}.al-col-legno{--c:#c08a3e}.al-col-acc{--c:#8593a8}.al-col-petr{--c:#3f86b3}
+.al-tab{width:100%;border-collapse:collapse;font-size:12px}
+.al-tab th{color:var(--text-dim);font-weight:400;font-size:10px;text-transform:uppercase;letter-spacing:1px;padding:5px 6px;border-bottom:.5px solid var(--border);text-align:center}
+.al-tab td{padding:5px 6px;border-bottom:.5px solid rgba(255,255,255,.05)}
+.ainp{width:46px;background:var(--bg3);border:1px solid var(--border);color:var(--text);font-family:var(--mono);font-size:12px;text-align:right;padding:2px 4px;border-radius:3px}
+.abar{display:flex;height:14px;border-radius:3px;overflow:hidden;min-width:150px}
+.abar span{display:block}
+.al-btn{background:var(--bg3);border:1px solid var(--border);color:var(--text-dim);font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:3px;cursor:pointer}
+.al-btn.save{border-color:var(--accent);color:var(--accent)}
+.al-pill{font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(232,160,32,.15);color:var(--accent)}
+.al-leg{display:flex;gap:14px;font-size:11px;color:var(--text-dim);flex-wrap:wrap;align-items:center}
+.al-leg b{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:middle}
+</style>
+
+<div class="tel-card tel-full">
+  <div class="tel-head" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <span>🎯 allocazione raccolta · per istanza</span>
+    <span class="al-leg" style="margin-left:auto">
+      <span><b class="al-col-pom" style="background:#e0574e"></b>🍅 pomodoro</span>
+      <span><b style="background:#c08a3e"></b>🪵 legno</span>
+      <span><b style="background:#8593a8"></b>⚙ acciaio</span>
+      <span><b style="background:#3f86b3"></b>🛢 petrolio</span>
+    </span>
+  </div>
+
+  <div style="padding:2px 12px 8px;font-size:11px;color:var(--text-dim)">
+    target di raccolta per tipo (bias soft: il bot si adatta comunque al deposito) ·
+    le % si normalizzano · <b>vuoto/reset → usa il globale</b>
+  </div>
+
+  <div style="overflow-x:auto;padding:0 8px 8px">
+  <table class="al-tab">
+    <thead><tr>
+      <th style="text-align:left">istanza</th>
+      <th>🍅 pom</th><th>🪵 legno</th><th>⚙ acc</th><th>🛢 petr</th>
+      <th style="text-align:left">mix</th><th>tot</th><th></th>
+    </tr></thead>
+    <tbody>
+      {# riga globale (default, read-only) #}
+      {% set g = data.globale %}
+      {% set gtot = (g.pomodoro + g.legno + g.petrolio + g.acciaio) or 1 %}
+      <tr style="background:rgba(232,160,32,.05)">
+        <td style="font-family:var(--sans);font-weight:600;letter-spacing:1px;color:var(--accent);text-transform:uppercase;font-size:11px">globale (default)</td>
+        <td style="text-align:right;font-family:var(--mono);color:var(--text-dim)">{{ g.pomodoro }}</td>
+        <td style="text-align:right;font-family:var(--mono);color:var(--text-dim)">{{ g.legno }}</td>
+        <td style="text-align:right;font-family:var(--mono);color:var(--text-dim)">{{ g.acciaio }}</td>
+        <td style="text-align:right;font-family:var(--mono);color:var(--text-dim)">{{ g.petrolio }}</td>
+        <td><div class="abar" style="width:170px;opacity:.7">
+          <span style="width:{{ (g.pomodoro/gtot*100)|round(1) }}%;background:#e0574e"></span>
+          <span style="width:{{ (g.legno/gtot*100)|round(1) }}%;background:#c08a3e"></span>
+          <span style="width:{{ (g.acciaio/gtot*100)|round(1) }}%;background:#8593a8"></span>
+          <span style="width:{{ (g.petrolio/gtot*100)|round(1) }}%;background:#3f86b3"></span>
+        </div></td>
+        <td style="text-align:right;font-family:var(--mono);color:var(--text-dim)">{{ gtot|round(0)|int }}</td>
+        <td></td>
+      </tr>
+
+      {% for r in data.istanze %}
+      {% set n = r.nome %}{% set a = r.alloc %}
+      {% set tot = (a.pomodoro + a.legno + a.petrolio + a.acciaio) or 1 %}
+      <tr>
+        <td style="font-family:var(--sans);font-weight:700;letter-spacing:1px;white-space:nowrap">
+          {{ n }} {% if r.is_override %}<span class="al-pill">custom</span>{% else %}<span style="color:var(--text-dim);font-size:9px">globale</span>{% endif %}
+        </td>
+        <td><input class="ainp" id="a-{{n}}-pomodoro" value="{{ a.pomodoro }}" oninput="allocBar('{{n}}')"></td>
+        <td><input class="ainp" id="a-{{n}}-legno"    value="{{ a.legno }}"    oninput="allocBar('{{n}}')"></td>
+        <td><input class="ainp" id="a-{{n}}-acciaio"  value="{{ a.acciaio }}"  oninput="allocBar('{{n}}')"></td>
+        <td><input class="ainp" id="a-{{n}}-petrolio" value="{{ a.petrolio }}" oninput="allocBar('{{n}}')"></td>
+        <td><div class="abar" id="bar-{{n}}" style="width:170px">
+          <span style="width:{{ (a.pomodoro/tot*100)|round(1) }}%;background:#e0574e"></span>
+          <span style="width:{{ (a.legno/tot*100)|round(1) }}%;background:#c08a3e"></span>
+          <span style="width:{{ (a.acciaio/tot*100)|round(1) }}%;background:#8593a8"></span>
+          <span style="width:{{ (a.petrolio/tot*100)|round(1) }}%;background:#3f86b3"></span>
+        </div></td>
+        <td style="text-align:right;font-family:var(--mono)"><span id="tot-{{n}}"
+            style="color:{% if (r.tot-100)|abs < 0.5 %}var(--green){% else %}var(--accent){% endif %}">{{ r.tot|round(0)|int }}</span></td>
+        <td style="white-space:nowrap">
+          <button class="al-btn save" onclick="allocSave('{{n}}')">salva</button>
+          <button class="al-btn" onclick="allocReset('{{n}}')" title="torna al globale">reset</button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  <div class="tel-foot" style="padding:2px 12px">
+    <span id="al-msg"></span> · salvataggio su <code>runtime_overrides</code> per-istanza ·
+    effetto al prossimo tick raccolta dell'istanza (nessun riavvio)
+  </div>
+</div>
+
+<script>
+(function(){
+  const RIS = ["pomodoro","legno","acciaio","petrolio"];
+  const COL = {pomodoro:"#e0574e",legno:"#c08a3e",acciaio:"#8593a8",petrolio:"#3f86b3"};
+  const $ = id => document.getElementById(id);
+  function vals(n){ return RIS.map(r => parseFloat(($('a-'+n+'-'+r)||{}).value || 0)); }
+  window.allocBar = function(n){
+    const v = vals(n), tot = v.reduce((a,b)=>a+b,0);
+    const bar = $('bar-'+n); if(bar) bar.innerHTML = RIS.map((r,i)=>
+      `<span style="width:${tot>0?(v[i]/tot*100):0}%;background:${COL[r]}"></span>`).join('');
+    const t = $('tot-'+n); if(t){ t.textContent = Math.round(tot);
+      t.style.color = Math.abs(tot-100)<0.5 ? 'var(--green)' : 'var(--accent)'; }
+  };
+  function msg(txt,c){ const m=$('al-msg'); if(m){ m.textContent=txt; m.style.color=c||'var(--text-dim)'; } }
+  async function patch(n, body){
+    const r = await fetch(URL_PREFIX+'/api/config/overrides/istanze/'+n,
+      {method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
+    return r.ok;
+  }
+  window.allocSave = async function(n){
+    const v = vals(n);
+    const ok = await patch(n, {allocazione:{pomodoro:v[0],legno:v[1],acciaio:v[2],petrolio:v[3]}});
+    msg(ok?('✓ '+n+' salvato'):('✗ '+n+' errore'), ok?'#0a8000':'#c00');
+    if(ok && typeof htmx!=='undefined') htmx.trigger('#alloc-matrix','refresh');
+  };
+  window.allocReset = async function(n){
+    const ok = await patch(n, {allocazione:null});
+    msg(ok?('↺ '+n+' → globale'):('✗ '+n+' errore'), ok?'#0066cc':'#c00');
+    if(ok && typeof htmx!=='undefined') htmx.trigger('#alloc-matrix','refresh');
+  };
+})();
+</script>
