@@ -14,6 +14,7 @@
 .al-btn.save{border-color:var(--accent);color:var(--accent)}
 .al-btn:disabled{opacity:.4;cursor:not-allowed}
 .al-pill{font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(232,160,32,.15);color:var(--accent)}
+.al-pill-def{font-size:9px;padding:1px 6px;border-radius:8px;background:rgba(120,180,120,.15);color:var(--green)}
 .al-leg{display:flex;gap:14px;font-size:11px;color:var(--text-dim);flex-wrap:wrap;align-items:center}
 .al-leg b{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:middle}
 .al-dep span{font-family:var(--mono);font-size:10px}
@@ -30,10 +31,12 @@
     </span>
   </div>
 
-  <div style="padding:2px 12px 8px;font-size:11px;color:var(--text-dim)">
-    target di raccolta per tipo (bias soft: il bot si adatta al deposito) ·
-    <b>la somma deve essere 100 per salvare</b> · <b>reset → usa il globale</b> ·
-    <i>deposito (M)</i> = livelli castello attuali
+  <div style="padding:2px 12px 8px;font-size:11px;color:var(--text-dim);display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+    <span>target di raccolta per tipo (bias soft: il bot si adatta al deposito) ·
+    <b>la somma deve essere 100 per salvare</b> · <b>reset → default (globale)</b> ·
+    <i>deposito (M)</i> = livelli castello attuali</span>
+    <button class="al-btn" onclick="allocResetAll()" style="margin-left:auto"
+            title="riporta TUTTE le istanze al default (globale)">↺ reset tutto</button>
   </div>
 
   <div style="overflow-x:auto;padding:0 8px 8px">
@@ -72,7 +75,7 @@
       {% set valid = (r.tot - 100)|abs < 0.5 %}
       <tr>
         <td style="font-family:var(--sans);font-weight:700;letter-spacing:1px;white-space:nowrap">
-          {{ n }} {% if r.is_override %}<span class="al-pill">custom</span>{% else %}<span style="color:var(--text-dim);font-size:9px">globale</span>{% endif %}
+          {{ n }} {% if r.is_override %}<span class="al-pill">custom</span>{% else %}<span class="al-pill-def">default</span>{% endif %}
         </td>
         <td><input class="ainp" id="a-{{n}}-pomodoro" value="{{ a.pomodoro }}" oninput="allocBar('{{n}}')"></td>
         <td><input class="ainp" id="a-{{n}}-legno"    value="{{ a.legno }}"    oninput="allocBar('{{n}}')"></td>
@@ -134,8 +137,17 @@
   };
   window.allocReset = async function(n){
     const ok = await patch(n, {allocazione:null});
-    msg(ok?('↺ '+n+' → globale'):('✗ '+n+' errore'), ok?'#0066cc':'#c00');
+    msg(ok?('↺ '+n+' → default'):('✗ '+n+' errore'), ok?'#0066cc':'#c00');
     if(ok && typeof htmx!=='undefined') htmx.trigger('#alloc-matrix','refresh');
+  };
+  // WU215 — reset di TUTTE le istanze al default (globale) in un colpo.
+  window.allocResetAll = async function(){
+    if(!confirm('Riportare TUTTE le istanze al default (globale)?')) return;
+    const nomi = [...document.querySelectorAll('[id^="save-"]')].map(b => b.id.replace('save-',''));
+    let ok=0, ko=0;
+    for(const n of nomi){ (await patch(n, {allocazione:null})) ? ok++ : ko++; }
+    msg('↺ reset tutto: '+ok+' istanze a default'+(ko?(' · '+ko+' errori'):''), ko?'#c00':'#0066cc');
+    if(typeof htmx!=='undefined') htmx.trigger('#alloc-matrix','refresh');
   };
 })();
 </script>
