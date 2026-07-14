@@ -1279,6 +1279,7 @@ def main():
     ciclo = 0
     while not stop_event.is_set():
         ciclo += 1
+        _ciclo_start_ts = time.time()   # WU218 — durata giro per shadow doppio giro
         _log("MAIN", f"{'=' * 55}")
 
         # Rilettura dinamica istanze (recepisce modifiche dashboard pre-ciclo)
@@ -1475,6 +1476,16 @@ def main():
                 pass
 
             _log("MAIN", f"--- Istanza {nome} completata ---")
+
+        # WU218 SHADOW — valuta (OSSERVATIVO, non esegue) se FAU_00 avrebbe un
+        # 2° passaggio raccolta-only a fine giro. Scrive data/doppio_giro_shadow.jsonl
+        # per il cost/benefit Fase 0. Failsafe: non impatta mai il ciclo.
+        try:
+            from core.doppio_giro_shadow import valuta_shadow
+            valuta_shadow(ciclo, time.time() - _ciclo_start_ts,
+                          lambda m: _log("MAIN", m))
+        except Exception as _exc_sh:
+            _log("MAIN", f"[WARN] doppio-giro-shadow: {_exc_sh}")
 
         # Fine ciclo — cancella checkpoint solo se completato senza interruzioni
         if not stop_event.is_set():
