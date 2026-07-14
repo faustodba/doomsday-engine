@@ -15,9 +15,11 @@ LOGICA:
      b. Sceglie quella col score più alto come prossima
      c. Aggiorna t_avvio_previsto cumulando T_predicted dell'istanza scelta
      d. Ripete finché tutte assegnate
-  3. Master FauMorfeus (WU216): partecipa al ranking greedy come le ordinarie
-     (ordine 1 = scheduler). L'ordine fisso base (`_carica_istanze_ciclo`) resta
-     invariato → master ultimo solo quando lo scheduler NON si attiva.
+  3. Master FauMorfeus SEMPRE fissa in fondo (fuori ranking). WU216 provò a
+     metterla in rotazione, revertito in WU217: FauMorfeus è giocata MANUALMENTE
+     (raccoglitori inviati a mano) → slot imprevedibili, ed è esclusa dallo
+     stimatore empirico (`nodi_mappa.ISTANZE_ESCLUSE`) → non schedulabile
+     dinamicamente. Resta a posizione fissa ultima.
   4. **Mai skip definitivo**: tutte le istanze processate.
   5. Persistence: salva ordine pianificato in `data/scheduler_planned_order.json`.
      Su restart bot, se file esiste e fresh → resume da sequenza memorizzata.
@@ -731,24 +733,25 @@ def _invalidate_cycle_pred_cache() -> None:
 
 
 def ordina_istanze_adaptive(istanze: list[str],
-                              master_excluded: bool = False,
+                              master_excluded: bool = True,
                               log_fn=None) -> list[dict]:
     """Greedy adattivo: ordina istanze per `slot_liberi_atteso` decrescente.
 
     Args:
-        istanze: lista nomi istanze (master incluso).
-        master_excluded: WU216 — default **False**: il master FauMorfeus
-                         partecipa al ranking greedy come le ordinarie (entra
-                         in rotazione). Se True: appeso a fine lista fuori
-                         ranking (comportamento pre-WU216).
+        istanze: lista nomi istanze (master escluso dal ranking).
+        master_excluded: default **True** (WU217): il master FauMorfeus viene
+                         appeso a fine lista fuori ranking, posizione fissa.
+                         Giocata manualmente → slot imprevedibili + esclusa
+                         dallo stimatore empirico → non schedulabile
+                         dinamicamente. (WU216 provò False = in rotazione,
+                         revertito.)
         log_fn: callable opzionale `log_fn(msg: str)`. Se passato, emette un
                 trace step-by-step del greedy con candidati + score + scelto.
 
     Returns:
         list[dict] in ordine ottimale, ciascuno con campi di
         `compute_slot_liberi_atteso` + `t_avvio_min` (offset previsto).
-        Con `master_excluded=False` il master è ordinato come le altre;
-        con True è sempre ultimo (fuori ranking).
+        Master sempre ultimo (con t_avvio_min calcolato).
 
     Logica greedy:
         - t_avvio_min[0] = 0
