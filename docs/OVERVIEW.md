@@ -876,7 +876,7 @@ Auto-generati dalle pipeline calibrazione, no manutenzione manuale:
 | `data/cap_nodi_dataset.jsonl` | per-invio raccolta `{tipo, livello, capacita, load_squadra}` | append in raccolta hook |
 | `data/predictions/cycle_snapshots.jsonl` | snapshot predictor ogni 15min | dashboard background task |
 | `data/predictions/cycle_accuracy.jsonl` | accuracy fine-ciclo (errore% per snapshot) | dashboard background task |
-| `data/predictions/scheduler_ab.jsonl` | A/B test virtuale adaptive vs naive (proposta E) | append ad ogni greedy |
+| `data/predictions/scheduler_ab.jsonl` | A/B test virtuale adaptive vs naive (proposta E) — **feature RIMOSSA WU210 14/07, no più scritto** | dormiente |
 | `data/predictor_decisions.jsonl` | decisioni skip predictor live (legacy, no più scritto post-RIMOZIONE WU89 08/05) | dormiente |
 | `data/mail_queue.jsonl` | queue email notifier (WU137) | append at enqueue, mutate at dispatch |
 | `data/alerts_state.json` | state rate-limit alert real-time (WU137 fase 2) | mutate at trigger_alert |

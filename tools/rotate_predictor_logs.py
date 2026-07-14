@@ -10,9 +10,7 @@ continuano a leggere solo il file live, più piccolo).
 WU186 (02/07) — la rotazione era rimasta SOLO manuale (mai eseguita in prod:
 istanza_metrics.jsonl a 5.4MB/6.619 righe il 02/07, nessun `data/archive/`).
 Aggiunta `run_retention()` riutilizzabile, chiamata automaticamente 1×/die da
-`dashboard/app.py::_predictor_retention_loop` con cutoff 60 giorni. Aggiunto
-anche `data/predictions/scheduler_ab.jsonl` ai target (stesso problema,
-nessuna retention nemmeno manuale).
+`dashboard/app.py::_predictor_retention_loop` con cutoff 60 giorni.
 
 Uso CLI:
     py -3.14 tools/rotate_predictor_logs.py                  # dry-run, 180gg
@@ -49,7 +47,7 @@ _TARGETS = [
     ("data/istanza_metrics.jsonl", "ts"),
     ("data/predictions/cycle_snapshots.jsonl", "ts"),
     ("data/predictions/cycle_accuracy.jsonl", "ts_end"),
-    ("data/predictions/scheduler_ab.jsonl", "ts"),
+    # WU210 — scheduler_ab.jsonl rimosso (feature A/B test eliminata).
 ]
 
 DEFAULT_RETENTION_DAYS = 60

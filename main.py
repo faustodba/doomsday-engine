@@ -1340,21 +1340,6 @@ def main():
                         )
                         nomi_ordinati_adapt = [d["ist"] for d in ordine_dict]
 
-                        # Proposta E 08/05 — A/B test virtuale: ordine adaptive
-                        # vs naive (alfabetico). Persiste in scheduler_ab.jsonl
-                        # per analisi storica del valore aggiunto del greedy.
-                        try:
-                            from core.adaptive_scheduler import (
-                                compute_ab_test_metrics, record_ab_test,
-                            )
-                            ab = compute_ab_test_metrics(nomi)
-                            record_ab_test(ab, reasons=reasons)
-                            _log("MAIN",
-                                 f"[ADAPT-AB] adapt_tot={ab['adaptive']['tot_slot']} "
-                                 f"naive_tot={ab['naive']['tot_slot']} "
-                                 f"delta={ab['delta_slot']:+.1f}")
-                        except Exception as _exc_ab:
-                            _log("MAIN", f"[WARN] AB test: {_exc_ab}")
                         ist_by_nome = {i["nome"]: i for i in istanze_ciclo}
 
                         # Telemetria meta scheduler per ogni istanza (sia shadow che live)
