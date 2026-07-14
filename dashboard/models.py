@@ -355,11 +355,11 @@ class IstanzaOverride(BaseModel):
     max_squadre:  Optional[int]           = None   # scritto su instances.json
     # 08/05: `layout` rimosso (deprecato WU22 — TM dinamico, no coord per layout)
     livello:      Optional[int]           = None   # scritto su instances.json
-    # WU211 — livello edificio trasporto/rifugio (1-25): capacità trasporto +
+    # WU211 — livello edificio di trasporto (1-25): capacità trasporto +
     # tassa per il calcolo deterministico dell'inviato rifornimento. Scritto
     # ANCHE su instances.json. Campo necessario qui altrimenti un save dashboard
     # lo perderebbe silenziosamente (bug-class WU199/WU102).
-    livello_rifugio: Optional[int]        = None   # scritto su instances.json
+    livello_trasporto: Optional[int]        = None   # scritto su instances.json
     # WU50 — raccolta fuori territorio (per istanza)
     raccolta_fuori_territorio: bool       = False
     # WU199 — report_raccolta (per istanza). Campo mancante qui causava perdita

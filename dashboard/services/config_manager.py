@@ -228,7 +228,7 @@ def save_instances_fields(updates: dict[str, dict]) -> None:
     # 08/05 ter: aggiunto truppe_override (sub-dict caserme) per override per
     # istanza dalla pagina CONFIG card truppe.
     allowed_fields = {"abilitata", "truppe", "profilo", "fascia_oraria",
-                      "max_squadre", "livello", "livello_rifugio",
+                      "max_squadre", "livello", "livello_trasporto",
                       "raccolta_fuori_territorio", "master",
                       "truppe_override"}
 

@@ -167,7 +167,7 @@ async def save_rifornimento(request: Request):
     rc_payload = raw.get("rifornimento_comune") or {}
     if isinstance(rc_payload, dict):
         # WU213 — VINCOLO soglie: una soglia di deposito inferiore al lordo
-        # debitato del livello_rifugio piu' alto tra le istanze provocherebbe
+        # debitato del livello_trasporto piu' alto tra le istanze provocherebbe
         # invii PARZIALI (il gioco clampa a meno di capacita_trasporto),
         # rompendo la contabilita' deterministica (netto = capacita[liv]).
         # Blocca il save se un valore inserito e' sotto il minimo richiesto.
@@ -187,7 +187,7 @@ async def save_rifornimento(request: Request):
                     if not _nome or is_master_instance(_nome):
                         continue   # il master riceve, non invia → non vincola
                     _liv = (_ov_ist.get(_nome, {}) or {}).get(
-                        "livello_rifugio", _i.get("livello_rifugio", 20))
+                        "livello_trasporto", _i.get("livello_trasporto", 20))
                     _livelli.append(_liv)
                 _min_m, _driver = soglia_minima_richiesta_m(_livelli)
             except HTTPException:
@@ -539,8 +539,8 @@ def save_istanze(payload: PayloadIstanze):
             upd["max_squadre"] = ist_ov.max_squadre
         if ist_ov.livello is not None:
             upd["livello"] = ist_ov.livello
-        if ist_ov.livello_rifugio is not None:
-            upd["livello_rifugio"] = ist_ov.livello_rifugio
+        if ist_ov.livello_trasporto is not None:
+            upd["livello_trasporto"] = ist_ov.livello_trasporto
         instances_updates[nome] = upd
 
     # Invalida cache instance_meta (master flag potrebbe essere cambiato)
@@ -739,7 +739,7 @@ def patch_istanza(nome: str, data: dict):
     # WU205: `allocazione` (dict {pomodoro,legno,petrolio,acciaio} %) per la
     # matrice allocazione per-istanza. `None` = reset al globale.
     allowed = {"abilitata", "truppe", "tipologia", "fascia_oraria",
-               "max_squadre", "livello", "livello_rifugio",
+               "max_squadre", "livello", "livello_trasporto",
                "raccolta_fuori_territorio", "allocazione"}
     for k, v in data.items():
         if k in allowed:

@@ -11,8 +11,8 @@ Semantica (v2, verificata dal log):
                        dal castello mittente = SOGLIA minima di deposito
   netto = lordo * (1 - tassa)  →  netto == capacita_trasporto
 
-Il livello per istanza sta in config: `livello_rifugio` (WU211), letto dal bot
-come `ctx.config.livello_rifugio`.
+Il livello per istanza sta in config: `livello_trasporto` (WU211), letto dal bot
+come `ctx.config.livello_trasporto`.
 """
 
 from __future__ import annotations
@@ -28,7 +28,7 @@ _CACHE: dict = {"mtime": None, "livelli": None}
 
 _MIN_LIV = 1
 _MAX_LIV = 25
-_LIV_DEFAULT = 20   # coerente con config_loader._InstanceCfg.livello_rifugio
+_LIV_DEFAULT = 20   # coerente con config_loader._InstanceCfg.livello_trasporto
 
 
 def _root() -> Path:

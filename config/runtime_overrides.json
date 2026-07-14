@@ -102,7 +102,7 @@
       "fascia_oraria": null,
       "max_squadre": 5,
       "livello": 7,
-      "livello_rifugio": 25
+      "livello_trasporto": 24
     },
     "FAU_01": {
       "abilitata": true,
@@ -111,7 +111,7 @@
       "fascia_oraria": null,
       "max_squadre": 4,
       "livello": 6,
-      "livello_rifugio": 20
+      "livello_trasporto": 20
     },
     "FAU_02": {
       "abilitata": true,
@@ -120,7 +120,7 @@
       "fascia_oraria": null,
       "max_squadre": 4,
       "livello": 6,
-      "livello_rifugio": 20
+      "livello_trasporto": 20
     },
     "FAU_03": {
       "abilitata": true,
@@ -129,7 +129,7 @@
       "fascia_oraria": null,
       "max_squadre": 4,
       "livello": 6,
-      "livello_rifugio": 20
+      "livello_trasporto": 20
     },
     "FAU_04": {
       "abilitata": true,
@@ -138,7 +138,7 @@
       "fascia_oraria": null,
       "max_squadre": 4,
       "livello": 6,
-      "livello_rifugio": 20
+      "livello_trasporto": 20
     },
     "FAU_05": {
       "abilitata": true,
@@ -147,7 +147,7 @@
       "fascia_oraria": null,
       "max_squadre": 4,
       "livello": 6,
-      "livello_rifugio": 20
+      "livello_trasporto": 20
     },
     "FAU_06": {
       "abilitata": true,
@@ -156,7 +156,7 @@
       "fascia_oraria": null,
       "max_squadre": 4,
       "livello": 6,
-      "livello_rifugio": 20
+      "livello_trasporto": 20
     },
     "FAU_07": {
       "abilitata": true,
@@ -165,7 +165,7 @@
       "fascia_oraria": null,
       "max_squadre": 4,
       "livello": 6,
-      "livello_rifugio": 20
+      "livello_trasporto": 20
     },
     "FAU_08": {
       "abilitata": true,
@@ -174,7 +174,7 @@
       "fascia_oraria": null,
       "max_squadre": 4,
       "livello": 6,
-      "livello_rifugio": 20
+      "livello_trasporto": 20
     },
     "FAU_09": {
       "abilitata": true,
@@ -183,7 +183,7 @@
       "fascia_oraria": null,
       "max_squadre": 4,
       "livello": 6,
-      "livello_rifugio": 20
+      "livello_trasporto": 18
     },
     "FauMorfeus": {
       "abilitata": true,
@@ -193,7 +193,7 @@
       "max_squadre": 5,
       "livello": 7,
       "master": true,
-      "livello_rifugio": 25
+      "livello_trasporto": 20
     },
     "FAU_10": {
       "abilitata": true,
@@ -202,7 +202,7 @@
       "fascia_oraria": null,
       "max_squadre": 4,
       "livello": 6,
-      "livello_rifugio": 20
+      "livello_trasporto": 19
     }
   }
 }

@@ -1,6 +1,6 @@
 {
   "_schema": "rifornimento_livelli_trasporto/v2",
-  "_note": "Tabella STATICA livelli edificio trasporto/rifugio (1-25). Fonte di verita' per l'invio risorse SENZA leggere il valore clampato dalla maschera via OCR. Livello per istanza in config: campo 'livello_rifugio' (WU211).",
+  "_note": "Tabella STATICA livelli edificio di trasporto (1-25). Fonte di verita' per l'invio risorse SENZA leggere il valore clampato dalla maschera via OCR. Livello per istanza in config: campo 'livello_trasporto' (WU211).",
   "_semantica_tassa": "capacita_trasporto = NETTO che arriva al master (valore tabella gioco). Il castello viene debitato del LORDO = capacita/(1-tassa) = 'capacita + tassa' (= lordo_debitato). Verificato dal log: L24 capacita 4.000.000, tassa 10%, lordo osservato 4.444.444 = 4.000.000/0.90. netto = lordo*(1-tassa) = capacita.",
   "_assunzione_invio_max": "SEMPLIFICAZIONE (utente): la soglia di invio del deposito e' sempre >= lordo_debitato, quindi ogni spedizione e' SEMPRE al massimo: netto_al_master = capacita_trasporto, lordo_dal_castello = lordo_debitato. Nessun caso parziale.",
   "_colonne": {

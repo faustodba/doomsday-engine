@@ -10,7 +10,7 @@
     "abilitata": true,
     "fascia_oraria": "",
     "master": false,
-    "livello_rifugio": 25
+    "livello_trasporto": 24
   },
   {
     "nome": "FAU_01",
@@ -23,7 +23,7 @@
     "abilitata": true,
     "fascia_oraria": "",
     "master": false,
-    "livello_rifugio": 20
+    "livello_trasporto": 20
   },
   {
     "nome": "FAU_02",
@@ -36,7 +36,7 @@
     "abilitata": true,
     "fascia_oraria": "",
     "master": false,
-    "livello_rifugio": 20
+    "livello_trasporto": 20
   },
   {
     "nome": "FAU_03",
@@ -49,7 +49,7 @@
     "abilitata": true,
     "fascia_oraria": "",
     "master": false,
-    "livello_rifugio": 20
+    "livello_trasporto": 20
   },
   {
     "nome": "FAU_04",
@@ -62,7 +62,7 @@
     "abilitata": true,
     "fascia_oraria": "",
     "master": false,
-    "livello_rifugio": 20
+    "livello_trasporto": 20
   },
   {
     "nome": "FAU_05",
@@ -75,7 +75,7 @@
     "abilitata": true,
     "fascia_oraria": "",
     "master": false,
-    "livello_rifugio": 20
+    "livello_trasporto": 20
   },
   {
     "nome": "FAU_06",
@@ -88,7 +88,7 @@
     "abilitata": true,
     "fascia_oraria": "",
     "master": false,
-    "livello_rifugio": 20
+    "livello_trasporto": 20
   },
   {
     "nome": "FAU_07",
@@ -101,7 +101,7 @@
     "abilitata": true,
     "fascia_oraria": "",
     "master": false,
-    "livello_rifugio": 20
+    "livello_trasporto": 20
   },
   {
     "nome": "FAU_08",
@@ -114,7 +114,7 @@
     "abilitata": true,
     "fascia_oraria": "",
     "master": false,
-    "livello_rifugio": 20
+    "livello_trasporto": 20
   },
   {
     "nome": "FAU_09",
@@ -127,7 +127,7 @@
     "abilitata": true,
     "fascia_oraria": "",
     "master": false,
-    "livello_rifugio": 20
+    "livello_trasporto": 18
   },
   {
     "nome": "FAU_10",
@@ -140,7 +140,7 @@
     "abilitata": true,
     "fascia_oraria": "",
     "master": false,
-    "livello_rifugio": 20
+    "livello_trasporto": 19
   },
   {
     "nome": "FauMorfeus",
@@ -153,6 +153,6 @@
     "abilitata": true,
     "fascia_oraria": "",
     "master": true,
-    "livello_rifugio": 25
+    "livello_trasporto": 20
   }
 ]

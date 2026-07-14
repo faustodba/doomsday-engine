@@ -1643,8 +1643,8 @@ def partial_ist_table(request: Request):
         # (pre-fix la tabella mostrava sempre il valore static dopo save bulk)
         max_squadre = ist_ov.get("max_squadre",   ist.get("max_squadre", 4))
         livello     = ist_ov.get("livello",       ist.get("livello",     6))
-        # WU211 — livello edificio trasporto/rifugio (rifornimento)
-        livello_rifugio = ist_ov.get("livello_rifugio", ist.get("livello_rifugio", 20))
+        # WU211 — livello edificio di trasporto (rifornimento)
+        livello_trasporto = ist_ov.get("livello_trasporto", ist.get("livello_trasporto", 20))
         # WU50 — flag fuori territorio: override > instances.json (default)
         fuori_terr  = bool(ist_ov.get(
             "raccolta_fuori_territorio",
@@ -1708,8 +1708,8 @@ def partial_ist_table(request: Request):
           </select></td>
           <td><input type="number" class="ist-lv" value="{livello}" {disabled_attr}
                      min="1" max="10" style="width:36px"></td>
-          <td><input type="number" class="ist-rifugio" value="{livello_rifugio}" {disabled_attr}
-                     min="1" max="25" title="livello edificio trasporto/rifugio (1-25)" style="width:40px"></td>
+          <td><input type="number" class="ist-trasporto" value="{livello_trasporto}" {disabled_attr}
+                     min="1" max="25" title="livello edificio di trasporto (1-25)" style="width:40px"></td>
           <td><input type="checkbox" class="ist-fuori-terr" {"checked" if fuori_terr else ""} {disabled_attr}
                      title="modalità fuori territorio: raccolta su nodi fuori senza blacklist (WU50)"
                      style="accent-color:var(--accent);width:13px;height:13px;cursor:pointer"></td>

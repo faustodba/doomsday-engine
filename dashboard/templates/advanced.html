@@ -21,7 +21,7 @@
         <th title="max squadre concorrenti">squadre</th>
         <th>prof.</th>
         <th title="livello nodo target">nodo</th>
-        <th title="livello edificio trasporto/rifugio (1-25)">rifugio</th>
+        <th title="livello edificio di trasporto (1-25)">trasporto</th>
         <th title="raccolta fuori territorio (WU50)">FT</th>
         <th>fascia oraria</th>
       </tr></thead>
@@ -157,7 +157,7 @@ async function advSalvaIstanze() {
       fascia_oraria: (da||a) ? `${da||'00:00'}-${a||'23:59'}` : null,
       max_squadre:  parseInt(tr.querySelector('.ist-sq')?.value)||null,
       livello:      parseInt(tr.querySelector('.ist-lv')?.value)||null,
-      livello_rifugio: parseInt(tr.querySelector('.ist-rifugio')?.value)||null,
+      livello_trasporto: parseInt(tr.querySelector('.ist-trasporto')?.value)||null,
       raccolta_fuori_territorio: tr.querySelector('.ist-fuori-terr')?.checked ?? false,
     };
     try {

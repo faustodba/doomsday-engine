@@ -711,18 +711,18 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
     # WU213 — invio DETERMINISTICO da tabella livelli trasporto (sostituisce
     # l'OCR del valore clampato, inaffidabile: per FAU_00 leggeva 999M/garbage
     # → contabilità corrotta, vedi analisi bug). Il valore inviato è funzione
-    # SOLO del livello edificio trasporto (ctx.config.livello_rifugio, WU211):
+    # SOLO del livello edificio trasporto (ctx.config.livello_trasporto, WU211):
     #   qta_effettiva (netto al master)   = capacita_trasporto[liv]
     #   qta_clamped_real (esce dal castello) = lordo_debitato[liv] = "cap+tassa"
     # Assunzione (utente, garantita dal vincolo soglia in dashboard): la soglia
     # di deposito è sempre >= lordo_debitato, quindi ogni invio è al massimo →
     # nessun OCR, nessun caso parziale. La capacità di trasporto è per-LIVELLO
     # (uguale per tutte le risorse), quindi non dipende da `risorsa`.
-    liv_rifugio = int(getattr(ctx.config, "livello_rifugio", 20) or 20)
+    liv_trasporto = int(getattr(ctx.config, "livello_trasporto", 20) or 20)
     _dl = None
     try:
         from shared.rifornimento_livelli import dati_livello
-        _dl = dati_livello(liv_rifugio)
+        _dl = dati_livello(liv_trasporto)
     except Exception as exc:
         ctx.log_msg(f"Rifornimento: errore lookup livelli: {exc}")
     if _dl:
@@ -730,7 +730,7 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
         qta_effettiva    = int(_dl["capacita_trasporto"])  # netto al master
         tassa_amount     = int(_dl["tassa_importo"])
         ctx.log_msg(
-            f"Rifornimento: liv_rifugio={liv_rifugio} → netto={qta_effettiva:,} "
+            f"Rifornimento: liv_trasporto={liv_trasporto} → netto={qta_effettiva:,} "
             f"lordo={qta_clamped_real:,} tassa={tassa_amount:,} (deterministico)"
         )
     else:
@@ -740,7 +740,7 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
         qta_effettiva    = 0
         tassa_amount     = 0
         ctx.log_msg(
-            f"Rifornimento: tabella livelli assente per liv {liv_rifugio} "
+            f"Rifornimento: tabella livelli assente per liv {liv_trasporto} "
             f"— registro 0 (no OCR, no fallback 999M)"
         )
 
