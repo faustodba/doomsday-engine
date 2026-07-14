@@ -1264,6 +1264,11 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         truppe        = _ovr("truppe",      12000)
         max_squadre   = _ovr("max_squadre", 4)
         livello       = _ovr("livello",     gcfg.livello_nodo)
+        # WU211 — livello edificio trasporto/rifugio (rifornimento): determina
+        # capacità di trasporto per spedizione + tassa (tabella livelli 1-25).
+        # Serve al calcolo deterministico dell'inviato (sostituisce l'OCR del
+        # valore clampato, inaffidabile). Default 20 se non configurato.
+        livello_rifugio = _ovr("livello_rifugio", 20)
         profilo       = _ovr("profilo",     "full")
         fascia_oraria = _ovr("fascia_oraria", "")
         abilitata     = ist.get("abilitata", True)

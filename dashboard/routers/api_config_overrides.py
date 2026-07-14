@@ -493,6 +493,8 @@ def save_istanze(payload: PayloadIstanze):
             upd["max_squadre"] = ist_ov.max_squadre
         if ist_ov.livello is not None:
             upd["livello"] = ist_ov.livello
+        if ist_ov.livello_rifugio is not None:
+            upd["livello_rifugio"] = ist_ov.livello_rifugio
         instances_updates[nome] = upd
 
     # Invalida cache instance_meta (master flag potrebbe essere cambiato)
@@ -691,8 +693,8 @@ def patch_istanza(nome: str, data: dict):
     # WU205: `allocazione` (dict {pomodoro,legno,petrolio,acciaio} %) per la
     # matrice allocazione per-istanza. `None` = reset al globale.
     allowed = {"abilitata", "truppe", "tipologia", "fascia_oraria",
-               "max_squadre", "livello", "raccolta_fuori_territorio",
-               "allocazione"}
+               "max_squadre", "livello", "livello_rifugio",
+               "raccolta_fuori_territorio", "allocazione"}
     for k, v in data.items():
         if k in allowed:
             current_dict[k] = v

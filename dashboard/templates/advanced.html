@@ -21,6 +21,7 @@
         <th title="max squadre concorrenti">squadre</th>
         <th>prof.</th>
         <th title="livello nodo target">nodo</th>
+        <th title="livello edificio trasporto/rifugio (1-25)">rifugio</th>
         <th title="raccolta fuori territorio (WU50)">FT</th>
         <th>fascia oraria</th>
       </tr></thead>
@@ -28,7 +29,7 @@
              hx-get="{{ url_prefix }}/ui/partial/ist-table"
              hx-trigger="load"
              hx-swap="innerHTML">
-        <tr><td colspan="8" style="color:var(--text-dim);font-size:9px;padding:8px">caricamento...</td></tr>
+        <tr><td colspan="9" style="color:var(--text-dim);font-size:9px;padding:8px">caricamento...</td></tr>
       </tbody>
     </table>
   </div>
@@ -156,6 +157,7 @@ async function advSalvaIstanze() {
       fascia_oraria: (da||a) ? `${da||'00:00'}-${a||'23:59'}` : null,
       max_squadre:  parseInt(tr.querySelector('.ist-sq')?.value)||null,
       livello:      parseInt(tr.querySelector('.ist-lv')?.value)||null,
+      livello_rifugio: parseInt(tr.querySelector('.ist-rifugio')?.value)||null,
       raccolta_fuori_territorio: tr.querySelector('.ist-fuori-terr')?.checked ?? false,
     };
     try {
