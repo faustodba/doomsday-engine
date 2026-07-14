@@ -1,21 +1,24 @@
 {
-  "_schema": "rifornimento_livelli_trasporto/v1",
-  "_note": "Tabella STATICA dei livelli edificio trasporto/rifugio (1-25) del gioco. Fonte di verita' per l'invio risorse SENZA piu' leggere il valore clampato dalla maschera via OCR (inaffidabile, vedi bug 999M FAU_00). Il livello per istanza e' in config: instances.json / runtime_overrides.json campo 'livello_rifugio' (WU211).",
-  "_assunzione_invio_max": "SEMPLIFICAZIONE (richiesta utente): le soglie di invio del deposito sono sempre tali che il deposito disponibile >= massimo inviabile. Quindi ogni spedizione e' SEMPRE al massimo: lordo = capacita_trasporto[livello], netto = invio_netto_max[livello]. Nessun caso parziale da gestire.",
+  "_schema": "rifornimento_livelli_trasporto/v2",
+  "_note": "Tabella STATICA livelli edificio trasporto/rifugio (1-25). Fonte di verita' per l'invio risorse SENZA leggere il valore clampato dalla maschera via OCR. Livello per istanza in config: campo 'livello_rifugio' (WU211).",
+  "_semantica_tassa": "capacita_trasporto = NETTO che arriva al master (valore tabella gioco). Il castello viene debitato del LORDO = capacita/(1-tassa) = 'capacita + tassa' (= lordo_debitato). Verificato dal log: L24 capacita 4.000.000, tassa 10%, lordo osservato 4.444.444 = 4.000.000/0.90. netto = lordo*(1-tassa) = capacita.",
+  "_assunzione_invio_max": "SEMPLIFICAZIONE (utente): la soglia di invio del deposito e' sempre >= lordo_debitato, quindi ogni spedizione e' SEMPRE al massimo: netto_al_master = capacita_trasporto, lordo_dal_castello = lordo_debitato. Nessun caso parziale.",
   "_colonne": {
-    "capacita_trasporto": "risorse caricate per spedizione (lordo, escono dal castello mittente)",
+    "capacita_trasporto": "NETTO ricevuto dal master per spedizione (valore tabella gioco)",
     "tassa_pct": "tassa di trasporto in percentuale intera",
-    "invio_netto_max": "risorse ricevute dal master per spedizione = floor(capacita * (1 - tassa/100))",
+    "lordo_debitato": "risorse che escono dal castello mittente = floor(capacita/(1-tassa)) = SOGLIA min deposito",
+    "tassa_importo": "tassa in unita' = lordo_debitato - capacita_trasporto",
     "limite_ricezione_giornaliero": "cap giornaliero di ricezione del destinatario (master)",
     "limite_trasporto_giornaliero": "cap giornaliero di invio del mittente",
-    "velocita_trasporto_pct": "bonus velocita' di trasporto (non usato per la contabilita')",
-    "potenza": "potenza edificio (per identificazione livello)"
+    "velocita_trasporto_pct": "bonus velocita' trasporto (non usato per la contabilita')",
+    "potenza": "potenza edificio (identificazione livello)"
   },
   "livelli": {
     "1": {
       "capacita_trasporto": 20000,
       "tassa_pct": 30,
-      "invio_netto_max": 14000,
+      "lordo_debitato": 28571,
+      "tassa_importo": 8571,
       "limite_ricezione_giornaliero": 5000000,
       "limite_trasporto_giornaliero": 2500000,
       "velocita_trasporto_pct": 0.0,
@@ -24,7 +27,8 @@
     "2": {
       "capacita_trasporto": 50000,
       "tassa_pct": 29,
-      "invio_netto_max": 35500,
+      "lordo_debitato": 70422,
+      "tassa_importo": 20422,
       "limite_ricezione_giornaliero": 7500000,
       "limite_trasporto_giornaliero": 3750000,
       "velocita_trasporto_pct": 0.0,
@@ -33,7 +37,8 @@
     "3": {
       "capacita_trasporto": 100000,
       "tassa_pct": 29,
-      "invio_netto_max": 71000,
+      "lordo_debitato": 140845,
+      "tassa_importo": 40845,
       "limite_ricezione_giornaliero": 10000000,
       "limite_trasporto_giornaliero": 5000000,
       "velocita_trasporto_pct": 0.0,
@@ -42,7 +47,8 @@
     "4": {
       "capacita_trasporto": 150000,
       "tassa_pct": 28,
-      "invio_netto_max": 108000,
+      "lordo_debitato": 208333,
+      "tassa_importo": 58333,
       "limite_ricezione_giornaliero": 12500000,
       "limite_trasporto_giornaliero": 6250000,
       "velocita_trasporto_pct": 0.0,
@@ -51,7 +57,8 @@
     "5": {
       "capacita_trasporto": 200000,
       "tassa_pct": 28,
-      "invio_netto_max": 144000,
+      "lordo_debitato": 277777,
+      "tassa_importo": 77777,
       "limite_ricezione_giornaliero": 15000000,
       "limite_trasporto_giornaliero": 7500000,
       "velocita_trasporto_pct": 0.0,
@@ -60,7 +67,8 @@
     "6": {
       "capacita_trasporto": 300000,
       "tassa_pct": 27,
-      "invio_netto_max": 219000,
+      "lordo_debitato": 410958,
+      "tassa_importo": 110958,
       "limite_ricezione_giornaliero": 18000000,
       "limite_trasporto_giornaliero": 9000000,
       "velocita_trasporto_pct": 0.0,
@@ -69,7 +77,8 @@
     "7": {
       "capacita_trasporto": 400000,
       "tassa_pct": 27,
-      "invio_netto_max": 292000,
+      "lordo_debitato": 547945,
+      "tassa_importo": 147945,
       "limite_ricezione_giornaliero": 21000000,
       "limite_trasporto_giornaliero": 10500000,
       "velocita_trasporto_pct": 0.0,
@@ -78,7 +87,8 @@
     "8": {
       "capacita_trasporto": 500000,
       "tassa_pct": 26,
-      "invio_netto_max": 370000,
+      "lordo_debitato": 675675,
+      "tassa_importo": 175675,
       "limite_ricezione_giornaliero": 24000000,
       "limite_trasporto_giornaliero": 12000000,
       "velocita_trasporto_pct": 0.0,
@@ -87,7 +97,8 @@
     "9": {
       "capacita_trasporto": 600000,
       "tassa_pct": 26,
-      "invio_netto_max": 444000,
+      "lordo_debitato": 810810,
+      "tassa_importo": 210810,
       "limite_ricezione_giornaliero": 27000000,
       "limite_trasporto_giornaliero": 13500000,
       "velocita_trasporto_pct": 0.0,
@@ -96,7 +107,8 @@
     "10": {
       "capacita_trasporto": 700000,
       "tassa_pct": 25,
-      "invio_netto_max": 525000,
+      "lordo_debitato": 933333,
+      "tassa_importo": 233333,
       "limite_ricezione_giornaliero": 30000000,
       "limite_trasporto_giornaliero": 15000000,
       "velocita_trasporto_pct": 0.0,
@@ -105,7 +117,8 @@
     "11": {
       "capacita_trasporto": 850000,
       "tassa_pct": 25,
-      "invio_netto_max": 637500,
+      "lordo_debitato": 1133333,
+      "tassa_importo": 283333,
       "limite_ricezione_giornaliero": 35000000,
       "limite_trasporto_giornaliero": 17500000,
       "velocita_trasporto_pct": 0.0,
@@ -114,7 +127,8 @@
     "12": {
       "capacita_trasporto": 1000000,
       "tassa_pct": 24,
-      "invio_netto_max": 760000,
+      "lordo_debitato": 1315789,
+      "tassa_importo": 315789,
       "limite_ricezione_giornaliero": 40000000,
       "limite_trasporto_giornaliero": 20000000,
       "velocita_trasporto_pct": 0.0,
@@ -123,7 +137,8 @@
     "13": {
       "capacita_trasporto": 1200000,
       "tassa_pct": 23,
-      "invio_netto_max": 924000,
+      "lordo_debitato": 1558441,
+      "tassa_importo": 358441,
       "limite_ricezione_giornaliero": 45000000,
       "limite_trasporto_giornaliero": 22500000,
       "velocita_trasporto_pct": 0.0,
@@ -132,7 +147,8 @@
     "14": {
       "capacita_trasporto": 1400000,
       "tassa_pct": 22,
-      "invio_netto_max": 1092000,
+      "lordo_debitato": 1794871,
+      "tassa_importo": 394871,
       "limite_ricezione_giornaliero": 50000000,
       "limite_trasporto_giornaliero": 25000000,
       "velocita_trasporto_pct": 0.0,
@@ -141,7 +157,8 @@
     "15": {
       "capacita_trasporto": 1600000,
       "tassa_pct": 21,
-      "invio_netto_max": 1264000,
+      "lordo_debitato": 2025316,
+      "tassa_importo": 425316,
       "limite_ricezione_giornaliero": 55000000,
       "limite_trasporto_giornaliero": 27500000,
       "velocita_trasporto_pct": 0.0,
@@ -150,7 +167,8 @@
     "16": {
       "capacita_trasporto": 1800000,
       "tassa_pct": 20,
-      "invio_netto_max": 1440000,
+      "lordo_debitato": 2250000,
+      "tassa_importo": 450000,
       "limite_ricezione_giornaliero": 60000000,
       "limite_trasporto_giornaliero": 30000000,
       "velocita_trasporto_pct": 0.0,
@@ -159,7 +177,8 @@
     "17": {
       "capacita_trasporto": 2000000,
       "tassa_pct": 19,
-      "invio_netto_max": 1620000,
+      "lordo_debitato": 2469135,
+      "tassa_importo": 469135,
       "limite_ricezione_giornaliero": 70000000,
       "limite_trasporto_giornaliero": 35000000,
       "velocita_trasporto_pct": 0.0,
@@ -168,7 +187,8 @@
     "18": {
       "capacita_trasporto": 2200000,
       "tassa_pct": 18,
-      "invio_netto_max": 1804000,
+      "lordo_debitato": 2682926,
+      "tassa_importo": 482926,
       "limite_ricezione_giornaliero": 80000000,
       "limite_trasporto_giornaliero": 40000000,
       "velocita_trasporto_pct": 0.0,
@@ -177,7 +197,8 @@
     "19": {
       "capacita_trasporto": 2400000,
       "tassa_pct": 17,
-      "invio_netto_max": 1992000,
+      "lordo_debitato": 2891566,
+      "tassa_importo": 491566,
       "limite_ricezione_giornaliero": 90000000,
       "limite_trasporto_giornaliero": 45000000,
       "velocita_trasporto_pct": 0.0,
@@ -186,7 +207,8 @@
     "20": {
       "capacita_trasporto": 2600000,
       "tassa_pct": 16,
-      "invio_netto_max": 2184000,
+      "lordo_debitato": 3095238,
+      "tassa_importo": 495238,
       "limite_ricezione_giornaliero": 100000000,
       "limite_trasporto_giornaliero": 50000000,
       "velocita_trasporto_pct": 0.0,
@@ -195,7 +217,8 @@
     "21": {
       "capacita_trasporto": 2800000,
       "tassa_pct": 15,
-      "invio_netto_max": 2380000,
+      "lordo_debitato": 3294117,
+      "tassa_importo": 494117,
       "limite_ricezione_giornaliero": 110000000,
       "limite_trasporto_giornaliero": 55000000,
       "velocita_trasporto_pct": 0.0,
@@ -204,7 +227,8 @@
     "22": {
       "capacita_trasporto": 3000000,
       "tassa_pct": 14,
-      "invio_netto_max": 2580000,
+      "lordo_debitato": 3488372,
+      "tassa_importo": 488372,
       "limite_ricezione_giornaliero": 120000000,
       "limite_trasporto_giornaliero": 60000000,
       "velocita_trasporto_pct": 0.0,
@@ -213,7 +237,8 @@
     "23": {
       "capacita_trasporto": 3500000,
       "tassa_pct": 12,
-      "invio_netto_max": 3080000,
+      "lordo_debitato": 3977272,
+      "tassa_importo": 477272,
       "limite_ricezione_giornaliero": 130000000,
       "limite_trasporto_giornaliero": 65000000,
       "velocita_trasporto_pct": 0.0,
@@ -222,7 +247,8 @@
     "24": {
       "capacita_trasporto": 4000000,
       "tassa_pct": 10,
-      "invio_netto_max": 3600000,
+      "lordo_debitato": 4444444,
+      "tassa_importo": 444444,
       "limite_ricezione_giornaliero": 140000000,
       "limite_trasporto_giornaliero": 70000000,
       "velocita_trasporto_pct": 0.0,
@@ -231,7 +257,8 @@
     "25": {
       "capacita_trasporto": 5000000,
       "tassa_pct": 8,
-      "invio_netto_max": 4600000,
+      "lordo_debitato": 5434782,
+      "tassa_importo": 434782,
       "limite_ricezione_giornaliero": 200000000,
       "limite_trasporto_giornaliero": 100000000,
       "velocita_trasporto_pct": 100.0,
