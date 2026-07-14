@@ -166,6 +166,52 @@ async def save_rifornimento(request: Request):
     # Sub-section "rifornimento_comune" — merge incrementale field-by-field
     rc_payload = raw.get("rifornimento_comune") or {}
     if isinstance(rc_payload, dict):
+        # WU213 — VINCOLO soglie: una soglia di deposito inferiore al lordo
+        # debitato del livello_rifugio piu' alto tra le istanze provocherebbe
+        # invii PARZIALI (il gioco clampa a meno di capacita_trasporto),
+        # rompendo la contabilita' deterministica (netto = capacita[liv]).
+        # Blocca il save se un valore inserito e' sotto il minimo richiesto.
+        _soglia_keys = ("soglia_campo_m", "soglia_legno_m",
+                        "soglia_petrolio_m", "soglia_acciaio_m")
+        if any(k in rc_payload for k in _soglia_keys):
+            try:
+                from shared.rifornimento_livelli import soglia_minima_richiesta_m
+                from shared.instance_meta import is_master_instance
+                from dashboard.services.config_manager import (
+                    get_instances, get_overrides,
+                )
+                _ov_ist = (get_overrides() or {}).get("istanze", {}) or {}
+                _livelli = []
+                for _i in (get_instances() or []):
+                    _nome = _i.get("nome")
+                    if not _nome or is_master_instance(_nome):
+                        continue   # il master riceve, non invia → non vincola
+                    _liv = (_ov_ist.get(_nome, {}) or {}).get(
+                        "livello_rifugio", _i.get("livello_rifugio", 20))
+                    _livelli.append(_liv)
+                _min_m, _driver = soglia_minima_richiesta_m(_livelli)
+            except HTTPException:
+                raise
+            except Exception:
+                _min_m, _driver = None, None  # best-effort: non bloccare su errore interno
+            if _min_m is not None:
+                _viol = []
+                for _k in _soglia_keys:
+                    if _k in rc_payload:
+                        try:
+                            _val = float(rc_payload[_k])
+                        except Exception:
+                            continue
+                        if _val + 1e-9 < _min_m:
+                            _viol.append(f"{_k}={_val:g}M")
+                if _viol:
+                    raise HTTPException(status_code=400, detail=(
+                        f"Soglie sotto il minimo: {', '.join(_viol)}. "
+                        f"Servono ≥ {_min_m:g}M (lordo debitato del livello rifugio "
+                        f"{_driver}, il piu' alto in flotta) per garantire invii al "
+                        f"massimo — altrimenti l'invio e' parziale e la contabilita' "
+                        f"deterministica sovrastima."
+                    ))
         cur_rc = ov.globali.rifornimento_comune
         for field in ("dooms_account", "max_spedizioni_ciclo",
                       "soglia_campo_m", "soglia_legno_m",

@@ -708,38 +708,41 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
         ctx.device.key("KEYCODE_BACK")
         return False, 0, False, 0, 0, provviste, False
 
-    # auto-WU12: leggi valore reale CLAMPED dal campo input + applica tassa.
-    # User: "L'input 999_999_999 il sistema auto-aggiusta sul max, e il valore
-    # effettivo mandato è (input clamped) - tassa". Tassa è %, formula:
-    # qta_effettiva = qta_clamped * (1 - tassa).
-    # screen2 è già il post-tap_OK_TASTIERA, contiene il valore clamped.
-    qta_effettiva     = qta  # fallback se OCR fallisce
-    qta_clamped_real  = qta  # valore totale uscito dal castello
-    tassa_amount      = 0
-    if screen2 is not None:
-        ocr_input_dict = _cfg(ctx, "OCR_CAMPO_INPUT") or {}
-        ocr_input_zone = ocr_input_dict.get(risorsa)
-        if ocr_input_zone:
-            try:
-                from shared.ocr_helpers import ocr_intero, estrai_numero
-                testo_in = ocr_intero(screen2, ocr_input_zone, preprocessor="otsu")
-                qta_clamped = estrai_numero(testo_in)
-                tassa_pct  = _leggi_tassa(screen2, _cfg(ctx, "OCR_TASSA"))
-                if qta_clamped is not None and qta_clamped > 0:
-                    qta_effettiva    = int(qta_clamped * (1.0 - tassa_pct))
-                    qta_clamped_real = qta_clamped
-                    tassa_amount     = qta_clamped_real - qta_effettiva
-                    ctx.log_msg(
-                        f"Rifornimento: input clamped={qta_clamped:,} "
-                        f"tassa={tassa_pct*100:.1f}% → effettiva={qta_effettiva:,}"
-                    )
-                else:
-                    ctx.log_msg(
-                        f"Rifornimento: OCR input fallito (testo='{testo_in}') "
-                        f"— fallback qta={qta:,}"
-                    )
-            except Exception as exc:
-                ctx.log_msg(f"Rifornimento: errore OCR input: {exc} — fallback qta={qta:,}")
+    # WU213 — invio DETERMINISTICO da tabella livelli trasporto (sostituisce
+    # l'OCR del valore clampato, inaffidabile: per FAU_00 leggeva 999M/garbage
+    # → contabilità corrotta, vedi analisi bug). Il valore inviato è funzione
+    # SOLO del livello edificio trasporto (ctx.config.livello_rifugio, WU211):
+    #   qta_effettiva (netto al master)   = capacita_trasporto[liv]
+    #   qta_clamped_real (esce dal castello) = lordo_debitato[liv] = "cap+tassa"
+    # Assunzione (utente, garantita dal vincolo soglia in dashboard): la soglia
+    # di deposito è sempre >= lordo_debitato, quindi ogni invio è al massimo →
+    # nessun OCR, nessun caso parziale. La capacità di trasporto è per-LIVELLO
+    # (uguale per tutte le risorse), quindi non dipende da `risorsa`.
+    liv_rifugio = int(getattr(ctx.config, "livello_rifugio", 20) or 20)
+    _dl = None
+    try:
+        from shared.rifornimento_livelli import dati_livello
+        _dl = dati_livello(liv_rifugio)
+    except Exception as exc:
+        ctx.log_msg(f"Rifornimento: errore lookup livelli: {exc}")
+    if _dl:
+        qta_clamped_real = int(_dl["lordo_debitato"])      # esce dal castello
+        qta_effettiva    = int(_dl["capacita_trasporto"])  # netto al master
+        tassa_amount     = int(_dl["tassa_importo"])
+        ctx.log_msg(
+            f"Rifornimento: liv_rifugio={liv_rifugio} → netto={qta_effettiva:,} "
+            f"lordo={qta_clamped_real:,} tassa={tassa_amount:,} (deterministico)"
+        )
+    else:
+        # Tabella assente/illeggibile: fallback conservativo. NON registrare mai
+        # il grezzo `qta` (999M sentinel, era la causa del fantasma) — meglio 0.
+        qta_clamped_real = 0
+        qta_effettiva    = 0
+        tassa_amount     = 0
+        ctx.log_msg(
+            f"Rifornimento: tabella livelli assente per liv {liv_rifugio} "
+            f"— registro 0 (no OCR, no fallback 999M)"
+        )
 
     ctx.log_msg("Rifornimento: tap VAI")
     ctx.device.tap(coord_vai)
