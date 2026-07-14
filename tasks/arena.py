@@ -645,18 +645,21 @@ class ArenaTask(Task):
             time.sleep(1.5)
             return "errore"
 
-        # WU83 (30/04 12:20) — Rebuild truppe pre-1ª sfida del giorno.
-        # Eseguito SOLO alla prima sfida del primo tentativo del giorno.
-        # State persistito in data/arena_deploy_state.json (granularità UTC).
+        # WU83 (30/04 12:20) — Rebuild truppe pre-1ª sfida.
+        # WU219 (14/07) — cadenza da GIORNALIERA a SETTIMANALE: lo schieramento
+        # viene ricostruito solo la PRIMA volta della settimana (ISO, lun-dom),
+        # non più ogni giorno. Eseguito alla prima sfida del primo tentativo.
+        # State persistito in data/arena_deploy_state.json (granularità
+        # settimanale ISO, es. "2026-W29").
         # Operation: rimuovi N squadre + tap cella + READY (auto-deploy).
         # READY auto-seleziona la migliore composizione disponibile (es. test
         # FAU_06: power 431k → 685k post-rebuild, +59% truppe nuove).
-        if run.sfide_eseguite == 0 and not _deploy_done_today(ctx.instance_name):
+        if run.sfide_eseguite == 0 and not _deploy_done_settimana(ctx.instance_name):
             try:
                 n_celle = int(ctx.config.get("max_squadre", 4))
                 self._rebuild_truppe(ctx, n_celle)
                 _mark_deploy_done(ctx.instance_name)
-                ctx.log_msg(f"[ARENA] [WU83] rebuild OK ({n_celle} celle) — marcato per oggi")
+                ctx.log_msg(f"[ARENA] [WU219] rebuild schieramento OK ({n_celle} celle) — marcato per la settimana")
             except Exception as exc:
                 ctx.log_msg(f"[ARENA] [WU83] rebuild errore: {exc}")
             # Re-verifica START CHALLENGE post-rebuild
@@ -1001,8 +1004,16 @@ def _today_utc() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%d")
 
 
-def _deploy_done_today(nome: str) -> bool:
-    """True se rebuild già fatto oggi (UTC) per `nome`. Failsafe → False."""
+def _settimana_iso() -> str:
+    """Identificativo settimana ISO UTC (es. '2026-W29'), settimana lun-dom.
+    WU219: il rebuild schieramento arena passa da giornaliero a settimanale."""
+    return datetime.now(timezone.utc).strftime("%G-W%V")
+
+
+def _deploy_done_settimana(nome: str) -> bool:
+    """True se il rebuild schieramento è già stato fatto QUESTA settimana (ISO
+    UTC) per `nome`. WU219 (era `_deploy_done_today`, giornaliero). Failsafe →
+    False (in caso di dubbio esegue il rebuild)."""
     if not nome:
         return False
     try:
@@ -1010,13 +1021,14 @@ def _deploy_done_today(nome: str) -> bool:
         if not path.exists():
             return False
         data = json.loads(path.read_text(encoding="utf-8"))
-        return data.get(nome) == _today_utc()
+        return data.get(nome) == _settimana_iso()
     except Exception:
         return False
 
 
 def _mark_deploy_done(nome: str) -> None:
-    """Aggiorna data/arena_deploy_state.json[nome] = oggi UTC. Atomic write."""
+    """Aggiorna data/arena_deploy_state.json[nome] = settimana ISO corrente
+    (WU219). Atomic write."""
     if not nome:
         return
     try:
@@ -1030,7 +1042,7 @@ def _mark_deploy_done(nome: str) -> None:
                     data = {}
             except Exception:
                 data = {}
-        data[nome] = _today_utc()
+        data[nome] = _settimana_iso()
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(data, indent=2), encoding="utf-8")
         os.replace(tmp, path)
