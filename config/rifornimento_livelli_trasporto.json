@@ -1,0 +1,241 @@
+{
+  "_schema": "rifornimento_livelli_trasporto/v1",
+  "_note": "Tabella STATICA dei livelli edificio trasporto/rifugio (1-25) del gioco. Fonte di verita' per l'invio risorse SENZA piu' leggere il valore clampato dalla maschera via OCR (inaffidabile, vedi bug 999M FAU_00). Il livello per istanza e' in config: instances.json / runtime_overrides.json campo 'livello_rifugio' (WU211).",
+  "_assunzione_invio_max": "SEMPLIFICAZIONE (richiesta utente): le soglie di invio del deposito sono sempre tali che il deposito disponibile >= massimo inviabile. Quindi ogni spedizione e' SEMPRE al massimo: lordo = capacita_trasporto[livello], netto = invio_netto_max[livello]. Nessun caso parziale da gestire.",
+  "_colonne": {
+    "capacita_trasporto": "risorse caricate per spedizione (lordo, escono dal castello mittente)",
+    "tassa_pct": "tassa di trasporto in percentuale intera",
+    "invio_netto_max": "risorse ricevute dal master per spedizione = floor(capacita * (1 - tassa/100))",
+    "limite_ricezione_giornaliero": "cap giornaliero di ricezione del destinatario (master)",
+    "limite_trasporto_giornaliero": "cap giornaliero di invio del mittente",
+    "velocita_trasporto_pct": "bonus velocita' di trasporto (non usato per la contabilita')",
+    "potenza": "potenza edificio (per identificazione livello)"
+  },
+  "livelli": {
+    "1": {
+      "capacita_trasporto": 20000,
+      "tassa_pct": 30,
+      "invio_netto_max": 14000,
+      "limite_ricezione_giornaliero": 5000000,
+      "limite_trasporto_giornaliero": 2500000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 1207
+    },
+    "2": {
+      "capacita_trasporto": 50000,
+      "tassa_pct": 29,
+      "invio_netto_max": 35500,
+      "limite_ricezione_giornaliero": 7500000,
+      "limite_trasporto_giornaliero": 3750000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 2417
+    },
+    "3": {
+      "capacita_trasporto": 100000,
+      "tassa_pct": 29,
+      "invio_netto_max": 71000,
+      "limite_ricezione_giornaliero": 10000000,
+      "limite_trasporto_giornaliero": 5000000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 3633
+    },
+    "4": {
+      "capacita_trasporto": 150000,
+      "tassa_pct": 28,
+      "invio_netto_max": 108000,
+      "limite_ricezione_giornaliero": 12500000,
+      "limite_trasporto_giornaliero": 6250000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 4866
+    },
+    "5": {
+      "capacita_trasporto": 200000,
+      "tassa_pct": 28,
+      "invio_netto_max": 144000,
+      "limite_ricezione_giornaliero": 15000000,
+      "limite_trasporto_giornaliero": 7500000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 6160
+    },
+    "6": {
+      "capacita_trasporto": 300000,
+      "tassa_pct": 27,
+      "invio_netto_max": 219000,
+      "limite_ricezione_giornaliero": 18000000,
+      "limite_trasporto_giornaliero": 9000000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 7567
+    },
+    "7": {
+      "capacita_trasporto": 400000,
+      "tassa_pct": 27,
+      "invio_netto_max": 292000,
+      "limite_ricezione_giornaliero": 21000000,
+      "limite_trasporto_giornaliero": 10500000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 9238
+    },
+    "8": {
+      "capacita_trasporto": 500000,
+      "tassa_pct": 26,
+      "invio_netto_max": 370000,
+      "limite_ricezione_giornaliero": 24000000,
+      "limite_trasporto_giornaliero": 12000000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 11262
+    },
+    "9": {
+      "capacita_trasporto": 600000,
+      "tassa_pct": 26,
+      "invio_netto_max": 444000,
+      "limite_ricezione_giornaliero": 27000000,
+      "limite_trasporto_giornaliero": 13500000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 13670
+    },
+    "10": {
+      "capacita_trasporto": 700000,
+      "tassa_pct": 25,
+      "invio_netto_max": 525000,
+      "limite_ricezione_giornaliero": 30000000,
+      "limite_trasporto_giornaliero": 15000000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 16475
+    },
+    "11": {
+      "capacita_trasporto": 850000,
+      "tassa_pct": 25,
+      "invio_netto_max": 637500,
+      "limite_ricezione_giornaliero": 35000000,
+      "limite_trasporto_giornaliero": 17500000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 20025
+    },
+    "12": {
+      "capacita_trasporto": 1000000,
+      "tassa_pct": 24,
+      "invio_netto_max": 760000,
+      "limite_ricezione_giornaliero": 40000000,
+      "limite_trasporto_giornaliero": 20000000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 24344
+    },
+    "13": {
+      "capacita_trasporto": 1200000,
+      "tassa_pct": 23,
+      "invio_netto_max": 924000,
+      "limite_ricezione_giornaliero": 45000000,
+      "limite_trasporto_giornaliero": 22500000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 29560
+    },
+    "14": {
+      "capacita_trasporto": 1400000,
+      "tassa_pct": 22,
+      "invio_netto_max": 1092000,
+      "limite_ricezione_giornaliero": 50000000,
+      "limite_trasporto_giornaliero": 25000000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 35823
+    },
+    "15": {
+      "capacita_trasporto": 1600000,
+      "tassa_pct": 21,
+      "invio_netto_max": 1264000,
+      "limite_ricezione_giornaliero": 55000000,
+      "limite_trasporto_giornaliero": 27500000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 43839
+    },
+    "16": {
+      "capacita_trasporto": 1800000,
+      "tassa_pct": 20,
+      "invio_netto_max": 1440000,
+      "limite_ricezione_giornaliero": 60000000,
+      "limite_trasporto_giornaliero": 30000000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 53927
+    },
+    "17": {
+      "capacita_trasporto": 2000000,
+      "tassa_pct": 19,
+      "invio_netto_max": 1620000,
+      "limite_ricezione_giornaliero": 70000000,
+      "limite_trasporto_giornaliero": 35000000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 66750
+    },
+    "18": {
+      "capacita_trasporto": 2200000,
+      "tassa_pct": 18,
+      "invio_netto_max": 1804000,
+      "limite_ricezione_giornaliero": 80000000,
+      "limite_trasporto_giornaliero": 40000000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 83162
+    },
+    "19": {
+      "capacita_trasporto": 2400000,
+      "tassa_pct": 17,
+      "invio_netto_max": 1992000,
+      "limite_ricezione_giornaliero": 90000000,
+      "limite_trasporto_giornaliero": 45000000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 104448
+    },
+    "20": {
+      "capacita_trasporto": 2600000,
+      "tassa_pct": 16,
+      "invio_netto_max": 2184000,
+      "limite_ricezione_giornaliero": 100000000,
+      "limite_trasporto_giornaliero": 50000000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 131555
+    },
+    "21": {
+      "capacita_trasporto": 2800000,
+      "tassa_pct": 15,
+      "invio_netto_max": 2380000,
+      "limite_ricezione_giornaliero": 110000000,
+      "limite_trasporto_giornaliero": 55000000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 170112
+    },
+    "22": {
+      "capacita_trasporto": 3000000,
+      "tassa_pct": 14,
+      "invio_netto_max": 2580000,
+      "limite_ricezione_giornaliero": 120000000,
+      "limite_trasporto_giornaliero": 60000000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 225812
+    },
+    "23": {
+      "capacita_trasporto": 3500000,
+      "tassa_pct": 12,
+      "invio_netto_max": 3080000,
+      "limite_ricezione_giornaliero": 130000000,
+      "limite_trasporto_giornaliero": 65000000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 309763
+    },
+    "24": {
+      "capacita_trasporto": 4000000,
+      "tassa_pct": 10,
+      "invio_netto_max": 3600000,
+      "limite_ricezione_giornaliero": 140000000,
+      "limite_trasporto_giornaliero": 70000000,
+      "velocita_trasporto_pct": 0.0,
+      "potenza": 432684
+    },
+    "25": {
+      "capacita_trasporto": 5000000,
+      "tassa_pct": 8,
+      "invio_netto_max": 4600000,
+      "limite_ricezione_giornaliero": 200000000,
+      "limite_trasporto_giornaliero": 100000000,
+      "velocita_trasporto_pct": 100.0,
+      "potenza": 629823
+    }
+  }
+}
