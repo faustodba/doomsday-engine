@@ -135,6 +135,8 @@ class AdaptiveSchedulerPatch(BaseModel):
     threshold_spedizioni_oggi:  Optional[int]  = None
     # WU200 Fase B — stima empirica tempo di raccolta come parametro predictor
     tempo_raccolta_empirico_enabled: Optional[bool] = None
+    # WU221 — doppio giro: 2° passaggio raccolta-only di FAU_00 nello stesso ciclo
+    doppio_giro_enabled: Optional[bool] = None
 
 
 def _global_config_path() -> Path:
@@ -178,6 +180,13 @@ def patch_adaptive_scheduler(payload: AdaptiveSchedulerPatch) -> dict:
         gc["tempo_raccolta_empirico_enabled"] = v
         globali["tempo_raccolta_empirico_enabled"] = v
         changed["tempo_raccolta_empirico_enabled"] = v
+    # WU221 — flag doppio giro (2° passaggio FAU_00). core.doppio_giro_shadow
+    # legge globali.doppio_giro_enabled a caldo → toggle immediato senza restart.
+    if payload.doppio_giro_enabled is not None:
+        v = bool(payload.doppio_giro_enabled)
+        gc["doppio_giro_enabled"] = v
+        globali["doppio_giro_enabled"] = v
+        changed["doppio_giro_enabled"] = v
 
     # Thresholds (validati). 08/05: drl_residuo_m sostituisce drl_residuo_pct.
     # Cleanup automatico: se la chiave legacy è ancora presente, rimossa.

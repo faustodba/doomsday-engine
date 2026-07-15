@@ -347,6 +347,12 @@ def get_status() -> dict:
         tempo_raccolta_empirico = _read_tempo_raccolta_empirico_flag()
     except Exception:
         tempo_raccolta_empirico = False
+    # WU221 — flag doppio giro (2° passaggio FAU_00) per il toggle nella card.
+    try:
+        from core.doppio_giro_shadow import doppio_giro_live_attivo
+        doppio_giro = doppio_giro_live_attivo()
+    except Exception:
+        doppio_giro = False
     return {
         "enabled":      enabled,
         "shadow_only":  shadow,
@@ -354,6 +360,7 @@ def get_status() -> dict:
         "reasons":      reasons,
         "thresholds":   soglie,
         "tempo_raccolta_empirico": tempo_raccolta_empirico,
+        "doppio_giro":  doppio_giro,
         "live": {
             "drl_residuo_m":    round(drl_m, 1) if drl_m >= 0 else None,
             "rifornimento_on":  rif_on,
