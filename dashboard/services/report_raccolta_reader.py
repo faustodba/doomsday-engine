@@ -110,7 +110,13 @@ def get_riepilogo() -> dict:
 def get_occupati_in_volo() -> list[dict]:
     """Raccoglitori attualmente in volo (occupazioni pending, non ancora
     abbinate a un report di completamento). Una voce per occupazione, con
-    stima arrivo se disponibile tramite stima_tempo_raccolta()."""
+    stima arrivo se disponibile tramite stima_tempo_raccolta().
+
+    Ordine (richiesta utente 15/07): per RITARDO decrescente — `residuo_min`
+    crescente, quindi i piu' negativi (in ritardo da piu' tempo) in testa, poi
+    quelli ancora in volo per residuo crescente, infine le voci senza stima
+    (`residuo_min is None`, cella con pochi campioni) in fondo.
+    """
     from shared.tempo_raccolta_estimator import stima_tempo_raccolta
 
     state = _load_state()
@@ -152,7 +158,9 @@ def get_occupati_in_volo() -> list[dict]:
                 "residuo_min":    residuo_min,
             })
 
-    righe.sort(key=lambda r: (r["instance"], r["ts_invio"]))
+    righe.sort(key=lambda r: (r["residuo_min"] is None,
+                              r["residuo_min"] if r["residuo_min"] is not None else 0.0,
+                              r["instance"], r["ts_invio"]))
     return righe
 
 

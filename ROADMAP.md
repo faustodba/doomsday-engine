@@ -5,6 +5,40 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 15/07/2026 (2) — WU224 ordinamento in-volo + WU225 diagnosi TTL orfane
+
+**WU224 — ordinamento pannello (commit di questa sessione).** Richiesta utente:
+"ordina la lista in base al tempo più lungo del ritardo".
+`dashboard/services/report_raccolta_reader.py::get_occupati_in_volo` ordinava per
+`(instance, ts_invio)` → ora per `residuo_min` crescente (più in ritardo in testa,
+`n/d` in fondo). Verificato sui dati prod. **Richiede riavvio DASHBOARD**, non il bot.
+
+**WU225 — diagnosi (APERTA, nessun fix applicato).** La domanda dell'utente
+("FAU_02 avviata ora non compare, e perché non FAU_05 che è fortemente in
+ritardo?") ha fatto emergere due artefatti dello stesso meccanismo:
+
+- **Scheduling: nessun errore.** L'ordine deciso alle 15:08 era
+  `FAU_00 → FAU_02 → FAU_05 → ...` — FAU_05 era *già* la prossima. Al passo 2
+  FAU_02 `sla=5/5, anz=234m` ha battuto FAU_05 `sla=4/5, anz=220m` (gli slot
+  precedono l'anzianità); al passo 3 FAU_05 arriva a `sla=5/5` ed è scelta.
+- **Il "ritardo" del pannello non è un ritardo di gioco**: il completamento
+  esiste solo quando l'istanza riparte e legge il tab Report → latenza
+  invio→report ≈ un periodo di ciclo. `TTL_ORFANE_ORE=4.0` pota prima. Le 4
+  righe FAU_05 sono state potate alle 15:32:35 *durante* l'analisi; le 5 di
+  FAU_02 alle 15:17, ~10min prima che ripartisse.
+- **Impatto misurato**: 1269 report → 491 matchati, **706 orfani ma abbinabili**
+  (660 con durata <4h). Cattura 41% dei campioni. Perdita **selettiva sui
+  lenti**: persi p50 3.00h/p90 3.89h vs matchati p50 2.82h/p90 3.19h. Periodo
+  di ciclo p50 3.46h, 29% ≥4h. Critico perché WU223 Fase C ha eliminato lo
+  statico → questo dataset è l'unica fonte del predictor.
+- Il fermo bot del giorno (aggiornamento) ha allungato il ciclo ma **non è la
+  causa**: 52-69% di orfani anche nei giorni senza fermo.
+
+**Proposta pending**: `TTL_ORFANE_ORE` 4 → 8-10h. Dettagli in
+`docs/issues/telemetria-predictor.md` (WU224/WU225).
+
+---
+
 ## Sessione 15/07/2026 — WU223: fallback cross-istanza + Fase C (statico eliminato)
 
 **Contesto** (richiesta utente: "per ovviare al problema del 12% effettua una
