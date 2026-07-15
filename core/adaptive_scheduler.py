@@ -821,21 +821,43 @@ def ordina_istanze_adaptive(istanze: list[str],
     if includi_doppio_giro:
         try:
             from core.doppio_giro_shadow import (
-                CANDIDATO, doppio_giro_live_attivo,
+                CANDIDATO, SOGLIA_ELAPSED_MIN, doppio_giro_live_attivo,
             )
+            # t_avvio del candidato in QUESTO piano: il gate scatta a `t_offset`
+            # (= quando parte il master), quindi il tempo che sarà trascorso dal
+            # suo passaggio è al PIÙ `t_offset - t_avvio` (gli invii avvengono
+            # dopo il boot, quindi l'elapsed reale è ancora minore).
+            _t_cand = next((r.get("t_avvio_min") for r in risultato
+                            if r.get("ist") == CANDIDATO), None)
+            _finestra = (t_offset - _t_cand) if _t_cand is not None else None
+            # WU228b — se la finestra non basta per la soglia elapsed, il 2°
+            # passaggio è ARITMETICAMENTE impossibile in questo ciclo: non va
+            # disegnato. Segnalato dall'utente: col candidato scivolato in coda
+            # (perché il doppio giro del ciclo prima gli ha riempito gli slot) la
+            # voce compariva lo stesso, promettendo un passo che non poteva
+            # avvenire. Qui NON si predice la qualifica — si verifica solo se il
+            # piano le lascia spazio. Limite superiore: si sopprime la voce solo
+            # quando è certo che non può scattare.
             if (doppio_giro_live_attivo()
-                    and any(r.get("ist") == CANDIDATO for r in risultato)):
+                    and _finestra is not None
+                    and _finestra >= SOGLIA_ELAPSED_MIN):
                 risultato.append({
                     "ist":            CANDIDATO,
                     "is_doppio_giro": True,
                     "condizionale":   True,
                     "t_avvio_min":    round(t_offset, 1),
+                    "finestra_min":   round(_finestra, 1),
                     "score":          -1,          # fuori ranking
                     "data_completa":  False,
                 })
                 _trace(f"  doppio-giro: {CANDIDATO} t_avvio={t_offset:.1f}m "
-                       f"(raccolta-only, condizionale, prima del master)")
+                       f"(raccolta-only, condizionale · finestra={_finestra:.0f}m "
+                       f"≥ soglia {SOGLIA_ELAPSED_MIN:.0f}m)")
                 t_offset += _stima_durata_istanza_min(CANDIDATO)
+            elif doppio_giro_live_attivo() and _finestra is not None:
+                _trace(f"  doppio-giro: {CANDIDATO} NON previsto in questo ciclo "
+                       f"· finestra={_finestra:.0f}m < soglia {SOGLIA_ELAPSED_MIN:.0f}m "
+                       f"(candidato a t={_t_cand:.0f}m, troppo tardi nel giro)")
         except Exception as exc:
             _log.debug("[ADAPT-SCHED] doppio giro nel piano: %s", exc)
 
