@@ -107,6 +107,14 @@ RETENTION_GIORNI = 15   # WU200bis: poca variabilita' attesa nel tempo,
                         # non serve conservare storia lunga
 MIN_CAMPIONI_CELLA = 3
 
+# WU223 — fallback cross-istanza. Le ordinarie hanno tempi di raccolta
+# omogenei (~2h44-2h53m); FAU_00 e' nettamente piu' veloce (~2h09m, l'istanza
+# piu' sviluppata) → va ESCLUSA dal pool cross-istanza, altrimenti abbasserebbe
+# la mediana per tutte le altre. Per i suoi buchi FAU_00 usa comunque il pool
+# delle ordinarie (leggera sovrastima accettata: celle a bassa allocazione).
+# Il master (FauMorfeus) e' gia' fuori dal dataset (ISTANZE_ESCLUSE).
+ISTANZA_VELOCE_ESCLUSA = "FAU_00"
+
 
 def _root_dir() -> Path:
     root = os.environ.get("DOOMSDAY_ROOT")
@@ -473,11 +481,19 @@ def stima_tempo_raccolta(instance: str, tipo: str, livello: int,
          rate squadra costante). Ancora scelta con più campioni, tie-break
          livello più vicino. Un solo livello misurato copre così tutti i
          livelli di quella istanza+tipo.
-      3. `None` — il chiamante userà la stima statica esistente.
-
-    NB: nessun fallback cross-istanza (l'istanza è la dimensione dominante,
-    ~+46% vs ~+10% del livello — mescolare istanze distorce la stima). Se
-    l'istanza non ha dati per quel tipo → None → statico.
+      3. **Media cross-istanza (WU223)** — pool di `(tipo, livello)` dalle
+         ordinarie simili (tutte tranne FAU_00, che è più veloce), se il pool
+         ha >= min_campioni → mediana. Chiude i buchi delle celle a bassa
+         allocazione (campo/L7, acciaio/L6) che da sole non raggiungono mai 3
+         campioni ma pooled arrivano a 6-29 (censimento 15/07). Per FAU_00
+         usa comunque il pool delle ordinarie (leggera sovrastima accettata,
+         sono celle marginali per lei).
+      3b. Se la cella cercata è di FAU_00 e nessun tier ha prodotto valore,
+          si tenta la proporzione cross-istanza da un ALTRO livello dello
+          stesso tipo nel pool ordinarie (stessa formula del punto 2).
+      4. `None` — nessun dato per questo (tipo, livello) da nessuna istanza
+         (in pratica solo un tipo/livello mai raccolto). Il chiamante decide
+         il default (post-Fase C: costante, non più la stima statica).
     """
     rows = _carica_dataset_output()
     if not rows:
@@ -485,13 +501,22 @@ def stima_tempo_raccolta(instance: str, tipo: str, livello: int,
 
     # durate per livello, ristrette a (istanza, tipo)
     per_livello: dict[int, list[float]] = defaultdict(list)
+    # WU223 — pool cross-istanza per livello, ordinarie tranne FAU_00
+    per_livello_pool: dict[int, list[float]] = defaultdict(list)
     for rec in rows:
-        if rec.get("tipo") != tipo or rec.get("instance") != instance:
+        if rec.get("tipo") != tipo:
             continue
         durata = rec.get("durata_s")
         lv = rec.get("livello")
-        if isinstance(durata, (int, float)) and lv is not None:
+        if not isinstance(durata, (int, float)) or lv is None:
+            continue
+        inst = rec.get("instance")
+        if inst == instance:
             per_livello[int(lv)].append(durata)
+        if inst != ISTANZA_VELOCE_ESCLUSA:
+            per_livello_pool[int(lv)].append(durata)
+
+    cap_target = cap_nominale(tipo, livello)
 
     # 1. cella esatta
     diretta = per_livello.get(int(livello), [])
@@ -499,21 +524,45 @@ def stima_tempo_raccolta(instance: str, tipo: str, livello: int,
         return statistics.median(diretta)
 
     # 2. proporzione da un altro livello della stessa (istanza, tipo)
-    cap_target = cap_nominale(tipo, livello)
     if cap_target:
-        best = None   # (n_campioni, -distanza_livello), durate, cap_ancora
-        for lv, durate in per_livello.items():
-            if lv == int(livello) or len(durate) < min_campioni:
-                continue
-            cap_anchor = cap_nominale(tipo, lv)
-            if not cap_anchor:
-                continue
-            chiave = (len(durate), -abs(lv - int(livello)))
-            if best is None or chiave > best[0]:
-                best = (chiave, durate, cap_anchor)
-        if best is not None:
-            _, durate_a, cap_a = best
-            return statistics.median(durate_a) * cap_target / cap_a
+        prop = _proporzione_da_altro_livello(per_livello, livello, cap_target, tipo,
+                                             min_campioni)
+        if prop is not None:
+            return prop
 
-    # 3. nessun dato per questa istanza+tipo → statico
+    # 3. media cross-istanza diretta su (tipo, livello) — pool ordinarie
+    pool_diretto = per_livello_pool.get(int(livello), [])
+    if len(pool_diretto) >= min_campioni:
+        return statistics.median(pool_diretto)
+
+    # 3b. proporzione cross-istanza da un altro livello dello stesso tipo
+    if cap_target:
+        prop = _proporzione_da_altro_livello(per_livello_pool, livello, cap_target,
+                                             tipo, min_campioni)
+        if prop is not None:
+            return prop
+
+    # 4. nessun dato per questo (tipo, livello) da nessuna istanza
+    return None
+
+
+def _proporzione_da_altro_livello(per_livello: dict, livello, cap_target,
+                                  tipo: str, min_campioni: int) -> Optional[float]:
+    """Scala la mediana di un altro livello (con >= min_campioni) al `livello`
+    target per il rapporto delle capacità nominali. Ancora: più campioni,
+    tie-break livello più vicino. Ritorna None se nessun livello qualifica.
+    Condivisa dal tier 2 (per-istanza) e dal tier 3b (pool cross-istanza)."""
+    best = None   # (n_campioni, -distanza_livello), durate, cap_ancora
+    for lv, durate in per_livello.items():
+        if lv == int(livello) or len(durate) < min_campioni:
+            continue
+        cap_anchor = cap_nominale(tipo, lv)
+        if not cap_anchor:
+            continue
+        chiave = (len(durate), -abs(lv - int(livello)))
+        if best is None or chiave > best[0]:
+            best = (chiave, durate, cap_anchor)
+    if best is not None:
+        _, durate_a, cap_a = best
+        return statistics.median(durate_a) * cap_target / cap_a
     return None
