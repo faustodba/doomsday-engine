@@ -133,10 +133,11 @@ class AdaptiveSchedulerPatch(BaseModel):
     threshold_drl_residuo_m:    Optional[int]  = None
     threshold_pct_istanze_sat:  Optional[int]  = None
     threshold_spedizioni_oggi:  Optional[int]  = None
-    # WU200 Fase B — stima empirica tempo di raccolta come parametro predictor
-    tempo_raccolta_empirico_enabled: Optional[bool] = None
     # WU221 — doppio giro: 2° passaggio raccolta-only di FAU_00 nello stesso ciclo
     doppio_giro_enabled: Optional[bool] = None
+    # WU223 Fase C: `tempo_raccolta_empirico_enabled` rimosso (empirico
+    # permanente). Un eventuale PATCH col vecchio campo viene ignorato (extra
+    # ignorati di default da Pydantic) — nessun errore per client legacy.
 
 
 def _global_config_path() -> Path:
@@ -174,12 +175,6 @@ def patch_adaptive_scheduler(payload: AdaptiveSchedulerPatch) -> dict:
         gc["adaptive_scheduler_shadow_only"] = v
         globali["adaptive_scheduler_shadow_only"] = v
         changed["shadow_only"] = v
-    # WU200 Fase B — flag stima empirica tempo di raccolta (dual-write, hot)
-    if payload.tempo_raccolta_empirico_enabled is not None:
-        v = bool(payload.tempo_raccolta_empirico_enabled)
-        gc["tempo_raccolta_empirico_enabled"] = v
-        globali["tempo_raccolta_empirico_enabled"] = v
-        changed["tempo_raccolta_empirico_enabled"] = v
     # WU221 — flag doppio giro (2° passaggio FAU_00). core.doppio_giro_shadow
     # legge globali.doppio_giro_enabled a caldo → toggle immediato senza restart.
     if payload.doppio_giro_enabled is not None:

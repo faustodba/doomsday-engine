@@ -225,156 +225,48 @@ def load_truppe(istanza: str) -> int:
 
 
 # ==============================================================================
-# WU-CycleDur — Modello empirico T_marcia (vedi config/predictor_t_l_max.json)
-# Sostituisce il calcolo "2 × avg_eta_marcia + 30" della vecchia _rule_squadre_fuori
-# con: T_marcia = 2 × eta_marcia + saturazione × T_L_max[livello, istanza]
+# WU223 Fase C (15/07) — Modello T_marcia EMPIRICO PERMANENTE.
+# Rimossi in blocco: il modello statico (formula nominale + tabella
+# config/predictor_t_l_max.json), il flag `tempo_raccolta_empirico_enabled`
+# (con la sua cache) e la calibrazione closed-loop (core/t_marcia_calibration).
+# La stima di T_marcia viene ORA solo da
+# shared/tempo_raccolta_estimator.stima_tempo_raccolta, la cui copertura è
+# ~100% grazie al fallback cross-istanza (WU223, 15/07). Ultima spiaggia:
+# costante farm `_FALLBACK_RACCOLTA_MIN` per un (tipo,livello) mai raccolto da
+# nessuna istanza (in pratica mai). Storico/motivazioni del cutover in
+# docs/issues/predictor-cutover-plan.md.
 # ==============================================================================
 
-# Capacità nominale max per (tipo, livello). Fonte di verità condivisa in
-# shared/cap_nodi_dataset (usata anche da tempo_raccolta_estimator per la
-# proporzione fra livelli). Re-export locale per retrocompatibilità dei
-# riferimenti esistenti (`CAP_NOMINALE` in questo modulo).
-from shared.cap_nodi_dataset import CAP_NOMINALE  # noqa: E402
-
-_t_l_max_cache: dict = {"loaded_at": 0.0, "data": None}
-
-
-def _load_t_l_max_config() -> dict:
-    """Carica config/predictor_t_l_max.json (cached). Default conservativi."""
-    import time as _t
-    if _t_l_max_cache["data"] and (_t.time() - _t_l_max_cache["loaded_at"]) < 60:
-        return _t_l_max_cache["data"]
-    root = _resolve_root()
-    path = root / "config" / "predictor_t_l_max.json"
-    if not path.exists():
-        cfg = {
-            "_default_per_livello":   {"5": 100, "6": 114, "7": 125},
-            "_multiplier_per_istanza": {"_default": 1.3},
-        }
-    else:
-        try:
-            cfg = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            cfg = {"_default_per_livello": {"5": 100, "6": 114, "7": 125},
-                   "_multiplier_per_istanza": {"_default": 1.3}}
-    _t_l_max_cache["data"] = cfg
-    _t_l_max_cache["loaded_at"] = _t.time()
-    return cfg
-
-
-def _get_t_l_max_min(istanza: str, livello: int) -> float:
-    """T_L_max in minuti per (livello, istanza). Fallback default 30min."""
-    cfg = _load_t_l_max_config()
-    base = cfg.get("_default_per_livello", {}).get(str(livello))
-    if base is None:
-        return 30.0
-    mult_map = cfg.get("_multiplier_per_istanza", {}) or {}
-    mult = mult_map.get(istanza, mult_map.get("_default", 1.3))
-    return float(base) * float(mult)
-
-
-# WU200 Fase B — flag stima empirica tempo di raccolta.
-_tr_empirico_cache: dict = {"loaded_at": 0.0, "value": None}
-
-
-def _read_tempo_raccolta_empirico_flag() -> bool:
-    """Lettura FRESCA del flag `tempo_raccolta_empirico_enabled`.
-
-    Priorità DYNAMIC (`runtime_overrides.json::globali`) > STATIC
-    (`global_config.json`), coerente con architecture_config_static_dynamic.md
-    e con `core.adaptive_scheduler._flags_status`. Default False (sicuro:
-    percorso statico invariato). Nessuna cache — usarla quando serve il valore
-    corrente (es. status dashboard). Per l'hot-path per-invio usare
-    `_tempo_raccolta_empirico_attivo()` (cache TTL 15s)."""
-    val = None
-    try:
-        root = _resolve_root()
-        ov_path = root / "config" / "runtime_overrides.json"
-        if ov_path.exists():
-            ov = json.loads(ov_path.read_text(encoding="utf-8"))
-            globali = ov.get("globali") or {}
-            if "tempo_raccolta_empirico_enabled" in globali:
-                val = bool(globali["tempo_raccolta_empirico_enabled"])
-        if val is None:
-            gc_path = root / "config" / "global_config.json"
-            if gc_path.exists():
-                gc = json.loads(gc_path.read_text(encoding="utf-8"))
-                val = bool(gc.get("tempo_raccolta_empirico_enabled", False))
-    except Exception:
-        val = None
-    return bool(val) if val is not None else False
-
-
-def _tempo_raccolta_empirico_attivo() -> bool:
-    """Come `_read_tempo_raccolta_empirico_flag()` ma con cache TTL 15s — il
-    flag è letto per-invio nel greedy dello scheduler, evita I/O ripetuto.
-    Hot-reload entro ~15s dall'attivazione da dashboard."""
-    import time as _t
-    if (_tr_empirico_cache["value"] is not None
-            and (_t.time() - _tr_empirico_cache["loaded_at"]) < 15):
-        return _tr_empirico_cache["value"]
-    val = _read_tempo_raccolta_empirico_flag()
-    _tr_empirico_cache["value"] = val
-    _tr_empirico_cache["loaded_at"] = _t.time()
-    return val
-
-
-def _calc_t_marcia_static(invio: dict, istanza: str) -> Optional[float]:
-    """Formula STATICA T_marcia (andata + raccolta + ritorno) in minuti, senza
-    dipendere da alcun flag:
-        T_marcia = 2 × eta_marcia_min + (saturazione × T_L_max[livello, istanza]) × coef
-        saturazione = min(1, load_squadra / CAP_NOMINALE[tipo, livello])
-    WU168 (19/06) — `coef` (calibrazione closed-loop, proposta B 08/05) applicato
-    SOLO al termine di raccolta. Ritorna None se livello o load_squadra mancanti.
-
-    Estratta da `_calc_t_marcia_min` (WU202) per permettere al backtest
-    (`tools/predictor_backtest_empirico`) di calcolare la stima statica in modo
-    deterministico e THREAD-SAFE (senza monkeypatch del flag, che nel processo
-    dashboard produrrebbe una race col preview scheduler live)."""
-    livello = int(invio.get("livello", -1))
-    tipo    = invio.get("tipo", "")
-    eta_min = int(invio.get("eta_marcia_s", 0) or 0) / 60.0
-    if livello < 1:
-        return None
-    load = int(invio.get("load_squadra", -1))
-    if load <= 0:
-        return None
-    cap = CAP_NOMINALE.get((tipo, livello))
-    if not cap or cap <= 0:
-        return None
-    raccolta_min = min(1.0, load / cap) * _get_t_l_max_min(istanza, livello)
-    try:
-        from core.t_marcia_calibration import get_calibration_coef
-        raccolta_min *= get_calibration_coef(istanza, livello)
-    except Exception:
-        pass
-    return 2 * eta_min + raccolta_min
+# ~2h48m: mediana farm delle ordinarie a L7 (censimento 15/07). Usata SOLO
+# quando lo stimatore empirico non ha alcun dato per il (tipo,livello) —
+# evento residuale ora che il fallback cross-istanza copre tutte le celle reali.
+_FALLBACK_RACCOLTA_MIN = 168.0
 
 
 def _calc_t_marcia_min(invio: dict, istanza: str) -> Optional[float]:
     """Stima T_marcia (andata + raccolta + ritorno) in minuti per 1 invio.
 
-    WU200 Fase B (12/07) — TIERED, flag-gated:
-      1. PRIMARIO (flag `tempo_raccolta_empirico_enabled` ON + cella con dati):
-         misura empirica diretta `durata_s + eta_ritorno`
-         (shared/tempo_raccolta_estimator.stima_tempo_raccolta). Non richiede
-         load_squadra: copre anche invii pre-WU116 dove lo statico è None.
-      2. FALLBACK (flag OFF, o cella sotto soglia): `_calc_t_marcia_static`.
-
-    Con flag OFF il risultato è byte-identico alla versione pre-Fase B.
+    WU223 Fase C (15/07) — EMPIRICO PERMANENTE (nessun flag, nessuno statico):
+      1. `stima_tempo_raccolta(istanza, tipo, livello)` → `durata_s/60 +
+         eta_ritorno`. Non richiede `load_squadra` (copre gli invii pre-WU116).
+      2. `(tipo, livello)` mai raccolto da NESSUNA istanza (residuale ora che
+         WU223 copre tutte le celle reali): costante `_FALLBACK_RACCOLTA_MIN`.
+      3. invio degenere (livello < 1 o tipo mancante): None — i chiamanti lo
+         trattano come "già rientrato" (comportamento invariato).
     """
     livello = int(invio.get("livello", -1))
     tipo    = invio.get("tipo", "")
-    if livello >= 1 and tipo and _tempo_raccolta_empirico_attivo():
-        try:
-            from shared.tempo_raccolta_estimator import stima_tempo_raccolta
-            t_emp_s = stima_tempo_raccolta(istanza, tipo, livello)
-        except Exception:
-            t_emp_s = None
-        if t_emp_s is not None:
-            eta_min = int(invio.get("eta_marcia_s", 0) or 0) / 60.0
-            return t_emp_s / 60.0 + eta_min   # durata_s + eta_ritorno
-    return _calc_t_marcia_static(invio, istanza)
+    if livello < 1 or not tipo:
+        return None
+    eta_min = int(invio.get("eta_marcia_s", 0) or 0) / 60.0
+    try:
+        from shared.tempo_raccolta_estimator import stima_tempo_raccolta
+        t_emp_s = stima_tempo_raccolta(istanza, tipo, livello)
+    except Exception:
+        t_emp_s = None
+    if t_emp_s is not None:
+        return t_emp_s / 60.0 + eta_min          # durata_s + eta_ritorno
+    return _FALLBACK_RACCOLTA_MIN + eta_min       # ultima spiaggia (raro)
 
 
 def _predict_gap_minutes() -> float:

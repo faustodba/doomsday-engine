@@ -340,13 +340,10 @@ def get_status() -> dict:
     pct_sat = _percentuale_istanze_sature()
     sped = _spedizioni_oggi_totali()
     active, reasons = should_activate_scheduler()
-    # WU200 Fase B — flag stima empirica tempo di raccolta (lettura fresca,
-    # DYNAMIC>STATIC) per il toggle nella card predictor.
-    try:
-        from core.skip_predictor import _read_tempo_raccolta_empirico_flag
-        tempo_raccolta_empirico = _read_tempo_raccolta_empirico_flag()
-    except Exception:
-        tempo_raccolta_empirico = False
+    # WU223 Fase C (15/07) — stima empirica del tempo di raccolta ora PERMANENTE
+    # (rimossi flag e modello statico). Campo mantenuto costante True per
+    # retrocompatibilità dei consumatori di get_status().
+    tempo_raccolta_empirico = True
     # WU221 — flag doppio giro (2° passaggio FAU_00) per il toggle nella card.
     try:
         from core.doppio_giro_shadow import doppio_giro_live_attivo
@@ -458,54 +455,16 @@ def compute_slot_liberi_atteso(istanza: str,
         }
         return _blend_with_empirical(out, istanza, anz_min + t_offset_min)
 
-    # WU200ter (11/07) — import lazy dello stimatore empirico nuovo, stesso
-    # pattern di _calc_t_marcia_min. Usato SOLO per un campo di confronto
-    # osservativo (vedi sotto) — nessuna decisione di scheduling ne dipende.
-    try:
-        from shared.tempo_raccolta_estimator import stima_tempo_raccolta
-    except Exception:
-        stima_tempo_raccolta = None  # type: ignore[assignment]
-
-    # Calcola T_marcia per ogni invio, mantenendo l'associazione col suo
-    # `ts_invio` reale (necessario per l'anchoring corretto del residuo, vedi sotto).
+    # WU223 Fase C (15/07) — `_calc_t_marcia_min` è ORA la stima empirica
+    # (durata reale invio→completamento). Rimosso il campo osservativo
+    # `confronto_tempo_raccolta` (WU200ter): confrontava statico vs empirico
+    # prima del cutover — con lo statico eliminato sarebbe empirico-vs-sé-stesso.
     invii = invii_record["raccolta"]["invii"]
     t_marce_ts: list[tuple[float, Optional[str]]] = []
-    confronto_tempo_raccolta: list[dict] = []
     for inv in invii:
         t = _calc_t_marcia_min(inv, istanza)
         if t is not None:
             t_marce_ts.append((t, inv.get("ts_invio")))
-
-        # WU200ter — affiancamento in sola osservazione del nuovo stimatore
-        # empirico (shared/tempo_raccolta_estimator.py, basato su durate
-        # reali invio→completamento report, non su formula/saturazione).
-        # Campo aggiuntivo nell'output, MAI usato per t_residue_min/
-        # rientro_atteso/slot_liberi_atteso — zero rischio di regressione
-        # sul comportamento esistente, serve solo a confrontare le due
-        # stime nel tempo prima di considerare un eventuale cutover.
-        if stima_tempo_raccolta is not None and t is not None:
-            tipo_inv = inv.get("tipo")
-            livello_inv = inv.get("livello")
-            if tipo_inv and livello_inv:
-                try:
-                    t_emp_s = stima_tempo_raccolta(istanza, tipo_inv, int(livello_inv))
-                except Exception:
-                    t_emp_s = None
-                if t_emp_s is not None:
-                    eta_s = int(inv.get("eta_marcia_s") or 0)
-                    # WU200 Fase B — `t_emp_s` (durata_s) include GIÀ l'andata
-                    # (report a raccolta completata). Per l'equivalente
-                    # round-trip (slot libero al rientro) si aggiunge SOLO
-                    # l'eta di ritorno, non 2×eta. Pre-fix WU200ter usava
-                    # 2×eta (un eta di troppo, ~1min con eta mediano 59s):
-                    # cosmetico ma corretto per coerenza con _calc_t_marcia_min.
-                    t_emp_min = (eta_s + t_emp_s) / 60.0
-                    confronto_tempo_raccolta.append({
-                        "tipo": tipo_inv, "livello": livello_inv,
-                        "t_det_min": round(t, 1),
-                        "t_emp_min": round(t_emp_min, 1),
-                        "diff_min": round(t_emp_min - t, 1),
-                    })
 
     if not t_marce_ts:
         # Dati pre-WU116 (load=-1) → conservativo + blend empirico se disponibile.
@@ -573,7 +532,6 @@ def compute_slot_liberi_atteso(istanza: str,
         "t_residue_min": [round(t, 1) for t in sorted(t_residue_min)],
         "anzianita_tick_min": round(anz_min, 1),
         "data_completa": True,
-        "confronto_tempo_raccolta": confronto_tempo_raccolta,  # WU200ter, solo osservativo
     }
     # Blend con lookup empirico (proposta A 08/05).
     # gap_min = elapsed dal record con invii + t_offset_greedy

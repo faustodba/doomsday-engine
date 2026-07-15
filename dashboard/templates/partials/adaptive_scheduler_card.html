@@ -47,11 +47,10 @@
       <input type="checkbox" id="adapt-shadow" {% if d.shadow_only %}checked{% endif %}>
       shadow only
     </label>
-    <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-weight:400;font-size:11px"
-           title="Modalità STANDARD in prod dal 13/07 (WU202 Fase B): T_marcia da misura empirica reale (durata invio→completamento + eta) invece del modello statico. Fallback statico automatico se la cella (istanza,tipo,livello) ha <3 campioni. Il flag sarà rimosso in Fase C (empirico permanente).">
-      <input type="checkbox" id="adapt-tr-empirico" {% if d.tempo_raccolta_empirico %}checked{% endif %}>
-      tempo raccolta empirico <span style="color:var(--text-dim);font-size:9px">(standard)</span>
-    </label>
+    <span style="display:flex;align-items:center;gap:4px;font-weight:400;font-size:11px;color:var(--text-dim)"
+          title="WU223 Fase C (15/07): T_marcia da misura empirica reale è ora PERMANENTE (rimossi flag e modello statico). Copertura ~100% grazie al fallback cross-istanza: se una cella (istanza,tipo,livello) ha <3 campioni diretti, usa la mediana del pool (tipo,livello) delle ordinarie (escl. FAU_00).">
+      tempo raccolta empirico <span style="color:var(--green);font-size:9px">●permanente</span>
+    </span>
     <label style="display:flex;align-items:center;gap:4px;cursor:pointer;font-weight:400;font-size:11px"
            title="WU221 — DOPPIO GIRO: 2° passaggio raccolta-only di FAU_00 nello stesso ciclo (prima del master), quando i suoi raccoglitori sono rientrati e ha slot liberi. Recupera lo slack di FAU_00 (raccolta ~2h09m vs ~2h48m). Effetto immediato (hot). OFF = ciclo normale.">
       <input type="checkbox" id="adapt-doppio-giro" {% if d.doppio_giro %}checked{% endif %}>
@@ -132,7 +131,6 @@
       threshold_drl_residuo_m:    parseInt($('adapt-th-drl-m').value || 50),
       threshold_pct_istanze_sat:  parseInt($('adapt-th-sat').value || 50),
       threshold_spedizioni_oggi:  parseInt($('adapt-th-sped').value || 100),
-      tempo_raccolta_empirico_enabled: $('adapt-tr-empirico').checked,
       doppio_giro_enabled:        $('adapt-doppio-giro').checked,
     };
     try {

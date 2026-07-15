@@ -567,7 +567,7 @@ def merge_config(gcfg: dict, overrides: dict) -> dict:
     # Estendibile: aggiungere chiavi qui se servono nuovi flag globali.
     for _k in ("raccolta_ocr_debug", "auto_learn_banner",
                "adaptive_scheduler_enabled", "adaptive_scheduler_shadow_only",
-               "adaptive_scheduler_thresholds", "tempo_raccolta_empirico_enabled",
+               "adaptive_scheduler_thresholds",
                "debug_tasks", "notifications"):
         try:
             if _k in globali:
@@ -840,12 +840,6 @@ class GlobalConfig:
         "spedizioni_oggi":  100,
     })
 
-    # WU200 Fase B (12/07) — stima empirica tempo di raccolta come parametro
-    # del predictor T_marcia. Default OFF: il modello statico resta la fonte
-    # (percorso byte-identico). ON → core.skip_predictor._calc_t_marcia_min usa
-    # la mediana reale invio→completamento (fallback statico se cella scarna).
-    tempo_raccolta_empirico_enabled: bool = False
-
     # WU115 — Debug screenshot per task (hot-reload via shared/debug_buffer.py)
     debug_tasks:            dict = field(default_factory=dict)
 
@@ -1008,11 +1002,6 @@ class GlobalConfig:
                                                     {"drl_residuo_pct": 30,
                                                      "pct_istanze_sat": 50,
                                                      "spedizioni_oggi": 100})) or {}
-            ),
-            # WU200 Fase B — stima empirica tempo di raccolta (default OFF)
-            tempo_raccolta_empirico_enabled = bool(
-                raw.get("tempo_raccolta_empirico_enabled",
-                        raw.get("globali", {}).get("tempo_raccolta_empirico_enabled", False))
             ),
             # WU115 — Debug screenshot per task (dict {task: bool}, hot-reload)
             debug_tasks = dict(
