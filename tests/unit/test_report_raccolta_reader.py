@@ -1,13 +1,135 @@
 # ==============================================================================
 #  tests/unit/test_report_raccolta_reader.py
 #
-#  Unit test per il pivot get_stima_matrice() (WU202d) —
-#  dashboard/services/report_raccolta_reader.py.
+#  Unit test per dashboard/services/report_raccolta_reader.py:
+#    - get_stima_matrice()      (WU202d)
+#    - get_produzione_unificata (WU204, shaping)
+#    - get_occupati_in_volo()   (WU226, classificazione stati + master escluso)
 # ==============================================================================
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
 
 from dashboard.services import report_raccolta_reader as rr
+
+
+class TestGetOccupatiInVoloStati:
+    """WU226 (15/07) — il pannello marcava ogni residuo negativo come "in
+    ritardo di N min" e ordinava per quel numero, mettendo in testa proprio le
+    voci prive di significato (segnalato dall'utente). Un residuo negativo di
+    solito misura solo che l'istanza non è ancora ripassata a leggere il tab
+    Report: il completamento non esiste finché non lo si legge (WU225). La
+    discriminante vera è "l'istanza ha riletto DOPO la fine prevista?"."""
+
+    ORA = datetime(2026, 7, 15, 12, 0, tzinfo=timezone.utc)
+
+    def _run(self, monkeypatch, invii, letture, stima_s=3 * 3600):
+        """invii: [(istanza, coord, tipo, livello, ore_fa)]
+           letture: {istanza: [ore_fa, ...]} — quando ha letto il tab Report"""
+        pending = {}
+        for inst, coord, tipo, lv, ore_fa in invii:
+            ts = (self.ORA - timedelta(hours=ore_fa)).isoformat()
+            pending.setdefault(f"{inst}|{coord}|{tipo}", []).append({"ts": ts, "livello": lv})
+        monkeypatch.setattr(rr, "_load_state", lambda: {"pending": pending})
+        monkeypatch.setattr(rr, "_letture_report_per_istanza",
+                            lambda: {i: [self.ORA - timedelta(hours=h) for h in sorted(hs, reverse=True)]
+                                     for i, hs in letture.items()})
+        monkeypatch.setattr("shared.tempo_raccolta_estimator.stima_tempo_raccolta",
+                            lambda i, t, l: stima_s)
+
+        class _Ora(datetime):
+            @classmethod
+            def now(cls, tz=None):
+                return TestGetOccupatiInVoloStati.ORA
+        monkeypatch.setattr(rr, "datetime", _Ora)
+        return rr.get_occupati_in_volo()
+
+    def test_in_volo_se_stima_non_ancora_scaduta(self, monkeypatch):
+        r = self._run(monkeypatch, [("FAU_01", "700_500", "segheria", 7, 1.0)], {})
+        assert [x["stato"] for x in r] == ["in_volo"]
+        assert r[0]["residuo_min"] > 0
+
+    def test_attesa_lettura_se_scaduta_ma_istanza_non_ripassata(self, monkeypatch):
+        # invio 8h fa, stima 3h -> finita 5h fa. Nessuna lettura DOPO la fine.
+        r = self._run(monkeypatch, [("FAU_01", "700_500", "segheria", 7, 8.0)],
+                      {"FAU_01": [7.0]})   # lettura 7h fa = PRIMA della fine (5h fa)
+        assert [x["stato"] for x in r] == ["attesa_lettura"]
+        assert r[0]["letture_dopo"] == 0
+
+    def test_orfana_se_istanza_ha_riletto_dopo_la_fine_senza_report(self, monkeypatch):
+        # invio 8h fa, stima 3h -> finita 5h fa. Due letture dopo: report mai arrivato.
+        r = self._run(monkeypatch, [("FAU_01", "700_500", "segheria", 7, 8.0)],
+                      {"FAU_01": [4.0, 1.0]})
+        assert [x["stato"] for x in r] == ["orfana"]
+        assert r[0]["letture_dopo"] == 2
+
+    def test_confine_lettura_esattamente_alla_fine_non_conta(self, monkeypatch):
+        # lettura ESATTAMENTE all'istante di fine: il report non puo' esserci
+        # ancora -> non e' orfana (serve `>`, non `>=`).
+        r = self._run(monkeypatch, [("FAU_01", "700_500", "segheria", 7, 8.0)],
+                      {"FAU_01": [5.0]})
+        assert [x["stato"] for x in r] == ["attesa_lettura"]
+
+    def test_senza_stima_se_cella_povera(self, monkeypatch):
+        r = self._run(monkeypatch, [("FAU_01", "700_500", "acciaio", 6, 9.0)], {},
+                      stima_s=None)
+        assert [x["stato"] for x in r] == ["senza_stima"]
+        assert r[0]["residuo_min"] is None
+
+    def test_ordine_orfane_poi_in_volo_poi_attesa(self, monkeypatch):
+        r = self._run(monkeypatch, [
+            ("FAU_01", "700_500", "segheria", 7, 1.0),   # in volo (residuo +120)
+            ("FAU_02", "701_500", "segheria", 7, 2.5),   # in volo (residuo +30) -> arriva prima
+            ("FAU_03", "702_500", "segheria", 7, 8.0),   # attesa lettura
+            ("FAU_04", "703_500", "segheria", 7, 9.0),   # orfana
+        ], {"FAU_04": [1.0]})
+        assert [x["stato"] for x in r] == ["orfana", "in_volo", "in_volo", "attesa_lettura"]
+        # fra gli in volo: prima chi arriva prima
+        volo = [x for x in r if x["stato"] == "in_volo"]
+        assert volo[0]["instance"] == "FAU_02"
+
+    def test_orfane_ordinate_dalla_piu_vecchia(self, monkeypatch):
+        r = self._run(monkeypatch, [
+            ("FAU_01", "700_500", "segheria", 7, 8.0),
+            ("FAU_02", "701_500", "segheria", 7, 11.0),
+        ], {"FAU_01": [1.0], "FAU_02": [1.0]})
+        assert [x["instance"] for x in r] == ["FAU_02", "FAU_01"]
+
+
+class TestSenzaMaster:
+    """WU226 — il master (FauMorfeus) è giocato a mano: raccoglitori inviati
+    manualmente, gioco chiuso durante gli eventi. `nodi_mappa.ISTANZE_ESCLUSE`
+    gli blocca già le OCCUPAZIONI (quindi non entra in match/pending/stime), ma
+    i suoi REPORT venivano scritti e finivano in riepilogo e timeline."""
+
+    def test_filtra_solo_il_master(self, monkeypatch):
+        monkeypatch.setattr("shared.instance_meta.is_master_instance",
+                            lambda n: n == "FauMorfeus")
+        righe = [{"instance": "FAU_00"}, {"instance": "FauMorfeus"}, {"instance": "FAU_05"}]
+        assert [r["instance"] for r in rr._senza_master(righe)] == ["FAU_00", "FAU_05"]
+
+    def test_instance_mancante_non_esplode(self, monkeypatch):
+        monkeypatch.setattr("shared.instance_meta.is_master_instance",
+                            lambda n: n == "FauMorfeus")
+        assert rr._senza_master([{"instance": None}, {}]) == [{"instance": None}, {}]
+
+
+class TestLettureReportPerIstanza:
+    """WU226 — le righe lette nella stessa passata condividono il boot: si
+    raggruppano per gap > 60 min."""
+
+    def test_raggruppa_per_passata_e_separa_i_boot(self, monkeypatch):
+        base = datetime(2026, 7, 15, 8, 0, tzinfo=timezone.utc)
+        rep = [
+            {"instance": "FAU_00", "ts_ocr": base.isoformat()},
+            {"instance": "FAU_00", "ts_ocr": (base + timedelta(minutes=2)).isoformat()},
+            {"instance": "FAU_00", "ts_ocr": (base + timedelta(hours=4)).isoformat()},
+            {"instance": "FAU_05", "ts_ocr": (base + timedelta(minutes=30)).isoformat()},
+        ]
+        monkeypatch.setattr(rr, "_load_jsonl", lambda p: rep)
+        out = rr._letture_report_per_istanza()
+        assert len(out["FAU_00"]) == 2      # 2 passate, non 3 righe
+        assert len(out["FAU_05"]) == 1
 
 
 def _cella(inst, tipo, liv, med_h, n):

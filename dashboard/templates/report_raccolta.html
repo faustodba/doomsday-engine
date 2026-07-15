@@ -44,8 +44,14 @@
             <div style="color:var(--text-dim);text-align:center;padding:8px">caricamento...</div>
           </div>
           <div class="tel-foot">
-            stima arrivo da <code>stima_tempo_raccolta()</code> (mediana per cella istanza+tipo+livello,
-            fallback tipo+livello globale, min 3 campioni) · refresh 15s
+            stima da <code>stima_tempo_raccolta()</code> (mediana cella istanza+tipo+livello → proporzione
+            fra livelli → pool cross-istanza WU223, min 3 campioni) · master escluso (giocato a mano)
+            <br>
+            <b>orfana</b> = l'istanza ha già riletto il tab Report dopo la fine prevista e il report non c'è:
+            non arriverà (marcia fallita o riga persa) — l'unico stato azionabile.
+            <b>attesa lettura</b> = l'istanza non è ancora ripassata, non lo sappiamo ancora: si risolve
+            al suo prossimo boot. Non esiste un "ritardo": la stima è una mediana, metà delle raccolte
+            la sfora per definizione (WU226) · refresh 15s
           </div>
         </div>
       </div>

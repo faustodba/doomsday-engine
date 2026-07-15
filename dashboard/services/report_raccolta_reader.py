@@ -78,13 +78,58 @@ def _ts_local_full(ts: str) -> str:
         return ts
 
 
+def _senza_master(righe: list[dict]) -> list[dict]:
+    """WU226 — toglie il master (FauMorfeus) da una lista di record `instance`.
+
+    Il master è giocato MANUALMENTE (vedi `core/adaptive_scheduler.py`): i suoi
+    raccoglitori possono partire a mano, e il gioco può restare chiuso per
+    eventi. `shared/nodi_mappa.py::ISTANZE_ESCLUSE` gli blocca già la scrittura
+    delle OCCUPAZIONI, quindi il master non entra mai nei match né nel pool
+    pending — ma i suoi REPORT sì (`report_raccolta` gira anche su di lui).
+    Senza questo filtro il riepilogo confronterebbe occupazioni (senza master)
+    con report (con master), e la timeline mescolerebbe raccolte manuali a
+    quelle del bot. Si usa `is_master_instance` (config-driven, canonico) e non
+    `ISTANZE_ESCLUSE` (frozenset hardcoded)."""
+    from shared.instance_meta import is_master_instance
+    return [r for r in righe if not is_master_instance(r.get("instance") or "")]
+
+
+def _letture_report_per_istanza() -> dict[str, list[datetime]]:
+    """Momenti in cui ogni istanza ha LETTO il tab Report in gioco, ricavati
+    raggruppando i `ts_ocr` dei report (righe lette nella stessa passata
+    condividono il boot; gap > 60 min = passata nuova).
+
+    Serve a distinguere "non lo sappiamo ancora" da "lo sappiamo ed è andata
+    male": un completamento esiste solo quando l'istanza ripassa e legge il tab
+    (vedi WU225), quindi finché non ha riletto, un residuo negativo non
+    significa nulla."""
+    per: dict[str, list[datetime]] = {}
+    for r in sorted(_load_jsonl(_PATH_REPORT), key=lambda x: x.get("ts_ocr") or ""):
+        inst, ts = r.get("instance"), r.get("ts_ocr")
+        if not inst or not ts:
+            continue
+        try:
+            t = datetime.fromisoformat(ts)
+        except Exception:
+            continue
+        letture = per.setdefault(inst, [])
+        if not letture or (t - letture[-1]).total_seconds() > 3600:
+            letture.append(t)
+    return per
+
+
 def get_riepilogo() -> dict:
     """Statistiche aggregate sui due dataset sorgente + dataset match,
     più i parametri di configurazione correnti (TTL orfane, retention)."""
     from shared.tempo_raccolta_estimator import TTL_ORFANE_ORE, RETENTION_GIORNI
 
     occupazioni = [o for o in _load_jsonl(_PATH_OCCUPAZIONI) if o.get("esito") == "occupato"]
-    report = _load_jsonl(_PATH_REPORT)
+    # WU226 — master fuori: le occupazioni lo escludono già a monte
+    # (nodi_mappa.ISTANZE_ESCLUSE), i report no. Senza questo filtro il pannello
+    # confrontava occupazioni SENZA master con report CON master.
+    report_tutti = _load_jsonl(_PATH_REPORT)
+    report = _senza_master(report_tutti)
+    report_master = len(report_tutti) - len(report)
     match = _load_jsonl(_PATH_MATCH)
     state = _load_state()
     pending = state.get("pending", {})
@@ -97,6 +142,7 @@ def get_riepilogo() -> dict:
     return {
         "occupazioni_totali": len(occupazioni),
         "report_totali":      len(report),
+        "report_master":      report_master,   # WU226: raccolte manuali, escluse
         "match_totali":       len(match),
         "pending_attuali":    pending_attuali,
         "mismatch_campioni":  len(con_livello_invio),
@@ -107,21 +153,44 @@ def get_riepilogo() -> dict:
     }
 
 
-def get_occupati_in_volo() -> list[dict]:
-    """Raccoglitori attualmente in volo (occupazioni pending, non ancora
-    abbinate a un report di completamento). Una voce per occupazione, con
-    stima arrivo se disponibile tramite stima_tempo_raccolta().
+# WU226 — ordine di presentazione degli stati: prima l'unico azionabile.
+_ORDINE_STATO = {"orfana": 0, "in_volo": 1, "attesa_lettura": 2, "senza_stima": 3}
 
-    Ordine (richiesta utente 15/07): per RITARDO decrescente — `residuo_min`
-    crescente, quindi i piu' negativi (in ritardo da piu' tempo) in testa, poi
-    quelli ancora in volo per residuo crescente, infine le voci senza stima
-    (`residuo_min is None`, cella con pochi campioni) in fondo.
+
+def get_occupati_in_volo() -> list[dict]:
+    """Occupazioni pending (non ancora abbinate a un report), classificate.
+
+    WU226 (15/07) — il pannello mostrava tutto come "in volo" e marcava ogni
+    residuo negativo come "in ritardo di N min", ordinando per quel numero.
+    Segnalato dall'utente come privo di logica, e a ragione: **il ritardo non
+    esiste come concetto qui**. La stima è una mediana, quindi metà delle
+    raccolte la sfora per definizione; e soprattutto il completamento diventa
+    visibile solo quando l'istanza ripassa e legge il tab Report (WU225), quindi
+    un residuo negativo di solito misura solo che non siamo ancora andati a
+    guardare. Col TTL a 12h (WU225) queste voci restano nel pool 3× più a lungo
+    e, ordinate per "ritardo", occupavano tutta la testa della lista.
+
+    Ogni voce riceve `stato`:
+      - `orfana`         — la stima è scaduta E l'istanza ha già riletto il tab
+                           dopo la fine prevista, senza che il report comparisse:
+                           non arriverà mai (marcia fallita, o riga di report
+                           persa). **L'unico stato azionabile.**
+      - `in_volo`        — stima non ancora scaduta: arrivo stimabile.
+      - `attesa_lettura` — stima scaduta ma l'istanza non è ancora ripassata:
+                           non lo sappiamo, si risolve da solo. Neutro.
+      - `senza_stima`    — cella sotto MIN_CAMPIONI_CELLA, nessuna stima.
+
+    Ordine: orfane (per età desc) → in volo (per arrivo più imminente) →
+    attesa lettura (per età desc) → senza stima.
+
+    Il master non compare mai (nessuna occupazione, vedi `_senza_master`).
     """
     from shared.tempo_raccolta_estimator import stima_tempo_raccolta
 
     state = _load_state()
     pending: dict = state.get("pending", {})
     ora = datetime.now(timezone.utc)
+    letture = _letture_report_per_istanza()
 
     righe: list[dict] = []
     for key, voci in pending.items():
@@ -146,6 +215,16 @@ def get_occupati_in_volo() -> list[dict]:
             stima_min = stima_s / 60 if stima_s is not None else None
             residuo_min = (stima_min - elapsed_min) if stima_min is not None else None
 
+            if stima_s is None:
+                stato, n_letture = "senza_stima", 0
+            elif residuo_min > 0:
+                stato, n_letture = "in_volo", 0
+            else:
+                fine = dt_invio + timedelta(seconds=stima_s)
+                dopo = [t for t in letture.get(instance, []) if t > fine]
+                n_letture = len(dopo)
+                stato = "orfana" if dopo else "attesa_lettura"
+
             righe.append({
                 "instance":       instance,
                 "coordinata":     coordinata,
@@ -156,19 +235,29 @@ def get_occupati_in_volo() -> list[dict]:
                 "elapsed_min":    elapsed_min,
                 "stima_min":      stima_min,
                 "residuo_min":    residuo_min,
+                "stato":          stato,
+                "letture_dopo":   n_letture,
             })
 
-    righe.sort(key=lambda r: (r["residuo_min"] is None,
-                              r["residuo_min"] if r["residuo_min"] is not None else 0.0,
-                              r["instance"], r["ts_invio"]))
+    def _chiave(r: dict):
+        s = _ORDINE_STATO[r["stato"]]
+        # in volo: prima chi arriva prima. Gli altri: prima i più vecchi.
+        secondo = r["residuo_min"] if r["stato"] == "in_volo" else -r["elapsed_min"]
+        return (s, secondo, r["instance"], r["ts_invio"])
+
+    righe.sort(key=_chiave)
     return righe
 
 
 def get_ultimi_eventi(n: int = 15) -> list[dict]:
     """Merge cronologico inverso degli ultimi N eventi invio (occupazione)
-    e completamento (report), per un colpo d'occhio sul flusso live."""
+    e completamento (report), per un colpo d'occhio sul flusso live.
+
+    WU226 — master escluso: le sue raccolte sono lanciate a mano e non hanno un
+    invio corrispondente, quindi in timeline comparivano come completamenti
+    orfani in mezzo al flusso del bot."""
     occupazioni = [o for o in _load_jsonl(_PATH_OCCUPAZIONI) if o.get("esito") == "occupato"]
-    report = _load_jsonl(_PATH_REPORT)
+    report = _senza_master(_load_jsonl(_PATH_REPORT))
 
     eventi: list[dict] = []
     for o in occupazioni:

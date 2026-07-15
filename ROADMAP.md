@@ -5,7 +5,38 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
-## Sessione 15/07/2026 (2) — WU224 ordinamento in-volo + WU225 diagnosi TTL orfane
+## Sessione 15/07/2026 (2) — WU224/225/226: TTL orfane, ricostruzione storico, riclassificazione pannello
+
+**WU226 — il "ritardo" non esiste (fix finale del pannello).** Segnalazione
+utente: *"questi dati così sono senza logica, il ritardo è dovuto alla lettura
+causa blocco del bot"*, con righe tipo "in ritardo di 518min" in cima. Aveva
+ragione, ed era un **effetto combinato di WU224+WU225**: il TTL a 12h tiene le
+occupazioni nel pool 3× più a lungo e l'ordinamento per ritardo le portava in
+testa, seppellendo l'unica informazione vera. Il "ritardo" non è un concetto
+valido: la stima è una mediana (metà delle raccolte la sfora per definizione) e
+il completamento si vede solo quando l'istanza ripassa a leggere il tab.
+
+`get_occupati_in_volo` ora **classifica** — discriminante *"l'istanza ha riletto
+il tab DOPO la fine prevista?"* (nuovo `_letture_report_per_istanza()`, cluster
+`ts_ocr` per gap >60min): `orfana` (ha riletto, report assente → non arriverà:
+marcia fallita o riga persa — **unico stato azionabile**), `in_volo`,
+`attesa_lettura` (neutro), `senza_stima`. Prod: 66 pending = **10 orfane / 42 in
+volo / 14 attesa lettura**; le 5 righe FAU_03 a 8.5h erano esattamente il caso
+dell'utente (restart 13:36 → rimessa in coda).
+
+**Esclusione master** (richiesta utente: *"FauMorfeus è un dato completamente
+inattendibile, raccoglitori inviati manualmente, o gioco disabilitato per
+eventi"*): verificato che il master **non entrava già** in stime/pool/pending/
+match — `nodi_mappa.py:108` gli blocca le occupazioni a monte, e senza invio non
+c'è match (0 su tutti e tre). **Ma i suoi report sì**: 42 righe. Corretto: il
+riepilogo confrontava occupazioni senza master (1419) con report con master
+(1280) → ora 1238 vs match 1208 = **30 orfani reali**. E **i "72 orfani
+irrecuperabili" di WU225 erano 42 FauMorfeus by design + 30 genuini** → tasso
+reale 2.4%, non 5.7%. Test 9→19, baseline invariata (51 fail / 444 pass).
+
+---
+
+## Sessione 15/07/2026 (2a) — WU224 ordinamento in-volo + WU225 diagnosi TTL orfane
 
 **WU224 — ordinamento pannello (commit di questa sessione).** Richiesta utente:
 "ordina la lista in base al tempo più lungo del ritardo".

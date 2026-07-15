@@ -767,7 +767,13 @@ def partial_report_raccolta_riepilogo(request: Request):
     )
     cards = [
         ("occupazioni (invii)", r["occupazioni_totali"], None),
-        ("report (completamenti)", r["report_totali"], None),
+        # WU226 — master escluso, altrimenti si confrontava con le occupazioni
+        # (che lo escludono a monte) un totale che invece lo comprendeva.
+        ("report (completamenti)",
+         f'{r["report_totali"]}'
+         + (f' <span style="font-size:11px;color:var(--text-dim)">'
+            f'(+{r["report_master"]} master, manuali)</span>' if r["report_master"] else ''),
+         None),
         ("match riconciliati", r["match_totali"], None),
         ("in volo (pending)", r["pending_attuali"], None),
         ("mismatch livello", mismatch_str, None),
@@ -785,6 +791,7 @@ def partial_report_raccolta_riepilogo(request: Request):
 
 @app.get("/ui/partial/report-raccolta-in-volo", include_in_schema=False)
 def partial_report_raccolta_in_volo(request: Request):
+    from collections import Counter
     from dashboard.services.report_raccolta_reader import get_occupati_in_volo
     righe = get_occupati_in_volo()
     if not righe:
@@ -792,31 +799,47 @@ def partial_report_raccolta_in_volo(request: Request):
             '<div style="color:var(--text-dim);text-align:center;padding:12px;font-size:11px">'
             'nessun raccoglitore in volo (pending pool vuoto).</div>'
         )
+    # WU226 — niente più "in ritardo": la stima è una mediana (metà delle
+    # raccolte la sfora per definizione) e il completamento si vede solo quando
+    # l'istanza ripassa a leggere il tab. Vedi get_occupati_in_volo().
+    def _stato_html(r):
+        s = r["stato"]
+        if s == "orfana":
+            return ('<span style="color:#f44336">⚠ orfana · nessun report dopo '
+                    f'{r["letture_dopo"]} letture del tab</span>')
+        if s == "in_volo":
+            return f'<span style="color:#4caf50">arrivo tra ~{r["residuo_min"]:.0f}min</span>'
+        if s == "attesa_lettura":
+            return ('<span style="color:var(--text-dim)">attesa lettura · istanza '
+                    'non ancora ripassata</span>')
+        return '<span style="color:var(--text-dim)">n/d (pochi campioni)</span>'
+
+    conta = Counter(r["stato"] for r in righe)
+    riepilogo = (
+        f'<div style="padding:4px 0 8px;font-size:11px;color:var(--text-dim)">'
+        f'<b style="color:#f44336">{conta.get("orfana", 0)}</b> orfane · '
+        f'<b style="color:#4caf50">{conta.get("in_volo", 0)}</b> in volo · '
+        f'{conta.get("attesa_lettura", 0)} in attesa di lettura · '
+        f'{conta.get("senza_stima", 0)} senza stima</div>'
+    )
     body = []
     for r in righe:
         lv = r["livello"] if r["livello"] is not None else "?"
-        elapsed = r["elapsed_min"]
-        if r["residuo_min"] is not None:
-            if r["residuo_min"] < 0:
-                stato = f'<span style="color:#ff9800">in ritardo di {abs(r["residuo_min"]):.0f}min</span>'
-            else:
-                stato = f'<span style="color:#4caf50">arrivo tra ~{r["residuo_min"]:.0f}min</span>'
-        else:
-            stato = '<span style="color:var(--text-dim)">n/d (pochi campioni)</span>'
         body.append(
             f'<tr>'
             f'<td style="font-weight:600">{r["instance"]}</td>'
             f'<td>{r["coordinata"]}</td>'
             f'<td>{r["tipo"]} Lv{lv}</td>'
             f'<td style="white-space:nowrap">{r["partenza_local"]}</td>'
-            f'<td style="text-align:right;font-family:monospace">{elapsed:.0f}min</td>'
-            f'<td style="font-size:10px">{stato}</td>'
+            f'<td style="text-align:right;font-family:monospace">{r["elapsed_min"]:.0f}min</td>'
+            f'<td style="font-size:10px">{_stato_html(r)}</td>'
             f'</tr>'
         )
     return HTMLResponse(
+        riepilogo +
         '<table class="tel-table"><thead><tr>'
         '<th>ist</th><th>coord</th><th>tipo/lv</th><th>partenza</th>'
-        '<th style="text-align:right">trascorso</th><th>stima</th>'
+        '<th style="text-align:right">trascorso</th><th>stato</th>'
         '</tr></thead>'
         f'<tbody>{"".join(body)}</tbody></table>'
     )
