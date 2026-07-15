@@ -1347,11 +1347,20 @@ def main():
                     if active:
                         nomi = [i["nome"] for i in istanze_ciclo]
                         # Trace step-by-step del greedy nel bot.log
+                        # WU228 — `includi_doppio_giro=True`: l'ordine include una
+                        # voce virtuale per il 2° passaggio di FAU_00 (WU221), che
+                        # il bot inserisce al volo prima del master e che quindi
+                        # era invisibile alla pianificazione in dashboard.
+                        # La voce è SOLO descrittiva: `ordine_dict` è la lista che
+                        # guida l'esecuzione, quindi va filtrata qui sotto —
+                        # altrimenti FAU_00 girerebbe due volte come tick completo.
                         ordine_dict = ordina_istanze_adaptive(
                             nomi,
                             log_fn=lambda m: _log("MAIN", m),
+                            includi_doppio_giro=True,
                         )
-                        nomi_ordinati_adapt = [d["ist"] for d in ordine_dict]
+                        nomi_ordinati_adapt = [d["ist"] for d in ordine_dict
+                                               if not d.get("is_doppio_giro")]
 
                         ist_by_nome = {i["nome"]: i for i in istanze_ciclo}
 
@@ -1361,7 +1370,10 @@ def main():
                                 imposta_adaptive_scheduler_meta,
                             )
                             for pos, item in enumerate(ordine_dict):
-                                if item.get("is_master"):
+                                # WU228 — salta anche la voce virtuale del doppio
+                                # giro: non è un tick da tracciare, e sovrascriverebbe
+                                # la meta del 1° passaggio di FAU_00 con la propria.
+                                if item.get("is_master") or item.get("is_doppio_giro"):
                                     continue
                                 imposta_adaptive_scheduler_meta(
                                     item["ist"],

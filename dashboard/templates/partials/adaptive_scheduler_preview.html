@@ -22,9 +22,16 @@
     <div style="padding:10px 14px">
       <div style="font-family:var(--font-mono);font-size:13px;line-height:1.9">
         {% set comp = (persisted.get('completate') or []) %}
+        {% set ordine_reale = (persisted.get('ordine') or []) | rejectattr('is_doppio_giro', 'defined') | list %}
         {% for item in (persisted.get('ordine') or []) %}
           {% set nome = item.get('ist','') %}
-          {% if nome in comp %}
+          {% if item.get('is_doppio_giro') %}
+            {# WU228 — 2° passaggio FAU_00 (WU221): inserito al volo dal bot prima
+               del master, quindi assente dall'ordine fino ad ora. Condizionale:
+               la qualifica la decide il bot in quel momento. Mai barrato — il
+               nome coincide col 1° passaggio e `completate` lo marcherebbe. #}
+            <span style="color:#ba68c8" title="2° passaggio raccolta-only, inserito prima del master se FAU_00 qualifica (elapsed ≥120min e ≥3 slot liberi previsti)">{{ nome }} ↻²</span>
+          {% elif nome in comp %}
             <span style="color:var(--text-dim);text-decoration:line-through">{{ nome }}</span>
           {% else %}
             <span style="color:var(--text)">{{ nome }}</span>
@@ -34,8 +41,9 @@
       </div>
     </div>
     <div class="tel-foot">
-      <b>{{ comp | length }}/{{ (persisted.get('ordine') or []) | length }}</b> completate ·
+      <b>{{ comp | length }}/{{ ordine_reale | length }}</b> completate ·
       <span style="text-decoration:line-through">barrate</span> = già processate ·
+      <span style="color:#ba68c8">↻²</span> = 2° giro raccolta-only (condizionale, non è un'istanza in più da processare) ·
       reasons: {{ (persisted.get('reasons') or []) | join(', ') or '—' }}
     </div>
   </div>

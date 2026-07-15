@@ -699,7 +699,8 @@ def _invalidate_cycle_pred_cache() -> None:
 
 def ordina_istanze_adaptive(istanze: list[str],
                               master_excluded: bool = True,
-                              log_fn=None) -> list[dict]:
+                              log_fn=None,
+                              includi_doppio_giro: bool = False) -> list[dict]:
     """Greedy adattivo: ordina istanze per `slot_liberi_atteso` decrescente.
 
     Args:
@@ -712,6 +713,24 @@ def ordina_istanze_adaptive(istanze: list[str],
                          revertito.)
         log_fn: callable opzionale `log_fn(msg: str)`. Se passato, emette un
                 trace step-by-step del greedy con candidati + score + scelto.
+        includi_doppio_giro: **default False** (WU228). Se True e il flag
+                `doppio_giro_enabled` è ON, inserisce PRIMA del master una voce
+                virtuale `is_doppio_giro=True` per il 2° passaggio raccolta-only
+                di FAU_00 (WU221), che altrimenti è invisibile alla
+                pianificazione — segnalato dall'utente: "la pianificazione dice
+                FauMorfeus, invece è partito FAU_00".
+                **La voce è CONDIZIONALE, non una predizione**: la qualifica
+                (`valuta_qualifica`) è valutata dal bot a fine ciclo sui dati di
+                quel momento, e qui non è calcolabile — dipende dagli invii che
+                FAU_00 farà *in questo stesso ciclo*, che al momento del piano
+                non esistono ancora. Segnala "questo passo è previsto", non
+                "questo passo avverrà".
+                **ATTENZIONE**: la lista di ritorno è ESECUTIVA
+                (`main.py::_thread_istanza` la itera per avviare le istanze), non
+                descrittiva. Con questo flag contiene un `ist` DUPLICATO: chi
+                esegue deve filtrare `is_doppio_giro`, altrimenti FAU_00 gira due
+                volte come tick completo. Per questo il default è False: solo i
+                consumer read-only (dashboard, persistence) lo attivano.
 
     Returns:
         list[dict] in ordine ottimale, ciascuno con campi di
@@ -794,6 +813,31 @@ def ordina_istanze_adaptive(istanze: list[str],
                f"anzianità={scelto['anzianita_tick_min']:.0f}m) · "
                f"avanza t_offset +{durata_scelto:.1f}m → {t_offset + durata_scelto:.1f}m")
         t_offset += durata_scelto
+
+    # WU228 — doppio giro FAU_00 (WU221): voce virtuale PRIMA del master, così
+    # la pianificazione mostra il passo che il bot inserisce al volo. Solo se il
+    # flag è ON e il candidato è nel ciclo. Condizionale: la qualifica la decide
+    # il bot a fine ciclo (vedi docstring). Failsafe: mai rompe l'ordine.
+    if includi_doppio_giro:
+        try:
+            from core.doppio_giro_shadow import (
+                CANDIDATO, doppio_giro_live_attivo,
+            )
+            if (doppio_giro_live_attivo()
+                    and any(r.get("ist") == CANDIDATO for r in risultato)):
+                risultato.append({
+                    "ist":            CANDIDATO,
+                    "is_doppio_giro": True,
+                    "condizionale":   True,
+                    "t_avvio_min":    round(t_offset, 1),
+                    "score":          -1,          # fuori ranking
+                    "data_completa":  False,
+                })
+                _trace(f"  doppio-giro: {CANDIDATO} t_avvio={t_offset:.1f}m "
+                       f"(raccolta-only, condizionale, prima del master)")
+                t_offset += _stima_durata_istanza_min(CANDIDATO)
+        except Exception as exc:
+            _log.debug("[ADAPT-SCHED] doppio giro nel piano: %s", exc)
 
     # Master in fondo (con t_avvio_min finale)
     for m in master:
@@ -936,7 +980,13 @@ def get_remaining_from_resume() -> Optional[list[str]]:
     rimanenti = [
         item.get("ist")
         for item in (data.get("ordine") or [])
+        # WU228 — la voce del doppio giro (WU221) è DESCRITTIVA: sta nell'ordine
+        # persistito solo per farsi vedere in dashboard. Va esclusa dal resume,
+        # altrimenti il `ist` duplicato farebbe rieseguire FAU_00 come tick
+        # COMPLETO (qui si perde il raccolta-only, che vive nel gate del master).
+        # Il 2° passaggio non va comunque "ripreso": al resume il gate lo rivaluta.
         if item.get("ist") and item.get("ist") not in completate
+        and not item.get("is_doppio_giro")
     ]
     return rimanenti or None
 

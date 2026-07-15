@@ -111,7 +111,9 @@ def preview_adaptive_scheduler() -> dict:
                 nomi.append(nome)
 
         from datetime import datetime, timezone
-        ordine_live = ordina_istanze_adaptive(nomi)
+        # WU228 — includi la voce del doppio giro FAU_00 (WU221): read-only,
+        # qui non si esegue nulla. Vedi docstring di ordina_istanze_adaptive.
+        ordine_live = ordina_istanze_adaptive(nomi, includi_doppio_giro=True)
         persisted = load_planned_order()
 
         return {
