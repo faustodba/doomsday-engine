@@ -5,6 +5,38 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 15/07/2026 — WU223: fallback cross-istanza + Fase C (statico eliminato)
+
+**Contesto** (richiesta utente: "per ovviare al problema del 12% effettua una
+media di quella tipologia dalle altre istanze simili FAU_01…FAU_10, con un
+censimento dei buchi" → "fallback cross-istanza senza FAU_00, poi elimina la
+parte statica"): il predictor T_marcia empirico (WU202 Fase B) copriva l'88%
+delle celle; il restante 12% cadeva sulla stima statica (6 celle a bassa
+allocazione: FAU_00/05/03/09 campo·L7, FAU_08/07 acciaio·L6).
+
+**Step 1 — fallback cross-istanza (commit `7834aeb`).** Nuovo tier in
+`stima_tempo_raccolta`: se una cella `(istanza,tipo,livello)` non ha ≥3 campioni
+diretti né proporzione per-istanza, usa la **mediana del pool `(tipo,livello)`
+dalle ordinarie** (tutte tranne FAU_00, più veloce ~2h09m → esclusa per non
+abbassare la mediana altrui). Censimento: campo/L7 pool=29 (2h51m), acciaio/L6
+pool=6 (2h44m) → **tutti i 6 buchi coperti empiricamente**. Copertura 88%→~100%.
+
+**Step 2 — Fase C, statico ELIMINATO (commit `f3ce078`).** Con copertura ~100%
+lo statico è peso morto. Rimossi: `_calc_t_marcia_static`, tabella
+`predictor_t_l_max` (`_load_t_l_max_config`/`_get_t_l_max_min`), flag
+`tempo_raccolta_empirico_enabled` (cache + config + PATCH + toggle),
+`core/t_marcia_calibration.py`, campo osservativo `confronto_tempo_raccolta`,
+tool `predictor_backtest_empirico.py`. `_calc_t_marcia_min` ora: empirico →
+(fallback) costante farm `_FALLBACK_RACCOLTA_MIN=168min` → None solo per invio
+degenere. Toggle dashboard → badge "permanente". Test `test_calc_t_marcia_tiered`
+riscritto (6/6 pass), `test_adaptive_scheduler_confronto` rimosso.
+
+**Stato**: pushato + synced in prod (file stale rimossi). **Pending restart bot**
+per attivare (batch con WU214/217/218/221/219/220). Dettagli in
+`docs/issues/predictor-cutover-plan.md` §5.3.2.
+
+---
+
 ## Sessione 12/07/2026 — WU202: cutover predictor Fase B (T_marcia empirico, flag-gated)
 
 **Contesto** (richiesta utente: "estrai, verifica e progetta" → "procedi con la

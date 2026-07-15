@@ -237,6 +237,26 @@ Con flag OFF: risultato byte-identico allo statico su tutte le celle
 
 ### 5.3.2 Fase C — piano dettagliato: empirico standard + rimozioni (13/07)
 
+> ✅ **ESEGUITA 15/07/2026 (WU223)** — commit `7834aeb` (fallback cross-istanza)
+> + `f3ce078` (Fase C). Il piano sotto (13/07) prevedeva di **tenere** lo statico
+> come rete di fallback ("🟢 Da NON rimuovere"). La direzione utente del 15/07 lo
+> ha **superato**: «per ovviare al problema del 12% [celle statiche] effettua una
+> media di quella tipologia dalle altre istanze simili (FAU_01…FAU_10)». Con quel
+> **fallback cross-istanza** (`stima_tempo_raccolta` tier 3: pool `(tipo,livello)`
+> dalle ordinarie escl. FAU_00) la copertura empirica sale a **~100%** (i 6 buchi
+> — campo/L7 pool=29, acciaio/L6 pool=6 — sono ora coperti empiricamente), quindi
+> lo statico diventa peso morto ed è stato **eliminato del tutto**, non declassato.
+> **Ultima spiaggia**: costante farm `_FALLBACK_RACCOLTA_MIN=168min` (mediana L7)
+> per un `(tipo,livello)` mai raccolto da nessuna istanza — in pratica mai.
+> **Rimossi**: `_calc_t_marcia_static`, `_load_t_l_max_config`/`_get_t_l_max_min`,
+> `core/t_marcia_calibration.py`, flag `tempo_raccolta_empirico_enabled` (+ cache
+> + config dataclass/parse/whitelist + PATCH field), campo osservativo
+> `confronto_tempo_raccolta`, tool `predictor_backtest_empirico.py`. Toggle card →
+> badge "permanente". Test `test_calc_t_marcia_tiered` riscritto (6/6),
+> `test_adaptive_scheduler_confronto` rimosso. **Non toccati**: `predictor_t_l_max.json`
+> + `tools/predictor_backtest.py` (backtest self-contained, non runtime). La
+> sezione sotto resta come storia del piano originale.
+
 Direzione utente (13/07): «al tendere dovrà essere standard e non più a scelta
 questo tipo di modalità, ed elimineremo sia visivamente che funzionalmente
 alcuni elementi del predictor che non vengono più utilizzati».
