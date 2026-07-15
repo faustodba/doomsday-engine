@@ -668,13 +668,21 @@ def _thread_istanza(ist, tasks_cls, dry_run, forza_solo_raccolta: bool = False):
     nome  = ist["nome"]
     porta = ist.get("porta", 16384 + ist.get("indice", 0) * 32)
 
-    # Ruota log JSONL istanza ad ogni avvio (max 1 backup .bak)
-    _jsonl_path = os.path.join(ROOT, "logs", f"{nome}.jsonl")
-    if os.path.exists(_jsonl_path):
-        try:
-            os.replace(_jsonl_path, _jsonl_path + ".bak")
-        except Exception:
-            pass
+    # Ruota log JSONL istanza ad ogni avvio (max 1 backup .bak).
+    # WU227 — la rotazione è delegata a core.logger: qui c'era un os.replace
+    # diretto dentro un `except: pass`, ma get_logger() tiene il
+    # StructuredLogger vivo nel registry con l'handle del file APERTO, e su
+    # Windows il rename di un file aperto fallisce. Risultato: la rotazione
+    # riusciva solo alla PRIMA run di ogni istanza dopo un riavvio del bot
+    # (registry ancora vuoto) e da lì in poi falliva in silenzio, accumulando
+    # più tick nello stesso .jsonl e lasciando il .bak fermo al pre-riavvio.
+    # Scoperto col doppio giro FAU_00 (WU221): stessa istanza due volte a
+    # distanza di minuti, i due passaggi finivano mescolati.
+    try:
+        from core.logger import rotate_logger
+        rotate_logger(nome, log_dir=os.path.join(ROOT, "logs"))
+    except Exception as exc:
+        _log(nome, f"[WARN] rotazione log JSONL fallita: {exc}")
 
     _log(nome, f"Thread avviato -- porta ADB {porta}")
     _aggiorna_stato_istanza(nome, {"stato": "waiting", "porta": porta})

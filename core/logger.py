@@ -122,6 +122,37 @@ class StructuredLogger:
         # Riapre su file nuovo vuoto
         self._open_file()
 
+    def rotate(self, suffix: str = ".bak") -> bool:
+        """Rotazione FORZATA (non basata su dimensione): chiude l'handle,
+        rinomina il file corrente in `<path><suffix>`, riapre su file nuovo.
+
+        WU227 (15/07) — esiste perché il chiamante NON può rinominare da solo.
+        Questa classe tiene un handle aperto in append (`_open_file`) e
+        `get_logger()` la mantiene viva nel registry per tutta la vita del
+        processo: su Windows `os.replace` su un file aperto fallisce con
+        PermissionError. `main.py::_thread_istanza` faceva il rename da fuori,
+        dentro un `except: pass`, quindi la rotazione riusciva SOLO alla prima
+        run di ogni istanza dopo un riavvio (registry vuoto = nessun handle) e
+        da lì in poi falliva in silenzio, accumulando più tick nello stesso
+        file. Reso visibile dal doppio giro FAU_00 (WU221), che fa girare la
+        stessa istanza due volte a distanza di minuti.
+
+        Ritorna True se il rename è avvenuto. In ogni caso riapre un handle
+        valido: un fallimento della rotazione non deve mai perdere log.
+        """
+        with self._lock:
+            if self._file_path is None or not self._file_path.exists():
+                return False
+            if self._file and not self._file.closed:
+                self._file.close()
+            ok = True
+            try:
+                os.replace(self._file_path, f"{self._file_path}{suffix}")
+            except OSError:
+                ok = False       # es. lettore esterno con handle aperto
+            self._open_file()    # nuovo file se rinominato, stesso se fallito
+            return ok
+
     def close(self) -> None:
         """Chiude il file di log. Da chiamare alla fine del ciclo vita."""
         with self._lock:
@@ -238,6 +269,37 @@ def get_logger(
                 colors=colors,
             )
         return _registry[instance_name]
+
+
+def rotate_logger(instance_name: str, log_dir: str | Path = "logs",
+                   suffix: str = ".bak") -> bool:
+    """Ruota il log JSONL di un'istanza gestendo l'handle aperto.
+
+    WU227 (15/07) — da usare al posto di un `os.replace` fatto dal chiamante:
+    se il logger è già nel registry tiene il file aperto, e su Windows il
+    rename di un file aperto fallisce (vedi `StructuredLogger.rotate`).
+
+    Due casi:
+      - logger già in registry → delega a `rotate()` (chiude, rinomina, riapre);
+      - nessun logger ancora creato (prima run dopo l'avvio) → nessun handle
+        aperto, rename diretto.
+
+    Ritorna True se il file è stato rinominato, False se non c'era nulla da
+    ruotare o se il rename è fallito (mai solleva: la rotazione del log non
+    deve poter fermare un tick).
+    """
+    path = Path(log_dir) / f"{instance_name}.jsonl"
+    with _registry_lock:
+        log = _registry.get(instance_name)
+    if log is not None:
+        return log.rotate(suffix)
+    if not path.exists():
+        return False
+    try:
+        os.replace(path, f"{path}{suffix}")
+        return True
+    except OSError:
+        return False
 
 
 def close_all_loggers() -> None:
