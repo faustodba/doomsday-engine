@@ -661,7 +661,10 @@ _ultimo_esito_tick: dict[str, str] = {}
 # WU138) ma mai skip totale. Vedi memoria `feedback_no_skip_istanza.md`.
 
 
-def _thread_istanza(ist, tasks_cls, dry_run):
+def _thread_istanza(ist, tasks_cls, dry_run, forza_solo_raccolta: bool = False):
+    # WU221 — forza_solo_raccolta: usato dal "doppio giro" per il 2° passaggio
+    # di FAU_00 (registra solo RaccoltaTask, come raccolta_only, ignorando la
+    # tipologia normale dell'istanza). Default False = comportamento invariato.
     nome  = ist["nome"]
     porta = ist.get("porta", 16384 + ist.get("indice", 0) * 32)
 
@@ -703,8 +706,8 @@ def _thread_istanza(ist, tasks_cls, dry_run):
         or getattr(ctx.config, "profilo", None)
         or "full"
     )
-    _solo_raccolta = str(_tipologia) == "raccolta_only"
-    _raccolta_fast = str(_tipologia) == "raccolta_fast"
+    _solo_raccolta = str(_tipologia) == "raccolta_only" or forza_solo_raccolta
+    _raccolta_fast = str(_tipologia) == "raccolta_fast" and not forza_solo_raccolta
     if _solo_raccolta:
         _log(nome, f"Tipologia={_tipologia} — registro solo RaccoltaTask")
     if _raccolta_fast:
@@ -1280,6 +1283,7 @@ def main():
     while not stop_event.is_set():
         ciclo += 1
         _ciclo_start_ts = time.time()   # WU218 — durata giro per shadow doppio giro
+        _doppio_giro_2p_fatto = False   # WU221 — 2° passaggio FAU_00 max 1×/ciclo
         _log("MAIN", f"{'=' * 55}")
 
         # Rilettura dinamica istanze (recepisce modifiche dashboard pre-ciclo)
@@ -1435,6 +1439,48 @@ def main():
                     continue
             except Exception as exc:
                 _log("MAIN", f"[WARN] hot-check abilitata {nome}: {exc}")
+
+            # WU221 — DOPPIO GIRO: prima del MASTER (FauMorfeus, ultimo), se il
+            # flag globali.doppio_giro_enabled è ON e FAU_00 qualifica
+            # (raccoglitori rientrati + slot liberi previsti ≥ soglia), esegui un
+            # 2° passaggio raccolta-only di FAU_00 per recuperare lo slack. Flag
+            # OFF (default) → questo blocco NON fa nulla → ciclo identico a prima.
+            # Failsafe totale: mai blocca il ciclo. Max 1×/ciclo (_doppio_giro_2p_fatto).
+            if not _doppio_giro_2p_fatto and not args.dry_run:
+                try:
+                    from shared.instance_meta import is_master_instance
+                    from core.doppio_giro_shadow import (
+                        doppio_giro_live_attivo, valuta_qualifica, CANDIDATO,
+                    )
+                    if is_master_instance(nome) and doppio_giro_live_attivo():
+                        _dg_q, _dg_m = valuta_qualifica(CANDIDATO)
+                        _dg_f0 = next((i for i in istanze_ciclo
+                                       if i.get("nome") == CANDIDATO), None)
+                        if _dg_q and _dg_f0 is not None:
+                            _doppio_giro_2p_fatto = True
+                            _dg_porta = _dg_f0.get(
+                                "porta", 16384 + _dg_f0.get("indice", 0) * 32)
+                            _log("MAIN",
+                                 f"--- [DOPPIO-GIRO] 2° passaggio {CANDIDATO} "
+                                 f"raccolta-only (slot liberi previsti="
+                                 f"{_dg_m.get('slot_liberi_atteso')}/"
+                                 f"{_dg_m.get('totali')}) ---")
+                            _launcher.reset_istanza(_dg_f0,
+                                                    lambda msg: _log(CANDIDATO, msg))
+                            _t2 = threading.Thread(
+                                target=_thread_istanza,
+                                args=(_dg_f0, tasks_cls, args.dry_run),
+                                kwargs={"forza_solo_raccolta": True},
+                                name=f"{CANDIDATO}-2p", daemon=True,
+                            )
+                            _t2.start()
+                            _t2.join()
+                            _launcher.chiudi_istanza(_dg_f0, _dg_porta,
+                                                     lambda msg: _log(CANDIDATO, msg))
+                            _log("MAIN",
+                                 f"--- [DOPPIO-GIRO] 2° passaggio {CANDIDATO} completato ---")
+                except Exception as _exc_dg:
+                    _log("MAIN", f"[WARN] doppio-giro 2° passaggio: {_exc_dg}")
 
             # Scrivi checkpoint PRIMA di avviare
             _scrivi_checkpoint(ciclo, nome)
