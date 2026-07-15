@@ -1267,8 +1267,13 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         # WU211 — livello edificio di trasporto (rifornimento): determina
         # capacità di trasporto per spedizione + tassa (tabella livelli 1-25).
         # Serve al calcolo deterministico dell'inviato (sostituisce l'OCR del
-        # valore clampato, inaffidabile). Default 20 se non configurato.
-        livello_trasporto = _ovr("livello_trasporto", 20)
+        # valore clampato, inaffidabile).
+        # WU220 — fallback allo STATIC (instances.json), poi 20. Prima cadeva su
+        # 20 costante: se il dynamic veniva azzerato (save dashboard con codice
+        # vecchio → null) TUTTE le istanze finivano a 20, ignorando i livelli
+        # reali (FAU_00=24, ecc.) → inviato sotto-registrato. Ora usa lo static.
+        livello_trasporto = _ovr("livello_trasporto",
+                                 ist.get("livello_trasporto", 20))
         profilo       = _ovr("profilo",     "full")
         fascia_oraria = _ovr("fascia_oraria", "")
         abilitata     = ist.get("abilitata", True)

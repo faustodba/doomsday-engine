@@ -183,7 +183,7 @@
       "fascia_oraria": null,
       "max_squadre": 4,
       "livello": 6,
-      "livello_trasporto": 18
+      "livello_trasporto": 20
     },
     "FauMorfeus": {
       "abilitata": true,
@@ -193,7 +193,7 @@
       "max_squadre": 5,
       "livello": 7,
       "master": true,
-      "livello_trasporto": 20
+      "livello_trasporto": 25
     },
     "FAU_10": {
       "abilitata": true,
@@ -202,7 +202,7 @@
       "fascia_oraria": null,
       "max_squadre": 4,
       "livello": 6,
-      "livello_trasporto": 19
+      "livello_trasporto": 20
     }
   }
 }

@@ -127,7 +127,7 @@
     "abilitata": true,
     "fascia_oraria": "",
     "master": false,
-    "livello_trasporto": 18
+    "livello_trasporto": 20
   },
   {
     "nome": "FAU_10",
@@ -140,7 +140,7 @@
     "abilitata": true,
     "fascia_oraria": "",
     "master": false,
-    "livello_trasporto": 19
+    "livello_trasporto": 20
   },
   {
     "nome": "FauMorfeus",
@@ -153,6 +153,6 @@
     "abilitata": true,
     "fascia_oraria": "",
     "master": true,
-    "livello_trasporto": 20
+    "livello_trasporto": 25
   }
 ]
