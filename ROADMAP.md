@@ -51,9 +51,25 @@ simulazione fedele del matcher sullo storico:
   architetturale del 10/07 (match nel loop, non nel task) resta giusta.
 
 Curva TTL (match/orfani): 4h 506/768 · 8h 1146/128 · **12h 1201/73** · 16-48h
-1202/72 (satura). **Pending separato, non approvato**: ricostruzione di
-`tempo_raccolta_dataset.jsonl` dai sorgenti intatti (491 → ~1201 campioni
-subito). Dettagli in `docs/issues/telemetria-predictor.md` (WU224/WU225).
+1202/72 (satura).
+
+**WU225b — ricostruzione storico (fatta, in prod 16:16).** Nuovo
+`tools/rebuild_tempo_raccolta_dataset.py`: dry-run default in sandbox,
+`--apply` con backup in `data/archive/`, guard anti-race sul loop dashboard
+(`_lock` è per-processo). **Non reimplementa il matcher** — azzera lo stato e
+richiama `esegui_riconciliazione()` su tutto lo storico in un batch (scenario
+già previsto da WU200quater: match precede potatura → zero divergenza dal
+comportamento live). Risultato: **491 → 1208 match (+717)**, celle ≥3 campioni
+**35 → 49**/57, p90 3.19→3.74h, max 4.02→5.10h (il 4.02 era la firma della
+censura). Integrità: cursori a EOF, 0 duplicati, 0 occupazioni riusate, 0
+durate ≤0. Nessun riavvio necessario.
+
+**Effetto sul predictor**: 8/20 celle campione cambiate di ≥5min, delta medio
++5.2min. `campo`/L7 (una delle 6 celle tappate dal pool WU223) rivela uno
+spread reale di **95min** che il pool appiattiva: FAU_00 171→**126min**,
+FAU_07 170→**221min**, FAU_05 171→208, FAU_02 164→179.
+
+Dettagli in `docs/issues/telemetria-predictor.md` (WU224/WU225).
 
 ---
 
@@ -83,9 +99,13 @@ tool `predictor_backtest_empirico.py`. `_calc_t_marcia_min` ora: empirico →
 degenere. Toggle dashboard → badge "permanente". Test `test_calc_t_marcia_tiered`
 riscritto (6/6 pass), `test_adaptive_scheduler_confronto` rimosso.
 
-**Stato**: pushato + synced in prod (file stale rimossi). **Pending restart bot**
-per attivare (batch con WU214/217/218/221/219/220). Dettagli in
-`docs/issues/predictor-cutover-plan.md` §5.3.2.
+**Stato**: ✅ **LIVE dal 15/07 13:36** — il riavvio bot per l'aggiornamento MuMu
+ha attivato il batch (WU214/217/218/221/219/220 + WU223). Verificato: prod non
+contiene più `_calc_t_marcia_static` (Fase C), i file erano sincronizzati alle
+11:52 e il processo è partito alle 13:36; nessun file runtime del bot risulta
+più recente dell'avvio. Conferma a runtime: gli `[ADAPT-TRACE]` del ciclo 15:08
+riportano il campo `emp=N/nMαX` → `_calc_t_marcia_min` sta usando la stima
+empirica. Dettagli in `docs/issues/predictor-cutover-plan.md` §5.3.2.
 
 ---
 
