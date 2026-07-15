@@ -34,8 +34,26 @@ ritardo?") ha fatto emergere due artefatti dello stesso meccanismo:
 - Il fermo bot del giorno (aggiornamento) ha allungato il ciclo ma **non è la
   causa**: 52-69% di orfani anche nei giorni senza fermo.
 
-**Proposta pending**: `TTL_ORFANE_ORE` 4 → 8-10h. Dettagli in
-`docs/issues/telemetria-predictor.md` (WU224/WU225).
+**WU225 — fix applicato**: `TTL_ORFANE_ORE` **4.0 → 12.0**, nient'altro (test
+guardrail aggiornato, suite 33/33). Effetto dal **riavvio dashboard**. Due
+proposte intermedie scartate su challenge dell'utente, entrambe smentite dalla
+simulazione fedele del matcher sullo storico:
+
+- *guard sulla durata plausibile* → rifiuta **zero**; a qualunque TTL fino a 48h
+  le durate restano ≤5.10h, zero implausibili. Le chiavi riusate (unica
+  popolazione dove la collisione è possibile) hanno durate **più strette** delle
+  chiavi usate una volta sola. La chiave + "più recente precedente a
+  `ts_raccolta`" bastano da sole; il TTL è igiene del pool, non una difesa.
+- *riconciliazione live dopo la lettura del tab* → 497 match vs 506 (TTL 4h),
+  1190 vs 1189 (TTL 10h): rumore. Non si legge più in fretta un report non
+  ancora nato. Costerebbe una race cross-processo su
+  `tempo_raccolta_match_state.json` (`_lock` è per-processo) → la scelta
+  architetturale del 10/07 (match nel loop, non nel task) resta giusta.
+
+Curva TTL (match/orfani): 4h 506/768 · 8h 1146/128 · **12h 1201/73** · 16-48h
+1202/72 (satura). **Pending separato, non approvato**: ricostruzione di
+`tempo_raccolta_dataset.jsonl` dai sorgenti intatti (491 → ~1201 campioni
+subito). Dettagli in `docs/issues/telemetria-predictor.md` (WU224/WU225).
 
 ---
 

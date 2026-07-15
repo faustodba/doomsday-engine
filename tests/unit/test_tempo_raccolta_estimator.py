@@ -289,9 +289,14 @@ class TestEseguiRiconciliazione:
         assert rec["ts_invio"] == ts_occ
         assert abs(rec["durata_s"] - 3 * 3600) < 5
 
-    def test_ttl_orfane_default_4_ore(self):
-        """Guardrail anti-drift: richiesta esplicita utente 11/07."""
-        assert TTL_ORFANE_ORE == 4.0
+    def test_ttl_orfane_default_12_ore(self):
+        """Guardrail anti-drift. WU225 (15/07): era 4.0 (WU200bis), alzato a
+        12.0 dopo aver misurato che il TTL potava le occupazioni prima che il
+        report del completamento venisse letto (esiste solo al boot successivo
+        dell'istanza, periodo di ciclo p50 3.46h) — 506 match/768 orfani a 4h
+        contro 1201/73 a 12h, con censura selettiva sulle raccolte lente.
+        12h è il punto di saturazione della curva (16h+ non recupera altro)."""
+        assert TTL_ORFANE_ORE == 12.0
 
 
 class TestPotaDatasetVecchio:

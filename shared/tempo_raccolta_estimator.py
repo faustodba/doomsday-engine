@@ -51,11 +51,15 @@
 #  run al successivo) + pool delle occupazioni pending non ancora
 #  abbinate. Persistente, non uno scan stateless ogni volta.
 #
-#  PRUNING: un'occupazione senza match entro TTL_ORFANE_ORE (default 4h,
-#  richiesta utente 11/07) viene rimossa dal pool — altrimenti resterebbe
-#  a rischiare un match errato con un'occupazione successiva sullo stesso
-#  nodo. Run frequenti (15 min, vedi dashboard/app.py) riducono
-#  ulteriormente la finestra di rischio.
+#  PRUNING: un'occupazione senza match entro TTL_ORFANE_ORE (12h dal WU225,
+#  era 4h) viene rimossa dal pool. Il TTL NON è la difesa dal match errato
+#  su respawn del nodo — quella la fanno già la chiave (istanza|coordinata|
+#  tipo) e la regola "occupazione più recente PRECEDENTE a ts_raccolta", che
+#  è robusta da sola: verificato sullo storico che a qualunque TTL (fino a
+#  48h) le durate restano <=5.10h, zero implausibili, e le chiavi riusate
+#  (unica popolazione dove la collisione è possibile) hanno durate più
+#  strette delle chiavi usate una volta sola. Il TTL è solo igiene del pool.
+#  Vedi WU225 in docs/issues/telemetria-predictor.md.
 #
 #  RETENTION: pota_dataset_vecchio() rimuove dal dataset di output le
 #  righe più vecchie di RETENTION_GIORNI (default 15, richiesta utente
@@ -100,9 +104,19 @@ _lock = threading.Lock()
 _dataset_cache: dict = {"key": None, "rows": None}
 _dataset_cache_lock = threading.Lock()
 
-TTL_ORFANE_ORE = 4.0   # WU200bis (11/07, richiesta utente): oltre il max
-                        # osservato finora (~4.3h) ma stretto — poca
-                        # variabilita' attesa nei tempi di raccolta
+TTL_ORFANE_ORE = 12.0  # WU225 (15/07): era 4.0 (WU200bis, tarato sul "max
+                        # osservato ~4.3h"). Quella soglia misurava la DURATA
+                        # di raccolta, ma la potatura misura l'ETA' AL RUN, che
+                        # include l'attesa del boot successivo dell'istanza —
+                        # il report esiste solo quando l'istanza riparte e legge
+                        # il tab (periodo di ciclo p50 3.46h, 29% >=4h). Una
+                        # raccolta lenta manca il boot N+1, viene letta al N+2
+                        # (~7h) e a 4h era gia' potata: censura SELETTIVA sui
+                        # lenti. Misurato sullo storico: 4h -> 506 match/768
+                        # orfani (max troncato esattamente a 4.00h), 12h -> 1201
+                        # match/73 orfani (curva satura, max reale 5.10h). I ~72
+                        # orfani residui sono report senza occupazione
+                        # registrata: non recuperabili da nessun TTL.
 RETENTION_GIORNI = 15   # WU200bis: poca variabilita' attesa nel tempo,
                         # non serve conservare storia lunga
 MIN_CAMPIONI_CELLA = 3
