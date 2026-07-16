@@ -37,6 +37,15 @@ senza report. Soglia 2 (conservativa: ~7h oltre la fine, oltre il max reale 5.1h
 Sul pool reale: 65→59 pending, massimo da 730min a 361min. Test 33→39. Riavvio
 DASHBOARD.
 
+**WU230 — sonda measure-before-cut OCR ramo skip (`4d48e6b`).** Da uno scambio con
+una seconda AI (Gemini, `shared_ai_exchange/`) che proponeva di rimuovere la verifica
+finale del livello nel ramo skip. Nel ramo skip le due letture sono dello stesso
+pannello statico → la 2ª coglie solo glitch transitori, ma il tasso di disaccordo non
+è misurato. Prima di tagliare, sonda OSSERVATIVA (zero cambio comportamento): log
+`[MONITOR-OCR-SKIP]` sulle anomalie (disaccordo + 2ª lettura `-1`). Denominatore =
+righe `"skip reset"`. Richiede **riavvio BOT**; poi analisi dopo N cicli e decisione
+sul taglio. Test 64/64. Dettagli in `docs/issues/raccolta.md`.
+
 ---
 
 ## Sessione 15/07/2026 (2) — WU224/225/226: TTL orfane, ricostruzione storico, riclassificazione pannello
