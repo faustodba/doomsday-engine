@@ -786,8 +786,12 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
     # (target-1)) e tap CERCA diretto. Risparmio: ~1.4s/raccolta + meno
     # tap stress UI. Se OCR fallisce (-1) o livello diverso → procedura
     # standard classica.
+    # WU230 — is_skip_branch: marca il ramo "livello già corretto" (nessun tap
+    # correttivo) per la sonda osservativa a fondo funzione (measure-before-cut).
+    is_skip_branch = False
     livello_panel = _leggi_livello_panel(ctx, tipo)
     if livello_panel == livello:
+        is_skip_branch = True
         ctx.log_msg(
             f"Raccolta: pannello già su Lv.{livello_panel} == target — "
             f"skip reset"
@@ -843,6 +847,24 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
     # Se OCR fallisce (-1) → assume OK e procede (fail-safe non bloccante).
     time.sleep(0.3)
     livello_final = _leggi_livello_panel(ctx, tipo)
+    # WU230 (16/07) — sonda measure-before-cut, OSSERVATIVA: zero cambio di
+    # comportamento (il reset forzato sotto gira comunque). Nel ramo skip le due
+    # letture sono dello STESSO pannello statico (nessun tap in mezzo), quindi la
+    # 2ª può solo cogliere un glitch transitorio della 1ª. Prima di decidere se
+    # la verifica finale sia tagliabile nel ramo skip, quantifica quanto spesso
+    # la 2ª smentisce la 1ª. Denominatore = righe "skip reset"; log solo sulle
+    # anomalie (disaccordo o 2ª lettura fallita) per non gonfiare il volume.
+    if is_skip_branch and livello_final != livello:
+        if livello_final == -1:
+            ctx.log_msg(
+                f"[MONITOR-OCR-SKIP] 2a lettura OCR fallita (-1) dopo skip su "
+                f"Lv.{livello_panel} (target={livello})"
+            )
+        else:
+            ctx.log_msg(
+                f"[MONITOR-OCR-SKIP] DISACCORDO: iniziale_panel={livello_panel} "
+                f"finale_read={livello_final} (target={livello})"
+            )
     if livello_final != -1 and livello_final != livello:
         ctx.log_msg(
             f"Raccolta: MISMATCH level finale Lv.{livello_final} ≠ target "
