@@ -5,6 +5,40 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 15-16/07/2026 (3) — WU227/228/229: log rotation, doppio giro nel piano, potatura orfani
+
+**WU227 — rotazione log `.jsonl` fallita in silenzio (fix, `689c5c6`).** Scoperto
+dall'utente sul doppio giro FAU_00: i due passaggi finivano mescolati nello stesso
+file. Causa (tutte le istanze, da sempre): `main.py` ruotava con `os.replace` in un
+`except: pass`, ma `get_logger` tiene il file **aperto** e su Windows il rename di
+un file aperto fallisce → la rotazione riusciva solo alla 1ª run dopo un riavvio.
+Fix: `StructuredLogger.rotate()`/`rotate_logger()` (chiude, rinomina, riapre); WARN
+invece del silenzio. Test 19→27 (+2 pre-esistenti sanati). Riavvio BOT.
+
+**WU228/228b — doppio giro visibile nella pianificazione (`24a3420`+`447b68c`).**
+Utente: "la pianificazione dice FauMorfeus, invece è partito FAU_00". Il 2° giro è
+inserito al volo dal gate del master, fuori dall'ordine persistito.
+`ordina_istanze_adaptive(includi_doppio_giro=True)` opt-in aggiunge una voce
+virtuale `FAU_00 ↻²` prima del master. La lista è ESECUTIVA → main.py filtra
+`is_doppio_giro` (lista byte-identica al default), e `get_remaining_from_resume` lo
+esclude (senza, un resume rieseguirebbe FAU_00 come tick completo). **228b**: la
+voce non si disegna se aritmeticamente impossibile — se FAU_00 è in coda la finestra
+`t_master − t_avvio` < 120min. Verificato sul ciclo reale (finestra 38m → niente
+voce). **Nota**: la posizione "prima del master" è progettuale, non calcolata — il
+greedy avanza il tempo ma non lo stato simulato, quindi non può valutare un'istanza
+già pianificata; miglioria futura identificata (stato simulato → 2° giro candidato
+ordinario). Riavvio BOT + DASHBOARD.
+
+**WU229 — potatura anticipata orfani (`eeaff2f`).** Utente: "record vecchi di 800
+min, perché non eliminati?". Erano orfani tenuti fino al TTL 12h. La classificazione
+orfano (WU226) viveva solo nel pannello, non nel pruning. `esegui_riconciliazione`
+ora pota prima del TTL se raccolta finita + istanza ripassata a leggere ≥2 volte
+senza report. Soglia 2 (conservativa: ~7h oltre la fine, oltre il max reale 5.1h).
+Sul pool reale: 65→59 pending, massimo da 730min a 361min. Test 33→39. Riavvio
+DASHBOARD.
+
+---
+
 ## Sessione 15/07/2026 (2) — WU224/225/226: TTL orfane, ricostruzione storico, riclassificazione pannello
 
 **WU226 — il "ritardo" non esiste (fix finale del pannello).** Segnalazione
