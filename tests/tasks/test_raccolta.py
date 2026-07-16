@@ -23,6 +23,8 @@ from tasks.raccolta import (
     _cfg,
     _calcola_sequenza,
     _cerca_nodo,
+    _invia_squadra,
+    _reset_leggero_lente,
     _loop_invio_marce,
     _DEFAULTS,
     _TUTTI_I_TIPI,
@@ -848,3 +850,198 @@ class TestBlacklistFuoriPersistenza:
 
         assert bl._path.read_text(encoding="utf-8") == contenuto_buono
         assert not bl._path.with_suffix(".tmp").exists()   # tmp ripulito, non lasciato a terra
+
+
+# ==============================================================================
+# WU232 (16/07) — CANARY reset leggero. Verifica che il flag
+# RACCOLTA_RESET_LEGGERO_ABILITATO governi correttamente quale reset viene
+# usato sui rami di scarto che cambiano livello (chiave_test None, blacklist
+# fuori), che il segnale canary_reset_leggero passi a _cerca_nodo SOLO per il
+# tentativo immediatamente successivo (single-shot), e che la strumentazione
+# [CANARY-RESET-LEGGERO] in _cerca_nodo logghi denominatore + esiti corretti
+# senza alterare il valore di ritorno rispetto al comportamento standard.
+# ==============================================================================
+
+class TestCanaryResetLeggeroFlag:
+
+    def _ctx_livelli_multipli(self, **overrides):
+        # RACCOLTA_LIVELLO=6 -> sequenza_livelli=[6,7], due giri nel loop.
+        base = {"RACCOLTA_LIVELLO": 6}
+        base.update(overrides)
+        return ctx_base(**base)
+
+    @patch("tasks.raccolta._reset_leggero_lente")
+    @patch("tasks.raccolta._reset_to_mappa")
+    @patch("tasks.raccolta._leggi_coord_nodo", return_value=None)
+    @patch("tasks.raccolta._cerca_nodo", return_value=True)
+    def test_flag_off_default_usa_reset_pesante(
+        self, mock_cerca, mock_coord, mock_pesante, mock_leggero, tmp_path
+    ):
+        """Default (flag assente = False): comportamento INVARIATO, usa
+        sempre _reset_to_mappa, mai il reset leggero. 3 chiamate attese:
+        2 dal loop (livelli 6 e 7, chiave_test None) + 1 dal fallback finale
+        skip_neutro (nessun livello ha dato nodo utile)."""
+        ctx = self._ctx_livelli_multipli()
+        _invia_squadra(ctx, "campo", Blacklist(), BlacklistFuori(data_dir=str(tmp_path)),
+                       {}, 0, set(), 4)
+        assert mock_pesante.call_count == 3
+        mock_leggero.assert_not_called()
+
+    @patch("tasks.raccolta._reset_leggero_lente")
+    @patch("tasks.raccolta._reset_to_mappa")
+    @patch("tasks.raccolta._leggi_coord_nodo", return_value=None)
+    @patch("tasks.raccolta._cerca_nodo", return_value=True)
+    def test_flag_on_usa_reset_leggero_su_chiave_none(
+        self, mock_cerca, mock_coord, mock_pesante, mock_leggero, tmp_path
+    ):
+        """Flag ON: i 2 rami DENTRO il loop (che cambiano livello nella
+        stessa chiamata) usano il reset leggero. Il 3o call-site (fallback
+        finale skip_neutro, righe 1925-1932, FUORI dal loop — il prossimo
+        _cerca_nodo sarà per un tipo diverso in una chiamata futura, non lo
+        stesso scenario del bug storico) resta volutamente sul reset pesante:
+        1 chiamata."""
+        ctx = self._ctx_livelli_multipli(
+            RACCOLTA_RESET_LEGGERO_ABILITATO=True)
+        _invia_squadra(ctx, "campo", Blacklist(), BlacklistFuori(data_dir=str(tmp_path)),
+                       {}, 0, set(), 4)
+        assert mock_leggero.call_count == 2
+        assert mock_pesante.call_count == 1
+
+    @patch("tasks.raccolta._reset_leggero_lente")
+    @patch("tasks.raccolta._reset_to_mappa")
+    @patch("tasks.raccolta._leggi_coord_nodo")
+    @patch("tasks.raccolta._cerca_nodo", return_value=True)
+    def test_flag_on_usa_reset_leggero_su_blacklist_fuori(
+        self, mock_cerca, mock_coord, mock_pesante, mock_leggero, tmp_path
+    ):
+        bl_fuori = BlacklistFuori(data_dir=str(tmp_path))
+        bl_fuori.aggiungi("700_500", "campo")
+        mock_coord.return_value = "700_500"   # sempre lo stesso nodo, in blacklist fuori
+        ctx = self._ctx_livelli_multipli(
+            RACCOLTA_RESET_LEGGERO_ABILITATO=True)
+        _invia_squadra(ctx, "campo", Blacklist(), bl_fuori, {}, 0, set(), 4)
+        assert mock_leggero.call_count == 2
+        assert mock_pesante.call_count == 1   # fallback finale, stesso motivo di sopra
+
+    @patch("tasks.raccolta._reset_leggero_lente")
+    @patch("tasks.raccolta._leggi_coord_nodo", return_value=None)
+    def test_flag_on_passa_canary_true_al_cerca_nodo_successivo(
+        self, mock_coord, mock_leggero, tmp_path
+    ):
+        """Il cuore del meccanismo: dopo un reset leggero, la chiamata
+        _cerca_nodo del livello SUCCESSIVO riceve canary_reset_leggero=True
+        -- il 1o tentativo (livello iniziale) invece NO (nessun reset ancora
+        avvenuto prima di lui)."""
+        ctx = self._ctx_livelli_multipli(
+            RACCOLTA_RESET_LEGGERO_ABILITATO=True)
+        chiamate = []
+        def fake_cerca(ctx, tipo, livello_override=0, **kw):
+            chiamate.append(kw.get("canary_reset_leggero", False))
+            return True
+        with patch("tasks.raccolta._cerca_nodo", side_effect=fake_cerca):
+            _invia_squadra(ctx, "campo", Blacklist(),
+                           BlacklistFuori(data_dir=str(tmp_path)), {}, 0, set(), 4)
+        assert chiamate == [False, True]   # 1o giro: no; 2o giro (dopo reset leggero): si
+
+    @patch("tasks.raccolta._reset_to_mappa")
+    def test_flag_off_cerca_nodo_mai_riceve_canary_true(self, mock_pesante, tmp_path):
+        ctx = self._ctx_livelli_multipli()   # flag assente = default False
+        chiamate = []
+        def fake_cerca(ctx, tipo, livello_override=0, **kw):
+            chiamate.append(kw.get("canary_reset_leggero", False))
+            return True
+        with patch("tasks.raccolta._cerca_nodo", side_effect=fake_cerca), \
+             patch("tasks.raccolta._leggi_coord_nodo", return_value=None):
+            _invia_squadra(ctx, "campo", Blacklist(),
+                           BlacklistFuori(data_dir=str(tmp_path)), {}, 0, set(), 4)
+        assert chiamate == [False, False]
+
+    def test_reset_leggero_lente_fa_solo_back(self):
+        """L'helper stesso: un tap BACK, nessuna navigazione HOME/MAPPA."""
+        ctx = ctx_base()
+        ctx.navigator.vai_in_home = MagicMock()
+        ctx.navigator.vai_in_mappa = MagicMock()
+        with patch("tasks.raccolta.time.sleep"):
+            _reset_leggero_lente(ctx)
+        assert ctx.device.key_calls == ["KEYCODE_BACK"]
+        ctx.navigator.vai_in_home.assert_not_called()
+        ctx.navigator.vai_in_mappa.assert_not_called()
+
+
+class TestCanaryResetLeggeroStrumentazione:
+    """Verifica la sonda [CANARY-RESET-LEGGERO] dentro _cerca_nodo: logga
+    sempre il denominatore (tentativo), poi soft-marker al 1o fallimento,
+    hard-marker (firma del bug storico 7c5e789) se tutti i retry falliscono.
+    Zero marker se canary_reset_leggero=False -- non deve intromettersi nel
+    percorso standard."""
+
+    def _ctx_con_log_mock(self, **overrides):
+        ctx = ctx_base(**overrides)
+        ctx.device.set_default_shot(object())
+        ctx.matcher.set_result("pin/pin_field.png", (500, 500))  # marker lente
+        ctx.log_msg = MagicMock()
+        return ctx
+
+    def _msgs(self, ctx):
+        return [c.args[0] for c in ctx.log_msg.call_args_list if c.args]
+
+    @patch("tasks.raccolta.time.sleep")
+    def test_canary_true_verifica_ok_solo_denominatore(self, mock_sleep):
+        ctx = self._ctx_con_log_mock()
+        with patch("tasks.raccolta._verifica_tipo", return_value=True), \
+             patch("tasks.raccolta._leggi_livello_panel", return_value=6):
+            ok = _cerca_nodo(ctx, "campo", livello_override=6,
+                             canary_reset_leggero=True)
+        assert ok is True
+        msgs = self._msgs(ctx)
+        marker = [m for m in msgs if "CANARY-RESET-LEGGERO" in m]
+        assert len(marker) == 1
+        assert "tentativo" in marker[0]
+        assert not any("ABORT" in m for m in marker)
+
+    @patch("tasks.raccolta.time.sleep")
+    def test_canary_false_nessun_marker_anche_con_verifica_fallita(self, mock_sleep):
+        """Regressione: con canary_reset_leggero=False (default/standard),
+        la sonda deve restare TOTALMENTE silenziosa, anche se _verifica_tipo
+        fallisce sempre (percorso standard invariato)."""
+        ctx = self._ctx_con_log_mock()
+        with patch("tasks.raccolta._verifica_tipo", return_value=False), \
+             patch("tasks.raccolta._apri_lente_verificata", return_value=True):
+            ok = _cerca_nodo(ctx, "campo", livello_override=6)
+        assert ok is False
+        msgs = self._msgs(ctx)
+        assert not any("CANARY-RESET-LEGGERO" in m for m in msgs)
+
+    @patch("tasks.raccolta.time.sleep")
+    def test_canary_true_soft_fail_poi_successo(self, mock_sleep):
+        """1o tentativo fallisce, 2o (retry tap icona) riesce: soft-marker
+        presente, hard-abort NO, funzione ritorna comunque al comportamento
+        standard (procede oltre la verifica tipo)."""
+        ctx = self._ctx_con_log_mock()
+        esiti = iter([False, True])
+        with patch("tasks.raccolta._verifica_tipo",
+                   side_effect=lambda *a, **k: next(esiti)), \
+             patch("tasks.raccolta._leggi_livello_panel", return_value=6):
+            ok = _cerca_nodo(ctx, "campo", livello_override=6,
+                             canary_reset_leggero=True)
+        assert ok is True
+        msgs = self._msgs(ctx)
+        marker = [m for m in msgs if "CANARY-RESET-LEGGERO" in m]
+        assert any("1o tentativo" in m for m in marker)
+        assert not any("ABORT" in m for m in marker)
+
+    @patch("tasks.raccolta.time.sleep")
+    def test_canary_true_hard_fail_riproduce_bug_storico(self, mock_sleep):
+        """Tutti e 3 i tentativi di _verifica_tipo falliscono: ABORT loggato
+        con riferimento esplicito al commit storico, _cerca_nodo ritorna
+        False esattamente come nel percorso standard (nessuna alterazione
+        del comportamento, solo osservabilita')."""
+        ctx = self._ctx_con_log_mock()
+        with patch("tasks.raccolta._verifica_tipo", return_value=False), \
+             patch("tasks.raccolta._apri_lente_verificata", return_value=True):
+            ok = _cerca_nodo(ctx, "campo", livello_override=6,
+                             canary_reset_leggero=True)
+        assert ok is False
+        msgs = self._msgs(ctx)
+        marker = [m for m in msgs if "CANARY-RESET-LEGGERO" in m]
+        assert any("ABORT" in m and "7c5e789" in m for m in marker)

@@ -1328,6 +1328,12 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
             "raccolta_fuori_territorio",
             ist.get("raccolta_fuori_territorio", False),
         ))
+        # WU232 (16/07) — CANARY reset leggero. Solo runtime override, nessun
+        # default statico (pattern REPORT_RACCOLTA_ABILITATO sotto): si abilita
+        # a mano su UNA istanza canary per validare senza toccare instances.json.
+        RACCOLTA_RESET_LEGGERO_ABILITATO = bool(_ovr(
+            "raccolta_reset_leggero_abilitato", False,
+        ))
         # WU199 (09/07) — report_raccolta: chiamata diretta da
         # main.py::_leggi_risorse(), NON un task schedulato. Per-istanza
         # (non in instances.json — nuovo, nessun default statico) così da

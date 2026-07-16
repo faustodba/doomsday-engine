@@ -216,6 +216,20 @@ _DEFAULTS: dict = {
     # Override per-istanza in runtime_overrides.json:
     #   "istanze": { "FAU_05": { "raccolta_fuori_territorio": true } }
     "RACCOLTA_FUORI_TERRITORIO_ABILITATA": False,
+    # WU232 (16/07) — CANARY, default False: reset leggero (solo BACK, no
+    # HOME/MAPPA) sui rami di scarto che cambiano livello (chiave_test None,
+    # blacklist fuori). Verificato che _reset_to_mappa lì scarta il proprio
+    # valore di ritorno (nessun impatto sul conteggio slot del loop) — ma
+    # commit 7c5e789 (18/04) documenta che un SOLO BACK, in questo esatto
+    # scenario (BACK seguito da CAMBIO di livello, non stesso livello come
+    # il retry blacklist RAM a `_verifica_tipo` sempre riuscito), causò
+    # fallimento SISTEMATICO di `_verifica_tipo` al livello successivo —
+    # da cui il reset pieno introdotto in quel refactor. Attivare SOLO su
+    # istanza canary per riprodurre/escludere il bug con dati freschi
+    # (log `[CANARY-RESET-LEGGERO]`) prima di considerare un rollout più
+    # ampio. Override per-istanza in runtime_overrides.json:
+    #   "istanze": { "FAU_02": { "raccolta_reset_leggero_abilitato": true } }
+    "RACCOLTA_RESET_LEGGERO_ABILITATO": False,
     # WU55 — Data collection per analisi OCR slot in MAPPA vs HOME.
     # Quando True: dopo lettura slot HOME (ground truth) + dopo vai_in_mappa,
     # salva crop+screenshot in data/ocr_dataset/ per analisi offline.
@@ -738,7 +752,8 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
                 skip_verifica_tipo: bool = False,
                 skip_livello_check: bool = False,
                 delay_tap_icona: Optional[float] = None,
-                delay_cerca: Optional[float] = None) -> bool:
+                delay_cerca: Optional[float] = None,
+                canary_reset_leggero: bool = False) -> bool:
     """
     LENTE → tap tipo × 2 → verifica tipo → livello → CERCA.
     Ritorna True se CERCA eseguita correttamente.
@@ -772,6 +787,15 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
         (quindi già un dato reale prima del taglio, non solo teorico) —
         una marcia su livello diverso dal target non fallisce, raccoglie
         comunque, solo con capacità/resa diversa da quella attesa.
+
+    WU232 (16/07) — canary_reset_leggero: True quando il chiamante ha appena
+      fatto un reset LEGGERO (solo BACK) invece di `_reset_to_mappa` E il
+      livello richiesto ORA è diverso da quello appena abbandonato — è
+      esattamente lo scenario che commit 7c5e789 (18/04) documenta come
+      fallimento SISTEMATICO di `_verifica_tipo` prima del reset uniforme
+      HOME. Solo strumentazione (log `[CANARY-RESET-LEGGERO]` sui punti di
+      retry/abort di `_verifica_tipo` sotto): non cambia alcun comportamento,
+      serve a confermare o escludere la riproduzione del bug storico.
     """
     coord_lv    = _cfg(ctx, "COORD_LIVELLO").get(tipo, _cfg(ctx, "COORD_LIVELLO")["campo"])
     # Livello nodo dall'istanza (instances.json → livello), fallback a RACCOLTA_LIVELLO
@@ -793,9 +817,24 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
     ctx.device.tap(tap_icona)
     time.sleep(delay_tap_icona)       # FIX F: 1.2 → 1.8 (standard); WU198: override fast
 
+    if canary_reset_leggero:
+        # Denominatore della sonda: un tentativo di _verifica_tipo dopo reset
+        # leggero + cambio livello è avvenuto ORA, esito ancora sconosciuto.
+        # Tasso di riproduzione = count(ABORT|1o tentativo) / count(tentativo).
+        ctx.log_msg(
+            f"[CANARY-RESET-LEGGERO] tentativo _verifica_tipo dopo reset "
+            f"leggero + cambio livello (target=Lv.{livello})"
+        )
+
     if skip_verifica_tipo:
         ctx.log_msg(f"Raccolta: [FAST] skip verifica tipo {tipo} (coordinate fisse)")
     elif not _verifica_tipo(ctx, tipo):
+        if canary_reset_leggero:
+            ctx.log_msg(
+                f"[CANARY-RESET-LEGGERO] tipo {tipo} NON selezionato al 1o "
+                f"tentativo dopo reset leggero + cambio livello (target=Lv."
+                f"{livello}) — possibile riproduzione bug storico 7c5e789"
+            )
         ctx.log_msg(f"Raccolta: tipo {tipo} NON selezionato — retry tap icona")
         ctx.device.tap(tap_icona)
         time.sleep(1.5)
@@ -811,6 +850,14 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
             ctx.device.tap(tap_icona)
             time.sleep(1.8)           # FIX F: coerenza con doppio tap sopra
             if not _verifica_tipo(ctx, tipo):
+                if canary_reset_leggero:
+                    ctx.log_msg(
+                        f"[CANARY-RESET-LEGGERO] ABORT: tipo {tipo} NON "
+                        f"selezionato dopo reset leggero + cambio livello, "
+                        f"3 tentativi esauriti (target=Lv.{livello}) — "
+                        f"RIPRODOTTO fallimento sistematico documentato in "
+                        f"commit 7c5e789 (18/04)"
+                    )
                 ctx.log_msg(f"Raccolta: tipo {tipo} NON selezionato dopo reset — abort")
                 ctx.device.key("KEYCODE_BACK")
                 time.sleep(0.5)
@@ -1333,6 +1380,33 @@ class _GatherResult:
 
 
 # ==============================================================================
+# WU232 16/07/2026 — _reset_leggero_lente: CANARY, alternativa a
+# _reset_to_mappa sui rami di scarto che scartano comunque il suo valore di
+# ritorno (chiave_test None, blacklist fuori — vedi _invia_squadra). Attiva
+# SOLO se RACCOLTA_RESET_LEGGERO_ABILITATO=True per l'istanza (default False).
+#
+# Storia (perché questa non è la prima volta): prima del refactor "reset
+# uniforme HOME" (commit 7c5e789, 18/04), questi stessi rami usavano un
+# doppio BACK + home/mappa parziale, con un commento esplicito: "Il solo
+# BACK lascia la lente in stato intermedio e _verifica_tipo al prossimo
+# livello fallisce SISTEMATICAMENTE". Un singolo BACK era già stato provato
+# e scartato per quello scenario preciso — BACK seguito da CAMBIO di
+# livello, non lo stesso livello del retry blacklist RAM (quello sì,
+# sempre stato un BACK singolo, mai in causa).
+# Questo helper reintroduce il singolo BACK SOLO su istanza canary, con la
+# sonda `[CANARY-RESET-LEGGERO]` in _cerca_nodo per confermare o escludere,
+# con dati freschi, che il bug storico si riproduca ancora oggi.
+# ==============================================================================
+
+def _reset_leggero_lente(ctx: TaskContext) -> None:
+    """CANARY (WU232): chiude il popup coordinate con un solo BACK, senza
+    passare da HOME/MAPPA. Vedi commento di modulo sopra per il precedente
+    storico che sconsiglia questo pattern sui rami che cambiano livello."""
+    ctx.device.key("KEYCODE_BACK")
+    time.sleep(0.5)
+
+
+# ==============================================================================
 # FIX B 19/04/2026 — _reset_to_mappa: funzione centralizzata reset UI
 # ==============================================================================
 
@@ -1724,9 +1798,18 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
     chiave: Optional[str] = None
     chiave_test: Optional[str] = None
 
+    # WU232 (16/07) — CANARY: True per un solo giro quando il giro precedente
+    # ha fatto un reset leggero (invece di _reset_to_mappa) e questo giro
+    # cerca un livello diverso — passato a _cerca_nodo per la strumentazione
+    # `[CANARY-RESET-LEGGERO]`. Consumato (rimesso a False) subito dopo l'uso.
+    _dopo_reset_leggero = False
+    _reset_leggero_on = bool(_cfg(ctx, "RACCOLTA_RESET_LEGGERO_ABILITATO"))
+
     for lv in sequenza_livelli:
         ctx.log_msg(f"Raccolta: tentativo CERCA {tipo} Lv.{lv}")
-        ok = _cerca_nodo(ctx, tipo, livello_override=lv)
+        ok = _cerca_nodo(ctx, tipo, livello_override=lv,
+                         canary_reset_leggero=_dopo_reset_leggero)
+        _dopo_reset_leggero = False   # single-shot, consumato
         if not ok:
             # Tipo NON selezionato — problema UI, inutile cambiare livello
             ctx.log_msg(
@@ -1742,7 +1825,11 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
                 f"Raccolta: nessun nodo disponibile a Lv.{lv} — "
                 f"provo livello successivo"
             )
-            _reset_to_mappa(ctx, obiettivo)
+            if _reset_leggero_on:
+                _reset_leggero_lente(ctx)
+                _dopo_reset_leggero = True
+            else:
+                _reset_to_mappa(ctx, obiettivo)
             continue
 
         # ── Blacklist FUORI (disco): prova livello successivo ──────────
@@ -1762,7 +1849,11 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
             #     )
             # except Exception:
             #     pass
-            _reset_to_mappa(ctx, obiettivo)
+            if _reset_leggero_on:
+                _reset_leggero_lente(ctx)
+                _dopo_reset_leggero = True
+            else:
+                _reset_to_mappa(ctx, obiettivo)
             continue
 
         # ── Blacklist DINAMICA (RAM): retry CERCA stesso livello ──────
