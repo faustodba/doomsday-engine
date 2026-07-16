@@ -121,6 +121,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import math as _math
 import os
 import re as _re
@@ -133,6 +134,12 @@ from typing import Optional
 import numpy as np
 
 from core.task import Task, TaskContext, TaskResult
+
+# WU231 (16/07) — logger di modulo per BlacklistFuori: la classe non ha
+# accesso a ctx.log_msg (istanziata senza contesto task), serve un canale di
+# log per segnalare corruzione/anomalie di persistenza senza fallire in
+# silenzio (pattern standard `core/*.py`, es. adaptive_scheduler.py).
+_log = logging.getLogger(__name__)
 
 # ------------------------------------------------------------------------------
 # Default costanti
@@ -454,21 +461,59 @@ class BlacklistFuori:
         self._data: dict[str, dict] = self._carica()
 
     def _carica(self) -> dict:
+        """Carica il file. WU231 (16/07): un file ASSENTE è normale (prima
+        esecuzione) → {}. Un file PRESENTE ma illeggibile (JSON corrotto,
+        troncato da un crash a metà `_salva`) è un'anomalia — NON va trattato
+        come "vuoto": azzererebbe silenziosamente mesi di blacklist accumulata
+        alla prima `aggiungi()` successiva. Si marca `self._corrotto = True` e
+        si preserva il file corrotto (nessuna scrittura finché non risolto)."""
+        self._corrotto = False
+        if not self._path.exists():
+            return {}
         try:
-            if self._path.exists():
-                return json.loads(self._path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
-        return {}
+            return json.loads(self._path.read_text(encoding="utf-8"))
+        except Exception as exc:
+            self._corrotto = True
+            _log.error(
+                "[BlacklistFuori] %s illeggibile (%s) — blacklist trattata "
+                "come vuota IN MEMORIA per non bloccare il bot, ma la "
+                "scrittura su disco resta sospesa per non perdere il file "
+                "originale. Richiede intervento manuale.",
+                self._path, exc,
+            )
+            return {}
 
     def _salva(self) -> None:
+        """Scrittura ATOMICA (tmp + os.replace, WU231 16/07): un crash a metà
+        scrittura lascia il file vecchio intatto invece di un JSON troncato
+        (era `write_text` diretto — non atomico). Sospesa se `_carica()` ha
+        rilevato un file corrotto: scrivere ora lo sovrascriverebbe con la
+        vista in-memory (vuota o parziale), perdendo per sempre il contenuto
+        originale che potrebbe essere recuperabile manualmente."""
+        if getattr(self, "_corrotto", False):
+            _log.error(
+                "[BlacklistFuori] scrittura SALTATA — %s è marcato corrotto "
+                "da un caricamento precedente, per non sovrascrivere dati "
+                "originali potenzialmente recuperabili.",
+                self._path,
+            )
+            return
+        tmp = self._path.with_suffix(".tmp")
         try:
-            self._path.write_text(
+            tmp.write_text(
                 json.dumps(self._data, indent=2, ensure_ascii=False),
                 encoding="utf-8"
             )
-        except Exception:
-            pass
+            os.replace(tmp, self._path)
+        except Exception as exc:
+            _log.error("[BlacklistFuori] salvataggio fallito: %s", exc)
+            # Pulisce il tmp residuo se write_text è riuscito ma replace no
+            # (es. permessi, disco pieno tra le due chiamate) — non deve
+            # restare un file .tmp orfano nella cartella data/.
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     def contiene(self, chiave: str) -> bool:
         if not chiave:

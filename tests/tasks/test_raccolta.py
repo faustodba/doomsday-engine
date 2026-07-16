@@ -19,6 +19,7 @@ from shared.template_matcher import FakeMatcher
 from tasks.raccolta import (
     RaccoltaTask,
     Blacklist,
+    BlacklistFuori,
     _cfg,
     _calcola_sequenza,
     _cerca_nodo,
@@ -763,3 +764,87 @@ class TestNodoInTerritorio:
         screen = MagicMock()
         screen.frame = None
         assert _nodo_in_territorio(screen, "campo", ctx) is True
+
+
+# ==============================================================================
+# WU231 (16/07) — BlacklistFuori: scrittura atomica + niente azzeramento
+# silenzioso su file corrotto.
+#
+# Bug pre-fix: _salva() era un write_text diretto (non atomico) -- un
+# crash/kill a meta' scrittura lasciava un JSON troncato. _carica() su quel
+# file sollevava un'eccezione, la ingoiava e ritornava {} -- la prima
+# aggiungi() successiva SOVRASCRIVEVA il file corrotto con {} + 1 solo nodo,
+# perdendo per sempre la blacklist accumulata (in prod: 46 nodi da 2 mesi).
+# ==============================================================================
+
+class TestBlacklistFuoriPersistenza:
+
+    def _bl(self, tmp_path):
+        return BlacklistFuori(data_dir=str(tmp_path))
+
+    def test_file_assente_e_normale_non_corrotto(self, tmp_path):
+        bl = self._bl(tmp_path)
+        assert bl._corrotto is False
+        assert len(bl) == 0
+
+    def test_aggiungi_e_contiene_roundtrip(self, tmp_path):
+        bl = self._bl(tmp_path)
+        bl.aggiungi("700_500", "petrolio")
+        assert bl.contiene("700_500") is True
+        assert len(bl) == 1
+
+    def test_salva_e_atomico_no_file_tmp_residuo(self, tmp_path):
+        bl = self._bl(tmp_path)
+        bl.aggiungi("700_500", "petrolio")
+        assert bl._path.exists()
+        assert not bl._path.with_suffix(".tmp").exists()
+
+    def test_persiste_tra_istanze_diverse(self, tmp_path):
+        bl1 = self._bl(tmp_path)
+        bl1.aggiungi("700_500", "petrolio")
+        bl1.aggiungi("701_501", "campo")
+        bl2 = self._bl(tmp_path)   # nuova istanza, stesso data_dir = rilettura da disco
+        assert bl2.contiene("700_500") is True
+        assert bl2.contiene("701_501") is True
+        assert len(bl2) == 2
+
+    def test_file_corrotto_rilevato_e_marcato(self, tmp_path):
+        p = tmp_path / "blacklist_fuori_globale.json"
+        p.write_text('{"700_500": {"ts": 1.0, "tipo": "petro', encoding="utf-8")  # troncato
+        bl = self._bl(tmp_path)
+        assert bl._corrotto is True
+
+    def test_file_corrotto_non_azzera_in_memoria_ma_non_scrive(self, tmp_path):
+        """Il cuore del fix: file corrotto -> in RAM parte vuoto (fail-safe,
+        il bot continua a funzionare), MA aggiungi() NON deve sovrascrivere
+        il file corrotto su disco -- altrimenti il contenuto originale
+        (potenzialmente recuperabile a mano) e' perso per sempre."""
+        p = tmp_path / "blacklist_fuori_globale.json"
+        originale = '{"700_500": {"ts": 1.0, "tipo": "petro'   # troncato
+        p.write_text(originale, encoding="utf-8")
+        bl = self._bl(tmp_path)
+        assert bl.contiene("700_500") is False   # fail-safe: non blocca il bot
+
+        bl.aggiungi("999_999", "campo")           # tentativo di scrittura successivo
+
+        assert p.read_text(encoding="utf-8") == originale   # file NON toccato
+        assert not p.with_suffix(".tmp").exists()            # nessun residuo tmp
+
+    def test_crash_a_meta_scrittura_simulato_lascia_file_precedente_intatto(
+        self, tmp_path, monkeypatch
+    ):
+        """Simula un crash durante _salva(): os.replace non viene mai
+        chiamato (interrotto a meta'). Con la scrittura atomica il file
+        pubblico deve restare quello vecchio, mai un JSON troncato."""
+        bl = self._bl(tmp_path)
+        bl.aggiungi("700_500", "petrolio")
+        contenuto_buono = bl._path.read_text(encoding="utf-8")
+
+        def _crash(*a, **kw):
+            raise OSError("crash simulato durante os.replace")
+        monkeypatch.setattr("os.replace", _crash)
+
+        bl.aggiungi("701_501", "campo")   # tenta di scrivere, "crasha" a meta'
+
+        assert bl._path.read_text(encoding="utf-8") == contenuto_buono
+        assert not bl._path.with_suffix(".tmp").exists()   # tmp ripulito, non lasciato a terra
