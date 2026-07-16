@@ -169,7 +169,8 @@ async def _tempo_raccolta_loop():
                 if not esito.get("errore"):
                     print(f"[DASHBOARD] {_ts()} tempo_raccolta: "
                           f"{esito['match_nuovi']} match nuovi, "
-                          f"{esito['occupazioni_potate']} potate, "
+                          f"{esito['occupazioni_potate']} potate (TTL), "
+                          f"{esito.get('occupazioni_orfane_potate', 0)} orfane, "
                           f"{esito['pending_attuali']} pending")
                 else:
                     print(f"[DASHBOARD] {_ts()} tempo_raccolta errore: {esito['errore']}")

@@ -129,6 +129,17 @@ MIN_CAMPIONI_CELLA = 3
 # Il master (FauMorfeus) e' gia' fuori dal dataset (ISTANZE_ESCLUSE).
 ISTANZA_VELOCE_ESCLUSA = "FAU_00"
 
+# WU229 — potatura anticipata degli orfani. Un pending la cui raccolta sarebbe
+# gia' finita (stima scaduta) e la cui istanza e' ripassata a LEGGERE il tab
+# Report >= questa soglia di volte senza che il report comparisse non arrivera'
+# mai: e' una marcia fallita o una riga di report persa. Il TTL a 12h (WU225)
+# lo terrebbe comunque fino a scadenza, riempiendo il pannello in-volo di marce
+# morte. Soglia = 2 (non 1) per non uccidere una raccolta piu' lenta della
+# stima: 2 passaggi dopo la fine PREVISTA sono ~2 cicli (~7h) oltre la fine,
+# ben oltre il max reale osservato (5.1h) — chi non e' arrivato entro allora
+# non arrivera'. Il TTL resta come rete per i record che nessuno ha riletto.
+LETTURE_ORFANA = 2
+
 
 def _root_dir() -> Path:
     root = os.environ.get("DOOMSDAY_ROOT")
@@ -250,6 +261,72 @@ def _parse_ts(s: str) -> datetime:
     return datetime.fromisoformat(s)
 
 
+def _leggi_tutte_le_righe(path: Path) -> list[dict]:
+    """Legge tutte le righe JSONL di `path` (best-effort, righe malformate
+    scartate). File assente → []."""
+    if not path.exists():
+        return []
+    rows: list[dict] = []
+    try:
+        with path.open(encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rows.append(json.loads(line))
+                except Exception:
+                    continue
+    except Exception:
+        return []
+    return rows
+
+
+def _letture_report_per_istanza(rows_report: list[dict]) -> dict:
+    """WU229 — istanti in cui ogni istanza ha LETTO il tab Report, ricavati
+    raggruppando i `ts_ocr` (righe lette nella stessa passata condividono il
+    boot; gap > 60 min = passata nuova). Usato dalla potatura anticipata degli
+    orfani. NB: il pannello dashboard ha un helper omonimo in
+    `report_raccolta_reader` — sono volutamente separati (display vs pruning),
+    stessa logica di clustering."""
+    per: dict[str, list[datetime]] = {}
+    for r in sorted(rows_report, key=lambda x: x.get("ts_ocr") or ""):
+        inst, ts = r.get("instance"), r.get("ts_ocr")
+        if not inst or not ts:
+            continue
+        try:
+            t = _parse_ts(ts)
+        except Exception:
+            continue
+        letture = per.setdefault(inst, [])
+        if not letture or (t - letture[-1]).total_seconds() > 3600:
+            letture.append(t)
+    return per
+
+
+def _e_orfano_confermato(instance: str, o: dict, ts_invio: datetime,
+                         ora: datetime, letture_ist: dict) -> bool:
+    """WU229 — True se il pending `o` (istanza `instance`, partito a `ts_invio`)
+    è un orfano CONFERMATO: la sua raccolta sarebbe già finita secondo la stima
+    empirica, e l'istanza è ripassata a leggere il tab Report >= LETTURE_ORFANA
+    volte DOPO quella fine senza che il report comparisse. In quel caso il
+    report non arriverà mai (marcia fallita o riga persa) → potabile prima del
+    TTL. Conservativo: senza stima, o con stima non ancora scaduta, o con
+    riletture insufficienti → False (lo tiene, decide il TTL)."""
+    tipo = o.get("tipo")
+    livello = o.get("livello")
+    if not tipo or not isinstance(livello, int):
+        return False
+    stima_s = stima_tempo_raccolta(instance, tipo, livello)
+    if stima_s is None:
+        return False
+    fine = ts_invio + timedelta(seconds=stima_s)
+    if ora <= fine:
+        return False   # raccolta ancora in corso secondo la stima
+    letture_dopo = sum(1 for t in letture_ist.get(instance, []) if t > fine)
+    return letture_dopo >= LETTURE_ORFANA
+
+
 def esegui_riconciliazione(ttl_ore: float = TTL_ORFANE_ORE) -> dict:
     """Un passo di riconciliazione: legge le righe nuove da entrambi i
     dataset sorgente, abbina, scrive i match, pota le occupazioni orfane
@@ -258,7 +335,7 @@ def esegui_riconciliazione(ttl_ore: float = TTL_ORFANE_ORE) -> dict:
     transitorio (file assente, JSON corrotto, ecc.).
     """
     esito = {"match_nuovi": 0, "report_orfane": 0, "occupazioni_potate": 0,
-              "pending_attuali": 0, "errore": None}
+              "occupazioni_orfane_potate": 0, "pending_attuali": 0, "errore": None}
     try:
         with _lock:
             state = _carica_stato()
@@ -365,27 +442,42 @@ def esegui_riconciliazione(ttl_ore: float = TTL_ORFANE_ORE) -> dict:
                 with _path_output().open("a", encoding="utf-8") as f:
                     f.write("\n".join(lines) + "\n")
 
-            # Pruning TTL — SOLO ora, su ciò che resta invenduto dopo il
-            # match. Un'occupazione senza match entro TTL_ORFANE_ORE non è
-            # più abbinabile in modo affidabile (rischio respawn nodo).
+            # Pruning — SOLO ora, su ciò che resta invenduto dopo il match.
+            # Due criteri:
+            #   (a) TTL: un'occupazione senza match entro TTL_ORFANE_ORE non è
+            #       più abbinabile in modo affidabile (rischio respawn nodo).
+            #   (b) WU229 — orfano CONFERMATO: raccolta già finita secondo la
+            #       stima E istanza ripassata a leggere il tab >= LETTURE_ORFANA
+            #       volte senza report → morto, potato prima del TTL (altrimenti
+            #       resta fino a 12h a riempire il pannello in-volo di marce
+            #       fallite). Le riletture del tab si ricavano dai ts_ocr dei
+            #       report (tutto il file, non solo le righe nuove del cursore).
+            letture_ist = _letture_report_per_istanza(
+                _leggi_tutte_le_righe(_path_report()))
             potate = 0
+            orfane = 0
             for key in list(pending.keys()):
+                instance_key = key.split("|")[0]
                 vive = []
                 for o in pending[key]:
                     try:
-                        eta_h = (ora - _parse_ts(o["ts"])).total_seconds() / 3600
+                        ts_o = _parse_ts(o["ts"])
                     except Exception:
                         potate += 1
                         continue
-                    if eta_h < ttl_ore:
-                        vive.append(o)
-                    else:
+                    if (ora - ts_o).total_seconds() / 3600 >= ttl_ore:
                         potate += 1
+                        continue
+                    if _e_orfano_confermato(instance_key, o, ts_o, ora, letture_ist):
+                        orfane += 1
+                        continue
+                    vive.append(o)
                 if vive:
                     pending[key] = vive
                 else:
                     pending.pop(key, None)
             esito["occupazioni_potate"] = potate
+            esito["occupazioni_orfane_potate"] = orfane
 
             state["cursor_occupazioni"] = nuovo_cursor_occ
             state["cursor_report"] = nuovo_cursor_report

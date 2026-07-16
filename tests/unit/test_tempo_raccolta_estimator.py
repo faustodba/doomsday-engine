@@ -536,3 +536,109 @@ class TestMigrazionePendingChiaveTipizzata:
         esito = esegui_riconciliazione()
         assert esito["match_nuovi"] == 1
         assert esito["report_orfane"] == 0
+
+
+class TestPotaturaOrfaniConfermati:
+    """WU229 (16/07) — potatura anticipata degli orfani. Segnalato dall'utente:
+    "in occupazioni pending ci sono record vecchi di 800 min, perché non vengono
+    eliminati?". Erano orfani (istanza già ripassata a leggere il tab più volte,
+    report mai comparso) tenuti fino al TTL di 12h. La potatura ora li rimuove
+    prima del TTL se la raccolta sarebbe già finita E l'istanza ha riletto il tab
+    >= LETTURE_ORFANA volte dopo quella fine, senza report."""
+
+    def _seed_stima(self, tmp_path, instance="FAU_09", tipo="petrolio",
+                    livello=7, durata_s=3 * 3600, n=3):
+        """Semina il dataset di output così che stima_tempo_raccolta(cella)
+        ritorni `durata_s` (mediana su n campioni identici, n >= 3)."""
+        righe = [{
+            "ts_match": _ore_fa(0.1), "instance": instance, "coordinata": f"70{i}_500",
+            "tipo": tipo, "livello": livello, "ts_invio": _ore_fa(3),
+            "ts_raccolta": _ore_fa(0.1), "durata_s": durata_s,
+        } for i in range(n)]
+        _scrivi_jsonl(tmp_path / "data" / "tempo_raccolta_dataset.jsonl", righe)
+
+    def _rilettura(self, instance, ts, coordinata="999_999"):
+        """Riga di report a una coordinata DIVERSA dal pending (non lo matcha),
+        stessa istanza → conta come una rilettura del tab a `ts` (ts_ocr)."""
+        return _report(instance, coordinata, ts)
+
+    def test_orfano_confermato_potato_prima_del_ttl(self, tmp_path):
+        # invio 8h fa, stima 3h -> fine 5h fa. Due riletture DOPO la fine.
+        self._seed_stima(tmp_path)
+        _scrivi_jsonl(tmp_path / "data" / "nodi_mappa_observations.jsonl", [
+            _occ("FAU_09", "700_500", _ore_fa(8)),
+        ])
+        _scrivi_jsonl(tmp_path / "data" / "report_raccolta_dataset.jsonl", [
+            self._rilettura("FAU_09", _ore_fa(4)),
+            self._rilettura("FAU_09", _ore_fa(1)),
+        ])
+        esito = esegui_riconciliazione()   # TTL 12h: NON scaduto per età
+        assert esito["occupazioni_orfane_potate"] == 1
+        assert esito["occupazioni_potate"] == 0     # non è il TTL ad averlo tolto
+        assert esito["pending_attuali"] == 0
+
+    def test_una_sola_rilettura_non_basta(self, tmp_path):
+        # fine 5h fa, UNA sola rilettura dopo -> sotto soglia, resta pending.
+        self._seed_stima(tmp_path)
+        _scrivi_jsonl(tmp_path / "data" / "nodi_mappa_observations.jsonl", [
+            _occ("FAU_09", "700_500", _ore_fa(8)),
+        ])
+        _scrivi_jsonl(tmp_path / "data" / "report_raccolta_dataset.jsonl", [
+            self._rilettura("FAU_09", _ore_fa(2)),
+        ])
+        esito = esegui_riconciliazione()
+        assert esito["occupazioni_orfane_potate"] == 0
+        assert esito["pending_attuali"] == 1
+
+    def test_stima_non_scaduta_non_e_orfano(self, tmp_path):
+        # invio 2h fa, stima 3h -> fine nel FUTURO: raccolta ancora in corso.
+        self._seed_stima(tmp_path)
+        _scrivi_jsonl(tmp_path / "data" / "nodi_mappa_observations.jsonl", [
+            _occ("FAU_09", "700_500", _ore_fa(2)),
+        ])
+        _scrivi_jsonl(tmp_path / "data" / "report_raccolta_dataset.jsonl", [
+            self._rilettura("FAU_09", _ore_fa(1.5)),
+            self._rilettura("FAU_09", _ore_fa(0.2)),
+        ])
+        esito = esegui_riconciliazione()
+        assert esito["occupazioni_orfane_potate"] == 0
+        assert esito["pending_attuali"] == 1
+
+    def test_senza_stima_solo_ttl_non_orfano(self, tmp_path):
+        # nessun dato per la cella -> stima None -> mai orfano, decide il TTL.
+        _scrivi_jsonl(tmp_path / "data" / "nodi_mappa_observations.jsonl", [
+            _occ("FAU_09", "700_500", _ore_fa(8)),
+        ])
+        _scrivi_jsonl(tmp_path / "data" / "report_raccolta_dataset.jsonl", [
+            self._rilettura("FAU_09", _ore_fa(4)),
+            self._rilettura("FAU_09", _ore_fa(1)),
+        ])
+        esito = esegui_riconciliazione()          # 8h < 12h TTL
+        assert esito["occupazioni_orfane_potate"] == 0
+        assert esito["pending_attuali"] == 1
+
+    def test_ttl_prevale_su_orfano(self, tmp_path):
+        # oltre il TTL: potato come TTL, non serve nemmeno il check orfano.
+        self._seed_stima(tmp_path)
+        _scrivi_jsonl(tmp_path / "data" / "nodi_mappa_observations.jsonl", [
+            _occ("FAU_09", "700_500", _ore_fa(13)),
+        ])
+        esito = esegui_riconciliazione()
+        assert esito["occupazioni_potate"] == 1
+        assert esito["occupazioni_orfane_potate"] == 0
+        assert esito["pending_attuali"] == 0
+
+    def test_riletture_prima_della_fine_non_contano(self, tmp_path):
+        # 2 riletture ma ENTRAMBE prima della fine prevista -> non orfano.
+        # invio 8h fa, stima 3h -> fine 5h fa. Riletture a 7h e 6h fa (prima).
+        self._seed_stima(tmp_path)
+        _scrivi_jsonl(tmp_path / "data" / "nodi_mappa_observations.jsonl", [
+            _occ("FAU_09", "700_500", _ore_fa(8)),
+        ])
+        _scrivi_jsonl(tmp_path / "data" / "report_raccolta_dataset.jsonl", [
+            self._rilettura("FAU_09", _ore_fa(7)),
+            self._rilettura("FAU_09", _ore_fa(6)),
+        ])
+        esito = esegui_riconciliazione()
+        assert esito["occupazioni_orfane_potate"] == 0
+        assert esito["pending_attuali"] == 1
