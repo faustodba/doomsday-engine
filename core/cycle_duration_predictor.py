@@ -1033,9 +1033,26 @@ def predict_cycle_from_config(strict_schedule: bool = True,
         )
 
         if str(tipologia) == "raccolta_only":
-            # Solo raccolta + raccolta_chiusura per istanze master/raccolta_only
+            # Raccolta + raccolta_chiusura + task extra della whitelist master.
+            # WU-MasterTasks (17/07): il master raccolta_only ora esegue i task
+            # selezionati in `master_task_whitelist` con la loro schedulazione
+            # normale.
+            #
+            # VINCOLO DI DESIGN (WU217): il master FauMorfeus è SEMPRE l'ultima
+            # istanza del ciclo, fuori dal ranking adattivo (posizione fissa,
+            # vedi `ordina_istanze_adaptive`). Quindi contare i suoi task extra
+            # NON cambia l'ordinamento — il master resta ultimo. Corregge solo la
+            # DURATA TOTALE stimata del ciclo (T_ciclo): prima il predictor
+            # ignorava questi task e sottostimava, ora la stima riflette il tempo
+            # reale in più che il master aggiunge in coda. È il tradeoff accettato
+            # ("più task sul master = ciclo un po' più lungo", per design).
+            # Si rispetta il kill-switch globale (`task_globali`), coerente con
+            # `should_run`/`task_abilitato`.
             tasks_consid = [t for t in ("raccolta", "raccolta_chiusura")
                             if t in task_globali]
+            for _t in (ist_o.get("master_task_whitelist") or []):
+                if _t in task_globali and _t not in tasks_consid:
+                    tasks_consid.append(_t)
         elif str(tipologia) == "raccolta_fast":
             # RaccoltaTask sostituita da RaccoltaFastTask runtime
             tasks_consid = []
