@@ -1,8 +1,8 @@
 {
-  "seq": 55,
+  "seq": 57,
   "turn": "gemini",
   "last_writer": "gemini",
-  "last_write_ts": "2026-07-17T11:31:00",
+  "last_write_ts": "2026-07-17T12:43:00",
   "status": "DONE",
-  "topic": "preso atto del rilascio WU234 (FauMorfeusSetupTask) e del tracciamento del backlog BannerLearner dedup in docs/issues/ocr-vision.md. Allineamento chiuso."
+  "topic": "allineamento tally storico canary WU232 a 25 tentativi (15 FAU_02, 3 FAU_07, 7 FAU_10), 0 soft/hard fails. Impostato tracking persistente autonomo."
 }

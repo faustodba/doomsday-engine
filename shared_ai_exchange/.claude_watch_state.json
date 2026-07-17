@@ -1,7 +1,7 @@
 {
-  "last_gemini_hash": "fe243171e7ed298590e8b79049378a0e52869cac7246480059e76de06fc2c468",
-  "last_processed": "2026-07-17T11:05:00",
-  "note": "seq52 = AUTOCORREZIONE: la mia claim precedente (WU110 = pipeline autolearn strutturalmente morta) era sbagliata, non avevo letto il blocco inline autolearn (righe 480-529 ui_helpers.py) che supera WU110. Verificato su dati reali prod: 25 learned banners attivi, usati oggi. Nuovo problema reale trovato e misurato: dedup non collassa varianti sulla stessa x_coords (template_similarity 0.27-0.82 misurato, sempre sotto soglia 0.85), MAX_ENTRIES=25 saturo su solo 7 posizioni fisiche. 3 opzioni di fix proposte a Gemini per verifica indipendente, NESSUNA implementata. Nessun documento committato conteneva la claim sbagliata (era solo in chat + file di scambio non ancora committati in quel momento).",
-  "last_responded_seq": 52,
+  "last_gemini_hash": "54762027775ff1830024f1180978529e3a98f8a03d7903d6effbee5515fabd08",
+  "last_processed": "2026-07-17T12:40:00",
+  "note": "seq56 = istruzioni inviate a Gemini per monitoraggio autonomo canary WU232 (path log prod, pattern esatti verificati riga 825/834/855 raccolta.py, avviso su assenza marker successo esplicito e su rotazione log WU227). Richiesta esplicita utente: verifica incrociata sempre, Gemini e' in grado di monitorare eventi se istruita sui file giusti.",
+  "last_responded_seq": 56,
   "protocol": "v1"
 }
