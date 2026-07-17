@@ -31,11 +31,66 @@
   reset-leggero chiuso 67/67, ciclo "starved" per i riavvii odierni (si
   auto-ripara). Questi NON sono findings nuovi, sono stato noto.
 
-### 1b. Riconciliazione con analisi 07/06 (DA FARE — assegnato)
-Rileggere `docs/analisi_2026-06-07.md` e marcare ogni voce:
-- **§2 Punti critici** (per rischio) → ancora aperti? risolti da WU successivi?
-- **§3 Ottimizzazioni ROI**, **§5 Debito tecnico**, **§6 Piano** → stato attuale.
-Output: tabella "07/06 → stato 07/17" (verificata sul codice, non a memoria).
+### 1b. Riconciliazione con analisi 07/06 (Gemini mining + Claude verifica)
+
+Mining di Gemini sui 14 punti critici del 07/06, con verifica Claude in corso
+(colonna "Verif. Claude": ✅ verificato / — da verificare nel prossimo incremento).
+
+| ID | Finding | Gemini | Evidenza | Verif. Claude |
+|----|---------|--------|----------|---------------|
+| C1 | Heartbeat alert non scatta | RISOLTO | `core/alerts.py:353-378` | — |
+| **C2** | **Dashboard senza auth su 0.0.0.0** | **APERTO** | `run_dashboard_prod.bat:66` + nessun middleware auth in `app.py` | ✅ **CONFERMATO (security)** |
+| C3 | tick_end esito sempre 'ok' | RISOLTO | `main.py:1570-1575` (WU46) | — |
+| **C4** | **`_esegui_marcia` success su screen None** | **APERTO** | `tasks/raccolta.py:~1735` | ✅ **CONFERMATO** |
+| **C5** | **`_save_ov` droppa chiavi (Pydantic)** | **APERTO** | `api_config_overrides.py:64` + `RuntimeOverrides` senza `extra` | ✅ **CONFERMATO (sistemico)** |
+| C6 | max_squadre/livello static ignorati | APERTO | `config_loader.py:1265-1266` | — |
+| C7 | BlacklistFuori scrittura non atomica | RISOLTO | `raccolta.py:501-521` (WU231, oggi) | — |
+| C8 | Store non_trovato → fail() non skip | APERTO | `tasks/store.py:792-794` | — |
+| C9 | rifornimento no post-verifica VAI | APERTO | `rifornimento.py:793-807` | — |
+| C10 | Fallback OCR 999M rifornimento | RISOLTO | `rifornimento.py:756-780` (WU213) | — |
+| C11 | DistrictShowdown rigira ogni tick | APERTO | `district_showdown.py:184-185` | — |
+| C12 | vai_in_home fail/skip incoerente | APERTO | `alleanza.py:73`/`messaggi.py:125`/`boost.py:183` | — |
+| C13 | Window DS duplicata nel predictor | APERTO | `cycle_duration_predictor.py:773-800` | — |
+| C14 | auto_learn_banner toggle morto | RISOLTO | `launcher.py:891-897` (WU189) | — |
+
+**Bilancio grezzo**: 5 risolti (C1,C3,C7,C10,C14), 9 ancora aperti. I risolti con
+attribuzione WU chiara (C7=oggi, C10=WU213, C14=WU189) sono attendibili; gli altri
+verrà spot-check nel prossimo incremento.
+
+### 1b-bis. Findings verificati da Claude (primo incremento)
+
+**[R-01] Dashboard esposta su LAN senza autenticazione** · asse 4 (dashboard) ·
+**severità ALTA (security)** · evidenza: `run_dashboard_prod.bat:66`
+(`--host 0.0.0.0 --port 8765`) + `dashboard/app.py` privo di middleware auth
+(nessun `add_middleware`/`HTTPBasic`/`Depends` di auth). · La dashboard espone
+controlli sensibili (restart bot, modifica config, maintenance, override
+istanze). Chiunque sulla stessa rete può usarli. · **Proposta**: (a) auth minima
+(HTTP Basic o token in header via middleware), oppure (b) bind su `127.0.0.1` +
+tunnel/reverse-proxy autenticato se serve accesso remoto. · **ESCALATO
+all'utente** (dipende dall'esposizione di rete reale — vedi domanda).
+
+**[R-02] Bug-class field-wipe Pydantic (root cause)** · asse 2+4 · **severità
+MEDIO-ALTA (sistemico)** · evidenza: `dashboard/routers/api_config_overrides.py:64`
+`save_overrides(ov.model_dump())` + `RuntimeOverrides`/`IstanzaOverride` senza
+`model_config extra` → ogni campo di `runtime_overrides.json` NON dichiarato nel
+modello viene **droppato** al primo save dashboard. · Già colpito 2 volte oggi
+(`raccolta_reset_leggero_abilitato`, `master_task_whitelist`), tappato campo-per-
+campo — ma la causa radice resta: ogni campo runtime futuro è a rischio silenzioso.
+· **Proposta**: fix strutturale — merge raw JSON + setattr field-by-field (pattern
+già in memoria `feedback_dashboard_save_merge`), oppure `model_config =
+ConfigDict(extra='allow')` + preservazione dei campi extra nel dump. Da valutare
+(extra='allow' ha implicazioni di validazione). · Chiude una classe di bug, non
+un singolo caso.
+
+**[R-03] `_esegui_marcia` — successo spurio su screenshot fallito** · asse 1 ·
+**severità MEDIA** · evidenza: `tasks/raccolta.py` `_esegui_marcia`: dopo tap
+MARCIA, se `screen_post is None` (screenshot fallito) il blocco di verifica
+maschera è saltato e la funzione ritorna `True` (marcia "OK") senza conferma. ·
+Impatto: falso positivo marcia → contabilità slot sfasata (il bot crede che una
+squadra sia partita quando potrebbe non esserlo). Raro (richiede screenshot None
+nell'istante), ma silenzioso. · **Proposta**: su `screen_post is None`, o retry
+screenshot, o ritornare esito prudente (non `True` incondizionato) coerente con
+gli altri rami di fallimento.
 
 ### 1c. Mappa subsystem + hotspot (DA FARE — assegnato a Gemini, mining)
 Inventario dei subsystem (tasks/, core/, shared/, dashboard/) con dimensione,
