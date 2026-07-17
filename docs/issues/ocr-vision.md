@@ -1,7 +1,7 @@
 # Issues — OCR · Template matching · Banner
 
 > Archivio tematico voci WU/issue (estratto verbatim da `.claude/CLAUDE.md` il 07/06/2026).
-> 18 voci totali · 2 aperte · 16 risolte. Legenda stato: ✅ risolta · 🟡 parziale · 🆕 aperta · 🔍 da osservare · ⏸ pausa.
+> 19 voci totali · 3 aperte · 16 risolte. Legenda stato: ✅ risolta · 🟡 parziale · 🆕 aperta · 🔍 da osservare · ⏸ pausa.
 
 ## 🔓 Aperti / parziali
 
@@ -9,6 +9,7 @@
 |---|-------|----------|-------|
 | 54 | Banner catalog & dismissal pipeline boot stabilization — 573 UNKNOWN polls | — | 🟡 parziale — framework + 3 banner attivi (exit_game_dialog, auto_collect_afk_banner, banner_eventi_laterale) |
 | 54 | Banner catalog & dismissal pipeline boot stabilization | — | 🟡 parziale (estesa con `pin_btn_x_close` + `pin_btn_back_arrow` in WU26/66) |
+| — | BannerLearner — dedup non collassa varianti sulla stessa x_coords, MAX_ENTRIES saturo | BASSA | 🔍 17/07/2026 — trovato durante uno scambio con Gemini (`shared_ai_exchange/`), inizialmente frainteso come "pipeline morta" (vedi nota sotto), poi corretto e approfondito. **Il sistema FUNZIONA**: l'AUTOLEARN inline in `shared/ui_helpers.py::dismiss_banners_loop` (righe 480-529, dentro lo Step A1 X-dorata) supera la race documentata da WU110 (03/05, deprecazione del vecchio blocco "Step LEARNER" separato a riga 575, che quello sì resta strutturalmente morto/ridondante). Prova: `data/learned_banners.json` in prod ha 25 entry (= `MAX_ENTRIES`, cap pieno), `last_used` più recente il giorno stesso, `hit_count` fino a 281. **Problema reale verificato**: le 25 entry si concentrano su sole 7 posizioni X fisiche (8 duplicati su `(870,97)`, 7 su `(825,138)`) — il dedup (`find_duplicate`, soglia `template_similarity>=0.85` sul crop titolo 780×50px) non collassa mai le ri-registrazioni sulla stessa posizione: misurato empiricamente 0.27–0.82 fra coppie duplicate, sempre sotto soglia. Causa radice (analisi indipendente convergente di Claude e Gemini): il crop titolo è troppo ampio e cattura contenuto grafico dinamico (artwork/countdown/testo variabile) che varia fra popup diversi condividendo la stessa X di chiusura, impedendo il match anche quando si tratta "concettualmente" dello stesso tipo di popup. Impatto pratico basso — `success_count` alti anche sulle entry duplicate, il dismiss funziona comunque (una delle varianti matcha). **Decisione condivisa: nessuna modifica a caldo** — rischio di regressione su una pipeline che sta già producendo tassi di successo alti, non giustificato dall'impatto (spreco di capacità, non blocco funzionale). Backlog per revisione futura: raffinamento `title_roi` (crop più stretto/stabile) o dedup a 2 livelli (bucket per prossimità `x_coords` prima del confronto template). Dettagli completi in `shared_ai_exchange/claude_to_gemini.md` (seq 50-52). |
 
 ## ✅ Risolti
 
