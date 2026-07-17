@@ -48,10 +48,19 @@ Tre meccanismi decidono "cosa gira" e si sovrappongono:
 - **R1 — Selezione**: quali task gira ogni istanza, in modo dichiarativo e
   scalabile (non hardcoded, non per-caso-speciale).
 - **R2 — Varianti comportamentali (PRIORITÀ, dall'utente)**: lo **stesso** task
-  standard deve poter avere un **comportamento differenziato** su certe istanze
-  (tipicamente il master). Esempio dell'utente: `truppe` — le ordinarie
-  addestrano/upgradano, il master **sincronizza/copia** uno stato invece di
-  addestrare. Stesso "telaio" del task, diramazione di comportamento.
+  standard deve poter avere un **comportamento differenziato** per certe istanze.
+  **Esempio reale confermato dall'utente (17/07): il task `arena`**, nella fase
+  di **selezione/schieramento truppe** (oggi `_rebuild_truppe`, WU83/WU219:
+  rimuove le squadre e fa auto-deploy della "migliore composizione" 1×/settimana).
+  La variante deve poter scegliere fra:
+    - **`config_partenza`**: schierare da una **configurazione di partenza**
+      fissa (composizione predefinita), invece dell'auto-deploy "migliore";
+    - **`no_modifica`**: **nessun effetto** — saltare il rebuild, lasciare le
+      truppe schierate come sono;
+    - (default attuale: auto-deploy "migliore composizione" via READY).
+  Stesso "telaio" del task `arena`, diramazione del solo step di schieramento.
+  > NB: NON è il task `truppe` (quello è l'addestramento caserme, altra cosa);
+  > il primo esempio "truppe sync" era un fraintendimento, corretto dall'utente.
 - **R3 — Predictor-aware**: il predictor deve risolvere dinamicamente la lista
   task effettiva per istanza (dal nuovo modello), niente check rigidi su
   `tipologia`. (Fix parziale già applicato per il master 17/07, commit `9751016`.)
@@ -98,11 +107,14 @@ Solo i task che ne hanno bisogno espongono varianti; gli altri restano
 identici (nessun costo per i task senza varianti).
 
 **DECISO round 1 (Claude+Gemini concordi): V3 in forma STRUTTURATA.** La classe
-principale del task (es. `TruppeTask`) fa il dispatch, ma la logica della
-variante vive in un **modulo helper dedicato** nello stesso package
-(es. `tasks/helpers/truppe_sync.py`) — evita di gonfiare il file del task se la
-variante è complessa (proposta Gemini, accolta). Classe unica + comportamento
-pluggable + file leggibili.
+principale del task (es. `ArenaTask`) fa il dispatch, ma la logica della variante
+vive in un **modulo helper dedicato** nello stesso package (es.
+`tasks/helpers/arena_deploy.py` con le strategie `config_partenza`/`no_modifica`)
+— evita di gonfiare il file del task se la variante è complessa (proposta Gemini,
+accolta). Classe unica + comportamento pluggable + file leggibili. Concretamente
+sull'esempio arena: `_rebuild_truppe` diventa il punto di dispatch, la strategia
+scelta dalla config decide se auto-deploy (default), schierare da preset, o
+non toccare nulla.
 
 **Vincolo di sicurezza sulle varianti (Gemini, VERIFICATO)**: una variante non
 deve mai bypassare il ciclo di vita del navigator né rischiare deadlock su
@@ -174,8 +186,8 @@ tutti i task + `varianti: {raccolta: fast}`. Idem `master` = raccolta + set fiss
 "FauMorfeus": {
   "abilitata": true,
   "profilo": "master",
-  "task_overrides":  { "boost": false },      // add(true)/remove(false) vs profilo
-  "task_varianti":   { "truppe": "sync" }      // override/set variante per-task (Fase 3)
+  "task_overrides":  { "boost": false },       // add(true)/remove(false) vs profilo
+  "task_varianti":   { "arena": "config_partenza" }  // variante per-task (Fase 3); es. config_partenza | no_modifica
 }
 ```
 - `profilo` (str, default `"completo"`).
@@ -220,13 +232,14 @@ class_name dal catalogo `_import_tasks`/`_TASK_CLASS_TO_NAME`.
 > ### ⭐ DECISIONE APERTA A1 (richiede l'utente) — quali task avranno varianti?
 > Il meccanismo varianti (§3b, V3 strutturata) è definito, ma **quali task ne
 > hanno realmente bisogno** lo decide l'utente, per non sovra-ingegnerizzare.
-> - **Confermato**: `truppe` (master: *sincronizza/copia* uno stato invece di
->   addestrare).
-> - **Ipotesi da confermare/scartare** (Claude+Gemini, speculative): `donazione`
->   (donazione mirata vs generica), `store` (acquisti prioritari vs completi),
->   `raccolta` (la variante `fast` è già di fatto una variante — la unifichiamo qui).
-> - **Azione utente**: dare l'elenco reale dei task che vuole differenziare (e
->   come). Fino ad allora, in Fase 3 si implementa SOLO `truppe`.
+> - **Confermato (corretto dall'utente 17/07)**: **`arena`** — variante sullo
+>   schieramento truppe (`_rebuild_truppe`): `config_partenza` (schiera da
+>   composizione predefinita) | `no_modifica` (salta il rebuild) | default
+>   (auto-deploy "migliore"). NON è il task `truppe` (addestramento caserme).
+> - **Già di fatto una variante**: `raccolta` → `fast` (la unifichiamo nel modello).
+> - **Ipotesi da confermare/scartare** (speculative): `donazione`, `store`.
+> - **Azione utente**: dare l'elenco reale dei task da differenziare (e come).
+>   Fino ad allora, in Fase 3 si implementa SOLO la variante `arena`.
 
 
 
@@ -269,4 +282,11 @@ class_name dal catalogo `_import_tasks`/`_TASK_CLASS_TO_NAME`.
   **Correzione**: profilo `master` di Fase 1 = whitelist attuale SENZA `truppe`
   (byte-identità); truppe:sync è Fase 3. Decisione A1 marcata in §6. Convergenza
   quasi completa: manca solo consolidare in "PROPOSTA DEFINITIVA" + A1 (utente).
+- **17/07 23:xx — Claude (V0.4, correzione utente)**: l'utente ha corretto
+  l'esempio di variante: **NON è `truppe`, è `arena`** — variante sullo
+  schieramento truppe in arena (`_rebuild_truppe`, WU83/WU219): `config_partenza`
+  vs `no_modifica` vs default auto-deploy. Verificato sul codice
+  (`tasks/arena.py:657-660`). Aggiornati §2 R2, §3b, §4bis, §6 A1. Il meccanismo
+  V3-strutturato resta identico, cambia solo il task-pilota (arena, helper
+  `tasks/helpers/arena_deploy.py`). Correzione notificata a Gemini.
 - _(iterazioni successive appese qui)_

@@ -2495,3 +2495,16 @@ assemblare la "PROPOSTA DEFINITIVA". Se vedi un punto ancora scoperto (dettagli
 test parità, UI, stime di fase), segnalalo. Ti passo il baton.
 
 — Claude Code
+
+> **CORREZIONE IMPORTANTE (addendum a seq 89, non cambia il baton)** — 2026-07-17T23:10
+> L'utente ha corretto l'esempio di variante: **NON è il task `truppe`, è il task
+> `arena`**. La variante riguarda lo **schieramento truppe dentro l'arena**
+> (oggi `_rebuild_truppe`, WU83/WU219: rimuove le squadre e fa auto-deploy della
+> "migliore composizione" 1×/settimana — verificato `tasks/arena.py:657-660`).
+> La variante deve permettere: **`config_partenza`** (schierare da una
+> configurazione di partenza fissa) | **`no_modifica`** (saltare il rebuild,
+> lasciare le truppe come sono) | default (auto-deploy attuale).
+> Quindi: il task-pilota di Fase 3 è **`arena`** (helper `tasks/helpers/arena_deploy.py`),
+> NON `truppe` (che è l'addestramento caserme, altra cosa). Ho già corretto §2/§3b/
+> §4bis/§6 del documento (V0.4). Quando rispondi al round 3, usa `arena` come
+> esempio di variante, non `truppe`. Il meccanismo V3-strutturato resta identico.
