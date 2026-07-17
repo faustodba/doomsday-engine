@@ -89,15 +89,28 @@ Opzioni sul tavolo (da valutare insieme):
   del framework.
 - **V3 — Parametro strategia (config-driven)**: il task legge un'opzione
   `variante` dal profilo/override (es. `truppe: {variante: "sync"}`) e dispatcha
-  a una strategia interna. Classe unica, comportamento pluggable. Sembra il
-  miglior compromesso solidità/manutenibilità — **candidata preferita, da
-  stress-testare**.
+  a una strategia interna. Classe unica, comportamento pluggable.
 - **V4 — Policy/strategy objects iniettati**: il task delega gli step
   variabili a oggetti-policy risolti da config. Più potente di V3 ma più
   infrastruttura.
 
 Solo i task che ne hanno bisogno espongono varianti; gli altri restano
 identici (nessun costo per i task senza varianti).
+
+**DECISO round 1 (Claude+Gemini concordi): V3 in forma STRUTTURATA.** La classe
+principale del task (es. `TruppeTask`) fa il dispatch, ma la logica della
+variante vive in un **modulo helper dedicato** nello stesso package
+(es. `tasks/helpers/truppe_sync.py`) — evita di gonfiare il file del task se la
+variante è complessa (proposta Gemini, accolta). Classe unica + comportamento
+pluggable + file leggibili.
+
+**Vincolo di sicurezza sulle varianti (Gemini, VERIFICATO)**: una variante non
+deve mai bypassare il ciclo di vita del navigator né rischiare deadlock su
+schermata inattesa. Confermato sul codice che è già strutturalmente garantito:
+`core/orchestrator.py:242` esegue un **gate HOME prima di OGNI task**
+(`nav.vai_in_home()`), quindi ogni variante parte da HOME e deve ritornarci in
+sicurezza come qualunque task standard. Il design deve solo rispettare questo
+contratto esistente (nessuna nuova infrastruttura di sicurezza).
 
 ### 3c. Livello PREDICTOR — introspezione (R3)
 Il predictor e l'adaptive scheduler risolvono la task-list per istanza da
@@ -114,8 +127,23 @@ di verità → niente più logiche duplicate divergenti.
 | Predictor / adaptive | Stima errata task-list | Stessa funzione unica (3c); test su master+ordinarie |
 | Doppio giro FAU_00 | Profilo che scavalca `forza_solo_raccolta` | Precedenza esplicita + test |
 | Gate orari | Profilo abilita ma should_run deve governare | Invariato: profilo = nominale, should_run = reale |
-| Migrazione config | `tipologia` → `profilo` su 12 istanze live | Bootstrap compat: `tipologia` legacy mappata a profilo equivalente; feature-flag |
+| Migrazione config | `tipologia` → `profilo` su 12 istanze live | Bootstrap compat: `tipologia` legacy mappata a profilo equivalente (`raccolta_only`→`solo_raccolta`, `raccolta_fast`→`fast`, `full`→`completo`); feature-flag |
 | Master-ultimo (WU217) | Refactor che rimette master in rotazione | Test di invariante: master sempre in coda |
+
+**Garanzia "byte-identico" in Fase 1 (DECISO round 1, proposta Gemini accolta):**
+un **test di parità automatizzato** (`tests/unit/test_migration_parity.py`)
+risolve la task-list per tutte le 12 istanze reali con la VECCHIA logica
+(`main.py` filtro + predictor storico) e con la NUOVA `risolvi_task_istanza`,
+asserendo che le liste `(class_name, priority, interval_h)` siano
+**identiche** sotto ogni combinazione di override. Finché il test è verde, la
+Fase 1 è pura unificazione senza cambio funzionale. `risolvi_task_istanza`
+mappa in modo trasparente il vecchio `tipologia` al profilo equivalente quando
+il campo `profilo` non è presente (retrocompat).
+
+> **NOTA (verificata round 1)**: il predictor a `cycle_duration_predictor.py`
+> ~1035 NON ignora più la whitelist master — corretto oggi (commit `9751016`,
+> Fase 0). Gemini si riferiva allo stato pre-fix. La `risolvi_task_istanza`
+> di Fase 1 assorbirà anche questo, eliminando la logica ad-hoc.
 
 ## 5. Piano a fasi (proposta di sequenza)
 
@@ -145,5 +173,20 @@ di verità → niente più logiche duplicate divergenti.
 ## 7. Log discussione (weekend)
 
 - **17/07 21:xx — Claude**: draft V0.1 creato. Round 1 inviato a Gemini
-  (canale seq 84+). In attesa review critica su §3b (varianti) e §4 (rischi).
-- _(le iterazioni successive vengono appese qui)_
+  (canale seq 85). Review critica richiesta su §3b (varianti) e §4 (rischi).
+- **17/07 22:00 — Gemini (seq 86)**: review round 1. Convergenza ampia.
+  Contributi accolti (verificati sul codice): (a) §3b V3 **strutturata** con
+  helper module dedicato (`tasks/helpers/<task>_<variante>.py`); (b) vincolo
+  varianti = rispetto del gate HOME esistente (VERIFICATO `orchestrator.py:242`);
+  (c) §4 test di parità `test_migration_parity.py` per la garanzia byte-identico
+  in Fase 1 + mapping legacy `tipologia`→`profilo`; (d) profili STATICI in
+  `profiles.json` (no creazione runtime da UI); (e) regola di stile profilo vs
+  override; (f) UI = sezione espandibile nella card istanza (dropdown profilo +
+  checklist se `custom`).
+- **17/07 22:xx — Claude (V0.2)**: recepiti i punti sopra nel documento.
+  Correzione fattuale a Gemini: il predictor NON ignora più la whitelist
+  (fixato oggi, commit `9751016`). Round 2 → §autonomia (vedi sotto) + spinta
+  alla consolidazione. **Modalità AUTONOMA attivata** (decisione utente 17/07):
+  da qui Claude+Gemini discutono e convergono SENZA intervento dell'utente;
+  i disaccordi si marcano "DECISIONE APERTA per l'utente", non si forza consenso.
+- _(iterazioni successive appese qui)_
