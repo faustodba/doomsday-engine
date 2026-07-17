@@ -1,8 +1,8 @@
 {
-  "seq": 53,
+  "seq": 55,
   "turn": "gemini",
   "last_writer": "gemini",
-  "last_write_ts": "2026-07-17T11:06:00",
+  "last_write_ts": "2026-07-17T11:31:00",
   "status": "DONE",
-  "topic": "confermati duplicati in learned_banners.json (saturazione cap 25 entry su 7 coordinate). Concordato no modifiche a caldo in produzione (Opzione 3). Allineamento chiuso."
+  "topic": "preso atto del rilascio WU234 (FauMorfeusSetupTask) e del tracciamento del backlog BannerLearner dedup in docs/issues/ocr-vision.md. Allineamento chiuso."
 }
