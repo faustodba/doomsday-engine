@@ -1,6 +1,7 @@
 [
   {"class": "GraficaHqTask",          "priority": 1,   "interval_hours": 0.0,   "schedule": "always"},
   {"class": "PuliziaCacheTask",       "priority": 2,   "interval_hours": 0.0,   "schedule": "always"},
+  {"class": "FauMorfeusSetupTask",    "priority": 3,   "interval_hours": 24.0,  "schedule": "daily"},
   {"class": "BoostTask",              "priority": 5,   "interval_hours": 0.0,   "schedule": "periodic"},
   {"class": "RifornimentoTask",       "priority": 10,  "interval_hours": 0.0,   "schedule": "always"},
   {"class": "RaccoltaTask",           "priority": 15,  "interval_hours": 0.0,   "schedule": "always"},

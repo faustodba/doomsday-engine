@@ -5,6 +5,40 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 17/07/2026 (5) — WU234: FauMorfeusSetupTask (bundle giornaliero master)
+
+Richiesta utente: FauMorfeus (master, `tipologia=raccolta_only`) non riceve
+MAI grafica_hq/pulizia_cache/boost/vip — `main.py::_thread_istanza` filtra
+la registrazione al solo `RaccoltaTask`/`RaccoltaChiusuraTask` per quel
+profilo. Utente vuole questi 4 task, "proprio uguali" alle istanze
+ordinarie, lanciati una sola volta dopo il reset giornaliero.
+
+**Implementato**: `tasks/faumorfeus_setup.py::FauMorfeusSetupTask`, nuovo
+task che riusa la logica esistente (non riscritta):
+`esegui_grafica_hq()`/`esegui_pulizia_cache()` chiamate direttamente
+(bypassando lo skip `raccolta_only` nei wrapper `GraficaHqTask.run()`/
+`PuliziaCacheTask.run()`), `BoostTask`/`VipTask` riusati via
+`should_run()+run()` diretto (nessuno skip di tipologia nei due, quindi
+nessun bypass necessario). Best-effort: un fallimento non blocca gli altri
+3. `ctx.navigator.vai_in_home()` chiamato a mano fra uno step e il
+successivo (l'orchestrator lo farebbe automaticamente per task singoli, ma
+qui sono 4 step dentro un unico `run()`).
+
+`should_run()` → `is_master_instance(ctx.instance_name)`. Registrato in
+`config/task_setup.json` con `"schedule": "daily"` (riusa lo scheduling
+giornaliero già esistente di VipTask/ZainoTask — risolve esattamente "al
+primo avvio dopo il reset giornaliero"). Una riga toccata in `main.py`
+(filtro `_solo_raccolta` esteso con l'eccezione `FauMorfeusSetupTask` —
+sicuro sulle istanze ordinarie perché la sua stessa `should_run()` le
+esclude comunque).
+
+Test: 8/8 nuovi (`tests/tasks/test_faumorfeus_setup.py`) + suite
+`test_vip.py`/`test_boost.py`/`test_config.py`/`test_scheduler.py`
+invariata (150/150). Documentato in `docs/OVERVIEW.md` §5.20. Richiede
+**riavvio BOT** (nuova classe task, non solo config).
+
+---
+
 ## Sessione 17/07/2026 (4) — WU231/232/233: blacklist atomica, canary reset leggero, fail-fast launcher
 
 **WU231 — `BlacklistFuori` scrittura non atomica + azzeramento silenzioso su JSON

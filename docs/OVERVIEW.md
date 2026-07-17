@@ -788,6 +788,43 @@ pulita oggi per l'istanza → uscita immediata, nessuna navigazione.
   su `data/cache_state.json`), indipendente dal flag abilitazione task
 - Priority 2 (subito dopo GraficaHqTask)
 
+### 5.20 FauMorfeusSetupTask (priority 3, daily 24h)
+
+[tasks/faumorfeus_setup.py](../tasks/faumorfeus_setup.py) — WU234 (17/07).
+Bundle giornaliero **esclusivo per l'istanza master** (FauMorfeus): esegue
+in sequenza grafica_hq, pulizia_cache, boost, vip — le stesse operazioni
+delle istanze ordinarie, che il profilo `tipologia="raccolta_only"` del
+master esclude normalmente (`main.py::_thread_istanza` filtra la
+registrazione al solo `RaccoltaTask`/`RaccoltaChiusuraTask` per quel
+profilo, con `FauMorfeusSetupTask` come unica eccezione esplicita).
+
+**Riuso, non riscrittura**:
+- grafica_hq/pulizia_cache: chiama direttamente `esegui_grafica_hq()` /
+  `esegui_pulizia_cache()` (core/settings_helper.py), bypassando il
+  wrapper `GraficaHqTask.run()`/`PuliziaCacheTask.run()` — che hanno uno
+  skip esplicito `tipologia == "raccolta_only"` pensato apposta per
+  escludere il master dal ciclo normale (§5.18/5.19). Bypassato solo il
+  wrapper, la logica sottostante è identica.
+- boost/vip: nessuno skip di tipologia nei rispettivi Task — riuso diretto
+  di `BoostTask().should_run()+run()` e `VipTask().should_run()+run()`
+  (preserva i guard di idempotenza esistenti, es. VipState "già ritirato
+  oggi").
+
+**Regole speciali**:
+- `should_run()` → `True` solo se `is_master_instance(ctx.instance_name)`
+  (shared/instance_meta.py) — seconda barriera difensiva, dato che le
+  istanze ordinarie non registrano nemmeno il task (filtro `main.py`).
+- Scheduling `daily` — una volta al giorno, al primo tick utile dopo il
+  reset giornaliero (stesso meccanismo di VipTask/ZainoTask/MainMissionTask,
+  core/scheduler.py).
+- Ogni sotto-step è **best-effort**: un fallimento non blocca gli altri
+  (stesso comportamento delle 4 istanze ordinarie, dove sono 4 entry
+  orchestrator indipendenti). `TaskResult.success` aggregato = AND di tutti.
+- `ctx.navigator.vai_in_home()` chiamato esplicitamente fra uno step e il
+  successivo — l'orchestrator lo farebbe automaticamente prima di ogni
+  singolo task (gate HOME), ma qui i 4 step sono dentro un unico `run()`.
+- Priority 3 (subito dopo GraficaHqTask/PuliziaCacheTask).
+
 ---
 
 ## 6. Configurazione

@@ -74,6 +74,7 @@ def _import_tasks() -> dict:
         ("tasks.store",          "StoreTask"),
         ("tasks.radar",          "RadarTask"),
         ("tasks.radar_census",   "RadarCensusTask"),
+        ("tasks.faumorfeus_setup", "FauMorfeusSetupTask"),  # WU234 — bundle daily solo master
     ]
     for module_path, class_name in _catalogue:
         try:
@@ -722,7 +723,13 @@ def _thread_istanza(ist, tasks_cls, dry_run, forza_solo_raccolta: bool = False):
         _log(nome, f"Tipologia={_tipologia} — RaccoltaFastTask sostituisce RaccoltaTask (altri task attivi)")
 
     for class_name, priority, interval_h, schedule in _carica_task_setup():
-        if _solo_raccolta and class_name not in ("RaccoltaTask", "RaccoltaChiusuraTask"):
+        # WU234 — FauMorfeusSetupTask è l'unica eccezione al filtro raccolta_only:
+        # bundle giornaliero esclusivo per il master (grafica_hq/pulizia_cache/
+        # boost/vip), la sua stessa should_run() lo limita a is_master_instance,
+        # quindi non registra nulla in più sulle istanze ordinarie raccolta_only.
+        if _solo_raccolta and class_name not in (
+            "RaccoltaTask", "RaccoltaChiusuraTask", "FauMorfeusSetupTask",
+        ):
             continue
         # WU57 — runtime swap RaccoltaTask -> RaccoltaFastTask (priority/interval/schedule preservati)
         if _raccolta_fast and class_name == "RaccoltaTask":
