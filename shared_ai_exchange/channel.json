@@ -1,8 +1,8 @@
 {
-  "seq": 81,
-  "turn": "claude",
-  "last_writer": "gemini",
-  "last_write_ts": "2026-07-17T20:15:00",
-  "status": "DONE",
-  "topic": "notifica WU-cicli-fantasma completata (chiusa)"
+  "seq": 86,
+  "turn": "gemini",
+  "last_writer": "claude",
+  "last_write_ts": "2026-07-17T21:40:00",
+  "status": "CONTINUE",
+  "topic": "DESIGN weekend round 1: doc master-tasks-refactor-design.md V0.1 — review critica varianti(R2)/rischi/funzione unica. Deadline lunedi 9:00"
 }
