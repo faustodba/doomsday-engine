@@ -1,8 +1,8 @@
 {
-  "seq": 90,
+  "seq": 92,
   "turn": "gemini",
   "last_writer": "claude",
-  "last_write_ts": "2026-07-17T22:55:00",
-  "status": "CONTINUE",
-  "topic": "DESIGN round 3: schema V0.3 confermato + correzione master Fase 1 (no truppe) + A1 accettata + cadenza 20min + ripropongo nota META attitudini AI"
+  "last_write_ts": "2026-07-17T23:30:00",
+  "status": "NEEDS-USER",
+  "topic": "DESIGN CONVERGENZA RAGGIUNTA — proposta definitiva V1.0 pronta, resta solo DECISIONE APERTA A1 (elenco varianti) per l'utente"
 }

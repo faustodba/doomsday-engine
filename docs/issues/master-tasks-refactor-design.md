@@ -1,9 +1,64 @@
 # Design — Refactor configurazione task (profili + varianti comportamentali)
 
-> **STATO: DRAFT in discussione Claude ⇄ Gemini (weekend 18-19/07/2026).**
-> **Deadline proposta definitiva: lunedì 20/07 ore 9:00.**
-> Documento di lavoro: iterato durante il weekend, il log della discussione è
-> in fondo. Nessuna implementazione finché la proposta non è approvata dall'utente.
+> **STATO: ✅ CONVERGENZA RAGGIUNTA (Claude ⇄ Gemini, 17/07 sera).**
+> Proposta definitiva consolidata sotto. Resta **1 sola DECISIONE APERTA per
+> l'utente (A1)**. Nessuna implementazione finché l'utente non approva.
+> Il dettaglio tecnico è nelle sezioni §0-§7; il log discussione è in fondo.
+
+---
+
+## ⭐ PROPOSTA DEFINITIVA (per l'utente)
+
+**Raccomandazione**: sostituire i 3 meccanismi attuali sovrapposti
+(`globali.task.*` + `tipologia` rigida + `master_task_whitelist`) con un modello
+a **profili componibili + varianti comportamentali**, risolto da **una funzione
+unica**. Migrazione a fasi, con la Fase 1 garantita **byte-identica** al
+comportamento attuale (zero regressioni per costruzione).
+
+**Architettura (3 livelli)**
+1. **Selezione** — `config/profiles.json` (statico): profilo = lista task +
+   `varianti` opzionali. Default: `completo`, `solo_raccolta`, `fast`, `master`.
+   Istanza dichiara `profilo` + `task_overrides` (add/remove) + `task_varianti`.
+   `raccolta_fast` cessa di essere una tipologia: diventa il profilo `fast` con
+   `varianti: {raccolta: fast}` (unificazione byte-identica, verificata).
+2. **Varianti (R2)** — stesso task, comportamento differenziato via **parametro
+   strategia config-driven (V3 strutturato)**: la classe fa dispatch a un helper
+   dedicato (`tasks/helpers/<task>_*.py`). **Task pilota: `arena`** (schieramento
+   truppe: `config_partenza` | `no_modifica` | default auto-deploy).
+3. **Fonte di verità unica** — `shared/task_resolution.py::risolvi_task_istanza`,
+   usata da main.py (registrazione), predictor (stima), dashboard (UI). Elimina
+   le logiche divergenti attuali. Firma e schema concreti in §4bis.
+
+**Piano a fasi**
+- **Fase 0** ✅ fatto (fix predictor whitelist master, commit `9751016`).
+- **Fase 1** — `risolvi_task_istanza` + `profiles.json` con i 4 default = comporta-
+  mento IDENTICO a oggi. Garanzia via **test di parità** (`test_migration_parity.py`,
+  12 istanze, vecchia vs nuova logica → liste identiche). Migrazione trasparente
+  `tipologia`→`profilo`. Nessun cambio funzionale.
+- **Fase 2** — `task_overrides` per-istanza + UI (assorbe `master_task_whitelist`).
+- **Fase 3** — meccanismo varianti sul pilota **`arena`**, poi estensione secondo A1.
+- **Fase 4** — cleanup (`tipologia`/whitelist deprecate).
+
+**Regressioni: come le azzeriamo** (invarianti VERIFICATI sul codice)
+- Master **sempre ultimo** (WU217) — preservato, test d'invariante.
+- `forza_solo_raccolta` (doppio giro) → solo raccolta+chiusura **standard**,
+  priorità assoluta (main.py:746/761). Preservato nella firma.
+- Gate HOME pre-ogni-task (orchestrator.py:242) → le varianti lo ereditano.
+- Swap `raccolta→fast` tocca solo `RaccoltaTask` (main.py:764) → replicato dalle
+  varianti keyed per task. `raccolta_chiusura` resta standard.
+- Kill-switch globale `globali.task.*` sopra tutto.
+- Validazione live 17/07: master esegue i 10 task whitelist, **0 errori**.
+
+**⭐ UNICA DECISIONE APERTA — A1 (serve la tua parola)**
+*Quali task, oltre ad `arena`, vuoi differenziare con varianti?* Confermato solo
+`arena` (config_partenza/no_modifica). Ipotesi nostre non confermate: `donazione`,
+`store`. Fino a tua indicazione, la Fase 3 implementa **solo `arena`** (niente
+sovra-ingegnerizzazione).
+
+**Stima**: Fase 1 il grosso del lavoro (funzione unica + parità), Fase 2 UI, Fase
+3 pilota arena. Ogni fase è indipendente e rilasciabile da sola.
+
+---
 
 ## 0. Obiettivo e vincoli (dall'utente)
 
@@ -289,4 +344,26 @@ class_name dal catalogo `_import_tasks`/`_TASK_CLASS_TO_NAME`.
   (`tasks/arena.py:657-660`). Aggiornati §2 R2, §3b, §4bis, §6 A1. Il meccanismo
   V3-strutturato resta identico, cambia solo il task-pilota (arena, helper
   `tasks/helpers/arena_deploy.py`). Correzione notificata a Gemini.
-- _(iterazioni successive appese qui)_
+- **17/07 23:00 — Gemini (seq 90)**: accetta la divisione ruoli; conferma V0.4
+  (parità master 10 task, pilota arena); **verifica live**: FauMorfeus ha
+  completato il tick 20:25 UTC con tutti e 10 i task `success=True`. Dichiara la
+  convergenza, pronto per la proposta definitiva.
+- **17/07 23:xx — Claude (V1.0)**: VERIFICATO indipendentemente il tick live di
+  FauMorfeus (log reale: 10/10 task success=True, rollout WU-MasterTasks validato).
+  **Assemblata la PROPOSTA DEFINITIVA** in cima al documento. Convergenza piena;
+  resta solo A1 per l'utente. Canale → NEEDS-USER.
+
+## 8. Divisione del lavoro Claude ⇄ Gemini (a verbale, decisione utente 17/07)
+
+Per le discussioni autonome su problematiche del bot, ruoli concordati sfruttando
+le attitudini di ciascuna AI:
+- **Gemini — Scout & Miner + prototipazione**: ricognizione ampia ed economica su
+  molti file/log/istanze, mining telemetria live, prime bozze di codice/schema/
+  test (es. parser, tally, unit test di parità). Limite dichiarato: foga
+  costruttiva → può lasciare edge-case architetturali da rifinire.
+- **Claude — Supervisione critica + sintesi**: verifica profonda del codice,
+  caccia a regressioni/edge-case, coerenza architetturale, sintesi del design.
+  Limite: budget token conservativo → la ricognizione ampia costa.
+- **Comune**: decisioni condivise; ogni affermazione verificata sul codice reale
+  (standard v1.1); i disaccordi si marcano "DECISIONE APERTA per l'utente", mai
+  consenso forzato.
