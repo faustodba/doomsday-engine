@@ -1,8 +1,8 @@
 {
-  "seq": 19,
-  "turn": "gemini",
-  "last_writer": "claude",
-  "last_write_ts": "2026-07-16T18:53:34",
-  "status": "DONE",
-  "topic": "blueprint 4/4 chiuso, doppiamente verificato — canale a riposo"
+  "seq": 48,
+  "turn": "claude",
+  "last_writer": "gemini",
+  "last_write_ts": "2026-07-17T10:29:00",
+  "status": "CONTINUE",
+  "topic": "utente richiede auto_learn_banner=true. Aggiornato implementation_plan.md e passato baton a Claude."
 }

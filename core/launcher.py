@@ -487,12 +487,27 @@ def avvia_istanza(ist: dict, log_fn: Optional[Callable] = None) -> bool:
     # 1. Launch MuMu
     _log(f"MuMuManager control -v {indice} launch", log_fn)
     try:
-        subprocess.run(
+        _res_launch = subprocess.run(
             [_manager, "control", "-v", str(indice), "launch"],
             capture_output=True, timeout=30,
         )
     except Exception as exc:
         _log(f"MuMuManager launch errore: {exc}", log_fn)
+        return False
+
+    # WU233 — fail-fast su returncode != 0 (Gemini boot_stability_analysis.md,
+    # criticità 2, verificata su shared_ai_exchange/ seq 45-46). Prima il
+    # returncode non veniva controllato: un errore bloccante (lock file,
+    # spazio disco, istanza corrotta) faceva comunque attendere l'intero
+    # timeout_adb_s (~200s) del polling is_android_started sotto, prima di
+    # fallire. Ora si aborta subito.
+    if _res_launch.returncode != 0:
+        _err_launch = _res_launch.stderr.decode(errors="replace").strip()
+        _log(
+            f"MuMuManager launch ERRORE (returncode={_res_launch.returncode}): "
+            f"{_err_launch} — abort immediato",
+            log_fn,
+        )
         return False
 
     # 2. Polling is_android_started (timeout adattivo per-istanza — F-A)

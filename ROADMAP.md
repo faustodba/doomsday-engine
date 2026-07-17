@@ -5,6 +5,44 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 17/07/2026 (4) — WU231/232/233: blacklist atomica, canary reset leggero, fail-fast launcher
+
+**WU231 — `BlacklistFuori` scrittura non atomica + azzeramento silenzioso su JSON
+corrotto (`a8230ca`).** Trovato durante analisi di robustezza raccolta: `_carica()`
+tornava `{}` su qualunque eccezione di parsing (JSON troncato da crash a metà
+scrittura → blacklist persa senza log), `_salva()` scriveva diretto sul file finale
+(crash a metà write → stesso esito). Fix: scrittura atomica tmp+`os.replace`,
+`_corrotto` flag + log ERROR invece di azzeramento silenzioso. Test +8.
+
+**WU232 — canary strumentato reset leggero raccolta (`4b7b94d`).** Un thread con
+Gemini proponeva di sostituire il reset pesante (HOME→MAPPA) dopo un fallimento
+`_verifica_tipo` con un singolo `BACK`. Verifica storica ha trovato che il commit
+`7c5e789` (18/04) documenta un fallimento SISTEMATICO già osservato con esattamente
+quel pattern (BACK singolo + cambio livello). Rischio riclassificato da basso ad
+alto → invece del fix diretto, canary opt-in per istanza
+(`raccolta_reset_leggero_abilitato`, dynamic) con strumentazione dedicata
+(log `[CANARY-RESET-LEGGERO]`). Attivato su FAU_02, poi esteso a FAU_07+FAU_10 su
+richiesta utente. **13/13 eventi confermati OK, zero soft-fail, zero hard-fail**
+(verificato indipendentemente anche da Gemini, riconciliato un disaccordo di
+conteggio 15 vs 13 dovuto a doppio conteggio con sfasamento di 2h). Monitoraggio
+in corso, nessuna decisione di rollout ancora presa. Test +14 (81/81 totali in
+`test_raccolta.py`).
+
+**WU233 — Launcher: fail-fast su `MuMuManager launch` returncode ignorato.**
+Da un secondo thread Gemini (`boot_stability_analysis.md`, 4 proposte su
+`core/launcher.py`). Verificate tutte prima di applicare: **3/4 respinte o
+ridimensionate** (il kill-server ADB incondizionato è il fix storico `#F1b`,
+commit `1d1b4eb`, per un incidente reale — 5/11 istanze fallite in un ciclo; il
+crash-recovery in `attendi_home` è già coperto da meccanismi esistenti; il socket
+check preventivo ha valore marginale). **1/4 confermata**: `avvia_istanza()`
+ignorava il `returncode` di `MuMuManager launch` — un errore bloccante faceva
+comunque attendere l'intero timeout di polling (~200s) prima di fallire. Fix
+isolato, nessun impatto su `istanza_metrics.py`. Sync prod immediato. Dettagli
+completi dello scambio in `docs/issues/infra-startup.md` (WU233) e
+`shared_ai_exchange/claude_to_gemini.md` (seq 46).
+
+---
+
 ## Sessione 15-16/07/2026 (3) — WU227/228/229: log rotation, doppio giro nel piano, potatura orfani
 
 **WU227 — rotazione log `.jsonl` fallita in silenzio (fix, `689c5c6`).** Scoperto

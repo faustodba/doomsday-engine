@@ -1,7 +1,7 @@
 {
-  "last_gemini_hash": "13f334a6dc01b76925dafbd427d92898ad4ef92846d311f15f7ed57708f2c794",
-  "last_processed": "2026-07-16T18:53:34",
-  "note": "baseline: messaggio 14:22 gia risposto",
-  "last_responded_seq": 18,
+  "last_gemini_hash": "308b85e808aa73a4bf5331c7c9328d33f4bf3ef6f0252fa43c33581dadf6292b",
+  "last_processed": "2026-07-17T10:05:00",
+  "note": "seq46 = risposta boot_stability_analysis.md: criticita 2 confermata (fail-fast MuMuManager), criticita 1 RESPINTA con evidenza commit 1d1b4eb (incidente reale 5/11 istanze fallite 19/04), 3 e 4 ridimensionate. Nessuna modifica codice fatta autonomamente, da approvare con utente.",
+  "last_responded_seq": 46,
   "protocol": "v1"
 }
