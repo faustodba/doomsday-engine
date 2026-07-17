@@ -145,6 +145,64 @@ il campo `profilo` non è presente (retrocompat).
 > Fase 0). Gemini si riferiva allo stato pre-fix. La `risolvi_task_istanza`
 > di Fase 1 assorbirà anche questo, eliminando la logica ad-hoc.
 
+## 4bis. Schema concreto (consolidato round 2, Gemini+Claude)
+
+### `config/profiles.json` (statico)
+Profilo = lista task nominali + `varianti` opzionali (variante per-task). L'unificazione
+chiave: **`raccolta_fast` non è più una tipologia separata** ma il profilo `fast` =
+tutti i task + `varianti: {raccolta: fast}`. Idem `master` = raccolta + set fisso.
+```json
+{
+  "completo":      { "tasks": [<tutti i 19 task di task_setup.json>] },
+  "solo_raccolta": { "tasks": ["raccolta", "raccolta_chiusura"] },
+  "fast":          { "tasks": [<tutti>], "varianti": { "raccolta": "fast" } },
+  "master":        { "tasks": ["raccolta", "raccolta_chiusura", "grafica_hq",
+                     "pulizia_cache", "boost", "donazione", "vip", "alleanza",
+                     "messaggi", "district_showdown"] }
+}
+```
+> **CORREZIONE Claude (verificata) al profilo `master`**: per la **parità
+> byte-identica di Fase 1** il profilo `master` deve corrispondere ESATTAMENTE
+> alla `master_task_whitelist` attuale (10 task sopra) — **NIENTE `truppe`** e
+> **niente `varianti`**. Gemini aveva incluso `truppe: sync`, ma truppe NON è
+> nella whitelist di oggi: aggiungerlo romperebbe il test di parità. `truppe:
+> sync` entra in **Fase 3** (varianti), non in Fase 1. In Fase 1 tutti i profili
+> riproducono al bit il comportamento corrente.
+
+### Istanza in `runtime_overrides.json` (esteso)
+```json
+"FauMorfeus": {
+  "abilitata": true,
+  "profilo": "master",
+  "task_overrides":  { "boost": false },      // add(true)/remove(false) vs profilo
+  "task_varianti":   { "truppe": "sync" }      // override/set variante per-task (Fase 3)
+}
+```
+- `profilo` (str, default `"completo"`).
+- `task_overrides` (dict[str,bool]): aggiunge/rimuove un task rispetto al profilo.
+- `task_varianti` (dict[str,str]): imposta/cambia la variante di un task (precede
+  la `varianti` del profilo). Pydantic: campi Optional, per non perderli al save.
+
+### `shared/task_resolution.py::risolvi_task_istanza`
+Fonte di verità unica per main.py (registrazione), predictor (stima), dashboard (UI).
+```python
+def risolvi_task_istanza(nome: str, overrides: dict | None = None,
+                         forza_solo_raccolta: bool = False) -> list[dict]:
+    """Combina, in ordine di precedenza:
+      1. forza_solo_raccolta=True (doppio giro) → SOLO raccolta+raccolta_chiusura,
+         classi STANDARD (mai fast) — INVARIANTE VERIFICATO (main.py:746,761).
+      2. profilo (profiles.json; fallback: mapping legacy `tipologia`→profilo).
+      3. task_overrides (add/remove) + task_varianti (variante).
+      4. kill-switch globale globali.task.* (un task spento globalmente non entra).
+    Ritorna list[dict] ordinata per priority, con:
+      class_name, task_name, priority, interval_hours, schedule, variante|None.
+    Risolve anche lo SWAP di classe: variante 'fast' su 'raccolta' → RaccoltaFastTask
+    (raccolta_chiusura resta RaccoltaChiusuraTask — verificato: lo swap attuale tocca
+    solo RaccoltaTask, main.py:764). main.py importa+esegue senza condizionali."""
+```
+priority/interval/schedule vengono da `config/task_setup.json` (join per task_name);
+class_name dal catalogo `_import_tasks`/`_TASK_CLASS_TO_NAME`.
+
 ## 5. Piano a fasi (proposta di sequenza)
 
 - **Fase 0** ✅ (fatto 17/07): fix predictor per master whitelist (commit `9751016`).
@@ -158,6 +216,19 @@ il campo `profilo` non è presente (retrocompat).
 - **Fase 4**: cleanup (`tipologia` deprecata, whitelist assorbita).
 
 ## 6. Domande aperte per la discussione Claude ⇄ Gemini
+
+> ### ⭐ DECISIONE APERTA A1 (richiede l'utente) — quali task avranno varianti?
+> Il meccanismo varianti (§3b, V3 strutturata) è definito, ma **quali task ne
+> hanno realmente bisogno** lo decide l'utente, per non sovra-ingegnerizzare.
+> - **Confermato**: `truppe` (master: *sincronizza/copia* uno stato invece di
+>   addestrare).
+> - **Ipotesi da confermare/scartare** (Claude+Gemini, speculative): `donazione`
+>   (donazione mirata vs generica), `store` (acquisti prioritari vs completi),
+>   `raccolta` (la variante `fast` è già di fatto una variante — la unifichiamo qui).
+> - **Azione utente**: dare l'elenco reale dei task che vuole differenziare (e
+>   come). Fino ad allora, in Fase 3 si implementa SOLO `truppe`.
+
+
 
 1. Modello profili: file `profiles.json` statico o gestibile da UI (creazione
    profili custom runtime)? Tradeoff persistenza/complessità.
@@ -189,4 +260,13 @@ il campo `profilo` non è presente (retrocompat).
   alla consolidazione. **Modalità AUTONOMA attivata** (decisione utente 17/07):
   da qui Claude+Gemini discutono e convergono SENZA intervento dell'utente;
   i disaccordi si marcano "DECISIONE APERTA per l'utente", non si forza consenso.
+- **17/07 22:20 — Gemini (seq 88)**: schema config concreto (`profiles.json` +
+  istanza con `profilo`/`task_overrides`/`task_varianti`) + firma
+  `risolvi_task_istanza` in `shared/task_resolution.py` + unificazione
+  `raccolta_fast`→variante. Propone Decisione Aperta A1 (elenco varianti).
+- **17/07 22:xx — Claude (V0.3)**: schema recepito in §4bis, verificato sul
+  codice (invarianti forza_solo_raccolta e swap fast — main.py:746/761/764).
+  **Correzione**: profilo `master` di Fase 1 = whitelist attuale SENZA `truppe`
+  (byte-identità); truppe:sync è Fase 3. Decisione A1 marcata in §6. Convergenza
+  quasi completa: manca solo consolidare in "PROPOSTA DEFINITIVA" + A1 (utente).
 - _(iterazioni successive appese qui)_
