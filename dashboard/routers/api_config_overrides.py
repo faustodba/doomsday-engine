@@ -740,7 +740,9 @@ def patch_istanza(nome: str, data: dict):
     # matrice allocazione per-istanza. `None` = reset al globale.
     allowed = {"abilitata", "truppe", "tipologia", "fascia_oraria",
                "max_squadre", "livello", "livello_trasporto",
-               "raccolta_fuori_territorio", "allocazione"}
+               "raccolta_fuori_territorio", "allocazione",
+               # WU-MasterTasks (17/07) — selezione task del master via UI
+               "master_task_whitelist"}
     for k, v in data.items():
         if k in allowed:
             current_dict[k] = v

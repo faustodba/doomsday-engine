@@ -865,6 +865,16 @@ class ArenaTask(Task):
         else:
             ctx.log_msg("[ARENA] timeout battaglia dopo %.0fs — né Victory né Failure",
                         total_wait)
+            # WU-arena-debug-timeout (17/07) — screenshot del momento esatto
+            # del timeout, per capire se è una schermata Victory/Failure reale
+            # mal riconosciuta (score sotto soglia) o qualcos'altro. Gated da
+            # globali.debug_tasks.arena (stesso pattern WU115/WU83), force
+            # flush indipendente dal buffer/flush del resto del task — solo
+            # osservabilità, nessun cambio di comportamento.
+            from shared.debug_buffer import DebugBuffer
+            debug_to = DebugBuffer.for_task("arena", getattr(ctx, "instance_name", "_unknown"))
+            debug_to.snap("timeout_battaglia", screen)
+            debug_to.flush(success=False, force=True, log_fn=ctx.log_msg)
         return victory, failure
 
     # ── Primitivi template matching ───────────────────────────────────────────

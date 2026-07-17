@@ -51,6 +51,35 @@ from config.config_loader import (
 from core import launcher as _launcher
 
 
+# WU-MasterTasks (17/07) — mappa classe→nome canonico task, per il filtro
+# della whitelist del master (main.py registra per classe da task_setup.json,
+# la whitelist config usa i nomi snake_case). DEVE restare in sync con
+# _import_tasks()/task_setup.json — stesso vincolo di CLASS_TO_TASK_NAME in
+# core/cycle_duration_predictor.py (tenuto separato per non alterarne le stime).
+_TASK_CLASS_TO_NAME = {
+    "GraficaHqTask": "grafica_hq",
+    "PuliziaCacheTask": "pulizia_cache",
+    "RaccoltaTask": "raccolta",
+    "RaccoltaChiusuraTask": "raccolta_chiusura",
+    "RaccoltaFastTask": "raccolta_fast",
+    "RifornimentoTask": "rifornimento",
+    "DonazioneTask": "donazione",
+    "MainMissionTask": "main_mission",
+    "ZainoTask": "zaino",
+    "VipTask": "vip",
+    "AlleanzaTask": "alleanza",
+    "MessaggiTask": "messaggi",
+    "ArenaTask": "arena",
+    "ArenaMercatoTask": "arena_mercato",
+    "DistrictShowdownTask": "district_showdown",
+    "BoostTask": "boost",
+    "TruppeTask": "truppe",
+    "StoreTask": "store",
+    "RadarTask": "radar",
+    "RadarCensusTask": "radar_census",
+}
+
+
 def _import_tasks() -> dict:
     tasks = {}
     _catalogue = [
@@ -74,7 +103,6 @@ def _import_tasks() -> dict:
         ("tasks.store",          "StoreTask"),
         ("tasks.radar",          "RadarTask"),
         ("tasks.radar_census",   "RadarCensusTask"),
-        ("tasks.faumorfeus_setup", "FauMorfeusSetupTask"),  # WU234 — bundle daily solo master
     ]
     for module_path, class_name in _catalogue:
         try:
@@ -722,15 +750,22 @@ def _thread_istanza(ist, tasks_cls, dry_run, forza_solo_raccolta: bool = False):
     if _raccolta_fast:
         _log(nome, f"Tipologia={_tipologia} — RaccoltaFastTask sostituisce RaccoltaTask (altri task attivi)")
 
+    # WU-MasterTasks (17/07) — whitelist config-driven dei task del master.
+    # Il master (tipologia=raccolta_only) registra SEMPRE RaccoltaTask/
+    # RaccoltaChiusuraTask; ogni altro task SOLO se selezionato nella whitelist
+    # (runtime_overrides.json::istanze.<master>.master_task_whitelist), con la
+    # sua schedulazione NORMALE da task_setup.json (identica alle ordinarie).
+    # Sostituisce il bundle giornaliero fisso FauMorfeusSetupTask (WU234).
+    # forza_solo_raccolta (doppio giro FAU_00) → nessun task extra, solo raccolta.
+    _master_whitelist = list(getattr(ctx.config, "MASTER_TASK_WHITELIST", []) or [])
+    if _solo_raccolta and _master_whitelist and not forza_solo_raccolta:
+        _log(nome, f"Master whitelist task: {_master_whitelist}")
+
     for class_name, priority, interval_h, schedule in _carica_task_setup():
-        # WU234 — FauMorfeusSetupTask è l'unica eccezione al filtro raccolta_only:
-        # bundle giornaliero esclusivo per il master (grafica_hq/pulizia_cache/
-        # boost/vip), la sua stessa should_run() lo limita a is_master_instance,
-        # quindi non registra nulla in più sulle istanze ordinarie raccolta_only.
-        if _solo_raccolta and class_name not in (
-            "RaccoltaTask", "RaccoltaChiusuraTask", "FauMorfeusSetupTask",
-        ):
-            continue
+        if _solo_raccolta and class_name not in ("RaccoltaTask", "RaccoltaChiusuraTask"):
+            _tnome = _TASK_CLASS_TO_NAME.get(class_name, "")
+            if forza_solo_raccolta or _tnome not in _master_whitelist:
+                continue
         # WU57 — runtime swap RaccoltaTask -> RaccoltaFastTask (priority/interval/schedule preservati)
         if _raccolta_fast and class_name == "RaccoltaTask":
             class_name = "RaccoltaFastTask"
@@ -1549,6 +1584,33 @@ def main():
                 pass
 
             _log("MAIN", f"--- Istanza {nome} completata ---")
+
+            # WU-restart-grana-fine (17/07) — check SOLO del flag esplicito
+            # (data/restart_requested.flag), non dell'intero should_restart_now()
+            # (che include schedule/cicli-max — quei due restano fine-ciclo-solo,
+            # altrimenti mark_cycle_completed/cicli_da_boot si sfaserebbe su un
+            # ciclo interrotto a metà). Punto sicuro: istanza appena completata
+            # (thread joinato, nessuna squadra/popup a metà) — stesso invariante
+            # "mai mid-tick" del check originale, a grana più fine. Riduce
+            # l'attesa di una richiesta esplicita da ~3.5h (fine ciclo) a
+            # ~15-20min (durata di un singolo tick). Resume già garantito da
+            # start.bat (--resume + checkpoint scritto ad ogni istanza).
+            #
+            # WU-restart-grana-fine-scelta (17/07) — il flag ora ha un `mode`:
+            # qui scatta SOLO se mode == "istanza". Se mode == "ciclo" l'utente
+            # ha scelto esplicitamente di aspettare la fine del ciclo intero →
+            # ignorato qui, lo raccoglie `should_restart_now()` a fine ciclo.
+            try:
+                from core.restart_scheduler import restart_flag_mode, EXIT_CODE_RESTART
+                if restart_flag_mode() == "istanza":
+                    _log("MAIN", f"RESTART richiesto (flag mode=istanza, post-istanza "
+                                 f"{nome}) — exit code {EXIT_CODE_RESTART} → run_prod.bat riavvia")
+                    close_all_loggers()
+                    sys.exit(EXIT_CODE_RESTART)
+            except SystemExit:
+                raise
+            except Exception as _exc_rg:
+                _log("MAIN", f"[WARN] restart grana-fine check: {_exc_rg}")
 
         # WU218 SHADOW — valuta (OSSERVATIVO, non esegue) se FAU_00 avrebbe un
         # 2° passaggio raccolta-only a fine giro. Scrive data/doppio_giro_shadow.jsonl

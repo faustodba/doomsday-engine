@@ -328,7 +328,7 @@ async function promoteRuntimeToStatic() {
 
 <!-- ── SCHEDULER RESTART BOT (06/05) ─────────────── -->
 <div class="section">
-  <div class="sec-label">⏰ scheduler restart bot — restart sicuro post-ciclo (mai mid-tick)</div>
+  <div class="sec-label">⏰ scheduler restart bot — restart sicuro, mai mid-tick (manuale: fine istanza · programmato: fine ciclo)</div>
 
   <div class="tel-grid">
     <div class="tel-card tel-full">
@@ -341,15 +341,18 @@ async function promoteRuntimeToStatic() {
           normale / 1 errore) → no riavvio.
         </div>
         <div style="margin-bottom:6px">
-          Il check avviene <b>solo dopo la chiusura dell'ultima istanza
-          del ciclo</b> (qualunque sia: FauMorfeus se abilitata, FAU_10 o
-          altra altrimenti). State coerente garantito.
+          <b>Manuale</b> (trigger ①, WU-restart-grana-fine 17/07): il flag è
+          controllato dopo la chiusura di <b>ogni singola istanza</b> — il
+          restart parte alla fine della prossima istanza, non a fine ciclo
+          intero (state coerente: mai mid-tick, resume via <code>--resume</code>).
+          <b>Programmato</b> (trigger ②/③, orario e cicli-max): valutati solo
+          dopo la chiusura dell'<b>ultima istanza del ciclo</b>, per non
+          sfasare il conteggio cicli.
         </div>
         <div>
-          Tre trigger valutati a fine ciclo <b>in ordine di priorità</b>
-          (1 → 2 → 3): il primo che scatta vince, gli altri non vengono
-          valutati. Trigger 1 (manuale) ha sempre la priorità massima
-          se la flag è presente.
+          Priorità <b>1 → 2 → 3</b>: il primo che scatta vince. Il trigger 1
+          (manuale) ha priorità massima e, essendo controllato ad ogni
+          istanza, di fatto anticipa gli altri quando il flag è presente.
         </div>
       </div>
     </div>
@@ -368,17 +371,24 @@ async function promoteRuntimeToStatic() {
       </div>
       <div style="padding:10px;font-size:11px;line-height:1.5">
         <div style="color:var(--text-dim);margin-bottom:8px">
-          On-demand: crea flag <code>data/restart_requested.flag</code>.
-          Bot rileva a fine ciclo corrente. Sempre disponibile.
+          On-demand: crea flag <code>data/restart_requested.flag</code> con il
+          <code>mode</code> scelto (WU-restart-grana-fine-scelta 17/07). Mai
+          mid-tick in entrambi i casi. Sempre disponibile.
         </div>
-        <button class="btn" type="button" onclick="restartBotToggle(true)"
+        <button class="btn" type="button" onclick="restartBotToggle(true,'istanza')"
+                style="width:100%;padding:6px;font-size:11px;margin-bottom:6px;
+                       background:transparent;color:var(--text);
+                       border:1px solid var(--accent);cursor:pointer">
+          🔄 restart a fine prossima istanza <span style="color:var(--text-dim)">(veloce)</span>
+        </button>
+        <button class="btn" type="button" onclick="restartBotToggle(true,'ciclo')"
                 style="width:100%;padding:6px;font-size:11px;
                        background:transparent;color:var(--text);
                        border:1px solid var(--border);cursor:pointer">
-          🔄 restart al prossimo fine ciclo
+          🔄 restart a fine ciclo intero
         </button>
         <div style="color:var(--text-dim);font-size:10px;margin-top:6px;text-align:center">
-          stessa azione del bottone topbar
+          il bottone topbar = "fine prossima istanza"
         </div>
       </div>
     </div>
@@ -564,6 +574,42 @@ async function promoteRuntimeToStatic() {
 </div>
 
 <div class="divider"></div>
+
+<!-- ── TASK DEL MASTER (WU-MasterTasks 17/07) ───────────────────────── -->
+{% set task_labels = {
+  'grafica_hq':'grafica HQ','pulizia_cache':'pulizia cache','boost':'boost raccolta',
+  'rifornimento':'rifornimento','truppe':'addestra truppe','donazione':'donazione',
+  'main_mission':'main mission','zaino':'zaino','vip':'VIP','alleanza':'alleanza',
+  'messaggi':'messaggi','arena':'arena','arena_mercato':'arena mercato',
+  'district_showdown':'district showdown','store':'store','radar':'radar'} %}
+{% for ist in instances if ist.nome in master_names %}
+{% set ov = overrides.get('istanze', {}).get(ist.nome, {}) %}
+{% set wl = ov.get('master_task_whitelist') or [] %}
+<div class="section" data-master-nome="{{ ist.nome }}">
+  <div class="sec-label">task del master — {{ ist.nome }} <span title="master" style="color:#f5c542">★</span></div>
+  <p style="font-size:11px;color:var(--text-dim);margin:2px 0 10px">
+    Il master è in modalità <b>solo raccolta</b>: raccolta gira sempre. Seleziona qui
+    gli <b>altri</b> task da fargli eseguire, ciascuno con la sua schedulazione normale
+    (come le istanze ordinarie). Attivo al prossimo avvio dell'istanza dopo il salvataggio.
+  </p>
+  <div style="display:flex;flex-wrap:wrap;gap:8px 18px">
+    {% for t in eligible_master_tasks %}
+    <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
+      <input class="gc-master-task" type="checkbox" value="{{ t }}" {% if t in wl %}checked{% endif %}>
+      {{ task_labels.get(t, t) }}
+    </label>
+    {% endfor %}
+  </div>
+  <div class="save-row" style="margin-top:10px">
+    <button class="btn btn-primary" onclick="gcSalvaMasterTasks('{{ ist.nome }}')">⬡ salva task master</button>
+    <span class="save-note">runtime_overrides.json · dynamic · attivo al prossimo avvio del master</span>
+    <span class="save-ok" id="gc-master-ok-{{ ist.nome }}">✓ salvato</span>
+    <span class="save-err" id="gc-master-err-{{ ist.nome }}"></span>
+  </div>
+</div>
+
+<div class="divider"></div>
+{% endfor %}
 
 <!-- ── MUMU (read-only) ───────────────────────────── -->
 <div class="section">
@@ -826,6 +872,27 @@ async function gcSalvaIstanze() {
     gcShowMsg('gc-ist-ok', 'gc-ist-err', resp.ok, data.detail || '');
   } catch (e) {
     gcShowMsg('gc-ist-ok', 'gc-ist-err', false, 'network error');
+  }
+}
+
+// ── TASK DEL MASTER (WU-MasterTasks 17/07) ────────────────────────────────
+
+async function gcSalvaMasterTasks(nome) {
+  const box = document.querySelector('.section[data-master-nome="'+nome+'"]');
+  if (!box) return;
+  const tasks = Array.from(box.querySelectorAll('.gc-master-task'))
+    .filter(cb => cb.checked)
+    .map(cb => cb.value);
+  try {
+    const resp = await fetch(URL_PREFIX + '/api/config/overrides/istanze/' + encodeURIComponent(nome), {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({ master_task_whitelist: tasks }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    gcShowMsg('gc-master-ok-'+nome, 'gc-master-err-'+nome, resp.ok, data.detail || '');
+  } catch (e) {
+    gcShowMsg('gc-master-ok-'+nome, 'gc-master-err-'+nome, false, 'network error');
   }
 }
 

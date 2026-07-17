@@ -30,29 +30,40 @@ file **`channel.json`** (il *baton*), non il file di contenuto.
 ## Regole
 
 1. **Scrivi SOLO se `turn` == te.** Altrimenti aspetta. Mai scavalcare il baton.
-2. Scrivi il tuo messaggio **completo** nel TUO file, come blocco con intestazione:
+2. **Ri-leggi `channel.json` (e l'ultimo blocco del file di contenuto
+   dell'altro) subito PRIMA di scrivere la tua richiesta/risposta e PRIMA di
+   aggiornare lo stato** — non fidarti di una lettura fatta a inizio task se
+   nel frattempo è passato del tempo (es. lavoro lungo, altre attività).
+   L'altro potrebbe aver scritto nel frattempo (nuovo `seq`, `turn` diverso
+   da quello che ricordavi, `status=NEEDS-USER` sopraggiunto). Se lo stato è
+   cambiato rispetto a quanto assunto, **gestisci prima il nuovo contenuto**
+   (leggilo, eventualmente rispondi) e solo dopo procedi con la tua
+   scrittura — mai sovrascrivere un baton più recente di quello che avevi in
+   mente. Regola esplicita dell'utente (17/07/2026), nata da un rischio di
+   race condition osservato in una sessione lunga.
+3. Scrivi il tuo messaggio **completo** nel TUO file, come blocco con intestazione:
    ```
    ## [seq N] gemini → claude · 2026-07-16T15:10 · status=CONTINUE
    <corpo del messaggio>
    ---
    ```
-3. **Come ULTIMO passo**, aggiorna `channel.json` in modo atomico (scrivi su
+4. **Come ULTIMO passo**, aggiorna `channel.json` in modo atomico (scrivi su
    `channel.json.tmp` e poi rinomina): `last_writer` = te, `turn` = altro,
    `seq` = N+1, `status`, `last_write_ts`. **Il flip del baton è il segnale di
    "messaggio completo, tocca a te"**: l'altro non legge né risponde finché il baton
    non passa a lui (evita di leggere un file scritto a metà).
-4. Dopo aver passato il baton, **NON scrivere più** finché non torna a te.
-5. `status`:
+5. Dopo aver passato il baton, **NON scrivere più** finché non torna a te.
+6. `status`:
    - **CONTINUE** — mi aspetto una risposta.
    - **DONE** — ho concluso, nessuna risposta necessaria (l'altro può comunque
      replicare). Il canale resta in idle senza spam.
    - **NEEDS-USER** — serve una decisione umana prima di procedere: **entrambi
      aspettano l'utente**, nessuno scrive finché l'utente non sblocca.
-6. **Vincolo di Claude**: modifiche al **codice del bot** (`tasks/`, `core/`,
+7. **Vincolo di Claude**: modifiche al **codice del bot** (`tasks/`, `core/`,
    `shared/`, `main.py`, `config/`) NON vengono applicate in autonomia. Claude
    prepara l'analisi, passa il baton con `status=NEEDS-USER` e la porta all'utente.
    Documentazione e analisi nel canale o in `docs/`: sì, in autonomia.
-7. **Anti-spam / timeout**: se il baton è tuo ma non hai nulla da dire, lascialo
+8. **Anti-spam / timeout**: se il baton è tuo ma non hai nulla da dire, lascialo
    invariato — non scrivere per scrivere. Se l'altro non risponde entro un tempo
    ragionevole, niente polling aggressivo: segnala all'utente.
 

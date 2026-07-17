@@ -5,7 +5,48 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
-## Sessione 17/07/2026 (5) — WU234: FauMorfeusSetupTask (bundle giornaliero master)
+## Sessione 17/07/2026 (6) — WU-MasterTasks: selezione task master config-driven (ANNULLA WU234)
+
+Richiesta utente: per necessità di tempo, delegare al master (FauMorfeus)
+una serie di task che normalmente esegue a mano, **selezionabili** e con la
+**stessa schedulazione** delle istanze ordinarie — annullando il bundle
+giornaliero fisso WU234.
+
+**Progettato + implementato** un'infrastruttura generica config-driven che
+sostituisce il task-bundle WU234:
+- Nuovo campo per-istanza `master_task_whitelist` (lista nomi task) in
+  `runtime_overrides.json` (dynamic). Il master (`tipologia=raccolta_only`)
+  registra sempre RaccoltaTask/RaccoltaChiusuraTask + i task selezionati,
+  ciascuno con la sua schedulazione normale da `task_setup.json`.
+- `main.py`: filtro `_solo_raccolta` ora consulta la whitelist (mappa
+  `_TASK_CLASS_TO_NAME` classe→nome, anti-drift vs task_setup.json).
+  `forza_solo_raccolta` (doppio giro FAU_00) → whitelist ignorata.
+- `config/config_loader.py`: `MASTER_TASK_WHITELIST` + `master_task_whitelisted()`.
+- `tasks/grafica_hq.py` + `tasks/pulizia_cache.py`: lo skip interno
+  `raccolta_only` è ora **whitelist-aware** (saltano solo se il master non
+  li ha selezionati; prima erano sempre saltati per il master).
+- **UI**: nuova sezione "task del master" in `/ui/config/global` con checkbox
+  per task, salva via `PATCH /api/config/overrides/istanze/{nome}`.
+- **Pydantic** `IstanzaOverride`: aggiunti `master_task_whitelist` **e**
+  `raccolta_reset_leggero_abilitato` (quest'ultimo mancava — bug-class
+  field-wipe WU199/WU102: un save dashboard avrebbe revertito il rollout
+  WU232 di stamattina; ora blindato).
+- **Rimosso** `FauMorfeusSetupTask` (WU234): `tasks/faumorfeus_setup.py`,
+  test, riga catalogo `main.py`, riga `task_setup.json`, eccezione filtro.
+
+**Whitelist FauMorfeus impostata (prod)**: grafica_hq, pulizia_cache, vip,
+alleanza, messaggi, donazione, district_showdown (7 — "monopoli" dell'utente
+= district_showdown). Nota: boost, che era nel bundle WU234, NON è più
+eseguito dal master (non selezionato).
+
+**Test**: `tests/unit/test_master_task_whitelist.py` 11/11 (whitelist config,
+anti-drift mappa, filtro registrazione, rimozione WU234, round-trip Pydantic).
+`test_config.py` verde. Sync dev→prod byte-identico (9 file + rimozione task).
+**Richiede riavvio BOT** (codice) + **riavvio DASHBOARD** (UI/modello/endpoint).
+
+---
+
+## Sessione 17/07/2026 (5) — WU234: FauMorfeusSetupTask (bundle giornaliero master) [ANNULLATA da (6)]
 
 Richiesta utente: FauMorfeus (master, `tipologia=raccolta_only`) non riceve
 MAI grafica_hq/pulizia_cache/boost/vip — `main.py::_thread_istanza` filtra

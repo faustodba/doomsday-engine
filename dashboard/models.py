@@ -369,6 +369,18 @@ class IstanzaOverride(BaseModel):
     # su tutte le 12 istanze, sparito dopo un save dashboard nel giro di ~20min.
     report_raccolta_abilitato:  bool      = False
     report_raccolta_solo_reset: bool      = True
+    # WU232 (16/07) — reset leggero raccolta (esteso a tutte le 12 istanze
+    # 17/07). Campo mancante qui = stesso bug-class WU199/WU102: un save
+    # dashboard lo strippava silenziosamente, revertendo il rollout. Aggiunto
+    # 17/07 per blindarlo (era sopravvissuto finora solo perché mai passato da
+    # un save dashboard).
+    raccolta_reset_leggero_abilitato: bool = False
+    # WU-MasterTasks (17/07) — whitelist task del master (nomi snake_case). Solo
+    # per l'istanza master: i task selezionati girano OLTRE a raccolta con la
+    # loro schedulazione normale. None/[] = solo raccolta (comportamento base).
+    # Sostituisce il bundle fisso FauMorfeusSetupTask (WU234). Campo necessario
+    # qui altrimenti un save dashboard lo perderebbe (bug-class WU199/WU102).
+    master_task_whitelist: Optional[list[str]] = None
     # Master istanza (rifugio destinatario): esclusa dagli aggregati ordinari
     # (telemetria, predictor, ranking dashboard). Esposta in sezione UI dedicata.
     master:       bool                    = False

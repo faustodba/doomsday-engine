@@ -1337,6 +1337,16 @@ def ui_advanced(request: Request):
     })
 
 
+# WU-MasterTasks (17/07) — task selezionabili per il master via UI. Escludono
+# raccolta/raccolta_chiusura (sempre attivi per il master by design) e
+# raccolta_fast. Ordine = ordine logico di esecuzione (priority task_setup.json).
+_MASTER_ELIGIBLE_TASKS = [
+    "grafica_hq", "pulizia_cache", "boost", "rifornimento", "truppe",
+    "donazione", "main_mission", "zaino", "vip", "alleanza", "messaggi",
+    "arena", "arena_mercato", "district_showdown", "store", "radar",
+]
+
+
 @app.get("/ui/config/global", include_in_schema=False)
 def ui_config_global(request: Request):
     """Pagina config — legge global_config.json RAW (no round-trip via
@@ -1359,6 +1369,7 @@ def ui_config_global(request: Request):
         "instances":    get_instances(),
         "overrides":    get_overrides(),
         "master_names": set(get_master_instances()),
+        "eligible_master_tasks": _MASTER_ELIGIBLE_TASKS,
         **_env_label(),
     })
 
@@ -4562,18 +4573,23 @@ def api_restart_bot_status():
 
 
 @app.post("/api/restart-bot", include_in_schema=False)
-def api_restart_bot():
+def api_restart_bot(mode: str = "istanza"):
     """
-    Richiede restart bot al PROSSIMO fine ciclo (mai mid-tick).
-    Crea file flag `data/restart_requested.flag`. Il bot lo rileva post
-    chiusura ultima istanza, esce con exit code 100, start.bat (:run_loop) lo riavvia
-    automaticamente (riavvio programmato a fine ciclo).
+    Richiede restart bot (mai mid-tick). Crea `data/restart_requested.flag`.
+
+    mode (WU-restart-grana-fine-scelta 17/07):
+      - "istanza" (default): il bot riavvia alla fine della PROSSIMA istanza
+        (check post-istanza) — veloce.
+      - "ciclo": il bot riavvia solo a fine ciclo intero (dopo l'ultima istanza).
+
+    In entrambi i casi esce con exit code 100 e start.bat (:run_loop) riavvia.
     """
+    mode = mode if mode in ("istanza", "ciclo") else "istanza"
     from core.restart_scheduler import request_restart
-    ok = request_restart(reason="dashboard")
+    ok = request_restart(reason="dashboard", mode=mode)
     if not ok:
         raise HTTPException(500, "scrittura flag fallita")
-    return {"requested": True, "reason": "dashboard"}
+    return {"requested": True, "reason": "dashboard", "mode": mode}
 
 
 @app.delete("/api/restart-bot", include_in_schema=False)
@@ -4698,7 +4714,14 @@ def partial_maintenance_banner(request: Request):
                          color:var(--text-dim);border:1px solid var(--border);cursor:pointer">
             🔧 manutenzione
           </button>
-          <button onclick="restartBotToggle(true)" class="btn"
+          <button onclick="restartBotToggle(true,'istanza')" class="btn"
+                  title="riavvia alla fine della prossima istanza (veloce)"
+                  style="padding:3px 10px;font-size:11px;background:transparent;
+                         color:var(--text);border:1px solid var(--accent);cursor:pointer">
+            🔄 restart fine istanza
+          </button>
+          <button onclick="restartBotToggle(true,'ciclo')" class="btn"
+                  title="riavvia alla fine del ciclo intero"
                   style="padding:3px 10px;font-size:11px;background:transparent;
                          color:var(--text-dim);border:1px solid var(--border);cursor:pointer">
             🔄 restart fine ciclo
@@ -4738,6 +4761,8 @@ def partial_restart_banner(request: Request):
             pass
         reason = info.get("reason", "?")
         ts = info.get("ts", "")[:19].replace("T", " ")
+        mode = info.get("mode", "istanza")
+        attesa = "fine prossima istanza" if mode == "istanza" else "fine ciclo intero"
 
         state = _load_state()
         cicli = int(state.get("cicli_da_boot", 0))
@@ -4748,8 +4773,8 @@ def partial_restart_banner(request: Request):
                     display:flex;align-items:center;gap:10px;font-size:12px">
           <span style="font-weight:600">🔄 RESTART BOT PENDENTE</span>
           <span style="color:var(--text-dim)">richiesto {ts} ({reason})
-            · cicli completati post-boot: {cicli}
-            · attesa fine ciclo per uscita pulita</span>
+            · mode: <b>{mode}</b> · cicli completati post-boot: {cicli}
+            · attesa {attesa} per uscita pulita</span>
           <button onclick="restartBotToggle(false)" class="btn"
                   style="margin-left:auto;padding:3px 10px;font-size:11px;
                          background:transparent;color:#60a5fa;
@@ -5220,9 +5245,9 @@ def mobile_partial_actions(request: Request):
         )
     restart_btn = (
         f'<button class="m-btn m-btn-info" '
-        f'hx-post="{up}/api/restart-bot" hx-swap="none" '
-        f'onclick="return confirm(\'Pianificare restart a fine ciclo?\')">'
-        f'🔄 Restart bot</button>'
+        f'hx-post="{up}/api/restart-bot?mode=istanza" hx-swap="none" '
+        f'onclick="return confirm(\'Pianificare restart a fine prossima istanza?\')">'
+        f'🔄 Restart (fine istanza)</button>'
     )
     return HTMLResponse(
         f'<div class="m-actions">{maint_btn}{restart_btn}'

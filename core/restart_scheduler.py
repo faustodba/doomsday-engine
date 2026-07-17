@@ -98,18 +98,28 @@ def mark_cycle_completed(ciclo_numero: int) -> None:
     _save_state(state)
 
 
-def request_restart(reason: str = "manual") -> bool:
+def request_restart(reason: str = "manual", mode: str = "istanza") -> bool:
     """
     Richiesta esterna di restart (es. da dashboard). Crea file flag che
-    `should_restart_now()` rilevera' al prossimo check.
+    `should_restart_now()` (fine ciclo) e il check post-istanza in main.py
+    rilevano.
+
+    mode (WU-restart-grana-fine-scelta 17/07):
+      - "istanza" (default): il flag scatta alla fine della PROSSIMA istanza
+        (check post-istanza in main.py) — restart veloce, mai mid-tick.
+      - "ciclo": il flag scatta solo a fine ciclo intero (`should_restart_now`,
+        ultima istanza del ciclo). Il check post-istanza lo ignora.
+
     Ritorna True se la flag e' stata creata.
     """
+    mode = mode if mode in ("istanza", "ciclo") else "istanza"
     try:
         flag = _flag_path()
         flag.parent.mkdir(parents=True, exist_ok=True)
         flag.write_text(json.dumps({
             "reason": reason,
             "ts": datetime.now(timezone.utc).isoformat(),
+            "mode": mode,
         }, indent=2), encoding="utf-8")
         return True
     except Exception:
@@ -117,8 +127,26 @@ def request_restart(reason: str = "manual") -> bool:
 
 
 def is_restart_requested() -> bool:
-    """True se file flag presente (richiesta restart pendente)."""
+    """True se file flag presente (richiesta restart pendente, qualunque mode)."""
     return _flag_path().exists()
+
+
+def restart_flag_mode() -> Optional[str]:
+    """
+    Mode del flag restart pendente: "istanza" | "ciclo", o None se assente.
+    Usato dal check POST-ISTANZA in main.py: scatta solo se mode == "istanza".
+    Flag legacy senza campo `mode` (pre-17/07) o illeggibile → "istanza"
+    (default sicuro: comportamento del check grana-fine già rilasciato).
+    """
+    p = _flag_path()
+    if not p.exists():
+        return None
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        m = data.get("mode", "istanza")
+        return m if m in ("istanza", "ciclo") else "istanza"
+    except Exception:
+        return "istanza"
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -231,14 +259,18 @@ def should_restart_now() -> tuple[bool, str]:
         (True, reason) → bot deve uscire con exit code 100
         (False, "")    → continua loop normale
     """
-    # 1. File flag esterno
+    # 1. File flag esterno (qualunque mode: a fine ciclo scattano sia i flag
+    #    "ciclo" sia gli eventuali "istanza" armati durante l'ultima istanza,
+    #    che il check post-istanza non ha fatto in tempo a raccogliere).
     if is_restart_requested():
         try:
             flag_data = json.loads(_flag_path().read_text(encoding="utf-8"))
             reason = flag_data.get("reason", "manual")
+            mode = flag_data.get("mode", "istanza")
         except Exception:
             reason = "manual"
-        return True, f"flag:{reason}"
+            mode = "istanza"
+        return True, f"flag:{reason}:{mode}"
 
     globali = _read_config()
 

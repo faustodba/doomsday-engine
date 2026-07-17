@@ -1238,6 +1238,17 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         if _asum > 0:
             _alloc_resolved = {r: _av[r] / _asum for r in _RIS_ALLOC}
 
+    # WU-MasterTasks (17/07) — whitelist dei task che il master
+    # (tipologia=raccolta_only) esegue OLTRE a raccolta, con la loro
+    # schedulazione NORMALE (come le istanze ordinarie). Sostituisce il bundle
+    # giornaliero fisso FauMorfeusSetupTask (WU234). Solo runtime override,
+    # nessun default statico. Calcolato come function-local per il pattern
+    # closure dei metodi della classe (come `task_abilitato`/`gcfg` — vedi nota
+    # di scope sotto: un metodo non vede i NOMI del corpo classe, ma chiude sui
+    # locali della funzione contenitore). Ignorato per istanze non-master.
+    _raw_master_wl = ovr.get("master_task_whitelist") or []
+    _master_wl = [str(t) for t in _raw_master_wl if t]
+
     class _InstanceCfg:
         # ── Identità istanza ─────────────────────────────────────────────────
         # 08/05 — Regola architetturale: campi per-istanza configurabili
@@ -1370,8 +1381,19 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         BOOST_ABILITATO           = gcfg.task_boost
         STORE_ABILITATO           = gcfg.task_store
 
+        # WU-MasterTasks (17/07) — esposto come attributo (lettura diretta
+        # ctx.config.MASTER_TASK_WHITELIST) + metodo helper (chiude su _master_wl,
+        # locale della funzione contenitore, come task_abilitato su gcfg).
+        MASTER_TASK_WHITELIST = list(_master_wl)
+
         def get(self, key: str, default=None):
             return getattr(self, key, default)
+
+        def master_task_whitelisted(self, nome_task: str) -> bool:
+            """True se `nome_task` è nella whitelist master (config-driven).
+            Rilevante solo per il master raccolta_only: le istanze ordinarie
+            non passano mai da questo check (registrano tutti i task)."""
+            return nome_task in _master_wl
 
         def task_abilitato(self, nome_task: str) -> bool:
             mappa = {

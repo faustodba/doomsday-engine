@@ -321,11 +321,16 @@
     }
 
     // 06/05 — toggle richiesta restart bot
-    async function restartBotToggle(request) {
+    async function restartBotToggle(request, mode) {
+      // mode: 'istanza' (default, fine prossima istanza) | 'ciclo' (fine ciclo intero)
+      mode = (mode === 'ciclo') ? 'ciclo' : 'istanza';
       try {
         if (request) {
-          if (!confirm('Richiedere restart bot al PROSSIMO fine ciclo?\n\nIl bot uscirà con exit code 100 e start.bat lo riavvierà automaticamente (riavvio programmato).\nNessun tick verrà interrotto.')) return;
-          const r = await fetch(URL_PREFIX + '/api/restart-bot', {method: 'POST'});
+          const quando = (mode === 'ciclo')
+            ? 'alla fine del CICLO intero (dopo l\'ultima istanza)'
+            : 'alla fine della PROSSIMA istanza';
+          if (!confirm('Richiedere restart bot ' + quando + '?\n\nIl bot uscirà con exit code 100 e start.bat lo riavvierà automaticamente.\nNessun tick verrà interrotto (mai mid-tick).')) return;
+          const r = await fetch(URL_PREFIX + '/api/restart-bot?mode=' + mode, {method: 'POST'});
           if (!r.ok) throw new Error('HTTP ' + r.status);
         } else {
           if (!confirm('Cancellare la richiesta di restart pendente?')) return;

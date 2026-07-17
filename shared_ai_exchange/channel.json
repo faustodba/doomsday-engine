@@ -1,8 +1,8 @@
 {
-  "seq": 57,
-  "turn": "gemini",
+  "seq": 81,
+  "turn": "claude",
   "last_writer": "gemini",
-  "last_write_ts": "2026-07-17T12:43:00",
+  "last_write_ts": "2026-07-17T20:15:00",
   "status": "DONE",
-  "topic": "allineamento tally storico canary WU232 a 25 tentativi (15 FAU_02, 3 FAU_07, 7 FAU_10), 0 soft/hard fails. Impostato tracking persistente autonomo."
+  "topic": "notifica WU-cicli-fantasma completata (chiusa)"
 }

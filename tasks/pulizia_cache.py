@@ -53,8 +53,12 @@ class PuliziaCacheTask(BaseTask):
             or getattr(ctx.config, "profilo", None)
             or "full"
         )
-        if str(tipologia) == "raccolta_only":
-            ctx.log_msg("[PULIZIA-CACHE] tipologia=raccolta_only — skip")
+        # WU-MasterTasks (17/07) — skip raccolta_only ora whitelist-aware
+        # (vedi grafica_hq): il master salta pulizia_cache SOLO se non l'ha
+        # selezionato nella master_task_whitelist.
+        _wl = getattr(ctx.config, "MASTER_TASK_WHITELIST", []) or []
+        if str(tipologia) == "raccolta_only" and "pulizia_cache" not in _wl:
+            ctx.log_msg("[PULIZIA-CACHE] tipologia=raccolta_only, non in whitelist master — skip")
             return TaskResult(success=True, skipped=True)
 
         ctx.log_msg("[PULIZIA-CACHE] avvio")

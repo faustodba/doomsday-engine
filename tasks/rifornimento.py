@@ -78,6 +78,7 @@ import numpy as np
 
 from core.task import Task, TaskContext, TaskResult
 from shared.ui_helpers import attendi_template
+from shared.debug_buffer import is_debug_enabled
 
 # ------------------------------------------------------------------------------
 # Default costanti UI (960x540)
@@ -185,6 +186,23 @@ def _vai_abilitato(screen, vai_zona: tuple,
         return int(yellow.sum()) > soglia_gialli
     except Exception:
         return False
+
+
+def _conta_pixel_gialli(screen, vai_zona: tuple) -> int:
+    """
+    WU-rifornimento-delay-measure (17/07) — variante di sola lettura di
+    `_vai_abilitato` che ritorna il conteggio grezzo invece del bool, per
+    strumentazione/misura (checkpoint delay). Stessa logica pixel, nessun
+    impatto sul comportamento reale (usata solo dietro debug_tasks.rifornimento).
+    """
+    try:
+        arr = screen.frame
+        yellow = (arr[vai_zona[1]:vai_zona[3], vai_zona[0]:vai_zona[2], 2] > 160) & \
+                 (arr[vai_zona[1]:vai_zona[3], vai_zona[0]:vai_zona[2], 1] > 120) & \
+                 (arr[vai_zona[1]:vai_zona[3], vai_zona[0]:vai_zona[2], 0] < 90)
+        return int(yellow.sum())
+    except Exception:
+        return -1
 
 
 def _leggi_provviste(screen, ocr_box: tuple) -> int:
@@ -694,10 +712,37 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
     # (sotto soglia) l'OCR poteva catturare il campo a metà ridisegno,
     # producendo letture spurie (osservato: 999.000.000 vicino al placeholder
     # digitato, e una volta "6" — schermata non ancora stabilizzata).
-    time.sleep(2.0)
+    #
+    # WU-rifornimento-delay-measure (17/07) — misura, non cambia il delay.
+    # screen2 finale resta catturato ESATTAMENTE a 2.0s (comportamento
+    # invariato, con o senza debug). Se debug attivo, checkpoint intermedi
+    # SOLO di lettura/log (nessuna tap, nessuna azione) a 0.5/0.8/1.2/1.5s
+    # per misurare quanto impiega `_vai_abilitato` (check a pixel gialli,
+    # NON template matching — meccanismo diverso da WU113/ArenaMercato dove
+    # è stata calibrata la regola generale) a stabilizzarsi. Dato raccolto
+    # per decidere in futuro, con numeri reali, se questo specifico check
+    # tollera un delay più corto.
+    screen2 = None
+    if is_debug_enabled("rifornimento"):
+        _checkpoints_s = [0.5, 0.8, 1.2, 1.5, 2.0]
+        _elapsed = 0.0
+        for _cp in _checkpoints_s:
+            time.sleep(_cp - _elapsed)
+            _elapsed = _cp
+            screen2 = ctx.device.screenshot()
+            if screen2 is not None:
+                _gialli = _conta_pixel_gialli(screen2, vai_zona)
+                _ok = _gialli > soglia_vai
+                ctx.log_msg(
+                    f"[DELAY-MEASURE-rifornimento] t={_cp:.1f}s gialli={_gialli} "
+                    f"soglia={soglia_vai} vai_ok={_ok}"
+                )
+    else:
+        time.sleep(2.0)
 
     # Verifica VAI
-    screen2 = ctx.device.screenshot()
+    if screen2 is None:
+        screen2 = ctx.device.screenshot()
     if screen2 and not _vai_abilitato(screen2, vai_zona, soglia_vai):
         ctx.log_msg("Rifornimento: VAI non abilitato dopo compilazione")
         provviste2 = _leggi_provviste(screen2, ocr_provv)

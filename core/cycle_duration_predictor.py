@@ -508,11 +508,22 @@ def predict_istanza_duration(
     }
 
 
+# WU-cicli-fantasma (17/07) — soglia sotto la quale un ciclo "completato" è in
+# realtà un artefatto del restart+resume (il resume crea un ciclo di pochi
+# secondi ad ogni riavvio: es. cicli 538/540 con durata_s=2). Vanno esclusi
+# dalla media, altrimenti tirano giù `gap_min_default` (amplificato dai restart
+# fine-istanza, più frequenti). NON un reset del predictor: solo pulizia di una
+# metrica secondaria. I cicli veri durano decine di minuti.
+_MIN_CICLO_REALE_S = 60
+
+
 def _avg_recent_cycles_min(n: int = 5) -> Optional[float]:
-    """Media durata ultimi N cicli completati da data/telemetry/cicli.json.
+    """Media durata ultimi N cicli REALI completati da data/telemetry/cicli.json.
 
     Usato per stimare gap_min (tempo prossimo passaggio) per units-aware.
-    Ritorna None se nessun ciclo completato disponibile.
+    Esclude: ciclo corrente (in corso), cicli `aborted` (interrotti mid-ciclo da
+    restart) e cicli-fantasma < `_MIN_CICLO_REALE_S` (artefatto restart+resume).
+    Ritorna None se nessun ciclo reale disponibile.
     """
     try:
         p = _root() / "data" / "telemetry" / "cicli.json"
@@ -520,11 +531,14 @@ def _avg_recent_cycles_min(n: int = 5) -> Optional[float]:
             return None
         data = json.loads(p.read_text(encoding="utf-8"))
         cicli = data.get("cicli") or []
-        durs = [
+        validi = [
             float(c.get("durata_s", 0))
-            for c in cicli[-n - 1:-1]   # esclude ciclo corrente
-            if c.get("completato") and c.get("durata_s", 0) > 0
+            for c in cicli[:-1]   # esclude il ciclo corrente (ultimo, in corso)
+            if c.get("completato")
+            and not c.get("aborted")
+            and float(c.get("durata_s", 0)) >= _MIN_CICLO_REALE_S
         ]
+        durs = validi[-n:]   # ultimi N REALI (dopo il filtro)
         if not durs:
             return None
         return (sum(durs) / len(durs)) / 60   # in minuti

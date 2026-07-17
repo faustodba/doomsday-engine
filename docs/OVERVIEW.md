@@ -788,42 +788,44 @@ pulita oggi per l'istanza → uscita immediata, nessuna navigazione.
   su `data/cache_state.json`), indipendente dal flag abilitazione task
 - Priority 2 (subito dopo GraficaHqTask)
 
-### 5.20 FauMorfeusSetupTask (priority 3, daily 24h)
+### 5.20 Task del master — whitelist config-driven (WU-MasterTasks, 17/07)
 
-[tasks/faumorfeus_setup.py](../tasks/faumorfeus_setup.py) — WU234 (17/07).
-Bundle giornaliero **esclusivo per l'istanza master** (FauMorfeus): esegue
-in sequenza grafica_hq, pulizia_cache, boost, vip — le stesse operazioni
-delle istanze ordinarie, che il profilo `tipologia="raccolta_only"` del
-master esclude normalmente (`main.py::_thread_istanza` filtra la
-registrazione al solo `RaccoltaTask`/`RaccoltaChiusuraTask` per quel
-profilo, con `FauMorfeusSetupTask` come unica eccezione esplicita).
+> **WU234 (`FauMorfeusSetupTask`) ANNULLATO** e rimosso. Il bundle giornaliero
+> fisso (grafica_hq+pulizia_cache+boost+vip) è stato sostituito da un
+> meccanismo generico e **selezionabile** — vedi sotto.
 
-**Riuso, non riscrittura**:
-- grafica_hq/pulizia_cache: chiama direttamente `esegui_grafica_hq()` /
-  `esegui_pulizia_cache()` (core/settings_helper.py), bypassando il
-  wrapper `GraficaHqTask.run()`/`PuliziaCacheTask.run()` — che hanno uno
-  skip esplicito `tipologia == "raccolta_only"` pensato apposta per
-  escludere il master dal ciclo normale (§5.18/5.19). Bypassato solo il
-  wrapper, la logica sottostante è identica.
-- boost/vip: nessuno skip di tipologia nei rispettivi Task — riuso diretto
-  di `BoostTask().should_run()+run()` e `VipTask().should_run()+run()`
-  (preserva i guard di idempotenza esistenti, es. VipState "già ritirato
-  oggi").
+Il master (FauMorfeus, `tipologia="raccolta_only"`) normalmente esegue solo
+`RaccoltaTask`/`RaccoltaChiusuraTask` (`main.py::_thread_istanza` filtra la
+registrazione degli altri task per quel profilo). Con WU-MasterTasks il master
+può eseguire un **sottoinsieme configurabile** degli altri task, ciascuno con
+la sua **schedulazione normale** (identica alle istanze ordinarie).
 
-**Regole speciali**:
-- `should_run()` → `True` solo se `is_master_instance(ctx.instance_name)`
-  (shared/instance_meta.py) — seconda barriera difensiva, dato che le
-  istanze ordinarie non registrano nemmeno il task (filtro `main.py`).
-- Scheduling `daily` — una volta al giorno, al primo tick utile dopo il
-  reset giornaliero (stesso meccanismo di VipTask/ZainoTask/MainMissionTask,
-  core/scheduler.py).
-- Ogni sotto-step è **best-effort**: un fallimento non blocca gli altri
-  (stesso comportamento delle 4 istanze ordinarie, dove sono 4 entry
-  orchestrator indipendenti). `TaskResult.success` aggregato = AND di tutti.
-- `ctx.navigator.vai_in_home()` chiamato esplicitamente fra uno step e il
-  successivo — l'orchestrator lo farebbe automaticamente prima di ogni
-  singolo task (gate HOME), ma qui i 4 step sono dentro un unico `run()`.
-- Priority 3 (subito dopo GraficaHqTask/PuliziaCacheTask).
+**Meccanismo**:
+- Campo per-istanza `master_task_whitelist` (lista di nomi task snake_case) in
+  `runtime_overrides.json::istanze.<master>` (dynamic, modificabile a caldo).
+- `main.py`: per un'istanza `raccolta_only`, oltre a raccolta registra i task
+  la cui classe mappa (`_TASK_CLASS_TO_NAME`) a un nome nella whitelist, con
+  `priority/interval/schedule` invariati da `task_setup.json`.
+  `forza_solo_raccolta` (doppio giro FAU_00) → whitelist ignorata (solo raccolta).
+- `config/config_loader.py::_InstanceCfg`: espone `MASTER_TASK_WHITELIST`
+  (attributo) + `master_task_whitelisted(nome)` (metodo).
+- `tasks/grafica_hq.py` / `tasks/pulizia_cache.py`: lo skip interno
+  `tipologia == "raccolta_only"` è ora **whitelist-aware** — il master li
+  salta SOLO se non selezionati (prima erano sempre saltati per il master).
+  Gli altri task (vip/alleanza/messaggi/donazione/district_showdown) non
+  hanno skip interni: bastava il filtro `main.py`.
+
+**UI**: sezione "task del master" in `/ui/config/global` (checkbox per task,
+salva via `PATCH /api/config/overrides/istanze/{nome}` con
+`master_task_whitelist`). Task selezionabili: tutti gli schedulabili tranne
+raccolta/raccolta_chiusura (sempre attivi per il master).
+
+**Pydantic** (`dashboard/models.py::IstanzaOverride`): `master_task_whitelist`
++ `raccolta_reset_leggero_abilitato` aggiunti al modello — senza, un save
+dashboard li strippava silenziosamente (bug-class field-wipe WU199/WU102).
+
+**Config attuale FauMorfeus (prod)**: `["grafica_hq","pulizia_cache","vip",
+"alleanza","messaggi","donazione","district_showdown"]`.
 
 ---
 

@@ -53,8 +53,13 @@ class GraficaHqTask(BaseTask):
             or getattr(ctx.config, "profilo", None)
             or "full"
         )
-        if str(tipologia) == "raccolta_only":
-            ctx.log_msg("[GRAFICA-HQ] tipologia=raccolta_only — skip")
+        # WU-MasterTasks (17/07) — skip raccolta_only ora whitelist-aware:
+        # il master salta grafica_hq SOLO se non l'ha selezionato nella sua
+        # master_task_whitelist. Se selezionato, main.py lo registra e qui
+        # deve girare (prima veniva sempre saltato per il master).
+        _wl = getattr(ctx.config, "MASTER_TASK_WHITELIST", []) or []
+        if str(tipologia) == "raccolta_only" and "grafica_hq" not in _wl:
+            ctx.log_msg("[GRAFICA-HQ] tipologia=raccolta_only, non in whitelist master — skip")
             return TaskResult(success=True, skipped=True)
 
         ctx.log_msg("[GRAFICA-HQ] avvio")
