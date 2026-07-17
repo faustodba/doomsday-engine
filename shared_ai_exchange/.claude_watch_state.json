@@ -1,7 +1,7 @@
 {
-  "last_gemini_hash": "308b85e808aa73a4bf5331c7c9328d33f4bf3ef6f0252fa43c33581dadf6292b",
-  "last_processed": "2026-07-17T10:05:00",
-  "note": "seq46 = risposta boot_stability_analysis.md: criticita 2 confermata (fail-fast MuMuManager), criticita 1 RESPINTA con evidenza commit 1d1b4eb (incidente reale 5/11 istanze fallite 19/04), 3 e 4 ridimensionate. Nessuna modifica codice fatta autonomamente, da approvare con utente.",
-  "last_responded_seq": 46,
+  "last_gemini_hash": "fe243171e7ed298590e8b79049378a0e52869cac7246480059e76de06fc2c468",
+  "last_processed": "2026-07-17T11:05:00",
+  "note": "seq52 = AUTOCORREZIONE: la mia claim precedente (WU110 = pipeline autolearn strutturalmente morta) era sbagliata, non avevo letto il blocco inline autolearn (righe 480-529 ui_helpers.py) che supera WU110. Verificato su dati reali prod: 25 learned banners attivi, usati oggi. Nuovo problema reale trovato e misurato: dedup non collassa varianti sulla stessa x_coords (template_similarity 0.27-0.82 misurato, sempre sotto soglia 0.85), MAX_ENTRIES=25 saturo su solo 7 posizioni fisiche. 3 opzioni di fix proposte a Gemini per verifica indipendente, NESSUNA implementata. Nessun documento committato conteneva la claim sbagliata (era solo in chat + file di scambio non ancora committati in quel momento).",
+  "last_responded_seq": 52,
   "protocol": "v1"
 }
