@@ -295,6 +295,41 @@ stessa (nessuna regressione). Il valore diagnostico parte **dopo** il restart:
 finestra 24h che sfuma da old-code a new-code, throughput e fail_rate non devono
 peggiorare oltre soglia.
 
+### Verifica post-restart (18/07, dopo riavvio BOT + DASHBOARD utente)
+
+Restart BOT effettivo (banner `bot.log`, timezone locale Europe/Rome CEST):
+`16:21:59` locale = **14:21:59 UTC**. Restart DASHBOARD confermato dall'utente
+subito dopo.
+
+**`--check` formale** (`py -3.14 tools/verifica_fix_revisione.py --hours 24`):
+**VERDETTO ✅ nessuna regressione**. 0 ERROR, 0 eccezioni sull'intera finestra.
+Fail_rate invariato su tutti i task tranne `district_showdown` (5.13%→6.17%,
+dentro tolleranza +10pp) — verificato essere lo stesso problema pre-esistente
+su **FAU_09** ("auto roll non avviato", già presente il 17/07 22:36 **prima**
+di qualunque restart di questa sessione). Segnali R-03/R-04/R-05 ancora a
+`count=0`: atteso, condizioni rare non ancora capitate nella finestra osservata,
+non un segno di malfunzionamento.
+
+**Verifica end-to-end del throttle DS** (dedicata, oltre al check generico —
+la telemetria da sola non distingue "should_run=False" da "task non ancora
+schedulato", serve verifica mirata):
+- Stato persistito correttamente su disco dopo la prima run post-restart:
+  `state/FAU_00.json` → `district_showdown.ultimo_dadi_esauriti` popolato con
+  il timestamp della run 15:33→15:35 UTC (la prima confermata **dopo** il
+  restart 14:21:59; le run precedenti di oggi, 03:47/06:56/12:52, erano su
+  codice vecchio, nessun gate).
+- `DistrictShowdownState.should_run()` rieseguito live con i timestamp reali
+  persistiti → `False` per FAU_00/01/05 (gap 188-222min, sotto soglia 300min),
+  `True` per FAU_09 (mai confermato — coerente col suo problema separato).
+- **Prova comportamentale runtime** (non solo la funzione isolata): FAU_00
+  rivisitato dal bot alle 17:58 e 18:04 UTC (raccolta/raccolta_chiusura
+  eseguiti normalmente) ma `district_showdown` **non è ripartito** — gap
+  143-149min dall'ultima conferma (15:35), sotto soglia → il gate blocca
+  correttamente la run prematura senza toccare gli altri task dell'istanza.
+- Non ancora osservata la riapertura del gate oltre soglia (mancano ~110min
+  al momento della verifica) né il bypass domenicale (oggi è sabato) — coperti
+  da unit test (`test_state.py`), da confermare empiricamente quando ricorrono.
+
 ### Asse 2 — Architettura & manutenibilità
 - **[seed, già noto]** Config-tangle risoluzione task list (3 meccanismi
   sovrapposti) — già in refactor, vedi `master-tasks-refactor-design.md`. Non
