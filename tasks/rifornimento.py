@@ -793,6 +793,26 @@ def _compila_e_invia(ctx: TaskContext, risorsa: str, qta: int,
     ctx.device.tap(coord_vai)
     time.sleep(2.5)
 
+    # R-04 (revisione 07/2026) — verifica POST-invio prima di contarlo. Prima si
+    # ritornava True + si registrava la spedizione INCONDIZIONATAMENTE dopo il
+    # tap VAI → se il tap non registrava (lag UI) una spedizione mai partita
+    # veniva contabilizzata (contabilità corrotta, coda_volo/produzione fantasma).
+    # Dopo un invio riuscito il pannello si chiude e il pulsante VAI sparisce
+    # (confermato dall'utente): se VAI è ANCORA presente → invio non partito.
+    # Screenshot None → retry; se ancora None o VAI presente → esito prudente
+    # NON inviato (BACK per chiudere l'eventuale pannello rimasto aperto).
+    screen_conf = ctx.device.screenshot()
+    if screen_conf is None:
+        time.sleep(0.8)
+        screen_conf = ctx.device.screenshot()
+    if screen_conf is None or _vai_abilitato(screen_conf, vai_zona, soglia_vai):
+        motivo = "screenshot non disponibile" if screen_conf is None else "pulsante VAI ancora presente"
+        ctx.log_msg(f"Rifornimento: invio NON confermato ({motivo}) — non conteggiato")
+        ctx.device.key("KEYCODE_BACK")
+        time.sleep(0.8)
+        return False, 0, False, 0, 0, provviste, False
+
+    # Invio confermato (pannello chiuso) → registra produzione.
     # auto-WU14 step2: hook produzione corrente
     try:
         if hasattr(ctx, "state") and ctx.state and ctx.state.produzione_corrente:

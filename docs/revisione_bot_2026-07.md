@@ -125,7 +125,17 @@ handle non chiusi, test falliti). Grezzo da verificare poi.
 Vedi R-03 (marcia success spurio) sopra. Fase B (Gemini evidenza + Claude verifica):
 
 **[R-04] `_compila_e_invia` rifornimento — successo su tap VAI non verificato** ·
-**severità MEDIA** · `tasks/rifornimento.py:793-807`: dopo `tap(coord_vai)` +
+**severità MEDIA** · **✅ RISOLTO 18/07**. Diverso da R-03: nessuna verifica
+post-invio esisteva (solo pre-check VAI abilitato). Confermato dall'utente che
+dopo un invio riuscito **il pannello si chiude e VAI sparisce** → verifica
+sicura possibile. Fix: dopo tap VAI, screenshot (retry su None) + `_vai_abilitato`:
+se VAI ANCORA presente (o screenshot non disponibile) → invio NON partito →
+**non conteggiato** (return False + BACK), altrimenti registra produzione e
+True. Evita spedizioni fantasma nella contabilità/coda_volo/predictor.
+Valutato e SCARTATO un fix cieco (avrebbe rischiato falsi-negativi → doppio
+invio); implementato solo dopo conferma UI dell'utente. Verificato per lettura;
+test_rifornimento 43 pass invariati (9 fail pre-esistenti STALE, firma 5→7
+tuple — test-debt R-10, non miei). · `tasks/rifornimento.py:793-807`: dopo `tap(coord_vai)` +
 `sleep(2.5)` ritorna `True` senza accertare che la maschera si sia chiusa/l'invio
 sia partito. Se il tap fallisce (lag UI), il bot registra come inviata una
 quantità mai partita → **contabilità corrotta** + delay viaggio sprecato nel
