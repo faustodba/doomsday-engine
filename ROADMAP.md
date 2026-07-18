@@ -5,6 +5,65 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 17-18/07/2026 (7) — Revisione tecnica bot+dashboard R-01..R-10 + throttle DS
+
+Revisione autonoma Claude/Gemini (4 assi: correttezza, architettura, performance,
+dashboard+affidabilità/test) su `docs/revisione_bot_2026-07.md`. Dopo la Fase B
+(10 findings qualificati con Gemini), Gemini è andato offline (token saturi);
+implementazione/validazione proseguita da Claude con spiegazione dettagliata +
+conferma utente per ciascun fix.
+
+**Risolti (7)**:
+- **R-10**: `pytest.ini` (testpaths=tests, --import-mode=importlib, ignore
+  test_device.py obsoleto) → collection sbloccata (crash→1009 test raccolti).
+- **R-09**: fallback static `max_squadre`/`livello` (`_ovr(k, ist.get(k,cost))`,
+  pattern WU220) + allineato `instances.json` driftato (FAU_01-10 4→5).
+- **R-02**: field-wipe Pydantic → `extra='allow'` su Istanza/Globali/RuntimeOverride
+  (validato su config prod reale, 0 campi persi). **Richiede riavvio DASHBOARD**.
+- **R-03**: raccolta — screenshot post-marcia mancante → esito prudente FALLITO
+  (no falso OK). Commit `e698eb8`.
+- **R-04**: rifornimento — invio confermato solo se pannello VAI chiuso (no
+  doppio invio). Commit `bf744db`.
+- **R-05**: alleanza — gate HOME `skip()`→`fail()`, uniformato a messaggi/boost
+  (skip rinviava 4h, rischio perdita claim). Commit `8df5a48`.
+- **R-07**: store — `STORE_NON_TROVATO` `fail()`→`skip()` (no rescan griglia
+  ogni ciclo). Commit `f0e4e0d`.
+- **R-06**: finestra evento DistrictShowdown duplicata (task↔predictor,
+  drift latente su `ds_end_hour`) → unificata in
+  `shared/task_scheduling.py::is_in_ds_event_window`. Commit `407f60c`.
+
+**Chiuso non riprodotto (1)**:
+- **R-08**: proposta "persistenza dadi esauriti" **scartata** — telemetria
+  live (FAU_00/FAU_01, 6-7 run/giorno con roll reale 160-270s ciascuna) +
+  conferma utente (20 dadi iniziali ven + 1/30min fino a fine evento + reward)
+  smentiscono un pool unico esauribile. Implementarlo avrebbe causato perdita
+  di dadi (regressione), non un'ottimizzazione. Nessuna modifica al codice.
+
+**Sistema di monitoraggio anti-regressione** — `tools/verifica_fix_revisione.py`
+(baseline/check, KPI fail_rate+throughput/run+ERROR/h+eccezioni da telemetry
+events + log per-istanza) + Monitor live poll 10min (solo transizioni
+azionabili). Baseline pre-restart catturata in prod.
+
+**Ottimizzazione post-revisione — throttle DS ven/sab** (richiesta utente,
+fuori scope R-01..R-10): nuovo `DistrictShowdownState` (`core/state.py`,
+pattern BoostState) — venerdì/sabato skip se gap < 300min (~10 dadi) dall'ultimo
+`dadi_esauriti` confermato; domenica nessun gate (a ridosso chiusura evento,
+ogni dado va raccolto subito). Timer riparte SOLO su conferma positiva, mai su
+esiti ambigui (vincolo esplicito utente). Retrocompatibile con state file prod
+esistenti. Commit `319ac06`.
+
+**Test**: +12 (`test_state.py` DS throttle), +8 (`test_ds_event_window_r06`),
++5 (`test_field_wipe_r02`), +4 (`test_config_static_fallback`). Suite completa
+860 pass/177 fail (baseline sessione 829/180) — zero fail nuovi, i 177 sono
+debito pre-esistente noto (orchestrator/zaino/navigator/alleanza/main/radar/
+rifornimento/task-async/ocr_helpers/store-residual/arena).
+
+**19 commit pushati su origin/main** (`f50be08..319ac06`).
+**Richiede riavvio BOT** (R-03/04/05/06/07/09 + throttle DS) **+ DASHBOARD** (R-02).
+Doc completo: `docs/revisione_bot_2026-07.md`.
+
+---
+
 ## Sessione 17/07/2026 (6) — WU-MasterTasks: selezione task master config-driven (ANNULLA WU234)
 
 Richiesta utente: per necessità di tempo, delegare al master (FauMorfeus)
