@@ -30,7 +30,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 # ==============================================================================
@@ -294,6 +294,8 @@ class NotificationsOverride(BaseModel):
 
 
 class GlobaliOverride(BaseModel):
+    # R-02 — extra='allow': preserva i campi globali runtime non dichiarati.
+    model_config = ConfigDict(extra="allow")
     task:                 TaskFlags                  = Field(default_factory=TaskFlags)
     sistema:              SistemaOverride             = Field(default_factory=SistemaOverride)
     rifugio:              RifugioOverride             = Field(default_factory=RifugioOverride)
@@ -348,6 +350,12 @@ class IstanzaOverride(BaseModel):
     max_squadre, layout, livello scritti ANCHE su instances.json
     dall'endpoint /api/config/istanze.
     """
+    # R-02 (revisione 07/2026) — extra='allow': preserva i campi runtime NON
+    # dichiarati qui invece di scartarli al round-trip load→save (field-wipe).
+    # Prima, un campo per-istanza mancante nel modello spariva dal file al primo
+    # save dashboard (colpito 2 volte: raccolta_reset_leggero_abilitato,
+    # master_task_whitelist). I campi espliciti sotto restano validati/tipizzati.
+    model_config = ConfigDict(extra="allow")
     abilitata:    bool                    = True
     truppe:       int                     = Field(default=0, ge=0)
     tipologia:    TipologiaIstanza        = TipologiaIstanza.full
@@ -402,6 +410,8 @@ class RuntimeOverrides(BaseModel):
     Contenuto completo di runtime_overrides.json.
     Letto ad ogni turno istanza dal bot. Failsafe: se manca → default.
     """
+    # R-02 — extra='allow': preserva eventuali chiavi top-level non dichiarate.
+    model_config = ConfigDict(extra="allow")
     globali: GlobaliOverride            = Field(default_factory=GlobaliOverride)
     istanze: Dict[str, IstanzaOverride] = Field(default_factory=dict)
 

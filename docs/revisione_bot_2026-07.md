@@ -73,7 +73,16 @@ esterna → **severità effettiva BASSA**, non urgente. Decisione utente:
 discrezione (nessun intervento ora, coerente con "solo analisi").
 
 **[R-02] Bug-class field-wipe Pydantic (root cause)** · asse 2+4 · **severità
-MEDIO-ALTA (sistemico)** · evidenza: `dashboard/routers/api_config_overrides.py:64`
+MEDIO-ALTA (sistemico)** · **✅ RISOLTO 18/07**. Catena verificata: `model_validate`
+(default `extra='ignore'`) scarta i campi ignoti in lettura + `save_overrides`
+sovrascrive col `model_dump()` → campi non dichiarati cancellati dal file. Fix:
+`model_config = ConfigDict(extra='allow')` su `IstanzaOverride`/`GlobaliOverride`/
+`RuntimeOverrides` → i campi ignoti sopravvivono al round-trip (verificato Pydantic
+2.13.4). Validato sul config prod REALE: 0 campi persi; campo ignoto arbitrario
+preservato. I campi espliciti restano validati. Non tocca il bot (config_loader
+legge JSON grezzo). Chiude anche la porta a R-09. Test +5 (`test_field_wipe_r02`),
+test_master_task_whitelist 11/11. **Trade-off accettato**: un typo ora persiste
+(visibile) invece di sparire (bug silenzioso). · evidenza: `dashboard/routers/api_config_overrides.py:64`
 `save_overrides(ov.model_dump())` + `RuntimeOverrides`/`IstanzaOverride` senza
 `model_config extra` → ogni campo di `runtime_overrides.json` NON dichiarato nel
 modello viene **droppato** al primo save dashboard. · Già colpito 2 volte oggi
@@ -166,7 +175,13 @@ BoostState/VipState) che marca "dadi esauriti oggi" → skip.
 - Vedi R-01 (auth, LAN → basso) e R-02 (field-wipe) sopra.
 
 **[R-09] `max_squadre`/`livello` static ignorati (fallback hardcoded)** ·
-**severità MEDIA** · `config/config_loader.py:1265-1266`: `_ovr("max_squadre", 4)`
+**severità MEDIA** · **✅ RISOLTO 18/07** (fix codice + allineamento static +
+test). Scoperta chiave in validazione: lo static `instances.json` era DRIFTATO
+(FAU_01-10 max_squadre=4 vs dynamic=5). Fix: (1) `_ovr(k, ist.get(k, cost))` —
+fallback dynamic>static>costante (pattern WU220), costante max_squadre 4→5; (2)
+allineato instances.json (FAU_01-10 →5). Livello già allineato (7 FAU_00/
+FauMorfeus, 6 altri — imposti dall'alleanza, ora protetti dal wipe). Commit
+`fix(config): R-09`. Test +4 (`test_config_static_fallback`), config 39/39. · `config/config_loader.py:1265-1266`: `_ovr("max_squadre", 4)`
 / `_ovr("livello", gcfg.livello_nodo)` leggono solo il dynamic; se la chiave manca
 in `runtime_overrides.json` (post field-wipe R-02, o reset) ripiegano su 4/globale
 ignorando `instances.json` (FAU_00/FauMorfeus = 5 squadre) → master retrocede a 4
