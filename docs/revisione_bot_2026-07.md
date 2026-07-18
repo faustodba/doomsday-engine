@@ -184,11 +184,19 @@ principio di `risolvi_task_istanza` del refactor task).
   col debug). Da raccogliere.
 
 **[R-07] Store `fail()` invece di `skip()` su non-trovato → rilancio ogni ciclo** ·
-**severità BASSA-MEDIA (efficienza)** · `tasks/store.py:792-794`: `STORE_NON_TROVATO`
-→ `fail()`. Lo scheduler non salva `last_run` sui fail → ritenta ogni ciclo
-(~20-30s scan griglia sprecati/ciclo). Latente oggi (edifici posizionati bene),
-ma spreca tempo se un edificio si sposta. (C8). **Proposta**: `skip()` quando
-la causa è "non trovato" (condizione ambientale, non errore tecnico).
+**severità BASSA-MEDIA (efficienza)** · **✅ RISOLTO 18/07**. `tasks/store.py`:
+`STORE_NON_TROVATO` (grid-scan sotto soglia riga 368 / re-match fallito riga 410)
+→ era `fail()`. Lo scheduler non salva `last_run` sui fail → ritenta ogni ciclo
+(~20-30s scan griglia sprecati/ciclo), concreto sulle istanze con edificio spostato
+(~22% fail su FAU_00/04/07/09, memoria `project_store_edificio_da_spostare`). **Fix**:
+spostato `STORE_NON_TROVATO` nel dict `skip_esiti` (accanto a LABEL/CARRELLO/MERCHANT
+_NON_TROVATO/NON_APERTO già a skip) → `skip()` posticipa all'intervallo, no hammer.
+Principio: *fallimento tecnico transitorio → fail; condizione ambientale persistente
+→ skip*. **Corroborazione forte**: il design voluto era già skip — `test_store_non_trovato_skip`
+lo asseriva ma il codice era driftato a `fail`; il fix riallinea codice↔test
+(test_store **5→3 fail, 34→36 pass**, +2 verdi 0 rotti; i 3 residui = `TestFreeRefresh`,
+area diversa pre-esistente). Commit `f0e4e0d`, sync prod OK. Effettivo al restart BOT.
+(C8)
 
 **[R-08] DistrictShowdown senza persistenza dadi → rinaviga ogni tick** ·
 **severità BASSA-MEDIA (efficienza)** · `tasks/district_showdown.py:184-185`

@@ -31,7 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from shared.task_scheduling import can_run_by_time_gate
+from shared.task_scheduling import can_run_by_time_gate, is_in_ds_event_window
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Config rolling stats
@@ -790,21 +790,12 @@ def _district_showdown_will_skip(now=None) -> bool:
             flags = (ov.get("globali") or {}).get("task") or {}
             if not flags.get("district_showdown", False):
                 return True
-        # Window check (replica logica DS task con default config)
-        # Default DistrictShowdownConfig: ds_end_hour=0 → lunedì sempre fuori
-        # window (h < 0 e' sempre False).
+        # Window check — R-06 (revisione 07/2026): delega alla logica condivisa
+        # (prima duplicata qui come if-ladder hardcodato, che ignorava ds_end_hour
+        # → drift se la config DS cambiava). skip = fuori finestra evento.
         if now is None:
             now = _dt.now(_tz.utc)
-        wd  = now.weekday()   # 0=lun … 6=dom
-        h   = now.hour
-        # Lunedì: SEMPRE fuori window (default ds_end_hour=0)
-        if wd == 0:   return True
-        # Venerdì: in window se h >= 0 (default ds_start_hour=0) → sempre True
-        if wd == 4:   return False
-        # Sabato/Domenica: sempre in window
-        if wd in (5, 6): return False
-        # Mar/Mer/Gio: fuori window
-        return True
+        return not is_in_ds_event_window(now)
     except Exception:
         return False
 

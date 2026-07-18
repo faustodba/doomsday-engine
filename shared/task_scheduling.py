@@ -60,6 +60,55 @@ def time_gate_main_mission(now=None) -> bool:
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# Finestra evento multi-giorno — District Showdown (R-06, revisione 07/2026)
+# ──────────────────────────────────────────────────────────────────────────────
+
+# Default finestra evento DS (UTC). DEVONO restare allineati ai default di
+# DistrictShowdownConfig (tasks/district_showdown.py:122-125): Ven 00:00 → Lun 00:00.
+DS_START_WEEKDAY = 4   # venerdì (Python weekday: 0=lun … 6=dom)
+DS_START_HOUR    = 0   # 00:00 UTC
+DS_END_WEEKDAY   = 0   # lunedì
+DS_END_HOUR      = 0   # 00:00 UTC (con hour=0 il lunedì è di fatto escluso)
+
+
+def is_in_ds_event_window(
+    now=None,
+    *,
+    ds_start_weekday: int = DS_START_WEEKDAY,
+    ds_start_hour:    int = DS_START_HOUR,
+    ds_end_weekday:   int = DS_END_WEEKDAY,
+    ds_end_hour:      int = DS_END_HOUR,
+) -> bool:
+    """
+    True se l'ora UTC `now` è nella finestra evento District Showdown
+    (default Ven 00:00 UTC → Lun 00:00 UTC, 3 giorni esatti).
+
+    UNICA implementazione della logica finestra DS (R-06: prima era duplicata
+    tra il task live e il predictor, con rischio drift — il predictor hardcodava
+    `lun → sempre fuori` ignorando `ds_end_hour`). Ora:
+      - tasks/district_showdown.py::_is_in_event_window   → chiama passando cfg
+      - core/cycle_duration_predictor.py::_district_showdown_will_skip → chiama
+        negata (skip = fuori finestra)
+
+    L'ordine dei check (end prima di start) replica esattamente il task originale.
+    """
+    d  = _now_utc(now)
+    wd = d.weekday()   # 0=lun … 6=dom
+    h  = d.hour
+    # Lunedì (fine evento): attivo solo prima di ds_end_hour
+    if wd == ds_end_weekday:
+        return h < ds_end_hour
+    # Venerdì (inizio evento): attivo solo da ds_start_hour in poi
+    if wd == ds_start_weekday:
+        return h >= ds_start_hour
+    # Sabato/Domenica: pieno weekend evento
+    if wd in (5, 6):
+        return True
+    # Mar/Mer/Gio: fuori finestra
+    return False
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Registry — introspection automatica per predictor
 # ──────────────────────────────────────────────────────────────────────────────
 

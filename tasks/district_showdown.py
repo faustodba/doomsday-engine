@@ -34,6 +34,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from core.task import Task, TaskContext, TaskResult
+from shared.task_scheduling import is_in_ds_event_window
 
 
 # ---------------------------------------------------------------------------
@@ -196,23 +197,19 @@ class DistrictShowdownTask(Task):
         Fuori (lun 00:00 → ven 00:00) → False.
         Configurabile via DistrictShowdownConfig.ds_start_*/ds_end_*.
         Default: ds_end_hour=0 → lunedì sempre fuori window (h < 0 sempre False).
+
+        R-06 (revisione 07/2026): logica delegata a
+        shared.task_scheduling.is_in_ds_event_window (single source of truth,
+        prima duplicata nel predictor). Qui passiamo la config dell'istanza →
+        gli override sono rispettati.
         """
         cfg = self._cfg
-        now = datetime.now(timezone.utc)
-        wd  = now.weekday()   # 0=lun … 6=dom
-        h   = now.hour
-
-        # Caso A — lunedì: attivo solo prima di ds_end_hour
-        if wd == cfg.ds_end_weekday:
-            return h < cfg.ds_end_hour
-        # Caso B — venerdì: attivo solo da ds_start_hour in poi
-        if wd == cfg.ds_start_weekday:
-            return h >= cfg.ds_start_hour
-        # Caso C — sabato, domenica: sempre attivo (pieno weekend evento)
-        if wd in (5, 6):
-            return True
-        # Caso D — mar/mer/gio: fuori finestra
-        return False
+        return is_in_ds_event_window(
+            ds_start_weekday=cfg.ds_start_weekday,
+            ds_start_hour=cfg.ds_start_hour,
+            ds_end_weekday=cfg.ds_end_weekday,
+            ds_end_hour=cfg.ds_end_hour,
+        )
 
     def _is_in_fund_raid_window(self) -> bool:
         """
