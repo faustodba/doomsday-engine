@@ -15,7 +15,6 @@ from tasks.zaino import (
     ZainoTask,
     _calcola_gap,
     _cfg,
-    PEZZATURE,
     _DEFAULTS,
 )
 
@@ -91,27 +90,11 @@ class TestCfg:
 
 
 # ==============================================================================
-# 3. PEZZATURE — struttura dati
+# 3. (rimosso) TestPezzature — testava `PEZZATURE` (dict risorsa→[6 asc]),
+#    struttura sostituita da `_PIN_CATALOGO` (keyed per short, valori DESC,
+#    conteggio variabile). Test obsoleto rimosso in R-10 (revisione 07/2026):
+#    le sue assert (crescente, esattamente 6) non valgono sulla nuova struttura.
 # ==============================================================================
-
-class TestPezzature:
-
-    def test_tutte_le_risorse_presenti(self):
-        for r in ["pomodoro", "legno", "acciaio", "petrolio"]:
-            assert r in PEZZATURE
-
-    def test_pezzature_crescenti(self):
-        for risorsa, vals in PEZZATURE.items():
-            assert vals == sorted(vals), f"{risorsa} non ordinato"
-
-    def test_pezzature_positive(self):
-        for risorsa, vals in PEZZATURE.items():
-            for v in vals:
-                assert v > 0, f"{risorsa}: valore <= 0"
-
-    def test_sei_pezzature_per_risorsa(self):
-        for risorsa, vals in PEZZATURE.items():
-            assert len(vals) == 6, f"{risorsa}: attese 6 pezzature"
 
 
 # ==============================================================================

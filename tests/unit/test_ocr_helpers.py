@@ -14,7 +14,6 @@ from unittest.mock import patch, MagicMock
 
 from shared.ocr_helpers import (
     RisorseDeposito,
-    ZONE_RISORSE_DEFAULT,
     estrai_numero,
     ocr_cifre,
     ocr_intero,

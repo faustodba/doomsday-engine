@@ -174,13 +174,23 @@ squadre, ciclo più lento. **Interagisce con R-02** (il field-wipe può innescar
 (C6). **Proposta**: fallback `_ovr` su static `instances.json` prima del default
 (fix bug-class C6 già previsto nell'analisi 07/06).
 
-**[R-10] Debito test** · **severità MEDIA (qualità)** · 8 errori di collection su
-508 test (Gemini): file-name duplicati root vs `tests/` (test_boost, test_orchestrator,
-test_rifornimento, test_navigator) + import rotti (`PEZZATURE` da zaino,
-`KeyCall` da device, `ZONE_RISORSE_DEFAULT` da ocr_helpers — simboli non più
-esistenti). **Proposta**: rimuovere i test-stub stray a root, allineare/eliminare
-i test con import morti. Sblocca una suite verde come rete di sicurezza per i
-refactor.
+**[R-10] Debito test** · **severità MEDIA (qualità)** · **✅ RISOLTO (fase 1
+collection) 18/07**. Diagnosi verificata: la collection crashava (INTERNALERROR)
+per 17 script standalone `test_*.py` a ROOT (uno con `sys.exit` all'import) +
+collisioni di basename dentro `tests/` (due `test_orchestrator.py`) + 3 test con
+import stale (simboli rimossi: `PEZZATURE`, `KeyCall`+`TapCall`/`SwipeCall`/
+`MuMuDevice`, `ZONE_RISORSE_DEFAULT`). **Fix applicato** (test infra, non tocca
+il runtime): nuovo `pytest.ini` con `testpaths=tests` (esclude gli stray root,
+nessuna cancellazione) + `--import-mode=importlib` (risolve basename uguali) +
+`--ignore` di `test_device.py` (obsoleto, testa API rimossa — TODO riscrittura);
+rimossi 2 import stale salvabili (`ZONE_RISORSE_DEFAULT` inutilizzato in
+test_ocr_helpers; `PEZZATURE` + classe obsoleta `TestPezzature` in test_zaino,
+struttura sostituita da `_PIN_CATALOGO`). **Risultato: collection PULITA — 1009
+test raccolti, 0 errori** (prima: crash totale). La suite ora gira = rete di
+sicurezza sbloccata per i refactor. **Follow-up (aperti, non bloccanti)**: (a)
+riscrivere `test_device.py` sull'API attuale di FakeDevice; (b) decidere se
+rimuovere/relocare i 17 script standalone a root (tracciati in git, ora
+inerti alla suite). Pass/fail baseline della suite: da misurare (run completa).
 
 ### Asse 2 — Architettura & manutenibilità
 - **[seed, già noto]** Config-tangle risoluzione task list (3 meccanismi
