@@ -595,6 +595,77 @@ class BoostState:
         }
 
 
+# ==============================================================================
+# DistrictShowdownState — throttle venerdì/sabato basato su ultimo roll confermato
+# ==============================================================================
+#
+# Ottimizzazione 18/07/2026 (post-revisione, non è tra i findings R-01..R-10):
+# meccanica di gioco confermata dall'utente — 20 dadi all'apertura evento (ven
+# 00:00 UTC) + 1 dado maturato ogni 30 min fino a fine evento (lun 00:00 UTC) +
+# dadi bonus da altre ricompense. Con schedule "always" (interval=0.0,
+# config/task_setup.json) il task viene rivalutato ad ogni tick per costruzione
+# → nei giorni con margine ampio (ven/sab) visitare l'istanza subito dopo aver
+# appena esaurito i dadi spreca ~160-270s di navigazione reale (misurato in
+# telemetria) per raccogliere 1-2 dadi soli. La domenica NON si applica alcun
+# throttle: a ridosso della chiusura evento (lun 00:00 UTC, + Fund Raid
+# dom 20:00→lun 00:00) ogni dado va raccolto appena disponibile.
+#
+# Vincolo esplicito dell'utente: il timer riparte SOLO alla conferma positiva
+# "dadi_esauriti" (fase1_esito), MAI su esiti ambigui (timeout/uscita_rilevata/
+# errore/abort_stuck) — un esito inconcludente non prova che i dadi siano
+# davvero finiti, quindi il task deve poter ritentare al tick successivo.
+
+# Attesa minima ven/sab tra un "dadi_esauriti" confermato e il prossimo tentativo.
+# 300min = ~10 dadi maturati al ritmo di 1/30min (valore utente).
+_DS_WAIT_MINUTES: float = 300.0
+
+
+@dataclass
+class DistrictShowdownState:
+    """
+    Throttle "dadi esauriti" per District Showdown, solo venerdì/sabato.
+
+    Logica should_run():
+      - domenica (weekday==6)                → sempre True, nessun gate
+        (mar/mer/gio sono già fuori dalla event window a monte, should_run()
+        del task non arriva nemmeno a interrogare questo stato)
+      - ultimo_dadi_esauriti is None          → True (mai confermato, entra)
+      - gap da ultimo_dadi_esauriti < soglia  → False (skip, aspetta)
+      - gap da ultimo_dadi_esauriti >= soglia → True (probabili nuovi dadi)
+
+    Formato JSON in state/<ISTANZA>.json:
+      "district_showdown": {
+        "ultimo_dadi_esauriti": "2026-07-18T09:00:00+00:00"
+      }
+    """
+
+    ultimo_dadi_esauriti: str | None = None   # ISO UTC, None = mai confermato
+
+    def should_run(self, now: datetime | None = None) -> bool:
+        d = now or _utc_now()
+        if d.weekday() != 4 and d.weekday() != 5:   # non ven/sab → nessun gate
+            return True
+        if self.ultimo_dadi_esauriti is None:
+            return True
+        try:
+            ultimo = datetime.fromisoformat(self.ultimo_dadi_esauriti)
+        except (ValueError, TypeError):
+            return True   # stato corrotto → conservativo, entra
+        gap_min = (d - ultimo).total_seconds() / 60.0
+        return gap_min >= _DS_WAIT_MINUTES
+
+    def registra_dadi_esauriti(self, riferimento: datetime | None = None) -> None:
+        """Chiamare SOLO su fase1_esito=='dadi_esauriti' confermato (mai su esiti ambigui)."""
+        self.ultimo_dadi_esauriti = (riferimento or _utc_now()).isoformat()
+
+    # ── Serializzazione ───────────────────────────────────────────────────────
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "DistrictShowdownState":
+        return cls(ultimo_dadi_esauriti=d.get("ultimo_dadi_esauriti", None))
+
+    def to_dict(self) -> dict:
+        return {"ultimo_dadi_esauriti": self.ultimo_dadi_esauriti}
 
 
 # ==============================================================================
@@ -1120,6 +1191,7 @@ class InstanceState:
     vip:          VipState          = field(default_factory=VipState)
     arena:        ArenaState        = field(default_factory=ArenaState)
     truppe:       TruppeState       = field(default_factory=TruppeState)   # 06/05
+    district_showdown: DistrictShowdownState = field(default_factory=DistrictShowdownState)  # 18/07
 
     # auto-WU14: produzione oraria per sessione
     produzione_corrente: ProduzioneSession | None = None
@@ -1143,6 +1215,7 @@ class InstanceState:
             "vip":           self.vip.to_dict(),
             "arena":         self.arena.to_dict(),
             "truppe":        self.truppe.to_dict(),   # 06/05 consumo addestramento
+            "district_showdown": self.district_showdown.to_dict(),   # 18/07 throttle ven/sab
             # auto-WU14: produzione oraria
             "produzione_corrente": self.produzione_corrente.to_dict() if self.produzione_corrente else None,
             "produzione_storico":  [s.to_dict() for s in self.produzione_storico],
@@ -1168,6 +1241,7 @@ class InstanceState:
             vip=VipState.from_dict(d.get("vip", {})),
             arena=ArenaState.from_dict(d.get("arena", {})),
             truppe=TruppeState.from_dict(d.get("truppe", {})),   # 06/05
+            district_showdown=DistrictShowdownState.from_dict(d.get("district_showdown", {})),  # 18/07
             produzione_corrente=pc,
             produzione_storico=ps,
             ultimo_errore=d.get("ultimo_errore", None),

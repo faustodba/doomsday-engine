@@ -180,7 +180,14 @@ class DistrictShowdownTask(Task):
         # Window temporale evento DS (Ven 00:00 → Lun 00:00 UTC, 3gg esatti).
         # Sub-step 5 (Fund Raid) ha gate proprio `_is_in_fund_raid_window`
         # (Dom 20:00 → Lun 00:00 UTC).
-        return self._is_in_event_window()
+        if not self._is_in_event_window():
+            return False
+        # Throttle ven/sab (18/07): con margine ampio prima di lunedì, evita di
+        # rivisitare l'istanza subito dopo un "dadi_esauriti" confermato per
+        # raccogliere 1-2 dadi soli. Domenica nessun gate (vedi
+        # DistrictShowdownState.should_run) — a ridosso della chiusura evento
+        # ogni dado va raccolto appena disponibile.
+        return ctx.state.district_showdown.should_run()
 
     def e_dovuto(self, ctx: TaskContext) -> bool:  # noqa: ARG002
         return True  # always scheduling — guard in should_run
@@ -522,6 +529,10 @@ class DistrictShowdownTask(Task):
             if _ds_stuck.get(inst, 0) > 0:
                 ctx.log_msg(f"[DS] completato — reset cicli_bloccati ({_ds_stuck[inst]}→0)")
             _ds_stuck[inst] = 0
+            # Throttle ven/sab (18/07): timer riparte SOLO su conferma positiva
+            # "dadi_esauriti" — mai su esiti ambigui (vedi else sotto), che non
+            # provano che i dadi siano davvero finiti.
+            ctx.state.district_showdown.registra_dadi_esauriti()
         else:
             _ds_stuck[inst] = _ds_stuck.get(inst, 0) + 1
             ctx.log_msg(

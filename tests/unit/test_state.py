@@ -22,6 +22,7 @@ from core.state import (
     BoostState,
     VipState,
     ArenaState,
+    DistrictShowdownState,
     _today_utc,
 )
 
@@ -215,6 +216,77 @@ class TestBoostState:
         b = BoostState()
         b.registra_attivo("8h", riferimento=datetime.now(timezone.utc))
         assert "ATTIVO" in b.log_stato()
+
+
+# ==============================================================================
+# TestDistrictShowdownState — R-08 follow-up: throttle ven/sab (18/07/2026)
+# ==============================================================================
+
+class TestDistrictShowdownState:
+
+    # 2026-07-17=venerdì, 07-18=sabato, 07-19=domenica, 07-13=lunedì, 07-14=martedì
+
+    def _utc(self, y, m, d, h, mi=0):
+        return datetime(y, m, d, h, mi, tzinfo=timezone.utc)
+
+    def test_defaults(self):
+        s = DistrictShowdownState()
+        assert s.ultimo_dadi_esauriti is None
+
+    def test_should_run_mai_confermato(self):
+        s = DistrictShowdownState()
+        assert s.should_run(self._utc(2026, 7, 17, 10)) is True   # venerdì
+
+    def test_registra_dadi_esauriti(self):
+        s = DistrictShowdownState()
+        now = self._utc(2026, 7, 17, 10)
+        s.registra_dadi_esauriti(riferimento=now)
+        assert s.ultimo_dadi_esauriti == now.isoformat()
+
+    def test_should_run_false_subito_dopo_venerdi(self):
+        s = DistrictShowdownState()
+        s.registra_dadi_esauriti(riferimento=self._utc(2026, 7, 17, 10, 0))
+        assert s.should_run(self._utc(2026, 7, 17, 10, 5)) is False  # +5min < 300
+
+    def test_should_run_true_dopo_soglia_venerdi(self):
+        s = DistrictShowdownState()
+        s.registra_dadi_esauriti(riferimento=self._utc(2026, 7, 17, 10, 0))
+        assert s.should_run(self._utc(2026, 7, 17, 15, 0)) is True   # +300min
+
+    def test_should_run_false_subito_dopo_sabato(self):
+        s = DistrictShowdownState()
+        s.registra_dadi_esauriti(riferimento=self._utc(2026, 7, 18, 10, 0))
+        assert s.should_run(self._utc(2026, 7, 18, 10, 5)) is False
+
+    def test_should_run_sempre_true_domenica_anche_subito_dopo(self):
+        """Domenica: nessun gate, anche 1 minuto dopo un dadi_esauriti confermato."""
+        s = DistrictShowdownState()
+        s.registra_dadi_esauriti(riferimento=self._utc(2026, 7, 19, 10, 0))
+        assert s.should_run(self._utc(2026, 7, 19, 10, 1)) is True
+
+    def test_should_run_sempre_true_lunedi_anche_subito_dopo(self):
+        """Fuori ven/sab/dom (qui: lunedì) → nessun gate (should_run() del task
+        a monte già filtra la finestra evento; questo è solo un limite interno)."""
+        s = DistrictShowdownState()
+        s.registra_dadi_esauriti(riferimento=self._utc(2026, 7, 13, 10, 0))
+        assert s.should_run(self._utc(2026, 7, 13, 10, 1)) is True
+
+    def test_should_run_stato_corrotto_conservativo(self):
+        s = DistrictShowdownState(ultimo_dadi_esauriti="non-una-data")
+        assert s.should_run(self._utc(2026, 7, 17, 10)) is True
+
+    def test_serializzazione_roundtrip(self):
+        s = DistrictShowdownState()
+        now = self._utc(2026, 7, 17, 10)
+        s.registra_dadi_esauriti(riferimento=now)
+        d = s.to_dict()
+        s2 = DistrictShowdownState.from_dict(d)
+        assert s2.ultimo_dadi_esauriti == now.isoformat()
+
+    def test_from_dict_vuoto(self):
+        s = DistrictShowdownState.from_dict({})
+        assert s.ultimo_dadi_esauriti is None
+        assert s.should_run() is True
 
 
 # ==============================================================================
@@ -492,12 +564,16 @@ class TestInstanceState:
         s.rifornimento.registra_spedizione()
         s.daily_tasks.segna_completato("boost")
         s.metrics.incrementa_cicli()
+        s.district_showdown.registra_dadi_esauriti(
+            riferimento=datetime(2026, 7, 17, 10, tzinfo=timezone.utc)
+        )
         d = s.to_dict()
         s2 = InstanceState.from_dict(d)
         assert s2.instance_name == "FAU_01"
         assert s2.rifornimento.spedizioni_oggi == 1
         assert s2.daily_tasks.is_completato("boost")
         assert s2.metrics.cicli_completati == 1
+        assert s2.district_showdown.ultimo_dadi_esauriti == "2026-07-17T10:00:00+00:00"
 
     def test_from_dict_valori_mancanti(self):
         """from_dict con dict minimo non crasha."""
