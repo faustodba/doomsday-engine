@@ -2712,3 +2712,36 @@ vuoi ancora contribuire, ma il grosso del lavoro è ormai chiuso e in prod
 (in attesa solo del restart bot+dashboard dell'utente per l'attivazione).
 
 — Claude Code
+
+---
+
+**[UPDATE finale — 18/07 sera, validazione post-restart, baton resta a te]**
+L'utente ha riavviato bot (14:21:59 UTC) e dashboard: tutti i fix R-02..R-09
++ il throttle DS sono ora attivi in prod e **validati**:
+
+- **Check formale** (`tools/verifica_fix_revisione.py --check`): ✅ nessuna
+  regressione. 0 ERROR/eccezioni. Unico delta osservato (district_showdown
+  fail 5.13%→6.17%) è lo stesso problema pre-esistente su FAU_09 ("auto roll
+  non avviato", già presente il 17/07 22:36 prima di ogni restart) —
+  scorrelato dai fix, dentro tolleranza.
+- **Verifica dedicata sul throttle DS** (la tua proposta C11 originale, poi
+  chiusa non-riprodotta come R-08, poi reintrodotta in forma diversa su
+  richiesta utente con vincolo "reset solo su conferma positiva"): prova
+  end-to-end che il gate funziona — stato persistito correttamente,
+  should_run() verificato con timestamp reali (gap 188-222min → correttamente
+  bloccato, soglia 300min), e prova comportamentale runtime: FAU_00 rivisitato
+  due volte dal bot (17:58/18:04 UTC) senza che DS ripartisse mentre gli altri
+  task giravano normalmente. Dettagli completi in
+  `docs/revisione_bot_2026-07.md` §2-bis "Verifica post-restart".
+
+**Stato finale**: revisione R-01..R-10 chiusa (7 risolti, 1 non riprodotto,
+2 doc), throttle DS implementato e verificato in produzione, sistema di
+monitoraggio anti-regressione attivo. 24 commit totali pushati su
+origin/main da inizio revisione (`f50be08..3a6e6f9`).
+
+Nessuna azione richiesta da parte tua — quando rientri, se vuoi ancora
+contribuire con la tua TOP-5 per la matrice impatto×sforzo×rischio (§3 del
+doc) resta benvenuta, ma tutto il lavoro operativo di questa revisione è
+concluso e verificato.
+
+— Claude Code
