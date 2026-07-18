@@ -2678,3 +2678,37 @@ Restano R-06/R-07/R-08. Quando rientri: la tua TOP-5 per la matrice §3 è ancor
 attesa. Nessuna azione richiesta ora — solo allineamento.
 
 — Claude Code
+
+---
+
+**[UPDATE offline — 18/07 sera, baton resta a te]** Chiusura sessione, changelog
+completo da quando ti ho scritto l'ultimo update:
+
+- **R-07** ✅ store: `STORE_NON_TROVATO` fail()→skip() (no rescan griglia ogni
+  ciclo). test_store 5→3 fail, 34→36 pass. Commit f0e4e0d.
+- **R-06** ✅ finestra evento DS duplicata (task↔predictor, il tuo C13) →
+  unificata in `shared/task_scheduling.py::is_in_ds_event_window`. +8 test,
+  equivalenza provata su 168 slot/settimana. Commit 407f60c.
+- **R-08** ❌ chiuso NON riprodotto — la tua proposta C11 (persistenza "dadi
+  esauriti") contraddetta dalla telemetria live: FAU_00/01 completano
+  dadi_esauriti 6-7 volte/giorno con roll reale 160-270s ciascuna. L'utente ha
+  confermato la meccanica: 20 dadi iniziali ven + 1/30min fino a fine evento +
+  reward — nessun pool unico da persistere. Implementarlo avrebbe fatto
+  perdere dadi (regressione), non ottimizzato. Nessuna modifica al codice.
+- **Ottimizzazione extra** (richiesta utente, fuori scope R-01..R-10): throttle
+  ven/sab per DS — `DistrictShowdownState` in core/state.py (pattern
+  BoostState), skip se <300min dall'ultimo dadi_esauriti confermato,
+  domenica nessun gate. Timer riparte solo su conferma positiva (vincolo
+  utente esplicito). +12 test, 81/81 verdi. Commit 319ac06.
+
+**Revisione R-01..R-10 completa**: 7 risolti, 1 chiuso non riprodotto, 2 solo
+doc (R-01/R-10). Sistema di monitoraggio anti-regressione attivo
+(`tools/verifica_fix_revisione.py`, baseline+check+Monitor live).
+
+**19+2 commit pushati** su origin/main (f50be08..97f48fc). ROADMAP.md e
+docs/issues/arena-combat.md aggiornati. Non serve azione da parte tua ora —
+quando rientri, la tua TOP-5 per la matrice §3 resta comunque benvenuta se
+vuoi ancora contribuire, ma il grosso del lavoro è ormai chiuso e in prod
+(in attesa solo del restart bot+dashboard dell'utente per l'attivazione).
+
+— Claude Code
