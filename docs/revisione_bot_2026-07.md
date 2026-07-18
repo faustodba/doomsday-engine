@@ -329,6 +329,19 @@ schedulato", serve verifica mirata):
 - Non ancora osservata la riapertura del gate oltre soglia (mancano ~110min
   al momento della verifica) né il bypass domenicale (oggi è sabato) — coperti
   da unit test (`test_state.py`), da confermare empiricamente quando ricorrono.
+- **Conferma live in diretta** (18/07 19:29 UTC, su richiesta utente "sta
+  processando FAU_01, verifica se district_showdown verrà eseguito"): previsto
+  a mente fredda con `should_run()` sui dati reali (gap 242.8min < soglia,
+  weekday=sabato) → **`should_run=False`**, poi verificato con Monitor live
+  sul log JSONL dell'istanza mentre il tick era in corso. Log reale catturato
+  in tempo reale: `Orchestrator: [district_showdown] should_run=False →
+  saltato` alle 19:29:25 UTC (gap ~248min). Confermato che l'ordine di
+  esecuzione segue esattamente le priorità di `config/task_setup.json`
+  (grafica_hq 1 → ... → rifornimento 10 → raccolta 15 → ... → district_showdown
+  70 → ...) — il task è stato valutato e correttamente scartato al suo turno,
+  senza alcuna interferenza con gli altri task del ciclo. Seconda conferma
+  end-to-end indipendente (dopo FAU_00), stavolta osservata in diretta anziché
+  ricostruita a posteriori.
 
 ### Asse 2 — Architettura & manutenibilità
 - **[seed, già noto]** Config-tangle risoluzione task list (3 meccanismi
