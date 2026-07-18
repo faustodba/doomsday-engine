@@ -1731,22 +1731,40 @@ def _esegui_marcia(ctx: TaskContext, n_truppe: int,
     ctx.device.tap(tap_marcia)
     time.sleep(1.5)                   # Slow-PC: 1.2 → 1.5
 
-    # Verifica maschera chiusa
+    # Verifica maschera chiusa. R-03 (revisione 07/2026): la marcia è OK SOLO se
+    # confermiamo positivamente la maschera chiusa. Prima, se lo screenshot
+    # falliva (screen_post None) il blocco era saltato e si ritornava True
+    # INCONDIZIONATO → successo spurio (marcia contata come inviata senza verifica
+    # → contabilità slot sfasata + marcia fantasma nel predictor). Ora: screenshot
+    # None → retry (fallimenti di solito transitori); se ancora None → esito
+    # PRUDENTE FALLITO (il caller fa rollback+reset, più sicuro di una fantasma).
     screen_post = ctx.device.screenshot()
-    if screen_post:
-        maschera_post = ctx.matcher.find_one(screen_post, template_marcia, threshold=soglia)
-        if maschera_post.found:
-            ctx.log_msg(f"Raccolta: maschera ancora aperta score={maschera_post.score:.3f} — retry")
-            ctx.device.tap(tap_marcia)
-            time.sleep(1.0)
+    if screen_post is None:
+        time.sleep(0.8)
+        screen_post = ctx.device.screenshot()
+    if screen_post is None:
+        ctx.log_msg("Raccolta: screenshot post-MARCIA non disponibile (2 tentativi) — esito prudente FALLITO")
+        return False, eta_s
+
+    maschera_post = ctx.matcher.find_one(screen_post, template_marcia, threshold=soglia)
+    if maschera_post.found:
+        ctx.log_msg(f"Raccolta: maschera ancora aperta score={maschera_post.score:.3f} — retry")
+        ctx.device.tap(tap_marcia)
+        time.sleep(1.0)
+        screen_post2 = ctx.device.screenshot()
+        if screen_post2 is None:
+            time.sleep(0.8)
             screen_post2 = ctx.device.screenshot()
-            if screen_post2:
-                m_post2 = ctx.matcher.find_one(screen_post2, template_marcia, threshold=soglia)
-                if m_post2.found:
-                    ctx.log_msg("Raccolta: maschera ancora aperta dopo retry — FALLITO")
-                    return False, eta_s
-        else:
-            ctx.log_msg(f"Raccolta: maschera chiusa score={maschera_post.score:.3f} → marcia OK")
+        if screen_post2 is None:
+            ctx.log_msg("Raccolta: screenshot post-retry non disponibile — esito prudente FALLITO")
+            return False, eta_s
+        m_post2 = ctx.matcher.find_one(screen_post2, template_marcia, threshold=soglia)
+        if m_post2.found:
+            ctx.log_msg("Raccolta: maschera ancora aperta dopo retry — FALLITO")
+            return False, eta_s
+        ctx.log_msg(f"Raccolta: maschera chiusa dopo retry score={m_post2.score:.3f} → marcia OK")
+    else:
+        ctx.log_msg(f"Raccolta: maschera chiusa score={maschera_post.score:.3f} → marcia OK")
 
     return True, eta_s
 

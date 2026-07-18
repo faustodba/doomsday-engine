@@ -95,7 +95,16 @@ ConfigDict(extra='allow')` + preservazione dei campi extra nel dump. Da valutare
 un singolo caso.
 
 **[R-03] `_esegui_marcia` — successo spurio su screenshot fallito** · asse 1 ·
-**severità MEDIA** · evidenza: `tasks/raccolta.py` `_esegui_marcia`: dopo tap
+**severità MEDIA** · **✅ RISOLTO 18/07**. 2 percorsi di `return True` spurio:
+(a) `screen_post is None` → blocco saltato → True incondizionato; (b) maschera
+aperta + retry con `screen_post2 is None` → True pur avendo visto la maschera
+aperta. Fix: `True` SOLO su conferma positiva maschera chiusa; screenshot None →
+retry (0.8s), se ancora None → esito prudente **FALLITO** (il caller fa
+rollback+reset, più sicuro di una marcia fantasma). Coerente con la logica
+esistente ("maschera confermata aperta = FALLITO"). Verificato per lettura +
+`test_raccolta` 81/81 invariato. **Follow-up test**: coprire il path None
+richiede estrarre un helper `_verifica_marcia` (refactor a sé) — tracciato,
+non fatto (evita scope creep su un fix piccolo). · evidenza: `tasks/raccolta.py` `_esegui_marcia`: dopo tap
 MARCIA, se `screen_post is None` (screenshot fallito) il blocco di verifica
 maschera è saltato e la funzione ritorna `True` (marcia "OK") senza conferma. ·
 Impatto: falso positivo marcia → contabilità slot sfasata (il bot crede che una
