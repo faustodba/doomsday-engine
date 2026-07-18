@@ -1262,8 +1262,14 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         # `_carica_istanze_ciclo`).
         instance_name = nome
         truppe        = _ovr("truppe",      12000)
-        max_squadre   = _ovr("max_squadre", 4)
-        livello       = _ovr("livello",     gcfg.livello_nodo)
+        # R-09 (revisione 07/2026) — fallback allo STATIC (instances.json) PRIMA
+        # della costante, come già fa livello_trasporto (WU220). Prima: se il
+        # dynamic mancava (es. field-wipe R-02, o reset) → 4 fisso / globale,
+        # ignorando instances.json → il master retrocedeva a 4 squadre e i
+        # livelli 7 (FAU_00/FauMorfeus) cadevano a 6. Ora: dynamic > static >
+        # costante. Costante max_squadre 4→5 (nessuna istanza usa più 4).
+        max_squadre   = _ovr("max_squadre", ist.get("max_squadre", 5))
+        livello       = _ovr("livello",     ist.get("livello", gcfg.livello_nodo))
         # WU211 — livello edificio di trasporto (rifornimento): determina
         # capacità di trasporto per spedizione + tassa (tabella livelli 1-25).
         # Serve al calcolo deterministico dell'inviato (sostituisce l'OCR del
