@@ -789,11 +789,14 @@ class StoreTask(Task):
                 f"Store completato — acquistati: {acquistati}",
                 data={"acquistati": acquistati, "refreshed": refreshed},
             )
-        if esito == _Esito.STORE_NON_TROVATO:
-            log(f"Outcome={esito!r} → fail")
-            return TaskResult.fail("Store non trovato nella griglia")
-
+        # R-07 (revisione 07/2026) — era fail() → last_run non aggiornato →
+        # rescan completo della griglia OGNI ciclo (~20-30s sprecati) quando
+        # l'edificio è spostato/non in griglia. È una condizione AMBIENTALE
+        # ("non trovato"), non un errore tecnico: uniformato agli altri
+        # *_NON_TROVATO/NON_APERTO già a skip → posticipa all'intervallo, no hammer.
+        # (Il design voluto era già skip: `test_store_non_trovato_skip` lo asserisce.)
         skip_esiti = {
+            _Esito.STORE_NON_TROVATO:    "Store non trovato nella griglia",
             _Esito.NON_IN_HOME:          "Non in home — skip",
             _Esito.LABEL_NON_TROVATA:    "Label store non trovata",
             _Esito.CARRELLO_NON_TROVATO: "Carrello non trovato",
