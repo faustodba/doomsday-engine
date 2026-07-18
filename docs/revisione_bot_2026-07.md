@@ -143,13 +143,20 @@ predictor. (C9, evidenza Gemini; pattern gemello di R-03). **Proposta**:
 post-verifica (maschera chiusa / conferma invio) prima di ritornare success.
 
 **[R-05] Policy incoerente su fallimento gate HOME** · **severità MEDIA
-(consistenza)** · Claude VERIFICATO: stessa condizione `vai_in_home()==False` →
-`alleanza.py:73` ritorna **skip** (posticipa 4h), `messaggi.py:125` e
-`boost.py:183` ritornano **fail** (retry immediato). Su un'istanza bloccata,
-comportamenti divergenti → messaggi/boost affaticano l'emulatore con retry.
-Inoltre **ridondante** col gate HOME dell'orchestrator (`orchestrator.py:242`).
-**Proposta**: policy unica (preferibile delegare al gate orchestrator + rimuovere
-i check duplicati nei task, o uniformare a skip). (C12)
+(consistenza)** · **✅ RISOLTO 18/07 (Opzione A — uniformato a fail)**. Claude
+VERIFICATO: stessa condizione `vai_in_home()==False` → `alleanza.py:73` ritornava
+**skip** (posticipa 4h), `messaggi.py:125` e `boost.py:183` ritornano **fail**
+(retry immediato). Il rischio concreto dello skip: `skip()` aggiorna `last_run`
+(WU79) → alleanza rinviata di 4h su un fallimento HOME meramente tecnico/
+transitorio → possibile **perdita di claim** in quella finestra. **Fix**: `alleanza.py`
+riga 73 `skip()` → `fail("Navigator non ha raggiunto HOME", step="assicura_home")`
+→ `last_run` invariato → ritenta al tick successivo, coerente con messaggi/boost e
+col gate orchestrator (`orchestrator.py`). Scelta A (uniformare a fail) invece di
+delegare-e-rimuovere: minima, chirurgica, reversibile; il de-duplica col gate
+orchestrator resta come debito architetturale (non bloccante). **Nessuna
+regressione**: `test_alleanza` 15/9 identico con/senza fix (git-stash diff; i 15
+fail sono stale pre-esistenti, debito R-10). Commit `8df5a48`, sync prod OK.
+**Effettivo al restart BOT.** (C12)
 
 ### Asse 2 — Architettura & manutenibilità
 - **[seed, già noto]** Config-tangle risoluzione task list (3 meccanismi
@@ -225,6 +232,36 @@ sicurezza sbloccata per i refactor. **Follow-up (aperti, non bloccanti)**: (a)
 riscrivere `test_device.py` sull'API attuale di FakeDevice; (b) decidere se
 rimuovere/relocare i 17 script standalone a root (tracciati in git, ora
 inerti alla suite). Pass/fail baseline della suite: da misurare (run completa).
+
+## 2-bis. Sistema di monitoraggio anti-regressione (18/07)
+
+Attivato su richiesta utente per verificare che i fix implementati **non
+introducano regressioni o peggioramenti**. Due componenti, sola lettura, nessuna
+azione sul bot:
+
+**1. Tool KPI** — `tools/verifica_fix_revisione.py` (py -3.14).
+- Fonti: telemetry events JSONL (KPI strutturati per task) + log per-istanza
+  JSONL (segnali fix + ERROR/eccezioni). Windows-safe (path `C:\...`).
+- Metriche di regressione: `fail_rate_pct` per task, `throughput_per_run`
+  (marce raccolta / spedizioni rifornimento / rivendiche alleanza), ERROR/ora,
+  eccezioni. Soglie: fail_rate +10pp, throughput −25%, ERROR +5/h, eccezioni >0.
+- Segnali fix (informativi, prova che il path del fix si esercita, **non**
+  regressioni): R-03 `esito prudente FALLITO`, R-04 `invio NON confermato`,
+  R-05 `Navigator non ha raggiunto HOME` (su alleanza).
+- Modi: `--baseline` (snapshot pre-restart) / `--check` (confronto + verdetto,
+  exit 1 se regressione). **Baseline pre-restart catturata**:
+  `C:\doomsday-engine-prod\data\verifica_fix_baseline.json`.
+
+**2. Monitor live** — poll 10 min che riusa la logica del tool e stampa SOLO
+transizioni azionabili: `REGRESSIONE:` (nuova), `RIENTRO:`, `ATTIVAZIONE R-0x:`
+(primo esercizio di un fix), `ERRORE-MONITOR:`. Silenzio = salute.
+
+**Dipendenza restart (vincolante)**: i fix diventano attivi solo dopo il
+riavvio di **BOT** (R-03/R-04/R-05/R-09) e **DASHBOARD** (R-02). Prima del
+restart il monitor è correttamente muto e il `--check` confronta baseline↔se
+stessa (nessuna regressione). Il valore diagnostico parte **dopo** il restart:
+finestra 24h che sfuma da old-code a new-code, throughput e fail_rate non devono
+peggiorare oltre soglia.
 
 ### Asse 2 — Architettura & manutenibilità
 - **[seed, già noto]** Config-tangle risoluzione task list (3 meccanismi
