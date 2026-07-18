@@ -70,7 +70,12 @@ class AlleanzaTask(Task):
 
         if ctx.navigator is not None:
             if not ctx.navigator.vai_in_home():
-                return TaskResult.skip("Navigator non ha raggiunto HOME")
+                # R-05 (revisione 07/2026) — era skip() → last_run aggiornato →
+                # task posticipato di 4h (possibile perdita claim). Un fallimento
+                # HOME è tecnico/transitorio, non un vero "salta": uniformato a
+                # fail() come messaggi/boost → last_run invariato → ritenta al
+                # tick successivo (coerente con WU79/orchestrator).
+                return TaskResult.fail("Navigator non ha raggiunto HOME", step="assicura_home")
 
         coord_alleanza = cfg.coord_alleanza
         if hasattr(ctx.config, "coord_alleanza"):
