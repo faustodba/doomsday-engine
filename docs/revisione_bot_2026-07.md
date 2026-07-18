@@ -66,8 +66,11 @@ verrà spot-check nel prossimo incremento.
 controlli sensibili (restart bot, modifica config, maintenance, override
 istanze). Chiunque sulla stessa rete può usarli. · **Proposta**: (a) auth minima
 (HTTP Basic o token in header via middleware), oppure (b) bind su `127.0.0.1` +
-tunnel/reverse-proxy autenticato se serve accesso remoto. · **ESCALATO
-all'utente** (dipende dall'esposizione di rete reale — vedi domanda).
+tunnel/reverse-proxy autenticato se serve accesso remoto. · **CALIBRATO con
+l'utente (18/07)**: macchina su **LAN di casa fidata**, nessuna esposizione
+esterna → **severità effettiva BASSA**, non urgente. Decisione utente:
+**documentare nel planning** con la proposta di fix, implementazione a sua
+discrezione (nessun intervento ora, coerente con "solo analisi").
 
 **[R-02] Bug-class field-wipe Pydantic (root cause)** · asse 2+4 · **severità
 MEDIO-ALTA (sistemico)** · evidenza: `dashboard/routers/api_config_overrides.py:64`
@@ -101,7 +104,83 @@ handle non chiusi, test falliti). Grezzo da verificare poi.
 ## 2. Findings per asse (popolati a incrementi)
 
 ### Asse 1 — Correttezza & robustezza
-_(in attesa Fase A)_
+Vedi R-03 (marcia success spurio) sopra. Fase B (Gemini evidenza + Claude verifica):
+
+**[R-04] `_compila_e_invia` rifornimento — successo su tap VAI non verificato** ·
+**severità MEDIA** · `tasks/rifornimento.py:793-807`: dopo `tap(coord_vai)` +
+`sleep(2.5)` ritorna `True` senza accertare che la maschera si sia chiusa/l'invio
+sia partito. Se il tap fallisce (lag UI), il bot registra come inviata una
+quantità mai partita → **contabilità corrotta** + delay viaggio sprecato nel
+predictor. (C9, evidenza Gemini; pattern gemello di R-03). **Proposta**:
+post-verifica (maschera chiusa / conferma invio) prima di ritornare success.
+
+**[R-05] Policy incoerente su fallimento gate HOME** · **severità MEDIA
+(consistenza)** · Claude VERIFICATO: stessa condizione `vai_in_home()==False` →
+`alleanza.py:73` ritorna **skip** (posticipa 4h), `messaggi.py:125` e
+`boost.py:183` ritornano **fail** (retry immediato). Su un'istanza bloccata,
+comportamenti divergenti → messaggi/boost affaticano l'emulatore con retry.
+Inoltre **ridondante** col gate HOME dell'orchestrator (`orchestrator.py:242`).
+**Proposta**: policy unica (preferibile delegare al gate orchestrator + rimuovere
+i check duplicati nei task, o uniformare a skip). (C12)
+
+### Asse 2 — Architettura & manutenibilità
+- **[seed, già noto]** Config-tangle risoluzione task list (3 meccanismi
+  sovrapposti) — già in refactor, vedi `master-tasks-refactor-design.md`.
+- Vedi R-02 (field-wipe Pydantic, sistemico) sopra.
+
+**[R-06] Logica window DistrictShowdown duplicata** · **severità MEDIA (debito)**
+· `core/cycle_duration_predictor.py:773-800` duplica la logica date/ore weekend di
+`tasks/district_showdown.py:191-215`. Rischio disallineamento: cambiando gli orari
+del task senza aggiornare la copia nel predictor → stime ciclo errate. (C13,
+evidenza Gemini). **Proposta**: unificare in una funzione condivisa (stesso
+principio di `risolvi_task_istanza` del refactor task).
+
+### Asse 3 — Performance & efficienza
+**Misurazioni live (Gemini, log reali)**:
+- **Boot Android**: 17 boot, 26-43s, media **30s**, 0 timeout → in QUESTO ambiente
+  il boot NON è un collo di bottiglia (il vecchio timeout 300s WU201 non si
+  manifesta ora). Declassato.
+- **Timeout arena 10s**: **0 occorrenze nei log correnti** — perché l'arena era
+  già esaurita per oggi. Il ~78% timeout osservato da Claude era DURANTE le run
+  arena reali (diurne). → **PENDING**: valutare con gli screenshot debug arena
+  (già armati) alla prossima run arena reale (post gate UTC≥10). Non concludere
+  finché non c'è la cattura.
+- **Rifornimento delay-measure**: 0 campioni finora (nessun invio recente loggato
+  col debug). Da raccogliere.
+
+**[R-07] Store `fail()` invece di `skip()` su non-trovato → rilancio ogni ciclo** ·
+**severità BASSA-MEDIA (efficienza)** · `tasks/store.py:792-794`: `STORE_NON_TROVATO`
+→ `fail()`. Lo scheduler non salva `last_run` sui fail → ritenta ogni ciclo
+(~20-30s scan griglia sprecati/ciclo). Latente oggi (edifici posizionati bene),
+ma spreca tempo se un edificio si sposta. (C8). **Proposta**: `skip()` quando
+la causa è "non trovato" (condizione ambientale, non errore tecnico).
+
+**[R-08] DistrictShowdown senza persistenza dadi → rinaviga ogni tick** ·
+**severità BASSA-MEDIA (efficienza)** · `tasks/district_showdown.py:184-185`
+`e_dovuto → True` sempre in-window, nessuno stato "dadi esauriti" su disco. Con
+dadi a zero, apre comunque il menu evento ogni ciclo per 3 giorni (~1-2 min
+navigazione sprecata/tick). (C11). **Proposta**: state persistito (come
+BoostState/VipState) che marca "dadi esauriti oggi" → skip.
+
+### Asse 4 — Dashboard + Affidabilità/Test
+- Vedi R-01 (auth, LAN → basso) e R-02 (field-wipe) sopra.
+
+**[R-09] `max_squadre`/`livello` static ignorati (fallback hardcoded)** ·
+**severità MEDIA** · `config/config_loader.py:1265-1266`: `_ovr("max_squadre", 4)`
+/ `_ovr("livello", gcfg.livello_nodo)` leggono solo il dynamic; se la chiave manca
+in `runtime_overrides.json` (post field-wipe R-02, o reset) ripiegano su 4/globale
+ignorando `instances.json` (FAU_00/FauMorfeus = 5 squadre) → master retrocede a 4
+squadre, ciclo più lento. **Interagisce con R-02** (il field-wipe può innescarlo).
+(C6). **Proposta**: fallback `_ovr` su static `instances.json` prima del default
+(fix bug-class C6 già previsto nell'analisi 07/06).
+
+**[R-10] Debito test** · **severità MEDIA (qualità)** · 8 errori di collection su
+508 test (Gemini): file-name duplicati root vs `tests/` (test_boost, test_orchestrator,
+test_rifornimento, test_navigator) + import rotti (`PEZZATURE` da zaino,
+`KeyCall` da device, `ZONE_RISORSE_DEFAULT` da ocr_helpers — simboli non più
+esistenti). **Proposta**: rimuovere i test-stub stray a root, allineare/eliminare
+i test con import morti. Sblocca una suite verde come rete di sicurezza per i
+refactor.
 
 ### Asse 2 — Architettura & manutenibilità
 - **[seed, già noto]** Config-tangle risoluzione task list (3 meccanismi
