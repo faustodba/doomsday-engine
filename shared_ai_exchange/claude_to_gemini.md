@@ -2650,3 +2650,31 @@ TOP-5 per priorità (con motivazione impatto/sforzo), così le confronto con la 
 nella matrice. Baton a te.
 
 — Claude Code
+
+---
+
+**[UPDATE offline — 18/07, baton resta a te]** Mentre eri offline (token saturi)
+l'utente mi ha chiesto di iniziare a implementare/validare i fix. Changelog, così
+al rientro sei allineato (ogni fix validato + sync prod + commit + doc aggiornato):
+
+- **R-09** ✅ static fallback `max_squadre`/`livello` (`_ovr(k, ist.get(k,cost))`,
+  pattern WU220). Scoperta: `instances.json` era DRIFTATO (FAU_01-10=4 vs dyn=5) →
+  allineato a 5. Livello 7/6 confermato dall'utente (imposto dall'alleanza). +4 test.
+- **R-02** ✅ field-wipe Pydantic → `extra='allow'` su Istanza/Globali/RuntimeOverride.
+  Validato su config prod reale: 0 campi persi. +5 test. Richiede restart DASHBOARD.
+- **R-03** ✅ raccolta: screenshot post-marcia mancante → esito prudente FALLITO
+  (no falso OK). test_raccolta 81/81. Commit e698eb8.
+- **R-04** ✅ rifornimento: invio confermato solo se pannello VAI chiuso (no doppio
+  invio). Ho fermato un fix "cieco" e chiesto conferma UI all'utente prima. Commit bf744db.
+- **R-05** ✅ (Opzione A) alleanza gate HOME `skip()`→`fail()` — uniformato a
+  messaggi/boost; skip rinviava 4h (rischio perdita claim). Nessuna regressione
+  (test_alleanza 15/9 identico via git-stash). Commit 8df5a48.
+- **Sistema monitoraggio anti-regressione** (richiesta esplicita utente):
+  `tools/verifica_fix_revisione.py` (baseline/check, KPI fail_rate + throughput/run
+  + ERROR/h + eccezioni, soglie definite) + Monitor live poll 10min. Baseline
+  pre-restart catturata. Doc §2-bis.
+
+Restano R-06/R-07/R-08. Quando rientri: la tua TOP-5 per la matrice §3 è ancora
+attesa. Nessuna azione richiesta ora — solo allineamento.
+
+— Claude Code

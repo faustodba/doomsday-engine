@@ -164,11 +164,19 @@ fail sono stale pre-esistenti, debito R-10). Commit `8df5a48`, sync prod OK.
 - Vedi R-02 (field-wipe Pydantic, sistemico) sopra.
 
 **[R-06] Logica window DistrictShowdown duplicata** · **severità MEDIA (debito)**
-· `core/cycle_duration_predictor.py:773-800` duplica la logica date/ore weekend di
-`tasks/district_showdown.py:191-215`. Rischio disallineamento: cambiando gli orari
-del task senza aggiornare la copia nel predictor → stime ciclo errate. (C13,
-evidenza Gemini). **Proposta**: unificare in una funzione condivisa (stesso
-principio di `risolvi_task_istanza` del refactor task).
+· **✅ RISOLTO 18/07**. `core/cycle_duration_predictor.py::_district_showdown_will_skip`
+duplicava la logica date/ore weekend di `tasks/district_showdown.py::_is_in_event_window`
+come **if-ladder hardcodato** che ignorava `ds_end_hour` (assumeva "lunedì sempre
+fuori"). Drift latente: cambiando gli orari nella config, il task li onorava ma il
+predictor no → stime ciclo errate (stessa classe di WU145→WU156). (C13, evidenza
+Gemini). **Fix**: unica funzione `shared.task_scheduling.is_in_ds_event_window`
+(modulo già condiviso WU157, dipendenze leggere). Il task la chiama passando la sua
+config (source of truth, onora override); il predictor la chiama **negata** (skip =
+fuori finestra). Estrazione fedele (stessa logica/ordine di check, zero cambio
+semantico a default); il bug latente `ds_end_hour>0` è ora gestito uniformemente.
+**Test +8** (`test_ds_event_window_r06`): equivalenza su 168 slot/settimana vs
+vecchia logica sia del task sia del predictor. Suite DS/predictor 28/28. Commit
+sync prod OK. Effettivo al restart BOT. (C13)
 
 ### Asse 3 — Performance & efficienza
 **Misurazioni live (Gemini, log reali)**:
