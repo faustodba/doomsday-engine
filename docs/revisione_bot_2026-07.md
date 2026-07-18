@@ -207,11 +207,27 @@ area diversa pre-esistente). Commit `f0e4e0d`, sync prod OK. Effettivo al restar
 (C8)
 
 **[R-08] DistrictShowdown senza persistenza dadi → rinaviga ogni tick** ·
-**severità BASSA-MEDIA (efficienza)** · `tasks/district_showdown.py:184-185`
-`e_dovuto → True` sempre in-window, nessuno stato "dadi esauriti" su disco. Con
-dadi a zero, apre comunque il menu evento ogni ciclo per 3 giorni (~1-2 min
-navigazione sprecata/tick). (C11). **Proposta**: state persistito (come
-BoostState/VipState) che marca "dadi esauriti oggi" → skip.
+**severità BASSA-MEDIA (efficienza)** · **❌ CHIUSO 18/07 — NON RIPRODOTTO,
+premessa invalidata dai dati live**. Premessa originale (C11): "con dadi a
+zero, il bot apre comunque il menu evento ogni ciclo per 3 giorni (~1-2 min
+sprecati/tick)" → proposta: state persistito "dadi esauriti oggi" → skip (come
+BoostState/VipState). **Verifica su telemetria reale** (regola di governance
+§0, mai concludere senza dati live): `FAU_01` e `FAU_00` completano
+`fase1_esito=dadi_esauriti` **6-7 volte nello STESSO giorno** (17/07, dentro
+finestra evento), ogni volta con durata reale 160-270s (loop di rolling
+effettivo, non un'uscita rapida "niente da fare") — smentisce un pool unico
+esaurito una volta per l'evento. **Confermato dall'utente**: meccanica di
+gioco reale = 20 dadi iniziali venerdì + **1 dado ogni 30 min** fino a
+lunedì + ricompense extra da altre azioni. **Confermato da codice**
+(`config/task_setup.json`, non a memoria): `district_showdown` ha
+`"schedule": "always"`, `"interval_hours": 0.0` → l'orchestrator lo valuta
+**ad ogni tick** (non solo al boot istanza), gate reale in `should_run()` =
+flag abilitato + finestra evento (ven→lun). **Conclusione**: non esiste uno
+stato "esauriti" da persistere — i dadi si rigenerano in continuo per tutta
+la finestra, quindi ricontrollare ad ogni tick è il comportamento CORRETTO
+(cattura i dadi maturati nel frattempo). Implementare il fix come proposto
+avrebbe introdotto una **regressione funzionale** (perdita di dadi/reward
+evento), non un'ottimizzazione. Nessuna modifica al codice. (C11)
 
 ### Asse 4 — Dashboard + Affidabilità/Test
 - Vedi R-01 (auth, LAN → basso) e R-02 (field-wipe) sopra.
