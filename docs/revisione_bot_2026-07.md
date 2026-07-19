@@ -343,6 +343,40 @@ schedulato", serve verifica mirata):
   end-to-end indipendente (dopo FAU_00), stavolta osservata in diretta anziché
   ricostruita a posteriori.
 
+### Bug nel monitor stesso — falso positivo da ciclo giornaliero (19/07)
+
+Il Monitor live ha oscillato `REGRESSIONE:`/`RIENTRO:` ogni ~10-20min per
+diverse ore della notte 18→19/07 su `alleanza` (poi anche `rifornimento`),
+throughput/run stabilmente nel range -25%/-31% rispetto alla baseline.
+
+**Diagnosi**: la baseline era uno **snapshot a istante singolo** (catturata
+di giorno, alta attività alleanza) confrontata con una finestra rolling che
+di notte attraversa naturalmente ore a bassa attività. Confermato su 3 giorni
+di storico (16-18/07): rivendiche/ora 0-2.5 di notte (00-05 UTC) vs 5-9/ora
+di giorno (06-14 UTC), pattern **ricorrente e stabile ogni singolo giorno**.
+Decisivo: `fail=0`, `skip=0`, segnale `R-05 count=0` costanti durante tutte le
+oscillazioni → il percorso di codice toccato da R-05 non si è mai attivato,
+quindi la causa non può essere nel codice — è la disponibilità di claim
+(guidata da altri giocatori dell'alleanza, non dal bot) che varia con l'ora.
+
+**Fix**: nuovo flag `--dod` (day-over-day) in `tools/verifica_fix_revisione.py`.
+`compute_kpi()` accetta ora un limite superiore `until` (prima solo
+open-ended). Il confronto avviene tra la finestra corrente `[now-H, now]` e
+la **stessa fascia oraria 24h prima** `[now-24h-H, now-24h]`, invece che
+contro uno snapshot statico — elimina per costruzione il bias sistematico da
+ciclo giornaliero. Monitor live aggiornato a v2: finestra 6h (più reattiva
+della precedente 24h) confrontata sempre con la stessa fascia del giorno
+prima. Sync prod, commit `97be59e`.
+
+**Residuo noto**: anche col confronto day-over-day può restare una variazione
+minore giorno-su-giorno (verificato: `alleanza` -45% anche vs la stessa
+fascia di ieri, in una finestra di 8h) — varianza naturale nell'attività di
+altri giocatori, non eliminabile senza allargare la tolleranza throughput o
+escludere `alleanza`/`rifornimento` dal check specifico (throughput guidato
+da fattori esterni al bot, non da correttezza del codice). Non affrontato in
+questa sessione — il segnale primario per una vera regressione di codice
+resta `fail_rate`/`ERROR`/eccezioni/segnali fix dedicati, tutti puliti.
+
 ### Asse 2 — Architettura & manutenibilità
 - **[seed, già noto]** Config-tangle risoluzione task list (3 meccanismi
   sovrapposti) — già in refactor, vedi `master-tasks-refactor-design.md`. Non
