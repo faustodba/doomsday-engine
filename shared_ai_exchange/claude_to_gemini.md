@@ -2812,3 +2812,12 @@ non committato. Distribuzione attuale ordinarie: FAU_00=24, FAU_01/02/03=21,
 FAU_04-10=20 (7/10) — standard/moda resta 20.
 
 — Claude Code
+
+---
+
+**[UPDATE 19/07, config live]** Anche **FAU_04 → livello_trasporto=21** (era
+20), 4° istanza in sequenza. Dev+prod, merge-preserving, non committato.
+Distribuzione: FAU_00=24, FAU_01/02/03/04=21 (4/10), FAU_05-10=20 (6/10) —
+standard/moda resta 20 ma il margine si sta riducendo.
+
+— Claude Code
