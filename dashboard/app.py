@@ -1374,13 +1374,15 @@ def ui_config_global(request: Request):
     })
 
 
-# WU-MasterPanel (19/07) — task verificati a comportamento IDENTICO alle
-# istanze ordinarie quando selezionati nella whitelist master (nessun
-# branching di codice su raccolta_only/master in nessuno di questi file —
-# verificato: grep su tasks/*.py, solo grafica_hq/pulizia_cache hanno un
-# guard interno, ma è ridondante col filtro di registrazione in main.py e
-# non cambia il comportamento quando il task è effettivamente whitelisted).
-_MASTER_STANDARD_TASKS = [
+# WU-MasterPanel (19/07) — sottoinsieme di _MASTER_ELIGIBLE_TASKS già
+# SELEZIONATO in prod e verificato a comportamento IDENTICO alle istanze
+# ordinarie (nessun branching di codice su raccolta_only/master in nessuno
+# di questi file — verificato: grep su tasks/*.py, solo grafica_hq/
+# pulizia_cache hanno un guard interno, ma è ridondante col filtro di
+# registrazione in main.py e non cambia il comportamento quando il task è
+# effettivamente whitelisted). Gli altri task eligible ma FUORI da questa
+# lista non sono mai stati provati sul profilo master → badge ⚠ in UI.
+_MASTER_VERIFIED_TASKS = [
     "grafica_hq", "pulizia_cache", "boost", "donazione",
     "vip", "alleanza", "messaggi", "district_showdown",
 ]
@@ -1410,9 +1412,16 @@ def ui_config_master(request: Request):
     """Pannello dedicato al profilo MASTER (istanza raccolta_only + task
     extra via whitelist) — separato da /ui/config/global per non mischiarlo
     con la config generica di tutte le istanze. 3 sezioni:
-      1. Task Standard      — comportamento identico alle istanze ordinarie
+      1. Task Standard   — comportamento identico alle istanze ordinarie,
+         selezione interattiva (whitelist) di quali far girare sul master.
       2. Task Personalizzati — stesso task di tutti, parametri su misura
-      3. Task Extra (solo Master) — selezione whitelist, esclusiva del master
+         (raccolta/raccolta_chiusura: livello nodo/trasporto).
+      3. Task Solo Master — task esclusivi del master (classe di codice
+         dedicata, non un toggle su un task condiviso). Vuota oggi: nessun
+         task del genere esiste nel catalogo (FauMorfeusSetupTask rimosso
+         col refactor WU-MasterTasks). Corretto 19/07 dopo feedback utente:
+         la sez. 3 mostrava erroneamente la whitelist di task CONDIVISI con
+         le istanze ordinarie, non task esclusivi — spostata in sez. 1.
 
     Generico per costruzione: risolve il/i nome/i master via
     shared.instance_meta.get_master_instances() (nessun nome hardcoded qui),
@@ -1452,7 +1461,7 @@ def ui_config_master(request: Request):
         "active":  "master",
         "masters": masters,
         "eligible_master_tasks": _MASTER_ELIGIBLE_TASKS,
-        "standard_tasks": _MASTER_STANDARD_TASKS,
+        "verified_tasks": _MASTER_VERIFIED_TASKS,
         "livello_standard": livello_standard,
         "trasporto_standard": trasporto_standard,
         **_env_label(),

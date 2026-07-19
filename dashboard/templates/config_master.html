@@ -6,7 +6,7 @@
 
 <div class="banner-restart">
   <strong>master</strong> = pannello dedicato al profilo master (raccolta_only + task extra) ·
-  <span style="color:#f87171">Sezione 2/3 richiedono il prossimo avvio dell'istanza</span> per applicarsi.<br>
+  <span style="color:#f87171">Sezione ①/② richiedono il prossimo avvio dell'istanza</span> per applicarsi.<br>
   Config generica di tutte le istanze: <a href="{{ url_prefix }}/ui/config/global">config</a>
 </div>
 
@@ -34,28 +34,37 @@
   </div>
   <p style="font-size:11px;color:var(--text-dim);margin:2px 0 14px">
     Profilo <b>raccolta_only</b>: raccolta/raccolta_chiusura girano sempre, tutto il resto
-    è opt-in. Le 3 sezioni sotto separano cosa gira identico alle istanze ordinarie, cosa
-    ha parametri su misura, e la selezione dei task extra (funzione esclusiva del master).
+    è opt-in. Le 3 sezioni sotto separano: task a comportamento standard (condivisi con le
+    istanze ordinarie, selezionabili), task con parametri su misura, e task realmente
+    esclusivi del master (nessuno implementato al momento — vedi ③).
   </p>
 
   <!-- ── 1. TASK STANDARD ──────────────────────────────────────────── -->
   <div style="border-left:3px solid #4caf7d;padding-left:12px;margin-bottom:18px">
     <div style="font-weight:600;font-size:12px;margin-bottom:4px">① Task Standard</div>
     <p style="font-size:11px;color:var(--text-dim);margin:0 0 8px">
-      Se selezionati in ③, girano <b>identici</b> a un'istanza ordinaria — nessun
-      parametro differenziato, nessuna logica speciale per il master.
+      Stesso codice di un'istanza ordinaria (nessun parametro differenziato, nessuna
+      logica speciale per il master) — qui scegli quali di questi far girare, ciascuno
+      con la sua schedulazione normale.
     </p>
-    <div style="display:flex;flex-wrap:wrap;gap:6px 14px">
-      {% for t in standard_tasks %}
-      <span style="font-size:12px;display:flex;align-items:center;gap:4px">
-        {% if t in m.whitelist %}
-          <span style="color:#4caf7d">●</span> {{ task_labels.get(t, t) }}
-        {% else %}
-          <span style="color:var(--text-dim)">○</span>
-          <span style="color:var(--text-dim)">{{ task_labels.get(t, t) }}</span>
+    <div style="display:flex;flex-wrap:wrap;gap:8px 18px">
+      {% for t in eligible_master_tasks %}
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
+        <input class="mc-standard-task" data-master-nome="{{ m.nome }}" type="checkbox"
+               value="{{ t }}" {% if t in m.whitelist %}checked{% endif %}>
+        {{ task_labels.get(t, t) }}
+        {% if t not in verified_tasks %}
+        <span title="mai validato sul profilo master — attivare con cautela"
+              style="color:#e8a33d;font-size:10px">⚠</span>
         {% endif %}
-      </span>
+      </label>
       {% endfor %}
+    </div>
+    <div class="save-row" style="margin-top:10px">
+      <button class="btn btn-primary" onclick="mcSalvaStandard('{{ m.nome }}')">⬡ salva selezione</button>
+      <span class="save-note">runtime_overrides.json · dynamic · attivo al prossimo avvio dell'istanza</span>
+      <span class="save-ok" id="mc-std-ok-{{ m.nome }}">✓ salvato</span>
+      <span class="save-err" id="mc-std-err-{{ m.nome }}"></span>
     </div>
   </div>
 
@@ -88,33 +97,19 @@
     </div>
   </div>
 
-  <!-- ── 3. TASK EXTRA (SOLO MASTER) ────────────────────────────────── -->
+  <!-- ── 3. TASK SOLO MASTER ────────────────────────────────────────── -->
   <div style="border-left:3px solid #5b8def;padding-left:12px">
-    <div style="font-weight:600;font-size:12px;margin-bottom:4px">③ Task Extra (solo Master)</div>
-    <p style="font-size:11px;color:var(--text-dim);margin:0 0 8px">
-      Selezione dei task aggiuntivi da eseguire, ciascuno con la sua schedulazione normale.
-      Funzione <b>esclusiva del master</b>: le istanze ordinarie non hanno questa scelta,
-      sono legate rigidamente al loro profilo (full/fast).
+    <div style="font-weight:600;font-size:12px;margin-bottom:4px">③ Task Solo Master</div>
+    <p style="font-size:11px;color:var(--text-dim);margin:0">
+      Task che esistono <b>esclusivamente</b> per il master, mai per le istanze ordinarie
+      (classe di codice dedicata, non un semplice toggle su un task condiviso).
+      <b>Nessuno al momento</b> — il vecchio <code>FauMorfeusSetupTask</code> è stato
+      rimosso col refactor WU-MasterTasks; tutti i task in ① sono condivisi col catalogo
+      delle istanze ordinarie. Se in futuro verrà introdotta una variante di comportamento
+      dedicata (es. schieramento truppe in <code>arena</code> —
+      <code>docs/issues/master-tasks-refactor-design.md</code>, decisione A1 aperta),
+      comparirà qui.
     </p>
-    <div style="display:flex;flex-wrap:wrap;gap:8px 18px">
-      {% for t in eligible_master_tasks %}
-      <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
-        <input class="mc-extra-task" data-master-nome="{{ m.nome }}" type="checkbox"
-               value="{{ t }}" {% if t in m.whitelist %}checked{% endif %}>
-        {{ task_labels.get(t, t) }}
-        {% if t not in standard_tasks %}
-        <span title="mai validato sul profilo master — attivare con cautela"
-              style="color:#e8a33d;font-size:10px">⚠</span>
-        {% endif %}
-      </label>
-      {% endfor %}
-    </div>
-    <div class="save-row" style="margin-top:10px">
-      <button class="btn btn-primary" onclick="mcSalvaExtra('{{ m.nome }}')">⬡ salva task extra</button>
-      <span class="save-note">runtime_overrides.json · dynamic · attivo al prossimo avvio dell'istanza</span>
-      <span class="save-ok" id="mc-extra-ok-{{ m.nome }}">✓ salvato</span>
-      <span class="save-err" id="mc-extra-err-{{ m.nome }}"></span>
-    </div>
   </div>
 </div>
 <div class="divider"></div>
@@ -156,12 +151,12 @@ function mcSalvaPersonalizzati(nome) {
                  'mc-cust-ok-' + nome, 'mc-cust-err-' + nome);
 }
 
-function mcSalvaExtra(nome) {
-  const tasks = Array.from(document.querySelectorAll('.mc-extra-task[data-master-nome="' + nome + '"]'))
+function mcSalvaStandard(nome) {
+  const tasks = Array.from(document.querySelectorAll('.mc-standard-task[data-master-nome="' + nome + '"]'))
     .filter(cb => cb.checked)
     .map(cb => cb.value);
   mcPatchIstanza(nome, { master_task_whitelist: tasks },
-                 'mc-extra-ok-' + nome, 'mc-extra-err-' + nome);
+                 'mc-std-ok-' + nome, 'mc-std-err-' + nome);
 }
 </script>
 
