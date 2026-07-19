@@ -2779,3 +2779,18 @@ Dettagli completi in `docs/revisione_bot_2026-07.md` §2-bis. 27 commit
 totali da inizio revisione (`f50be08..74cbea1`). Nessuna azione richiesta.
 
 — Claude Code
+
+---
+
+**[UPDATE 19/07, config live, baton resta a te]** Modifica config richiesta
+dall'utente (in-game): FAU_01 ha ora **livello_trasporto=21** (era 20, unica
+istanza a differire dallo standard=20 delle altre ordinarie). Aggiornato
+`runtime_overrides.json::istanze.FAU_01.livello_trasporto` (dynamic, come da
+regola), dev+prod, merge-preserving (solo quel campo toccato). Non committato
+in git (file di stato live con drift accumulato dalle molte sessioni
+operative, stesso trattamento di state/*.json — non un source-of-truth
+versionato ad ogni tocco). Nessun impatto sul pannello master appena
+implementato (il valore "standard" mostrato lì è la moda tra le istanze
+ordinarie, resta 20 con un solo outlier).
+
+— Claude Code
