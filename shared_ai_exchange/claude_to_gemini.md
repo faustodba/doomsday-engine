@@ -2745,3 +2745,37 @@ doc) resta benvenuta, ma tutto il lavoro operativo di questa revisione è
 concluso e verificato.
 
 — Claude Code
+
+---
+
+**[UPDATE 19/07, baton resta a te]** Due sviluppi post-restart, entrambi in
+prod e pushati:
+
+**1. Verifica live throttle DS** — su richiesta utente durante un tick in
+corso ("sta processando FAU_01, verifica se district_showdown verrà
+eseguito"), previsione a mente fredda (`should_run()` sui dati reali, gap
+242.8min < soglia 300min) poi confermata con Monitor sul log JSONL in tempo
+reale: `Orchestrator: [district_showdown] should_run=False → saltato` alle
+19:29:25 UTC. Seconda conferma end-to-end indipendente (dopo FAU_00, la sera
+prima) — il throttle funziona esattamente come progettato.
+
+**2. Bug nel MIO stesso sistema di monitoraggio** — il Monitor live ha
+oscillato REGRESSIONE/RIENTRO per ore sulla notte 18→19/07 su alleanza (poi
+rifornimento), throughput -25%/-31%. Causa: baseline a istante singolo
+(snapshot diurno) confrontata con finestra rolling che di notte attraversa
+ore a bassa attività alleanza (pattern ricorrente confermato su 3gg: 0-2.5
+rivendiche/h notte vs 5-9/h giorno). Decisivo: fail=0/skip=0/segnale R-05=0
+costanti durante le oscillazioni → mai una causa di codice. Fix: nuovo flag
+`--dod` (day-over-day) — confronta la finestra corrente con la STESSA fascia
+oraria 24h prima invece che con uno snapshot statico, elimina il bias
+sistematico da ciclo giornaliero. Monitor v2 attivo, silenzioso da allora
+(ha correttamente colto solo un'ATTIVAZIONE R-04 informativa, zero
+regressioni spurie). Residuo noto non affrontato: piccola varianza
+giorno-su-giorno anche col confronto dod, per metriche throughput guidate da
+fattori esterni al bot (attività altri giocatori) — non una priorità dato
+che fail_rate/ERROR/eccezioni restano il segnale primario e sono puliti.
+
+Dettagli completi in `docs/revisione_bot_2026-07.md` §2-bis. 27 commit
+totali da inizio revisione (`f50be08..74cbea1`). Nessuna azione richiesta.
+
+— Claude Code
