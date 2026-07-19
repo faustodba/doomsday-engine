@@ -94,8 +94,8 @@ def _parse_ts(s: str) -> datetime | None:
         return None
 
 
-def _iter_events(root: Path, since: datetime):
-    """Itera gli eventi telemetria a partire da `since` (inclusi giorni multipli)."""
+def _iter_events(root: Path, since: datetime, until: datetime | None = None):
+    """Itera gli eventi telemetria nell'intervallo [since, until) (giorni multipli)."""
     ev_dir = root / "data" / "telemetry" / "events"
     if not ev_dir.is_dir():
         return
@@ -106,6 +106,8 @@ def _iter_events(root: Path, since: datetime):
         except ValueError:
             continue
         if day < since.date():
+            continue
+        if until is not None and day > until.date():
             continue
         for line in fp.read_text(encoding="utf-8", errors="replace").splitlines():
             line = line.strip()
@@ -118,11 +120,13 @@ def _iter_events(root: Path, since: datetime):
             ts = _parse_ts(ev.get("ts_start", "") or ev.get("ts_end", ""))
             if ts is None or ts < since:
                 continue
+            if until is not None and ts >= until:
+                continue
             yield ev
 
 
-def _iter_log_lines(root: Path, since: datetime):
-    """Itera le righe dei log per-istanza (JSONL) a partire da `since`."""
+def _iter_log_lines(root: Path, since: datetime, until: datetime | None = None):
+    """Itera le righe dei log per-istanza (JSONL) nell'intervallo [since, until)."""
     log_dir = root / "logs"
     if not log_dir.is_dir():
         return
@@ -142,6 +146,8 @@ def _iter_log_lines(root: Path, since: datetime):
             ts = _parse_ts(rec.get("ts", ""))
             if ts is None or ts < since:
                 continue
+            if until is not None and ts >= until:
+                continue
             yield rec
 
 
@@ -149,10 +155,10 @@ def _iter_log_lines(root: Path, since: datetime):
 # Calcolo KPI
 # ---------------------------------------------------------------------------
 
-def compute_kpi(root: Path, since: datetime) -> dict:
+def compute_kpi(root: Path, since: datetime, until: datetime | None = None) -> dict:
     # --- da telemetria: per-task runs / outcome / throughput ---
     per_task = defaultdict(lambda: {"runs": 0, "ok": 0, "fail": 0, "skip": 0, "throughput": 0})
-    for ev in _iter_events(root, since):
+    for ev in _iter_events(root, since, until):
         t = ev.get("task")
         if not t:
             continue
@@ -173,7 +179,7 @@ def compute_kpi(root: Path, since: datetime) -> dict:
     exception_count = 0
     first_ts = None
     last_ts = None
-    for rec in _iter_log_lines(root, since):
+    for rec in _iter_log_lines(root, since, until):
         ts = _parse_ts(rec.get("ts", ""))
         if ts:
             if first_ts is None or ts < first_ts:
@@ -213,6 +219,7 @@ def compute_kpi(root: Path, since: datetime) -> dict:
     return {
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "window_since": since.isoformat(),
+        "window_until": until.isoformat() if until else None,
         "span_hours": round(span_h, 2),
         "tasks": kpi_task,
         "fix_signals": {
@@ -278,7 +285,7 @@ def compare(baseline: dict, current: dict) -> list[str]:
 # Report
 # ---------------------------------------------------------------------------
 
-def print_report(kpi: dict, baseline: dict | None = None) -> None:
+def print_report(kpi: dict, baseline: dict | None = None, baseline_label: str = "baseline") -> None:
     print("=" * 74)
     print(f"VERIFICA FIX REVISIONE 07/2026  —  finestra da {kpi['window_since']}")
     print(f"span log: {kpi['span_hours']}h   generato: {kpi['generated_at']}")
@@ -303,9 +310,9 @@ def print_report(kpi: dict, baseline: dict | None = None) -> None:
         print("\n" + "=" * 74)
         regs = compare(baseline, kpi)
         if not regs:
-            print("VERDETTO: ✅ nessuna regressione rilevata rispetto alla baseline")
+            print(f"VERDETTO: ✅ nessuna regressione rilevata rispetto a {baseline_label}")
         else:
-            print(f"VERDETTO: ⚠️  {len(regs)} REGRESSIONE/I SOSPETTA/E:")
+            print(f"VERDETTO: ⚠️  {len(regs)} REGRESSIONE/I SOSPETTA/E rispetto a {baseline_label}:")
             for r in regs:
                 print(f"   - {r}")
         print("=" * 74)
@@ -320,9 +327,25 @@ def main() -> int:
     ap.add_argument("--root", type=Path, default=DEFAULT_ROOT, help="root prod (default C:\\doomsday-engine-prod)")
     ap.add_argument("--hours", type=float, default=24.0, help="finestra ore all'indietro (default 24)")
     ap.add_argument("--baseline", action="store_true", help="salva snapshot baseline invece di confrontare")
+    ap.add_argument(
+        "--dod", action="store_true",
+        help="confronto day-over-day: finestra corrente [now-hours,now] vs STESSA fascia oraria "
+             "24h fa [now-24h-hours,now-24h] — elimina i falsi positivi da ciclo giornaliero "
+             "(es. alleanza/rifornimento meno attivi di notte). Uso consigliato per il Monitor live."
+    )
     args = ap.parse_args()
 
-    since = datetime.now(timezone.utc) - timedelta(hours=args.hours)
+    now = datetime.now(timezone.utc)
+    since = now - timedelta(hours=args.hours)
+
+    if args.dod:
+        kpi = compute_kpi(args.root, since, until=now)
+        y_since = since - timedelta(hours=24)
+        y_until = now - timedelta(hours=24)
+        y_kpi = compute_kpi(args.root, y_since, until=y_until)
+        print_report(kpi, baseline=y_kpi, baseline_label="ieri stessa fascia oraria")
+        return 1 if compare(y_kpi, kpi) else 0
+
     snap_path = args.root / "data" / SNAPSHOT_NAME
 
     kpi = compute_kpi(args.root, since)
