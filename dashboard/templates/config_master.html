@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% set active = "master" %}
+{% block title %}Master — Doomsday V6{% endblock %}
+
+{% block content %}
+
+<div class="banner-restart">
+  <strong>master</strong> = pannello dedicato al profilo master (raccolta_only + task extra) ·
+  <span style="color:#f87171">Sezione 2/3 richiedono il prossimo avvio dell'istanza</span> per applicarsi.<br>
+  Config generica di tutte le istanze: <a href="{{ url_prefix }}/ui/config/global">config</a>
+</div>
+
+{% set task_labels = {
+  'grafica_hq':'grafica HQ','pulizia_cache':'pulizia cache','boost':'boost raccolta',
+  'rifornimento':'rifornimento','truppe':'addestra truppe','donazione':'donazione',
+  'main_mission':'main mission','zaino':'zaino','vip':'VIP','alleanza':'alleanza',
+  'messaggi':'messaggi','arena':'arena','arena_mercato':'arena mercato',
+  'district_showdown':'district showdown','store':'store','radar':'radar'} %}
+
+{% if not masters %}
+<div class="section">
+  <div class="sec-label">nessuna istanza master</div>
+  <p style="font-size:12px;color:var(--text-dim)">
+    Nessuna istanza è attualmente marcata come master
+    (<code>shared/instance_meta.py::get_master_instances()</code>).
+  </p>
+</div>
+{% endif %}
+
+{% for m in masters %}
+<div class="section" data-master-nome="{{ m.nome }}">
+  <div class="sec-label">
+    {{ m.nome }} <span title="master" style="color:#f5c542">★</span>
+  </div>
+  <p style="font-size:11px;color:var(--text-dim);margin:2px 0 14px">
+    Profilo <b>raccolta_only</b>: raccolta/raccolta_chiusura girano sempre, tutto il resto
+    è opt-in. Le 3 sezioni sotto separano cosa gira identico alle istanze ordinarie, cosa
+    ha parametri su misura, e la selezione dei task extra (funzione esclusiva del master).
+  </p>
+
+  <!-- ── 1. TASK STANDARD ──────────────────────────────────────────── -->
+  <div style="border-left:3px solid #4caf7d;padding-left:12px;margin-bottom:18px">
+    <div style="font-weight:600;font-size:12px;margin-bottom:4px">① Task Standard</div>
+    <p style="font-size:11px;color:var(--text-dim);margin:0 0 8px">
+      Se selezionati in ③, girano <b>identici</b> a un'istanza ordinaria — nessun
+      parametro differenziato, nessuna logica speciale per il master.
+    </p>
+    <div style="display:flex;flex-wrap:wrap;gap:6px 14px">
+      {% for t in standard_tasks %}
+      <span style="font-size:12px;display:flex;align-items:center;gap:4px">
+        {% if t in m.whitelist %}
+          <span style="color:#4caf7d">●</span> {{ task_labels.get(t, t) }}
+        {% else %}
+          <span style="color:var(--text-dim)">○</span>
+          <span style="color:var(--text-dim)">{{ task_labels.get(t, t) }}</span>
+        {% endif %}
+      </span>
+      {% endfor %}
+    </div>
+  </div>
+
+  <!-- ── 2. TASK PERSONALIZZATI ─────────────────────────────────────── -->
+  <div style="border-left:3px solid #e8a33d;padding-left:12px;margin-bottom:18px">
+    <div style="font-weight:600;font-size:12px;margin-bottom:4px">② Task Personalizzati</div>
+    <p style="font-size:11px;color:var(--text-dim);margin:0 0 8px">
+      Stesso task di tutte le istanze (<b>raccolta</b>/<b>raccolta_chiusura</b>, sempre
+      attivi — non richiedono selezione), ma con parametri su misura per il master.
+    </p>
+    <div style="display:flex;flex-wrap:wrap;gap:14px 24px;align-items:flex-end">
+      <label style="font-size:12px">
+        livello nodo
+        <input type="number" id="mc-livello-{{ m.nome }}" value="{{ m.livello }}"
+               style="width:60px;margin-left:6px">
+        <span style="color:var(--text-dim);font-size:11px">standard istanze: {{ livello_standard }}</span>
+      </label>
+      <label style="font-size:12px">
+        livello trasporto
+        <input type="number" id="mc-trasporto-{{ m.nome }}" value="{{ m.livello_trasporto }}"
+               style="width:60px;margin-left:6px">
+        <span style="color:var(--text-dim);font-size:11px">standard istanze: {{ trasporto_standard }}</span>
+      </label>
+    </div>
+    <div class="save-row" style="margin-top:10px">
+      <button class="btn btn-primary" onclick="mcSalvaPersonalizzati('{{ m.nome }}')">⬡ salva parametri</button>
+      <span class="save-note">runtime_overrides.json · dynamic · attivo al prossimo avvio dell'istanza</span>
+      <span class="save-ok" id="mc-cust-ok-{{ m.nome }}">✓ salvato</span>
+      <span class="save-err" id="mc-cust-err-{{ m.nome }}"></span>
+    </div>
+  </div>
+
+  <!-- ── 3. TASK EXTRA (SOLO MASTER) ────────────────────────────────── -->
+  <div style="border-left:3px solid #5b8def;padding-left:12px">
+    <div style="font-weight:600;font-size:12px;margin-bottom:4px">③ Task Extra (solo Master)</div>
+    <p style="font-size:11px;color:var(--text-dim);margin:0 0 8px">
+      Selezione dei task aggiuntivi da eseguire, ciascuno con la sua schedulazione normale.
+      Funzione <b>esclusiva del master</b>: le istanze ordinarie non hanno questa scelta,
+      sono legate rigidamente al loro profilo (full/fast).
+    </p>
+    <div style="display:flex;flex-wrap:wrap;gap:8px 18px">
+      {% for t in eligible_master_tasks %}
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
+        <input class="mc-extra-task" data-master-nome="{{ m.nome }}" type="checkbox"
+               value="{{ t }}" {% if t in m.whitelist %}checked{% endif %}>
+        {{ task_labels.get(t, t) }}
+        {% if t not in standard_tasks %}
+        <span title="mai validato sul profilo master — attivare con cautela"
+              style="color:#e8a33d;font-size:10px">⚠</span>
+        {% endif %}
+      </label>
+      {% endfor %}
+    </div>
+    <div class="save-row" style="margin-top:10px">
+      <button class="btn btn-primary" onclick="mcSalvaExtra('{{ m.nome }}')">⬡ salva task extra</button>
+      <span class="save-note">runtime_overrides.json · dynamic · attivo al prossimo avvio dell'istanza</span>
+      <span class="save-ok" id="mc-extra-ok-{{ m.nome }}">✓ salvato</span>
+      <span class="save-err" id="mc-extra-err-{{ m.nome }}"></span>
+    </div>
+  </div>
+</div>
+<div class="divider"></div>
+{% endfor %}
+
+<script>
+function mcShowMsg(okId, errId, ok, msg) {
+  const okEl = document.getElementById(okId), errEl = document.getElementById(errId);
+  if (ok) {
+    if (okEl) { okEl.style.opacity='1'; setTimeout(()=>okEl.style.opacity='0', 3000); }
+  } else {
+    if (errEl) {
+      errEl.textContent = '✗ ' + (msg || 'errore');
+      errEl.style.opacity='1';
+      setTimeout(()=>errEl.style.opacity='0', 5000);
+    }
+  }
+}
+
+async function mcPatchIstanza(nome, payload, okId, errId) {
+  try {
+    const resp = await fetch(URL_PREFIX + '/api/config/overrides/istanze/' + encodeURIComponent(nome), {
+      method: 'PATCH',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json().catch(() => ({}));
+    mcShowMsg(okId, errId, resp.ok, data.detail || '');
+    if (resp.ok) setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    mcShowMsg(okId, errId, false, 'network error');
+  }
+}
+
+function mcSalvaPersonalizzati(nome) {
+  const livello = parseInt(document.getElementById('mc-livello-' + nome).value, 10);
+  const trasporto = parseInt(document.getElementById('mc-trasporto-' + nome).value, 10);
+  mcPatchIstanza(nome, { livello: livello, livello_trasporto: trasporto },
+                 'mc-cust-ok-' + nome, 'mc-cust-err-' + nome);
+}
+
+function mcSalvaExtra(nome) {
+  const tasks = Array.from(document.querySelectorAll('.mc-extra-task[data-master-nome="' + nome + '"]'))
+    .filter(cb => cb.checked)
+    .map(cb => cb.value);
+  mcPatchIstanza(nome, { master_task_whitelist: tasks },
+                 'mc-extra-ok-' + nome, 'mc-extra-err-' + nome);
+}
+</script>
+
+{% endblock %}

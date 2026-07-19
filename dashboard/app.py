@@ -1374,6 +1374,91 @@ def ui_config_global(request: Request):
     })
 
 
+# WU-MasterPanel (19/07) — task verificati a comportamento IDENTICO alle
+# istanze ordinarie quando selezionati nella whitelist master (nessun
+# branching di codice su raccolta_only/master in nessuno di questi file —
+# verificato: grep su tasks/*.py, solo grafica_hq/pulizia_cache hanno un
+# guard interno, ma è ridondante col filtro di registrazione in main.py e
+# non cambia il comportamento quando il task è effettivamente whitelisted).
+_MASTER_STANDARD_TASKS = [
+    "grafica_hq", "pulizia_cache", "boost", "donazione",
+    "vip", "alleanza", "messaggi", "district_showdown",
+]
+
+
+def _valore_standard_istanze(campo: str, default, master_names: set) -> object:
+    """Valore più diffuso di `campo` tra le istanze ORDINARIE (non master),
+    merge dynamic>static>default (stesso pattern R-09, config_loader.py).
+    Usato per mostrare "standard: X" a confronto col valore del master."""
+    from collections import Counter
+    from dashboard.services.config_manager import get_instances, get_overrides
+    ov_ist = (get_overrides() or {}).get("istanze", {}) or {}
+    counts = Counter()
+    for ist in (get_instances() or []):
+        nome = ist.get("nome")
+        if not nome or nome in master_names:
+            continue
+        val = (ov_ist.get(nome, {}) or {}).get(campo, ist.get(campo, default))
+        counts[val] += 1
+    if not counts:
+        return default
+    return counts.most_common(1)[0][0]
+
+
+@app.get("/ui/config/master", include_in_schema=False)
+def ui_config_master(request: Request):
+    """Pannello dedicato al profilo MASTER (istanza raccolta_only + task
+    extra via whitelist) — separato da /ui/config/global per non mischiarlo
+    con la config generica di tutte le istanze. 3 sezioni:
+      1. Task Standard      — comportamento identico alle istanze ordinarie
+      2. Task Personalizzati — stesso task di tutti, parametri su misura
+      3. Task Extra (solo Master) — selezione whitelist, esclusiva del master
+
+    Generico per costruzione: risolve il/i nome/i master via
+    shared.instance_meta.get_master_instances() (nessun nome hardcoded qui),
+    quindi resta valido se in futuro cambia quale istanza è il master.
+
+    Salvataggio: riusa l'endpoint esistente
+    PATCH /api/config/overrides/istanze/{nome} (già supporta livello,
+    livello_trasporto, master_task_whitelist — nessuna nuova API introdotta.
+    """
+    from dashboard.services.config_manager import get_instances, get_overrides
+    from shared.instance_meta import get_master_instances
+
+    master_names = set(get_master_instances())
+    overrides = get_overrides() or {}
+    ov_istanze = overrides.get("istanze", {}) or {}
+    instances = get_instances() or []
+
+    livello_standard = _valore_standard_istanze("livello", 6, master_names)
+    trasporto_standard = _valore_standard_istanze("livello_trasporto", 20, master_names)
+
+    masters = []
+    for ist in instances:
+        nome = ist.get("nome")
+        if nome not in master_names:
+            continue
+        ov = ov_istanze.get(nome, {}) or {}
+        wl = ov.get("master_task_whitelist") or []
+        masters.append({
+            "nome": nome,
+            "whitelist": wl,
+            "livello": ov.get("livello", ist.get("livello", livello_standard)),
+            "livello_trasporto": ov.get("livello_trasporto",
+                                        ist.get("livello_trasporto", trasporto_standard)),
+        })
+
+    return templates.TemplateResponse(request, "config_master.html", {
+        "active":  "master",
+        "masters": masters,
+        "eligible_master_tasks": _MASTER_ELIGIBLE_TASKS,
+        "standard_tasks": _MASTER_STANDARD_TASKS,
+        "livello_standard": livello_standard,
+        "trasporto_standard": trasporto_standard,
+        **_env_label(),
+    })
+
+
 # ==============================================================================
 # HTMX partial — vecchia serie (mantenuti per retrocompat.)
 # ==============================================================================
