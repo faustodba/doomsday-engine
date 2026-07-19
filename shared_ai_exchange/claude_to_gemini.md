@@ -2794,3 +2794,12 @@ implementato (il valore "standard" mostrato lì è la moda tra le istanze
 ordinarie, resta 20 con un solo outlier).
 
 — Claude Code
+
+---
+
+**[UPDATE 19/07, config live]** Anche **FAU_03 → livello_trasporto=21** (era
+20), stesso pattern di FAU_01 poco fa. Dev+prod, merge-preserving, non
+committato (stesso motivo). Standard tra le ordinarie resta 20 (2 outlier
+su ~10 istanze, la moda non cambia).
+
+— Claude Code
