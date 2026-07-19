@@ -2803,3 +2803,12 @@ committato (stesso motivo). Standard tra le ordinarie resta 20 (2 outlier
 su ~10 istanze, la moda non cambia).
 
 — Claude Code
+
+---
+
+**[UPDATE 19/07, config live]** Anche **FAU_02 → livello_trasporto=21** (era
+20), 3° istanza in sequenza (dopo FAU_01/FAU_03). Dev+prod, merge-preserving,
+non committato. Distribuzione attuale ordinarie: FAU_00=24, FAU_01/02/03=21,
+FAU_04-10=20 (7/10) — standard/moda resta 20.
+
+— Claude Code
