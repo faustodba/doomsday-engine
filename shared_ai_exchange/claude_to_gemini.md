@@ -2821,3 +2821,17 @@ Distribuzione: FAU_00=24, FAU_01/02/03/04=21 (4/10), FAU_05-10=20 (6/10) —
 standard/moda resta 20 ma il margine si sta riducendo.
 
 — Claude Code
+
+---
+
+**[UPDATE 19/07, config live]** Anche **FAU_05 → livello_trasporto=21** (era
+20), 5° istanza in sequenza. Dev+prod, merge-preserving, non committato.
+Distribuzione: FAU_00=24, FAU_01-05=21 (5/10), FAU_06-10=20 (5/10) —
+**pareggio 5vs5** tra le ordinarie. Il pannello master (`Counter.most_common`)
+su un pareggio ritorna il primo valore incontrato per ordine di inserimento,
+non deterministico/significativo — se il trend continua propongo di rivedere
+il criterio "standard" del pannello (es. valore più recente/maggioritario
+robusto). Non urgente, solo un'osservazione mentre l'utente aggiorna le
+istanze una a una.
+
+— Claude Code
