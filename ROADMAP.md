@@ -17,15 +17,26 @@ in `tools/verifica_fix_revisione.py`, commit `97be59e`.
 **2. Pannello dedicato `/ui/config/master`** (richiesta utente, non un fix):
 nuova pagina separata da `/ui/config/global`, 3 sezioni classificate sui dati
 reali del codice (nessuna congettura):
-- **① Task Standard**: grafica_hq/pulizia_cache/boost/donazione/vip/alleanza/
-  messaggi/district_showdown — verificato zero branching di codice su
-  raccolta_only/master → comportamento identico alle istanze ordinarie.
+- **① Task Standard**: grafica_hq/pulizia_cache/boost/rifornimento/truppe/
+  donazione/main_mission/zaino/vip/alleanza/messaggi/arena/arena_mercato/
+  district_showdown/store/radar — stesso codice di un'istanza ordinaria
+  (verificato zero branching su raccolta_only/master), **selezione
+  interattiva** (whitelist) di quali far girare sul master, badge ⚠ sui
+  non ancora validati.
 - **② Task Personalizzati**: raccolta/raccolta_chiusura (sempre attivi) —
   livello nodo + livello trasporto, con valore "standard" calcolato dal
   valore più diffuso tra le istanze ordinarie (non hardcoded); verificato
   7 vs 6, 25 vs 20 per il master attuale.
-- **③ Task Extra (solo Master)**: la selezione whitelist stessa — funzione
-  esclusiva del master, le istanze ordinarie non la possiedono.
+- **③ Task Solo Master**: task esclusivi del master (classe dedicata, non
+  un toggle su un task condiviso) — **onestamente vuota**, nessuno esiste
+  oggi nel catalogo (`FauMorfeusSetupTask` rimosso con WU-MasterTasks).
+
+**Correzione post-feedback utente (stesso giorno)**: la prima
+implementazione mostrava in ③ la whitelist di task CONDIVISI con le
+istanze ordinarie ("sono per tutte le istanze", feedback diretto) —
+spostata in ① dove appartiene concettualmente; ③ resa onestamente vuota
+con nota + rimando a `docs/issues/master-tasks-refactor-design.md`
+(variante `arena`, decisione A1) per il futuro.
 
 Nome generico "master" (non "FauMorfeus", su richiesta utente esplicita):
 risolve il/i nome/i master via `shared.instance_meta.get_master_instances()`,
@@ -33,9 +44,9 @@ nessun nome hardcoded — resta valido se cambia quale istanza è il master.
 **Zero nuove API**: riusa `PATCH /api/config/overrides/istanze/{nome}` già
 esistente. Solo `GET /ui/config/master` + `config_master.html` + link nav.
 
-Validato: render con dati prod reali (whitelist 8/8 corretti), edge case
-nessun master, home non impattata. Suite dashboard 20/20 verdi. Sync prod,
-commit `d681251`. **Richiede riavvio DASHBOARD** (non bot).
+Validato: render con dati prod reali (whitelist 8/8 corretti in ①), edge
+case nessun master, home non impattata. Suite dashboard 20/20 verdi. Sync
+prod, commit `d681251` + `c17ab7d` (fix). **Richiede riavvio DASHBOARD** (non bot).
 
 Dettagli completi: `docs/issues/dashboard-config.md`.
 
