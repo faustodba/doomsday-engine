@@ -654,7 +654,16 @@ class ArenaTask(Task):
         # Operation: rimuovi N squadre + tap cella + READY (auto-deploy).
         # READY auto-seleziona la migliore composizione disponibile (es. test
         # FAU_06: power 431k → 685k post-rebuild, +59% truppe nuove).
-        if run.sfide_eseguite == 0 and not _deploy_done_settimana(ctx.instance_name):
+        # WU-TaskResolution Fase 3 (20/07) — variante `no_modifica` (pilota
+        # master): NON rifare mai lo schieramento truppe, combattere con il
+        # deploy esistente (schierato a mano). Config-driven via
+        # runtime_overrides.json::istanze.<nome>.task_varianti.arena, letta a
+        # runtime dal task (ctx.config.task_varianti). Il popup stagionale del
+        # lunedì resta gestito da _naviga_a_arena (_gestisci_popup_glory).
+        _variante_arena = (getattr(ctx.config, "task_varianti", None) or {}).get("arena")
+        _salta_schieramento = _variante_arena == "no_modifica"
+        if (run.sfide_eseguite == 0 and not _deploy_done_settimana(ctx.instance_name)
+                and not _salta_schieramento):
             try:
                 n_celle = int(ctx.config.get("max_squadre", 4))
                 self._rebuild_truppe(ctx, n_celle)
@@ -668,6 +677,9 @@ class ArenaTask(Task):
                 ctx.device.back()
                 time.sleep(1.5)
                 return "errore"
+        elif run.sfide_eseguite == 0 and _salta_schieramento:
+            ctx.log_msg("[ARENA] variante no_modifica — schieramento truppe saltato "
+                        "(combatto con deploy esistente)")
 
         # SKIP-CHECKBOX: verifica ad ogni sfida.
         # WU74 (30/04 mattina) — pre-fix: solo 1×/sessione. Bug osservato: la

@@ -1290,6 +1290,11 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         # Meccanismo generico che assorbe master_task_whitelist (in Fase 2
         # convivono: main.py/predictor le mergiano, esplicito vince).
         task_overrides = _ovr("task_overrides", None)
+        # WU-TaskResolution Fase 3 (20/07) — variante comportamentale per-task
+        # (es. {"arena": "no_modifica"} → arena salta lo schieramento truppe).
+        # Letta a runtime dal task stesso (ctx.config.task_varianti). None se
+        # assente. Pilota: arena no_modifica sul master.
+        task_varianti = _ovr("task_varianti", None)
 
         # ── Rifornimento — comune ────────────────────────────────────────────
         DOOMS_ACCOUNT                    = gcfg.dooms_account

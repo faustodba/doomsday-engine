@@ -685,3 +685,80 @@ class TestArenaStateIntegration(unittest.TestCase):
         a = ArenaState(esaurite=True, data_riferimento="2020-01-01")
         self.assertTrue(a.should_run())  # nuovo giorno → reset
         self.assertFalse(a.esaurite)
+
+
+# ==============================================================================
+# Test: WU-TaskResolution Fase 3 — variante arena `no_modifica`
+# Il master salta lo schieramento truppe (_rebuild_truppe) e combatte con il
+# deploy esistente. Config-driven via ctx.config.task_varianti.
+# ==============================================================================
+
+class _CfgVariante:
+    """Config stub con task_varianti + get()/task_abilitato()."""
+    def __init__(self, task_varianti=None):
+        self.task_varianti = task_varianti
+
+    def task_abilitato(self, n):
+        return True
+
+    def get(self, k, d=None):
+        return {"max_squadre": 4}.get(k, d)
+
+
+class TestArenaVarianteNoModifica(unittest.TestCase):
+
+    def setUp(self):
+        self._sleep_patcher = patch("tasks.arena.time.sleep")
+        self._sleep_patcher.start()
+        # _assicura_home reale confronta Screen enum diversi → forziamo True.
+        self._home_patcher = patch(
+            "tasks.arena.ArenaTask._assicura_home",
+            lambda self_task, ctx: True,
+        )
+        self._home_patcher.start()
+        # Gate rebuild ATTIVO: deploy non ancora fatto questa settimana.
+        self._deploy_patcher = patch("tasks.arena._deploy_done_settimana",
+                                     return_value=False)
+        self._deploy_patcher.start()
+        self._mark_patcher = patch("tasks.arena._mark_deploy_done")
+        self._mark_patcher.start()
+
+    def tearDown(self):
+        self._sleep_patcher.stop()
+        self._home_patcher.stop()
+        self._deploy_patcher.stop()
+        self._mark_patcher.stop()
+
+    def _ctx(self, task_varianti):
+        matcher = FakeMatcher()
+        _setup_victory_fight(matcher)
+        ctx = FakeTaskContext(FakeDevice(), matcher, FakeNavigator(home=True))
+        ctx.config = _CfgVariante(task_varianti)
+        return ctx
+
+    def test_no_modifica_salta_rebuild(self):
+        from tasks.arena import ArenaTask
+        task = ArenaTask()
+        ctx = self._ctx({"arena": "no_modifica"})
+        with patch.object(ArenaTask, "_rebuild_truppe") as spy:
+            result = task.run(ctx)
+        spy.assert_not_called()
+        # il flusso prosegue comunque a START CHALLENGE → sfide completate
+        self.assertEqual(result.data["sfide_eseguite"], 5)
+
+    def test_default_esegue_rebuild(self):
+        from tasks.arena import ArenaTask
+        task = ArenaTask()
+        ctx = self._ctx(None)   # nessuna variante → comportamento standard
+        with patch.object(ArenaTask, "_rebuild_truppe") as spy:
+            task.run(ctx)
+        self.assertGreaterEqual(spy.call_count, 1)
+
+    def test_variante_altro_task_non_influisce(self):
+        # una variante impostata per un ALTRO task non tocca arena
+        from tasks.arena import ArenaTask
+        task = ArenaTask()
+        ctx = self._ctx({"store": "qualcosa"})
+        with patch.object(ArenaTask, "_rebuild_truppe") as spy:
+            task.run(ctx)
+        self.assertGreaterEqual(spy.call_count, 1)
