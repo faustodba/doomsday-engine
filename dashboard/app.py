@@ -1350,10 +1350,13 @@ def ui_advanced(request: Request):
 # master. Restano in TASK_CLASS_TO_NAME/task_setup.json (task ordinari delle
 # istanze normali) -- qui si toglie solo la possibilita' di selezionarli per
 # il master via dashboard.
+# radar rimosso 20/07 (richiesta utente) — il master usa la versione custom
+# radar_master (RadarMasterTask, sezione ③ Task Solo Master), il radar standard
+# sarebbe ridondante/conflittuale.
 _MASTER_ELIGIBLE_TASKS = [
     "grafica_hq", "pulizia_cache", "boost", "truppe",
     "donazione", "vip", "alleanza", "messaggi",
-    "arena", "arena_mercato", "district_showdown", "store", "radar",
+    "arena", "arena_mercato", "district_showdown", "store",
 ]
 
 
