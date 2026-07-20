@@ -50,6 +50,18 @@ prod, commit `d681251` + `c17ab7d` (fix). **Richiede riavvio DASHBOARD** (non bo
 
 Dettagli completi: `docs/issues/dashboard-config.md`.
 
+**3. Aggiornamento batch `livello_trasporto` (config live, in-game, 19-20/07)**
+— l'utente alza manualmente il livello "stazione di scambio" di alcune
+istanze e lo comunica una per volta; `runtime_overrides.json` aggiornato
+dynamic dev+prod ad ogni richiesta (merge-preserving, hot-reload, no restart).
+**Stato**: FAU_01/02/03/04/05 → 21 (era 20), FAU_00=24 (pre-esistente),
+**FAU_06-10 ancora a 20** — probabile continuazione in sessione successiva,
+chiedere prima di assumere completato. Con 5/10 ordinarie a 21 si è creato un
+pareggio nella "moda" usata dal pannello master per il valore "standard" —
+segnalato a Gemini (non ancora rientrato), non ancora deciso se aggiustare il
+criterio. Non committato in git (stato live, stesso trattamento di
+`state/*.json`). Dettagli in `.claude/SESSION.md`.
+
 ---
 
 ## Sessione 17-18/07/2026 (7) — Revisione tecnica bot+dashboard R-01..R-10 + throttle DS
