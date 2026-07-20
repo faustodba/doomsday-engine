@@ -1,10 +1,39 @@
 # Design — Refactor configurazione task (profili + varianti comportamentali)
 
-> **STATO: ✅ CONVERGENZA RAGGIUNTA (Claude ⇄ Gemini, 17/07 sera). FASI 1 e 2
-> IMPLEMENTATE (20/07).** Proposta definitiva consolidata sotto. Resta **1
-> sola DECISIONE APERTA per l'utente (A1)**, rimandata esplicitamente — non
-> blocca le fasi implementate. Il dettaglio tecnico è nelle sezioni §0-§7; il
-> log discussione è in fondo.
+> **STATO: ✅ CONVERGENZA RAGGIUNTA (Claude ⇄ Gemini, 17/07 sera). FASI 1, 2 e
+> 3 (pilota arena) IMPLEMENTATE (20/07).** Proposta definitiva consolidata
+> sotto. Il dettaglio tecnico è nelle sezioni §0-§7; il log discussione è in
+> fondo.
+
+---
+
+## ✅ FASE 3 — IMPLEMENTATA (pilota arena, 20/07/2026)
+
+Meccanismo **varianti comportamentali config-driven** (`task_varianti`
+per-istanza in `runtime_overrides.json`, letto a runtime da
+`ctx.config.task_varianti`), decisione A1 = **arena** confermata dall'utente.
+
+- **arena `no_modifica`** (commit `a4b7263`): il master fa arena standard ma
+  salta sempre `_rebuild_truppe` (schieramento truppe), combattendo col deploy
+  esistente. **Validato live** (4 Victory/1 Failure, rank Not-ranked→57). Il
+  popup stagionale del lunedì è già gestito da `_gestisci_popup_glory`.
+- **arena_mercato `priorita`** (commit `7677786`, GATED non-live): il master
+  compra oggetti per TIPO via icona (robusto alla rotazione), a saturazione,
+  in ordine di priorità: Honing Chip → Pants/Shoes Frag leggendari (oro).
+  Meccanica calibrata live (tap prezzo→1+xMAX). Honing Chip attivo; template
+  pants/scarpe oro da catturare in rotazione futura. **Validazione live
+  pendente** — non abilitato sul master finché non validato.
+- **store multi-template** (commit `0608d2f`, correlato): il negozio del
+  castello a livello MAX ha colori diversi → `_find_store()` prova
+  `pin_store` + `pin_store_max`. Non è una variante `task_varianti` ma un
+  fix multi-template generico (vale per ogni castello max-level).
+
+**Config master** (20/07): `master_task_whitelist` migrata a `task_overrides`
+(11 task: 9 precedenti + arena + store), `task_varianti={arena:no_modifica}`.
+
+**Non ancora fatto**: variante `config_partenza` per arena (schieramento da
+preset); validazione live + template oro per arena_mercato; Fase 4 (cleanup
+`tipologia`/`master_task_whitelist` deprecate).
 
 ---
 
