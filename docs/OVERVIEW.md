@@ -611,6 +611,43 @@ Complete è assente (istanza senza la funzione) → `segna_non_disponibile()`.
 Calibrato + validato live su FauMorfeus (auto-complete → missioni → claim
 batch → 5/5 chest, badge a 0).
 
+### 5.6-ter RadarMasterTask (priority 24, periodic 12h — task custom MASTER, 20/07)
+
+[tasks/radar_master.py](../tasks/radar_master.py) — Task esclusivo del master
+(FauMorfeus, via `master_task_whitelist`). Il master ha un **Radar Station
+Pass** (acquisto mensile) che abilita il pulsante **"Complete All"** nella
+Radar Station: un click completa in batch tutte le missioni radar attive,
+consumando stamina (50/missione, cap 1500). Indipendente da
+[tasks/radar.py](../tasks/radar.py) (pallini+card, istanze ordinarie) —
+nessuna condivisione di stato o codice, ma stessa cadenza di schedulazione
+(`interval_hours=12.0`, 2 volte/giorno, richiesta esplicita utente per
+allinearsi al ciclo di generazione missioni radar).
+
+**Idempotente, nessuno `state` dedicato**: il cooldown "Refresh in HH:MM:SS"
+è visibile a schermo dal gioco stesso — se già esaurito il task esce subito
+(`pin_radar_completed`, ~5s), anche se richiamato prima delle 12h (safety
+net, non il gate primario).
+
+**Flusso `run()`**: HOME → tap icona Radar Station → loop (max
+`max_complete_all_iter=15`): tap Complete All → se compare "You've completed
+all the current events!" → fine; se si apre la maschera STAMINA → satura con
+Emergency Recovery (+50) finché il **riempimento verde della barra** (pixel-
+check su `stamina_bar_roi`, non template — il badge "XN >" cambia numero ad
+ogni tap e non è discriminante via match, verificato live) raggiunge
+`soglia_stamina_piena=0.97` → chiudi maschera → ritenta; altrimenti (missione
+completata silenziosamente) → ritenta. **Guardia di sicurezza**: se per
+`max_stato_inatteso=2` iterazioni consecutive non viene riconosciuto né
+completamento né maschera stamina né `pin_radar_title` (ancora sulla Radar
+Station) → abort pulito (mitiga il rischio di un tap caduto su schermata
+inattesa, es. "Mass Deploy" osservato in calibrazione). **Chiusura sempre**
+via `ctx.navigator.vai_in_home()` (mai back/tap grezzo — un back non
+verificato da vista mappa ha aperto "Exit game?" in calibrazione).
+
+**Non gestito** (rimandato): rilevare "Complete All" disabilitato su istanze
+senza il Pass — la guardia di sicurezza intercetta il caso in modo
+conservativo (abort senza azione utile), fallback al flusso standard non
+ancora implementato.
+
 ### 5.7 ZainoTask (priority 25, periodic 168h = 7 giorni)
 
 [tasks/zaino.py](../tasks/zaino.py) — Scarica risorse dal Bag al

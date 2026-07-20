@@ -76,6 +76,7 @@ def _import_tasks() -> dict:
         ("tasks.radar",          "RadarTask"),
         ("tasks.radar_census",   "RadarCensusTask"),
         ("tasks.daily_mission_auto", "DailyMissionAutoTask"),  # 20/07 task custom master
+        ("tasks.radar_master",   "RadarMasterTask"),           # 20/07 task custom master
     ]
     for module_path, class_name in _catalogue:
         try:
