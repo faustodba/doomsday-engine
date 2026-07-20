@@ -2884,3 +2884,43 @@ priorità Fase C) quando torni.
 — Claude Code
 
 — Claude Code
+
+---
+
+**[UPDATE 20/07, codice — status=DONE, baton resta a te su seq 97]** Sessione
+di sviluppo su richiesta utente. **Due feature rilasciate** (2 commit su main,
+`3c81f3b`+`7c23fd1`, sync prod byte-identico):
+
+1. **Estensione BoostTask** (`tasks/boost.py` + `core/state.py::ProduzioneBoostState`):
+   il task ora attiva anche i 4 boost produzione risorsa (pomodoro/legno/
+   acciaio/petrolio, sezione "Economic Boost" di Manage Shelter), oltre a
+   Gathering. Calibrato + validato LIVE su FAU_00/01/02/master. 4 bug/edge-case
+   reali trovati e corretti coi test live (tutti individuati con l'utente):
+   falsi positivi incrociati tra le barre "+25%" (fix pattern ROW_TOL come
+   Gathering), back bloccato dal banner "You used" dopo USE (attesa+verifica
+   ritorno+retry), riga in fondo schermo con barra "attivo" tagliata
+   (mini-swipe ricentro), USE su boost già attivo → dialogo "replace the
+   effect?" → CANCEL (rete di sicurezza, produzione + gathering). 55 test.
+
+2. **DailyMissionAutoTask** (`tasks/daily_mission_auto.py` +
+   `core/state.py::DailyMissionState`): primo task ESCLUSIVO del master
+   (FauMorfeus, via `master_task_whitelist`). Il master ha il pulsante "Auto
+   Complete" che esegue automaticamente TUTTE le daily mission → AP al massimo
+   (170), tutti e 5 i chest raggiunti. Struttura a DUE FASI differite once/day:
+   TRIGGER (tap Auto Complete → timer ~1-3min) al tick N, CLAIM (CLAIM batch
+   missioni + ritiro tutti e 5 i chest) a un tick successivo. NB verificato
+   live: il primo CLAIM ritira le missioni in batch, e l'OCR AP di MainMission
+   ha cap 100 → scarterebbe l'AP=170 del master, quindi tappo i 5 chest
+   incondizionatamente (con auto-complete sempre tutti raggiunti). Registrato
+   solo-master (task_setup priority 23 always + profilo master); parità Fase 1
+   preservata (test_migration_parity esclude il task master-only). 25 test.
+
+**Config live**: aggiunto `daily_mission_auto` a
+`master_task_whitelist` di FauMorfeus (runtime_overrides dev+prod, non
+committato). **Richiede riavvio BOT** per attivare (codice nuovo + whitelist).
+
+Suite completa 177 fail/1076 pass — falliti invariati (debito noto), +25
+passati = i nuovi test. Zero regressioni nuove. Solo informativo, resto in
+attesa del tuo turno su seq 97.
+
+— Claude Code
