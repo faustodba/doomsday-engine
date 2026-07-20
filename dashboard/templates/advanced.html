@@ -43,6 +43,79 @@
 
 <div class="divider"></div>
 
+<!-- ── OVERRIDE TASK PER ISTANZA (WU-TaskResolution Fase 2, 20/07) ─── -->
+{% set task_labels = {
+  'grafica_hq':'grafica HQ','pulizia_cache':'pulizia cache','boost':'boost',
+  'rifornimento':'riforn.','truppe':'truppe','donazione':'donaz.',
+  'main_mission':'main miss.','zaino':'zaino','vip':'VIP','alleanza':'allean.',
+  'messaggi':'messaggi','arena':'arena','arena_mercato':'arena mkt',
+  'district_showdown':'district','store':'store','radar':'radar',
+  'radar_census':'radar cens.','daily_mission_auto':'daily auto','radar_master':'radar all'} %}
+<div class="section">
+  <div class="sec-label">⚙ override task per istanza · null = come da profilo</div>
+  <div style="background:rgba(91,141,239,0.06);border:1px solid var(--border);
+              border-radius:6px;padding:10px 14px;margin-bottom:12px;font-size:11px;color:var(--text-dim)">
+    Accende/spegne un task per la singola istanza (<code>task_overrides</code>, dynamic).
+    <b>(default)</b> = come da profilo dell'istanza: le ordinarie hanno tutti i task attivi,
+    il master★ solo raccolta + quelli selezionati qui. <code>raccolta</code>/<code>raccolta_chiusura</code>
+    girano sempre (non elencati). I task <b>solo-master</b> (daily auto, radar all) sono
+    modificabili solo sulla riga master.
+  </div>
+  <div style="overflow-x:auto">
+    <table class="ist-tbl">
+      <thead>
+        <tr>
+          <th>nome</th>
+          {% for t in task_palette %}
+          <th title="{{ t }}{% if t in task_master_only %} (solo master){% endif %}"
+              style="{% if t in task_master_only %}color:#f5c542{% endif %}">
+            {{ task_labels.get(t, t) }}{% if t in task_master_only %}★{% endif %}
+          </th>
+          {% endfor %}
+          <th>azione</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for ist in instances %}
+        {% set is_master = ist.nome in master_names %}
+        {% set eff = task_ov_eff.get(ist.nome, {}) %}
+        <tr data-nome="{{ ist.nome }}" class="adv-taskov-row">
+          <td>
+            <span style="font-family:var(--font-mono);font-weight:600">{{ ist.nome }}</span>
+            {% if is_master %}<span title="master" style="color:#f5c542;font-weight:700;margin-left:4px">★</span>{% endif %}
+          </td>
+          {% for t in task_palette %}
+          <td>
+            {% if t in task_master_only and not is_master %}
+            <span style="color:var(--text-dim);font-size:10px" title="task esclusivo del master">—</span>
+            {% else %}
+            <select class="adv-taskov" data-task="{{ t }}" style="width:76px;font-size:10px">
+              <option value=""      {% if t not in eff %}selected{% endif %}>(default)</option>
+              <option value="true"  {% if eff.get(t)==True %}selected{% endif %}>ON</option>
+              <option value="false" {% if eff.get(t)==False %}selected{% endif %}>OFF</option>
+            </select>
+            {% endif %}
+          </td>
+          {% endfor %}
+          <td>
+            <button class="btn" style="padding:2px 8px;font-size:10px"
+                    onclick="advResetTaskOv('{{ ist.nome }}')">↻ reset</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <div class="save-row" style="margin-top:10px">
+    <button class="btn btn-primary" onclick="advSalvaTaskOverrides()">⬡ salva override task</button>
+    <span class="save-note">runtime_overrides.json · dynamic · attivo al prossimo avvio dell'istanza</span>
+    <span class="save-ok" id="adv-taskov-ok">✓ salvato</span>
+    <span class="save-err" id="adv-taskov-err"></span>
+  </div>
+</div>
+
+<div class="divider"></div>
+
 <!-- ── ADDESTRAMENTO TRUPPE (default + override per istanza) ─── -->
 {% set tr_cfg = cfg.get('truppe', {}) %}
 {% set tr_cas = tr_cfg.get('caserme', {}) %}
@@ -250,6 +323,48 @@ function advResetTruppeIstanza(nome) {
   const tr = document.querySelector(`tr.adv-truppe-row[data-nome="${nome}"]`);
   if (!tr) return;
   tr.querySelectorAll('.adv-truppe-ov').forEach(s => s.value = '');
+}
+
+// ── Override task per istanza (DYNAMIC, WU-TaskResolution Fase 2) ───────────
+// Ogni riga → task_overrides = solo le voci NON-default (ON=true / OFF=false).
+// Vuoto → task_overrides: null (reset all'ereditarietà dal profilo). PATCH
+// serializzati come advSalvaIstanze (ogni PATCH fa load+save del file).
+async function advSalvaTaskOverrides() {
+  const rows = Array.from(document.querySelectorAll('tr.adv-taskov-row[data-nome]'));
+  let okCount = 0, failCount = 0;
+  const failNames = [];
+  for (const tr of rows) {
+    const nome = tr.dataset.nome;
+    if (!nome) continue;
+    const overrides = {};
+    tr.querySelectorAll('.adv-taskov').forEach(s => {
+      const v = s.value;
+      if (v === 'true')  overrides[s.dataset.task] = true;
+      else if (v === 'false') overrides[s.dataset.task] = false;
+      // '' (default) → non incluso
+    });
+    const payload = { task_overrides: Object.keys(overrides).length ? overrides : null };
+    try {
+      const r = await fetch(URL_PREFIX + '/api/config/overrides/istanze/' + encodeURIComponent(nome), {
+        method: 'PATCH',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(payload),
+      });
+      if (r.ok) okCount++; else { failCount++; failNames.push(nome); }
+    } catch (e) { failCount++; failNames.push(nome); }
+  }
+  if (failCount === 0) {
+    advShowMsg('adv-taskov-ok', 'adv-taskov-err', true, `✓ ${okCount} istanze salvate`);
+  } else {
+    advShowMsg('adv-taskov-ok', 'adv-taskov-err', false,
+               `${okCount} ok, ${failCount} fallite: ${failNames.join(', ')}`);
+  }
+}
+
+function advResetTaskOv(nome) {
+  const tr = document.querySelector(`tr.adv-taskov-row[data-nome="${nome}"]`);
+  if (!tr) return;
+  tr.querySelectorAll('.adv-taskov').forEach(s => s.value = '');
 }
 </script>
 {% endblock %}

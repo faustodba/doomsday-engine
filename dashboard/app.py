@@ -1333,6 +1333,10 @@ def ui_advanced(request: Request):
         "instances":    get_instances(),
         "overrides":    overrides,
         "master_names": set(get_master_instances()),
+        # WU-TaskResolution Fase 2 — override task per-istanza
+        "task_palette": _task_palette(),
+        "task_ov_eff":  _task_override_effettivo(overrides),
+        "task_master_only": _master_exclusive_tasks(),
         **_env_label(),
     })
 
@@ -1412,6 +1416,37 @@ def _master_exclusive_tasks() -> list[str]:
     return sorted(master_tasks - completo_tasks)
 
 
+_TASK_SEMPRE_ATTIVI = ("raccolta", "raccolta_chiusura")
+
+
+def _task_palette() -> list[str]:
+    """WU-TaskResolution Fase 2 — elenco task_name selezionabili per-istanza
+    (override task): unione profilo completo + esclusivi master, esclusi i
+    sempre-attivi raccolta/raccolta_chiusura. Derivato da profiles.json
+    (R4: un task nuovo compare da solo)."""
+    from dashboard.services.config_manager import get_profiles
+    profili = get_profiles()
+    completo = list(profili.get("completo", {}).get("tasks", []))
+    master = list(profili.get("master", {}).get("tasks", []))
+    return [t for t in dict.fromkeys(completo + master)
+            if t not in _TASK_SEMPRE_ATTIVI]
+
+
+def _task_override_effettivo(overrides: dict) -> dict:
+    """Per ogni istanza, l'override task EFFETTIVO = merge del bridge legacy
+    master_task_whitelist (→ True) con task_overrides esplicito (esplicito
+    vince) — stesso merge del bot (main.py/predictor). Serve alla UI per
+    mostrare come ON i task del master ancora espressi via whitelist prima
+    della migrazione a task_overrides. Ritorna {nome: {task: bool}}."""
+    ov_ist = (overrides or {}).get("istanze", {}) or {}
+    out = {}
+    for nome, ov in ov_ist.items():
+        wl = {t: True for t in (ov.get("master_task_whitelist") or [])}
+        expl = ov.get("task_overrides") or {}
+        out[nome] = {**wl, **expl}
+    return out
+
+
 def _valore_standard_istanze(campo: str, default, master_names: set) -> object:
     """Valore più diffuso di `campo` tra le istanze ORDINARIE (non master),
     merge dynamic>static>default (stesso pattern R-09, config_loader.py).
@@ -1471,16 +1506,23 @@ def ui_config_master(request: Request):
     livello_standard = _valore_standard_istanze("livello", 6, master_names)
     trasporto_standard = _valore_standard_istanze("livello_trasporto", 20, master_names)
 
+    # WU-TaskResolution Fase 2 — selezione task del master via task_overrides
+    # (merge col bridge legacy master_task_whitelist, esplicito vince). La UI
+    # legge lo stato EFFETTIVO e scrive task_overrides (migrazione dal
+    # whitelist). `whitelist` resta esposto per retrocompat visiva.
+    eff_all = _task_override_effettivo(overrides)
     masters = []
     for ist in instances:
         nome = ist.get("nome")
         if nome not in master_names:
             continue
         ov = ov_istanze.get(nome, {}) or {}
-        wl = ov.get("master_task_whitelist") or []
+        eff = eff_all.get(nome, {})
+        # task attivi = quelli con override effettivo True
+        attivi = sorted(t for t, on in eff.items() if on)
         masters.append({
             "nome": nome,
-            "whitelist": wl,
+            "whitelist": attivi,   # stato effettivo (task ON), non solo il campo legacy
             "livello": ov.get("livello", ist.get("livello", livello_standard)),
             "livello_trasporto": ov.get("livello_trasporto",
                                         ist.get("livello_trasporto", trasporto_standard)),

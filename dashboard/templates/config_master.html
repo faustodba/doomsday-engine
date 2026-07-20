@@ -181,17 +181,24 @@ function mcSalvaPersonalizzati(nome) {
 }
 
 function mcSalvaStandard(nome) {
-  // Sezioni ① (mc-standard-task) e ③ (mc-exclusive-task) scrivono lo stesso
-  // master_task_whitelist -- qualunque pulsante premuto salva lo stato
-  // combinato di entrambe (checkbox non selezionate in una sezione non
-  // vengono perse: sono nel DOM comunque, solo filtrate per .checked).
+  // WU-TaskResolution Fase 2 — sezioni ① (mc-standard-task) e ③
+  // (mc-exclusive-task) scrivono task_overrides (additivo: {task: true} per
+  // ogni box spuntato; il master ha base solo_raccolta, un task assente =
+  // spento). Il campo legacy master_task_whitelist viene azzerato per
+  // completare la migrazione (il merge nel bot resta idempotente durante la
+  // transizione). Le box non spuntate non vengono perse: sono nel DOM,
+  // filtrate per .checked.
   const tasks = Array.from(document.querySelectorAll(
       '.mc-standard-task[data-master-nome="' + nome + '"], ' +
       '.mc-exclusive-task[data-master-nome="' + nome + '"]'
     ))
     .filter(cb => cb.checked)
     .map(cb => cb.value);
-  mcPatchIstanza(nome, { master_task_whitelist: tasks },
+  const overrides = {};
+  tasks.forEach(t => { overrides[t] = true; });
+  mcPatchIstanza(nome,
+                 { task_overrides: Object.keys(overrides).length ? overrides : null,
+                   master_task_whitelist: null },
                  ['mc-std-ok-' + nome, 'mc-excl-ok-' + nome],
                  ['mc-std-err-' + nome, 'mc-excl-err-' + nome]);
 }

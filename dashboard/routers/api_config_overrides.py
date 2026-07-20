@@ -40,6 +40,7 @@ from dashboard.services.config_manager import (
     get_overrides,
     save_overrides,
     save_instances_fields,
+    get_profiles,
 )
 
 router = APIRouter(prefix="/api/config", tags=["config"])
@@ -71,6 +72,31 @@ def _save_ov(ov: RuntimeOverrides) -> None:
 # ==============================================================================
 # GET /api/config/overrides — lettura completa
 # ==============================================================================
+
+@router.get("/profiles")
+def read_profiles():
+    """
+    WU-TaskResolution Fase 2 (20/07) — espone config/profiles.json al frontend
+    per la UI di selezione task per-istanza (task_overrides). `palette` è
+    l'insieme dei task_name selezionabili derivato dai profili (unione dei
+    task del profilo `completo` + quelli esclusivi del master), così un task
+    nuovo compare da solo (R4) senza liste hardcoded lato client.
+    """
+    profili = get_profiles()
+    completo = list(profili.get("completo", {}).get("tasks", []))
+    master   = list(profili.get("master", {}).get("tasks", []))
+    # raccolta/raccolta_chiusura sono SEMPRE attivi (base di ogni profilo) →
+    # non toggleabili, esclusi dalla palette selezionabile.
+    _sempre_attivi = {"raccolta", "raccolta_chiusura"}
+    palette = [t for t in dict.fromkeys(completo + master) if t not in _sempre_attivi]
+    master_only = sorted(set(master) - set(completo) - _sempre_attivi)
+    return {
+        "profiles": profili,
+        "palette": palette,
+        "master_only": master_only,
+        "sempre_attivi": sorted(_sempre_attivi),
+    }
+
 
 @router.get("/overrides", response_model=RuntimeOverrides)
 def read_overrides():
@@ -742,7 +768,10 @@ def patch_istanza(nome: str, data: dict):
                "max_squadre", "livello", "livello_trasporto",
                "raccolta_fuori_territorio", "allocazione",
                # WU-MasterTasks (17/07) — selezione task del master via UI
-               "master_task_whitelist"}
+               "master_task_whitelist",
+               # WU-TaskResolution Fase 2 (20/07) — override task generico
+               # per-istanza + profilo (profiles.json)
+               "task_overrides", "profilo"}
     for k, v in data.items():
         if k in allowed:
             current_dict[k] = v

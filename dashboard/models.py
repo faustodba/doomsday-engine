@@ -389,6 +389,14 @@ class IstanzaOverride(BaseModel):
     # Sostituisce il bundle fisso FauMorfeusSetupTask (WU234). Campo necessario
     # qui altrimenti un save dashboard lo perderebbe (bug-class WU199/WU102).
     master_task_whitelist: Optional[list[str]] = None
+    # WU-TaskResolution Fase 2 (20/07) — override task GENERICO per-istanza
+    # (add/remove: {"arena": false, "boost": true}). Meccanismo unico che
+    # assorbe master_task_whitelist (in convivenza: il bot mergia i due,
+    # l'esplicito vince). Campo necessario qui altrimenti un save dashboard lo
+    # perderebbe (bug-class WU199/WU102). `profilo` = profilo profiles.json
+    # (completo/solo_raccolta/fast/master); None = fallback a `tipologia`.
+    profilo:       Optional[str]              = None
+    task_overrides: Optional[dict[str, bool]] = None
     # Master istanza (rifugio destinatario): esclusa dagli aggregati ordinari
     # (telemetria, predictor, ranking dashboard). Esposta in sezione UI dedicata.
     master:       bool                    = False
