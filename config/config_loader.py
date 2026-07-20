@@ -1284,6 +1284,12 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         fascia_oraria = _ovr("fascia_oraria", "")
         abilitata     = ist.get("abilitata", True)
         tipologia     = _tipologia
+        # WU-TaskResolution Fase 2 (20/07) — override task per-istanza
+        # (add/remove) letto da runtime_overrides.json::istanze.<nome>.
+        # None se assente (nessun cambio: risolvi_task_istanza lo ignora).
+        # Meccanismo generico che assorbe master_task_whitelist (in Fase 2
+        # convivono: main.py/predictor le mergiano, esplicito vince).
+        task_overrides = _ovr("task_overrides", None)
 
         # ── Rifornimento — comune ────────────────────────────────────────────
         DOOMS_ACCOUNT                    = gcfg.dooms_account

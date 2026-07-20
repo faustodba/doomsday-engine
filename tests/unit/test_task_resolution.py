@@ -84,6 +84,49 @@ def test_override_vuoto_o_none_non_cambia_nulla():
     assert _class_names(base) == _class_names(reg_none) == _class_names(reg_vuoto)
 
 
+# ── Merge whitelist(legacy) + task_overrides(esplicito) — Fase 2 ───────────
+# La logica di merge vive nei chiamanti (main.py/predictor): costruiscono
+# {**{t: True for t in master_task_whitelist}, **task_overrides}. Qui
+# replichiamo quel dict e verifichiamo il contratto "esplicito vince".
+
+def _merge_caller(master_whitelist, task_overrides):
+    """Replica esatta del merge in main.py:743-746 / predictor:1049-1052."""
+    wl = {t: True for t in (master_whitelist or [])}
+    expl = task_overrides or {}
+    return {**wl, **expl} or None
+
+
+def test_merge_esplicito_rimuove_task_aggiunto_da_whitelist():
+    # whitelist aggiunge boost; l'esplicito lo rimuove → esplicito vince.
+    merged = _merge_caller(["boost", "vip"], {"boost": False})
+    reg = risolvi_task_istanza(tipologia="raccolta_only", task_overrides=merged)
+    nomi = _class_names(reg)
+    assert "VipTask" in nomi          # dalla whitelist, non contraddetto
+    assert "BoostTask" not in nomi    # rimosso dall'esplicito
+    assert "RaccoltaTask" in nomi and "RaccoltaChiusuraTask" in nomi
+
+
+def test_merge_unione_whitelist_ed_esplicito():
+    merged = _merge_caller(["boost"], {"vip": True})
+    reg = risolvi_task_istanza(tipologia="raccolta_only", task_overrides=merged)
+    nomi = _class_names(reg)
+    assert "BoostTask" in nomi and "VipTask" in nomi
+
+
+def test_merge_solo_esplicito_su_profilo_completo():
+    # nessuna whitelist (istanza ordinaria): l'esplicito rimuove da completo.
+    merged = _merge_caller([], {"arena": False, "store": False})
+    reg = risolvi_task_istanza(tipologia="full", task_overrides=merged)
+    nomi = _class_names(reg)
+    assert "ArenaTask" not in nomi and "StoreTask" not in nomi
+    assert "BoostTask" in nomi   # non toccato
+
+
+def test_merge_entrambi_vuoti_equivale_a_none():
+    assert _merge_caller([], {}) is None
+    assert _merge_caller(None, None) is None
+
+
 # ── forza_solo_raccolta (doppio giro FAU_00) — precedenza assoluta ────────
 
 def test_forza_solo_raccolta_ignora_profilo_completo():

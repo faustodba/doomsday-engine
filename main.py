@@ -740,10 +740,19 @@ def _thread_istanza(ist, tasks_cls, dry_run, forza_solo_raccolta: bool = False):
     # tipologia/whitelist/swap fast qui sopra, comportamento byte-identico —
     # garantito da tests/unit/test_migration_parity.py). _tipologia/
     # _solo_raccolta/_raccolta_fast restano sopra SOLO per i messaggi di log.
-    _task_overrides = {t: True for t in _master_whitelist} if _master_whitelist else None
+    # WU-TaskResolution Fase 2 (20/07) — task_overrides per-istanza GENERICO
+    # (runtime_overrides.json::istanze.<nome>.task_overrides) mergiato col
+    # bridge legacy master_task_whitelist. L'esplicito vince sul bridge; se
+    # nessuno dei due è presente → None (byte-identico a prima). `profilo`
+    # (nuovo vocabolario profiles.json) passato quando valorizzato: la
+    # funzione lo ignora se non è un profilo noto (default "full" innocuo).
+    _wl_overrides = {t: True for t in _master_whitelist} if _master_whitelist else {}
+    _explicit_overrides = getattr(ctx.config, "task_overrides", None) or {}
+    _merged_overrides = {**_wl_overrides, **_explicit_overrides} or None
     for _row in risolvi_task_istanza(
         tipologia=_tipologia,
-        task_overrides=_task_overrides,
+        profilo=getattr(ctx.config, "profilo", None),
+        task_overrides=_merged_overrides,
         forza_solo_raccolta=forza_solo_raccolta,
     ):
         Cls = tasks_cls.get(_row["class_name"])

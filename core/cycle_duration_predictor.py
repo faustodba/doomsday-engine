@@ -1046,10 +1046,21 @@ def predict_cycle_from_config(strict_schedule: bool = True,
         # Il kill-switch globale (`task_globali`) resta applicato QUI, non
         # dentro risolvi_task_istanza (che non lo conosce — livello
         # ortogonale gestito dal chiamante, stessa semantica di main.py).
+        # WU-TaskResolution Fase 2 (20/07) — mirror di main.py: task_overrides
+        # per-istanza generico mergiato col bridge legacy master_task_whitelist
+        # (esplicito vince). `profilo` runtime (nuovo vocabolario) passato se
+        # valorizzato — NB è la chiave RUNTIME ist_o.get("profilo"), non il
+        # profilo STATIC di instances.json usato sopra come fallback tipologia.
         _master_wl = ist_o.get("master_task_whitelist") or []
-        _task_overrides = {t: True for t in _master_wl} if _master_wl else None
+        _wl_overrides = {t: True for t in _master_wl} if _master_wl else {}
+        _explicit_overrides = ist_o.get("task_overrides") or {}
+        _task_overrides = {**_wl_overrides, **_explicit_overrides} or None
         tasks_consid = []
-        for _row in risolvi_task_istanza(tipologia=tipologia, task_overrides=_task_overrides):
+        for _row in risolvi_task_istanza(
+            tipologia=tipologia,
+            profilo=ist_o.get("profilo"),
+            task_overrides=_task_overrides,
+        ):
             # Kill-switch verificato sul nome NOMINALE (pre-swap) — replica
             # l'ordine del branch raccolta_fast pre-refactor: il filtro su
             # task_globali avviene PRIMA di applicare lo swap
