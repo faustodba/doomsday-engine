@@ -56,6 +56,12 @@ class RadarMasterConfig:
     pin_stamina_mask:    str = "pin/pin_stamina_mask.png"
     pin_radar_title:     str = "pin/pin_radar_title.png"
     soglia_template:     float = 0.80
+    # 20/07 — safety Pass non attivo: quando il Radar Station Pass (acquisto
+    # mensile) è scaduto/assente, il pulsante Complete All mostra un LUCCHETTO
+    # in alto a destra dell'icona (calibrato su FAU_06, colore pulsante
+    # invariato). Se rilevato → skip pulito (niente tap a vuoto/loop sterile).
+    pin_pass_lock:       str = "pin/pin_radar_lock.png"
+    pass_lock_roi:       tuple[int, int, int, int] = (85, 400, 140, 445)
 
     # Pixel-check riempimento barra stamina (verificato: ratio verde
     # proporzionale alla stamina reale, non serve OCR sui numeri).
@@ -77,6 +83,7 @@ class _Esito:
     COMPLETATO       = "completato"
     MAX_ITER         = "max_iter_raggiunto"
     STATO_INATTESO   = "stato_inatteso"
+    PASS_NON_ATTIVO  = "pass_non_attivo"
     ERRORE           = "errore"
 
 
@@ -125,11 +132,23 @@ class RadarMasterTask(Task):
             time.sleep(cfg.wait_apertura_radar)
             log(f"attesa apertura mappa + notifiche ({cfg.wait_notifiche}s)")
             time.sleep(cfg.wait_notifiche)
-            debug.snap("00_post_open", ctx.device.screenshot())
+            shot_open = ctx.device.screenshot()
+            debug.snap("00_post_open", shot_open)
+
+            # Safety Pass non attivo: se il pulsante Complete All ha il LUCCHETTO
+            # (Radar Station Pass scaduto/assente) → skip, niente loop sterile.
+            pass_bloccato = shot_open is not None and ctx.matcher.find_one(
+                shot_open, cfg.pin_pass_lock,
+                threshold=cfg.soglia_template, zone=cfg.pass_lock_roi).found
+            if pass_bloccato:
+                log("Complete All BLOCCATO (lucchetto) — Radar Station Pass non "
+                    "attivo → skip")
+                esito = _Esito.PASS_NON_ATTIVO
+                debug.snap("00_pass_lock", shot_open)
 
             stato_inatteso_consec = 0
 
-            for i in range(1, cfg.max_complete_all_iter + 1):
+            for i in range(1, cfg.max_complete_all_iter + 1) if not pass_bloccato else range(0):
                 shot = ctx.device.screenshot()
                 if shot is None:
                     log("screenshot None — abort")
@@ -189,8 +208,9 @@ class RadarMasterTask(Task):
                     esito = _Esito.STATO_INATTESO
                     break
             else:
-                log(f"max_complete_all_iter={cfg.max_complete_all_iter} raggiunto")
-                esito = _Esito.MAX_ITER
+                if not pass_bloccato:   # loop vuoto per Pass bloccato → non è MAX_ITER
+                    log(f"max_complete_all_iter={cfg.max_complete_all_iter} raggiunto")
+                    esito = _Esito.MAX_ITER
 
         except Exception as exc:
             log(f"eccezione: {exc}")
@@ -207,6 +227,8 @@ class RadarMasterTask(Task):
 
         if esito == _Esito.ERRORE:
             return TaskResult.fail("Errore radar master", esito=esito)
+        if esito == _Esito.PASS_NON_ATTIVO:
+            return TaskResult.skip("Radar Station Pass non attivo (lucchetto) — skip")
         if esito == _Esito.STATO_INATTESO:
             return TaskResult.fail("Stato radar inatteso — abort in sicurezza", esito=esito)
         if esito == _Esito.MAX_ITER:

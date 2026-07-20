@@ -167,6 +167,19 @@ class TestStaminaFillRatio:
 # ── Flusso principale ──────────────────────────────────────────────────────
 
 class TestRun:
+    def test_pass_non_attivo_lucchetto_skip(self):
+        """Complete All col LUCCHETTO (Radar Station Pass non attivo) → skip,
+        nessun tap su Complete All."""
+        cfg = _cfg_zero()
+        device = FakeDevice()
+        m = FakeMatcher({"pin/pin_radar_lock.png": [True]})
+        ctx = _make_ctx(device=device, matcher=m)
+        result = RadarMasterTask(config=cfg).run(ctx)
+        assert result.skipped is True
+        complete_taps = [c for c in device.calls
+                         if c[0] == "tap" and (c[1], c[2]) == cfg.tap_complete_all]
+        assert len(complete_taps) == 0
+
     def test_completato_al_primo_check(self):
         """pin_radar_completed trovato subito → fine immediata, nessun tap Complete All."""
         cfg = _cfg_zero()
