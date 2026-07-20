@@ -422,22 +422,48 @@ Registrati da `main.py` via `config/task_setup.json` con
 
 ### 5.1 BoostTask (priority 5, periodic 0h)
 
-[tasks/boost.py](../tasks/boost.py) — Attiva booster Gathering Speed.
+[tasks/boost.py](../tasks/boost.py) — Attiva i booster del popup Manage
+Shelter → sezione "Economic Boost": **Gathering Speed** (tutte le risorse)
++, dal 20/07/2026, i 4 booster di **produzione risorsa singola**
+(Food/Wood/Steel/Oil Production = pomodoro/legno/acciaio/petrolio).
 
-**Flusso**: HOME → tap badge boost → swipe lista per trovare "Gathering
-Speed" → tap card USE → seleziona durata (8h default) → tap conferma.
+**Flusso Gathering Speed** (invariato): HOME → tap badge boost → swipe lista
+fino a "Gathering Speed" → espansione INLINE nella stessa lista (score
+`pin_speed_8h`/`pin_speed_1d` allineati per riga a `pin_speed_use`) → tap
+USE → conferma. Preferenza 8h, fallback 1d.
+
+**Flusso produzione risorsa** (nuovo, calibrato dal vivo 20/07/2026): swipe
+lista fino a "<Risorsa> Production" → se già attivo (barra verde
+`"<Risorsa> Production +25%"`) → skip, nessun tap → altrimenti tap riga →
+apre una **SOTTO-PAGINA dedicata** (diverso da Gathering: non inline) con
+2 righe fisse "8h Boost"/"24h Boost", ciascuna col proprio pulsante USE
+(zone-based, non allineamento riga) → tap back sotto-pagina per tornare
+alla lista (la sotto-pagina non torna da sola). Un solo popup aperto per
+tick, gestisce fino a 5 slot (produzioni PRIMA, gathering per ultimo — il
+suo `back()` su ATTIVATO chiude l'intero popup in un colpo solo, per design
+collaudato; le produzioni tornano sempre alla lista tramite il proprio tap
+back dedicato).
 
 **Parametri**:
-- `tipo_default="8h"` (alternative: 1h, 24h)
-- Stato in `BoostState` (core/state.py): `scadenza_iso`,
-  `ultimo_check_ts`. `should_run()` legge la scadenza — se
-  `now > scadenza` → True
+- Stato: `BoostState` (core/state.py) per Gathering, `ProduzioneBoostState`
+  (4 slot `BoostState` indipendenti, uno per risorsa) per la produzione —
+  stessa classe riusata, zero duplicazione di scheduling. `should_run()`
+  del task è vero se Gathering O almeno una produzione è dovuta.
+- `BoostConfig.produzioni`: tupla di 4 `ProduzioneBoostConfig`
+  (risorsa/template riga/template attivo), coordinate sotto-pagina fisse
+  (`tap_subpage_use_8h`, `tap_subpage_use_24h`, `tap_subpage_back`) e zone
+  di ricerca per disambiguare 8h vs 24h (`pin_speed_use.png` riusato,
+  identico su entrambe le righe).
 
 **Regole speciali**:
 - WU115 debug per task abilitabile da dashboard
 - Se boost già attivo → registra `scadenza` corrente, return success
-- `wait_after_tap_speed: 2.0s` (DELAY UI vincolante)
+- `wait_after_tap_speed`/`wait_after_subpage_open`: 2.0s (DELAY UI
+  vincolante)
 - `_salva_debug_shot` disabilitato (WU59 cleanup 105MB)
+- `TaskResult.data` porta un riepilogo per slot (`{"gathering": "...",
+  "pomodoro": "...", ...}`) — schema multi-slot, sostituisce il vecchio
+  `durata`/`outcome` single-slot
 
 ### 5.2 RifornimentoTask (priority 10, always 0h)
 
@@ -559,6 +585,31 @@ chiusura popup.
 **Regole speciali**:
 - WU88 detection 2-tab vs 3-tab via OCR "Chapter" (10,75,110,135)
 - WU91 daily 24h + gate UTC≥20 (massimizza chest milestone con AP elevato)
+
+### 5.6-bis DailyMissionAutoTask (priority 23, always — task custom MASTER, 20/07)
+
+[tasks/daily_mission_auto.py](../tasks/daily_mission_auto.py) — Task esclusivo
+del master (FauMorfeus, via `master_task_whitelist`). Il master ha il pulsante
+**"Auto Complete"** che esegue automaticamente TUTTE le daily mission (le
+istanze normali ne fanno solo alcune), portando l'AP al massimo → tutti e 5 i
+chest/pacchi (20/40/60/80/100) raggiunti. Once/day, reset mezzanotte UTC.
+
+**Struttura a DUE FASI differite** via `DailyMissionState` (core/state.py):
+- **Fase TRIGGER** (tick N): HOME → pannello (33,398) → tab Daily → tap Auto
+  Complete (843,225). Parte un timer "Auto ends in ~1-3 min" (nessun popup,
+  conferma via comparsa `pin_auto_ends`). → `segna_trigger()` (+ timestamp).
+- **Fase CLAIM** (tick successivo, ≥`wait_claim_min` dal trigger): loop CLAIM
+  (`pin_btn_claim_mission`, con scroll — il primo CLAIM ritira in batch tutte
+  le missioni) + ritiro chest: tappa TUTTI e 5 i chest incondizionatamente
+  (con auto-complete sono sempre raggiunti; NO OCR AP — quello di MainMission
+  ha cap 100 e scarterebbe l'AP=170 del master). Ogni chest → popup
+  "Congratulations! You got" → chiude con tap zona vuota. → `segna_claim()`.
+
+**Note**: un tick esegue UNA fase (guidata dallo stato); il claim differito
+evita di coordinare trigger+claim nello stesso tick. Se il pulsante Auto
+Complete è assente (istanza senza la funzione) → `segna_non_disponibile()`.
+Calibrato + validato live su FauMorfeus (auto-complete → missioni → claim
+batch → 5/5 chest, badge a 0).
 
 ### 5.7 ZainoTask (priority 25, periodic 168h = 7 giorni)
 

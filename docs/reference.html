@@ -508,19 +508,28 @@ if counts:
 <p class="desc">BoostTask (Gathering Speed), MainMissionTask (claim rewards), ArenaMercatoTask (acquisto pack arena).</p>
 
 <h3>BoostTask</h3>
-<p class="desc">Attivazione Gathering Speed Boost con scheduling intelligente via BoostState. Priority 5 — primo task eseguito.</p>
+<p class="desc">Attivazione booster Manage Shelter → "Economic Boost": Gathering Speed + (20/07/2026) 4 booster produzione risorsa singola (pomodoro/legno/acciaio/petrolio), fino a 5 slot indipendenti per tick via <code>BoostState</code>/<code>ProduzioneBoostState</code>. Priority 5 — primo task eseguito.</p>
 <table class="methods">
 <tr><th>Guard</th><th>Descrizione</th></tr>
-<tr><td><code>should_run()</code></td><td>Delega a <code>ctx.state.boost.should_run()</code>: skip se boost attivo e non in scadenza. Nessun interval fisso — la scadenza governa il timing.</td></tr>
+<tr><td><code>should_run()</code></td><td><code>ctx.state.boost.should_run() or ctx.state.produzione_boost.should_run_qualcuno()</code>: skip solo se TUTTI gli slot sono attivi e non in scadenza. Nessun interval fisso — la scadenza di ogni slot governa il timing.</td></tr>
 </table>
 <table class="methods">
-<tr><th>Flusso</th><th>Descrizione</th></tr>
-<tr><td>1. HOME → tap Manage Shelter</td><td>tap_boost (140,140)</td></tr>
-<tr><td>2. Scroll lista boost fino a Gathering Speed</td><td>Max MAX_SWIPE swipe. Mini-swipe inverso se swipe&gt;0 per ricentro riga.</td></tr>
+<tr><th>Flusso Gathering Speed (invariato)</th><th>Descrizione</th></tr>
+<tr><td>1. HOME → tap Manage Shelter</td><td>tap_boost (142,47)</td></tr>
+<tr><td>2. Scroll lista boost fino a Gathering Speed</td><td>Max MAX_SWIPE swipe, espansione INLINE nella stessa lista</td></tr>
 <tr><td>3. Pin_50_ visible → boost GIA' attivo → registra_attivo("8h")</td><td></td></tr>
-<tr><td>4. Tap riga (480, speed_cy) + polling pin_speed_use (timeout 4s)</td><td>sleep 2.0s DELAY UI</td></tr>
-<tr><td>5. USE 8h o 1d → registra_attivo(tipo)</td><td></td></tr>
+<tr><td>4. Tap riga + polling pin_speed_use (timeout 4s)</td><td>sleep 2.0s DELAY UI</td></tr>
+<tr><td>5. USE 8h (allineato riga) o 1d fallback → registra_attivo(tipo)</td><td>Un solo <code>back()</code> chiude l'INTERO popup (comportamento collaudato)</td></tr>
 </table>
+<table class="methods">
+<tr><th>Flusso produzione risorsa (nuovo, calibrato dal vivo su FAU_00)</th><th>Descrizione</th></tr>
+<tr><td>1. Scroll lista fino a "&lt;Risorsa&gt; Production"</td><td>Template riga per-risorsa (pin_food/wood/steel/oil_production.png)</td></tr>
+<tr><td>2. Barra verde "+25%" visibile → GIA' attivo, nessun tap</td><td>Template attivo per-risorsa (pin_&lt;x&gt;_active.png, testo senza cifre countdown)</td></tr>
+<tr><td>3. Altrimenti tap riga → apre SOTTO-PAGINA dedicata</td><td>Diverso da Gathering: non inline. Back-arrow fisso (167,65)</td></tr>
+<tr><td>4. Sotto-pagina: 2 righe fisse "8h Boost"/"24h Boost", USE proprio ciascuna</td><td>pin_speed_use.png riusato, disambiguato per ZONA (non allineamento riga)</td></tr>
+<tr><td>5. Tap USE (8h preferito, 24h fallback) → registra_attivo(tipo)</td><td>Sotto-pagina NON torna da sola — serve tap esplicito back (167,65)</td></tr>
+</table>
+<p class="desc">Un solo popup aperto per tick: produzioni processate PRIMA (ognuna torna sempre alla lista via il proprio tap back), Gathering per ultimo (il suo <code>back()</code> su esito ATTIVATO chiude l'intero popup — <code>_chiudi_popup()</code> extra evitato per non rischiare back a vuoto già su HOME, dialogo "Exit game?").</p>
 
 <h3>MainMissionTask</h3>
 <p class="desc">Raccolta ricompense Main Mission + Daily Mission + chest milestone. Gate orario UTC&gt;=20 (WU91). Priority 22.</p>

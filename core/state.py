@@ -596,6 +596,67 @@ class BoostState:
 
 
 # ==============================================================================
+# ProduzioneBoostState — boost produzione risorsa (Economic Boost, Manage Shelter)
+# ==============================================================================
+#
+# Estensione BoostTask (20/07/2026): oltre a Gathering Speed (BoostState sopra),
+# il popup Manage Shelter → "Economic Boost" ha 4 boost produzione indipendenti
+# (Food/Wood/Steel/Oil Production = pomodoro/legno/acciaio/petrolio, verificato
+# live via ADB). Ogni risorsa ha lo stesso identico ciclo di vita di Gathering
+# Speed (tipo/scadenza/disponibile) → riusa BoostState com'è, uno slot per
+# risorsa, invece di duplicarne la logica.
+
+_RISORSE_PRODUZIONE = ("pomodoro", "legno", "acciaio", "petrolio")
+
+
+@dataclass
+class ProduzioneBoostState:
+    """
+    Stato persistente dei 4 boost produzione risorsa, uno slot BoostState
+    indipendente per risorsa (stesso vocabolario canonico usato altrove nel
+    progetto: pomodoro/legno/acciaio/petrolio, non le label inglesi del menu).
+
+    Formato JSON in state/<ISTANZA>.json:
+      "produzione_boost": {
+        "pomodoro": {"tipo": "8h", "attivato_il": "...", "scadenza": "...", "disponibile": true},
+        "legno":    {...}, "acciaio": {...}, "petrolio": {...}
+      }
+    """
+
+    pomodoro: BoostState = field(default_factory=BoostState)
+    legno:    BoostState = field(default_factory=BoostState)
+    acciaio:  BoostState = field(default_factory=BoostState)
+    petrolio: BoostState = field(default_factory=BoostState)
+
+    def slot(self, risorsa: str) -> BoostState:
+        """Ritorna lo slot BoostState per la risorsa (pomodoro/legno/acciaio/petrolio)."""
+        return getattr(self, risorsa)
+
+    def should_run_qualcuno(self) -> bool:
+        """True se ALMENO UNA risorsa deve essere ricontrollata (entra nel task)."""
+        return any(self.slot(r).should_run() for r in _RISORSE_PRODUZIONE)
+
+    # ── Serializzazione ───────────────────────────────────────────────────────
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "ProduzioneBoostState":
+        return cls(
+            pomodoro=BoostState.from_dict(d.get("pomodoro", {})),
+            legno=BoostState.from_dict(d.get("legno", {})),
+            acciaio=BoostState.from_dict(d.get("acciaio", {})),
+            petrolio=BoostState.from_dict(d.get("petrolio", {})),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "pomodoro": self.pomodoro.to_dict(),
+            "legno":    self.legno.to_dict(),
+            "acciaio":  self.acciaio.to_dict(),
+            "petrolio": self.petrolio.to_dict(),
+        }
+
+
+# ==============================================================================
 # DistrictShowdownState — throttle venerdì/sabato basato su ultimo roll confermato
 # ==============================================================================
 #
@@ -758,6 +819,125 @@ class VipState:
         return {
             "cass_ritirata":    self.cass_ritirata,
             "free_ritirato":    self.free_ritirato,
+            "data_riferimento": self.data_riferimento,
+        }
+
+
+# ==============================================================================
+# DailyMissionState — Auto-Complete daily mission (master), two-phase once/day
+# ==============================================================================
+#
+# Task custom master #1 (20/07/2026): la pagina Daily Missions ha, per il
+# master, un pulsante "Auto Complete" che esegue automaticamente tutte le
+# missioni giornaliere. Verificato live su FauMorfeus: il tap fa partire un
+# timer "Auto ends in ~1-3 min" (nessun popup di conferma); a timer scaduto le
+# missioni sono completate e le ricompense (CLAIM + chest AP) vanno recuperate.
+# Once/day, reset a mezzanotte UTC — se non claimate entro, si perdono.
+#
+# Struttura a DUE FASI differite (decisione utente): trigger al tick N, claim a
+# un tick successivo (dopo ~3 min / prossimo ciclo). Stato modellato su VipState
+# (due flag + data_riferimento) con in più un timestamp del trigger per il gate
+# temporale della fase claim.
+
+
+@dataclass
+class DailyMissionState:
+    """
+    Stato once/day dell'auto-complete daily mission (due fasi: trigger, claim).
+
+    Logica:
+      - trigger_fatto=False           → fase TRIGGER (tap Auto Complete)
+      - trigger_fatto=True, trigger_ts→ attendi wait_min poi fase CLAIM
+      - claim_fatto=True              → completato per oggi
+      - should_run() = not (trigger_fatto and claim_fatto)
+      - reset lazy a mezzanotte UTC (data_riferimento)
+
+    JSON in state/<ISTANZA>.json:
+      "daily_mission": {
+        "trigger_fatto": true, "trigger_ts": "2026-07-20T10:41:00+00:00",
+        "claim_fatto": false, "data_riferimento": "2026-07-20"
+      }
+    """
+
+    trigger_fatto:    bool       = False
+    trigger_ts:       str | None = None   # ISO UTC del tap Auto Complete
+    claim_fatto:      bool       = False
+    data_riferimento: str        = field(default_factory=_today_utc)
+
+    # ── Business logic ────────────────────────────────────────────────────────
+
+    def _controlla_reset(self) -> None:
+        """Nuovo giorno UTC → reset entrambe le fasi."""
+        oggi = _today_utc()
+        if self.data_riferimento != oggi:
+            self.trigger_fatto    = False
+            self.trigger_ts       = None
+            self.claim_fatto      = False
+            self.data_riferimento = oggi
+
+    def should_run(self) -> bool:
+        """True finché entrambe le fasi non sono completate oggi."""
+        self._controlla_reset()
+        return not (self.trigger_fatto and self.claim_fatto)
+
+    def segna_trigger(self, riferimento: datetime | None = None) -> None:
+        """Auto Complete attivato: registra fase trigger + timestamp."""
+        self._controlla_reset()
+        self.trigger_fatto = True
+        self.trigger_ts    = (riferimento or _utc_now()).isoformat()
+
+    def segna_claim(self) -> None:
+        """Ricompense recuperate: chiude la fase claim (e il giorno)."""
+        self._controlla_reset()
+        self.claim_fatto = True
+
+    def segna_non_disponibile(self) -> None:
+        """Pulsante Auto Complete assente su questa istanza (es. FAU senza
+        funzione): chiude entrambe le fasi per non riprovare a vuoto oggi."""
+        self._controlla_reset()
+        self.trigger_fatto = True
+        self.claim_fatto   = True
+
+    def claim_pronto(self, wait_min: float) -> bool:
+        """True se il trigger è stato fatto ED è passato wait_min dal trigger
+        (le missioni hanno avuto tempo di completarsi). Se trigger_ts manca o
+        è corrotto → conservativo True (procede col claim)."""
+        self._controlla_reset()
+        if not self.trigger_fatto or self.claim_fatto:
+            return False
+        if not self.trigger_ts:
+            return True
+        try:
+            ts = datetime.fromisoformat(self.trigger_ts)
+        except (ValueError, TypeError):
+            return True
+        gap_min = (_utc_now() - ts).total_seconds() / 60.0
+        return gap_min >= wait_min
+
+    def log_stato(self) -> str:
+        self._controlla_reset()
+        if self.claim_fatto and self.trigger_fatto:
+            return f"COMPLETATO oggi ({self.data_riferimento})"
+        if self.trigger_fatto:
+            return f"trigger fatto ({self.trigger_ts}), claim DA FARE ({self.data_riferimento})"
+        return f"DA FARE ({self.data_riferimento})"
+
+    # ── Serializzazione ───────────────────────────────────────────────────────
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "DailyMissionState":
+        return cls(
+            trigger_fatto    = d.get("trigger_fatto",    False),
+            trigger_ts       = d.get("trigger_ts",       None),
+            claim_fatto      = d.get("claim_fatto",      False),
+            data_riferimento = d.get("data_riferimento", _today_utc()),
+        )
+
+    def to_dict(self) -> dict:
+        return {
+            "trigger_fatto":    self.trigger_fatto,
+            "trigger_ts":       self.trigger_ts,
+            "claim_fatto":      self.claim_fatto,
             "data_riferimento": self.data_riferimento,
         }
 
@@ -1188,6 +1368,8 @@ class InstanceState:
     metrics:      MetricsState      = field(default_factory=MetricsState)
     schedule:     ScheduleState     = field(default_factory=ScheduleState)
     boost:        BoostState        = field(default_factory=BoostState)
+    produzione_boost: ProduzioneBoostState = field(default_factory=ProduzioneBoostState)  # 20/07
+    daily_mission: DailyMissionState = field(default_factory=DailyMissionState)  # 20/07 master auto-complete
     vip:          VipState          = field(default_factory=VipState)
     arena:        ArenaState        = field(default_factory=ArenaState)
     truppe:       TruppeState       = field(default_factory=TruppeState)   # 06/05
@@ -1212,6 +1394,8 @@ class InstanceState:
             "metrics":       self.metrics.to_dict(),
             "schedule":      self.schedule.to_dict(),
             "boost":         self.boost.to_dict(),
+            "produzione_boost": self.produzione_boost.to_dict(),   # 20/07
+            "daily_mission": self.daily_mission.to_dict(),   # 20/07 master auto-complete
             "vip":           self.vip.to_dict(),
             "arena":         self.arena.to_dict(),
             "truppe":        self.truppe.to_dict(),   # 06/05 consumo addestramento
@@ -1238,6 +1422,8 @@ class InstanceState:
             metrics=MetricsState.from_dict(d.get("metrics", {})),
             schedule=ScheduleState.from_dict(d.get("schedule", {})),
             boost=BoostState.from_dict(d.get("boost", {})),
+            produzione_boost=ProduzioneBoostState.from_dict(d.get("produzione_boost", {})),  # 20/07
+            daily_mission=DailyMissionState.from_dict(d.get("daily_mission", {})),  # 20/07
             vip=VipState.from_dict(d.get("vip", {})),
             arena=ArenaState.from_dict(d.get("arena", {})),
             truppe=TruppeState.from_dict(d.get("truppe", {})),   # 06/05

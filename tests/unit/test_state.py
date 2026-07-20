@@ -7,7 +7,7 @@
 import json
 import os
 import tempfile
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from unittest.mock import patch
 
@@ -20,6 +20,7 @@ from core.state import (
     MetricsState,
     RifornimentoState,
     BoostState,
+    ProduzioneBoostState,
     VipState,
     ArenaState,
     DistrictShowdownState,
@@ -219,6 +220,98 @@ class TestBoostState:
 
 
 # ==============================================================================
+# TestProduzioneBoostState — estensione BoostTask, boost produzione risorsa
+# (Economic Boost, Manage Shelter) — 20/07/2026
+# ==============================================================================
+
+class TestProduzioneBoostState:
+
+    _RISORSE = ("pomodoro", "legno", "acciaio", "petrolio")
+
+    def test_defaults_tutti_slot_vuoti(self):
+        s = ProduzioneBoostState()
+        for r in self._RISORSE:
+            slot = s.slot(r)
+            assert isinstance(slot, BoostState)
+            assert slot.tipo is None
+            assert slot.should_run() is True
+
+    def test_slot_ritorna_istanza_corretta(self):
+        s = ProduzioneBoostState()
+        assert s.slot("pomodoro") is s.pomodoro
+        assert s.slot("legno") is s.legno
+        assert s.slot("acciaio") is s.acciaio
+        assert s.slot("petrolio") is s.petrolio
+
+    def test_should_run_qualcuno_true_di_default(self):
+        """Nessuna risorsa mai attivata → tutte due.run() → qualcuno True."""
+        s = ProduzioneBoostState()
+        assert s.should_run_qualcuno() is True
+
+    def test_should_run_qualcuno_false_se_tutte_attive(self):
+        now = datetime.now(timezone.utc)
+        s = ProduzioneBoostState()
+        for r in self._RISORSE:
+            s.slot(r).registra_attivo("8h", riferimento=now)
+        assert s.should_run_qualcuno() is False
+
+    def test_should_run_qualcuno_true_se_una_sola_dovuta(self):
+        now = datetime.now(timezone.utc)
+        s = ProduzioneBoostState()
+        for r in self._RISORSE:
+            s.slot(r).registra_attivo("8h", riferimento=now)
+        s.legno.registra_non_disponibile()   # riprova sempre
+        assert s.should_run_qualcuno() is True
+
+    def test_slot_indipendenti_tra_loro(self):
+        """Attivare pomodoro non deve alterare gli altri slot."""
+        now = datetime.now(timezone.utc)
+        s = ProduzioneBoostState()
+        s.pomodoro.registra_attivo("8h", riferimento=now)
+        assert s.pomodoro.should_run() is False
+        assert s.legno.should_run() is True
+        assert s.acciaio.should_run() is True
+        assert s.petrolio.should_run() is True
+
+    def test_serializzazione_roundtrip(self):
+        now = datetime.now(timezone.utc)
+        s = ProduzioneBoostState()
+        s.pomodoro.registra_attivo("8h", riferimento=now)
+        s.acciaio.registra_attivo("1d", riferimento=now)
+        d = s.to_dict()
+        assert set(d.keys()) == set(self._RISORSE)
+
+        s2 = ProduzioneBoostState.from_dict(d)
+        assert s2.pomodoro.tipo == "8h"
+        assert s2.acciaio.tipo == "1d"
+        assert s2.legno.tipo is None
+        assert s2.petrolio.tipo is None
+
+    def test_from_dict_vuoto(self):
+        s = ProduzioneBoostState.from_dict({})
+        for r in self._RISORSE:
+            assert s.slot(r).tipo is None
+            assert s.slot(r).should_run() is True
+
+    def test_instance_state_wiring(self):
+        """ProduzioneBoostState è raggiungibile da InstanceState e sopravvive
+        al round-trip to_dict/from_dict (pattern district_showdown 18/07)."""
+        st = InstanceState(instance_name="TEST")
+        st.produzione_boost.legno.registra_attivo("8h", riferimento=datetime.now(timezone.utc))
+        d = st.to_dict()
+        assert "produzione_boost" in d
+        st2 = InstanceState.from_dict(d)
+        assert st2.produzione_boost.legno.tipo == "8h"
+        assert st2.produzione_boost.pomodoro.tipo is None
+
+    def test_instance_state_from_dict_senza_chiave_produzione_boost(self):
+        """File di stato pre-esistenti (senza la chiave) → default vuoto,
+        nessun crash, nessuna migrazione necessaria."""
+        st = InstanceState.from_dict({"instance_name": "OLD"})
+        assert st.produzione_boost.pomodoro.should_run() is True
+
+
+# ==============================================================================
 # TestDistrictShowdownState — R-08 follow-up: throttle ven/sab (18/07/2026)
 # ==============================================================================
 
@@ -359,6 +452,103 @@ class TestVipState:
         v = VipState()
         v.segna_cass()
         assert "DA RITIRARE" in v.log_stato()
+
+
+# ==============================================================================
+# TestDailyMissionState — auto-complete daily mission master, due fasi (20/07)
+# ==============================================================================
+
+class TestDailyMissionState:
+
+    def _stato(self):
+        from core.state import DailyMissionState
+        return DailyMissionState()
+
+    def test_defaults(self):
+        s = self._stato()
+        assert s.trigger_fatto is False
+        assert s.trigger_ts is None
+        assert s.claim_fatto is False
+
+    def test_should_run_da_fare(self):
+        assert self._stato().should_run() is True
+
+    def test_should_run_dopo_solo_trigger(self):
+        s = self._stato()
+        s.segna_trigger()
+        assert s.trigger_fatto is True
+        assert s.trigger_ts is not None
+        assert s.should_run() is True   # claim ancora da fare
+
+    def test_should_run_false_dopo_trigger_e_claim(self):
+        s = self._stato()
+        s.segna_trigger()
+        s.segna_claim()
+        assert s.should_run() is False
+
+    def test_claim_pronto_subito_false(self):
+        s = self._stato()
+        s.segna_trigger()
+        assert s.claim_pronto(3.0) is False   # appena triggerato
+
+    def test_claim_pronto_dopo_attesa(self):
+        s = self._stato()
+        s.segna_trigger()
+        s.trigger_ts = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
+        assert s.claim_pronto(3.0) is True
+
+    def test_claim_pronto_false_se_non_triggerato(self):
+        assert self._stato().claim_pronto(3.0) is False
+
+    def test_claim_pronto_false_se_gia_claimato(self):
+        s = self._stato()
+        s.segna_trigger()
+        s.segna_claim()
+        assert s.claim_pronto(0.0) is False
+
+    def test_segna_non_disponibile_chiude_giornata(self):
+        s = self._stato()
+        s.segna_non_disponibile()
+        assert s.should_run() is False   # niente da fare oggi su questa istanza
+
+    def test_reset_mezzanotte_utc(self):
+        s = self._stato()
+        s.segna_trigger()
+        s.segna_claim()
+        # simula giorno precedente
+        s.data_riferimento = "2000-01-01"
+        assert s.should_run() is True    # reset → riparte
+        assert s.trigger_fatto is False
+        assert s.claim_fatto is False
+
+    def test_serializzazione_roundtrip(self):
+        from core.state import DailyMissionState
+        s = self._stato()
+        s.segna_trigger()
+        d = s.to_dict()
+        assert set(d.keys()) == {"trigger_fatto", "trigger_ts", "claim_fatto", "data_riferimento"}
+        s2 = DailyMissionState.from_dict(d)
+        assert s2.trigger_fatto is True
+        assert s2.trigger_ts == s.trigger_ts
+        assert s2.claim_fatto is False
+
+    def test_from_dict_vuoto(self):
+        from core.state import DailyMissionState
+        s = DailyMissionState.from_dict({})
+        assert s.trigger_fatto is False
+        assert s.should_run() is True
+
+    def test_instance_state_wiring(self):
+        st = InstanceState(instance_name="TEST")
+        st.daily_mission.segna_trigger()
+        d = st.to_dict()
+        assert "daily_mission" in d
+        st2 = InstanceState.from_dict(d)
+        assert st2.daily_mission.trigger_fatto is True
+
+    def test_instance_state_retrocompat_senza_chiave(self):
+        st = InstanceState.from_dict({"instance_name": "OLD"})
+        assert st.daily_mission.should_run() is True
 
 
 # ==============================================================================

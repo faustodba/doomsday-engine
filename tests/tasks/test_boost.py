@@ -105,6 +105,19 @@ class FakeMatcher:
     def __init__(self, scores: dict[str, float] | None = None) -> None:
         self._scores: dict[str, float] = scores or {}
         self._finds:  dict[str, FakeMatch | None] = {}
+        # 20/07/2026 — risultati per-zona, additivo: usato SOLO se find_one/
+        # score vengono chiamati con un `zone` che matcha una entry qui
+        # registrata; altrimenti fallback al comportamento globale esistente
+        # (zone=None nei test pre-estensione, invariati).
+        self._finds_by_zone: dict[tuple[str, tuple], FakeMatch | None] = {}
+        # 20/07/2026 — find_all per il pattern ROW_TOL della produzione risorsa.
+        self._finds_all: dict[str, list] = {}
+        # 20/07/2026 — gate per simulare la sotto-pagina che si CHIUDE dopo il
+        # back: quando il gate ritorna False, i match registrati via
+        # set_find_zone per la sotto-pagina USE spariscono (come nel gioco
+        # reale, dove dopo il back verificato l'USE non è più a schermo).
+        self._subpage_use_gate = None
+        self._subpage_use_tmpl: str | None = None
 
     def set_score(self, tmpl: str, score: float) -> None:
         self._scores[tmpl] = score
@@ -112,7 +125,21 @@ class FakeMatcher:
     def set_find(self, tmpl: str, match: FakeMatch | None) -> None:
         self._finds[tmpl] = match
 
-    def score(self, shot, tmpl: str) -> float:
+    def set_find_zone(self, tmpl: str, zone: tuple, match: FakeMatch | None) -> None:
+        """Configura il risultato di find_one/score per (template, zona)."""
+        self._finds_by_zone[(tmpl, tuple(zone))] = match
+
+    def set_subpage_use_gate(self, tmpl: str, gate_fn) -> None:
+        """Gate: quando gate_fn() ritorna False, i match zona-based per `tmpl`
+        (il pulsante USE della sotto-pagina) diventano 'non trovato' — simula
+        la sotto-pagina chiusa dopo il back verificato."""
+        self._subpage_use_tmpl = tmpl
+        self._subpage_use_gate = gate_fn
+
+    def score(self, shot, tmpl: str, zone=None) -> float:
+        if zone is not None and (tmpl, tuple(zone)) in self._finds_by_zone:
+            m = self._finds_by_zone[(tmpl, tuple(zone))]
+            return m.score if m else 0.0
         return self._scores.get(tmpl, 0.0)
 
     def exists(self, shot, tmpl: str, threshold: float = 0.75) -> bool:
@@ -129,8 +156,22 @@ class FakeMatcher:
             return FakeMatch(score=s)
         return None
 
+    def set_find_all(self, tmpl: str, matches: list) -> None:
+        """Configura la lista di match restituita da find_all(tmpl)."""
+        self._finds_all[tmpl] = matches
+
     def find_one(self, shot, tmpl: str, threshold: float = 0.8, zone=None):
         """API V6: find_one restituisce _MatchResult (found, score, cx, cy)."""
+        # Gate sotto-pagina: se il template USE è "gated" e il gate è chiuso
+        # (back avvenuto), la sotto-pagina non è più a schermo → not found.
+        if (zone is not None and tmpl == self._subpage_use_tmpl
+                and self._subpage_use_gate is not None and not self._subpage_use_gate()):
+            return _MatchResult(found=False, score=0.0, cx=0, cy=0)
+        if zone is not None and (tmpl, tuple(zone)) in self._finds_by_zone:
+            m = self._finds_by_zone[(tmpl, tuple(zone))]
+            if m and m.score >= threshold:
+                return _MatchResult(found=True, score=m.score, cx=m.cx, cy=m.cy)
+            return _MatchResult(found=False, score=(m.score if m else 0.0), cx=0, cy=0)
         if tmpl in self._finds:
             m = self._finds[tmpl]
             if m and m.score >= threshold:
@@ -138,6 +179,17 @@ class FakeMatcher:
         s = self.score(shot, tmpl)
         found = s >= threshold
         return _MatchResult(found=found, score=s, cx=700, cy=300)
+
+    def find_all(self, shot, tmpl: str, threshold: float = 0.8, zone=None,
+                 cluster_px: int = 20):
+        """API V6: find_all restituisce lista di _MatchResult sopra soglia."""
+        if tmpl in self._finds_all:
+            return [_MatchResult(found=True, score=mm.score, cx=mm.cx, cy=mm.cy)
+                    for mm in self._finds_all[tmpl] if mm.score >= threshold]
+        # Fallback: se c'è un find singolo o uno score globale sopra soglia,
+        # ritorna quello come lista di 1 elemento (comportamento minimale).
+        one = self.find_one(shot, tmpl, threshold=threshold, zone=zone)
+        return [one] if one.found else []
 
 
 # ==============================================================================
@@ -156,13 +208,27 @@ class FakeConfig:
         return True
 
 
+_RISORSE_PRODUZIONE = ("pomodoro", "legno", "acciaio", "petrolio")
+
+
 class FakeState:
-    def __init__(self, boost_should_run=True):
-        from core.state import BoostState
+    def __init__(self, boost_should_run=True, produzione_dovute: list[str] | None = None):
+        from core.state import BoostState, ProduzioneBoostState
+        from datetime import datetime, timezone
+
         self.boost = BoostState()
         if not boost_should_run:
-            from datetime import datetime, timezone
             self.boost.registra_attivo("8h", riferimento=datetime.now(timezone.utc))
+
+        # Default: NESSUNA produzione dovuta — isola i test gathering-only
+        # esistenti dal nuovo comportamento multi-slot (20/07/2026). I test
+        # dedicati alla produzione passano `produzione_dovute` con le
+        # risorse che vogliono esercitare in questo run.
+        self.produzione_boost = ProduzioneBoostState()
+        now = datetime.now(timezone.utc)
+        for risorsa in _RISORSE_PRODUZIONE:
+            if produzione_dovute is None or risorsa not in produzione_dovute:
+                self.produzione_boost.slot(risorsa).registra_attivo("8h", riferimento=now)
 
 
 class FakeLogger:
@@ -187,6 +253,9 @@ def _cfg_zero() -> BoostConfig:
         wait_after_swipe=0,
         wait_after_use=0,
         wait_after_back=0,
+        wait_after_subpage_open=0,        # 20/07/2026 — produzione risorsa
+        wait_after_subpage_back=0,
+        wait_after_use_produzione=0,      # attesa banner post-USE (azzerata nei test)
     )
 
 
@@ -203,6 +272,8 @@ def _make_ctx(
     matcher: FakeMatcher | None = None,
     navigator=None,
     task_abilitato: bool = True,
+    boost_should_run: bool = True,
+    produzione_dovute: list[str] | None = None,
 ):
     """Costruisce un TaskContext minimale per i test."""
     # Import locale per evitare circular import nei test
@@ -211,7 +282,7 @@ def _make_ctx(
     return TaskContext(
         instance_name="FAKE_00",
         config=FakeConfig(task_abilitato),
-        state=FakeState(),
+        state=FakeState(boost_should_run=boost_should_run, produzione_dovute=produzione_dovute),
         log=FakeLogger(),
         device=device,
         matcher=matcher,
@@ -273,6 +344,32 @@ class TestShouldRun:
         device  = FakeDevice()
         matcher = FakeMatcher()
         ctx     = _make_ctx(device=device, matcher=matcher, task_abilitato=True)
+        assert task.should_run(ctx) is True
+
+    # ── 20/07/2026 — should_run multi-slot (gathering OR qualunque produzione) ──
+
+    def test_solo_gathering_dovuto_ritorna_true(self):
+        task = _task()
+        ctx  = _make_ctx(device=FakeDevice(), matcher=FakeMatcher(),
+                          boost_should_run=True, produzione_dovute=[])
+        assert task.should_run(ctx) is True
+
+    def test_solo_una_produzione_dovuta_ritorna_true(self):
+        task = _task()
+        ctx  = _make_ctx(device=FakeDevice(), matcher=FakeMatcher(),
+                          boost_should_run=False, produzione_dovute=["pomodoro"])
+        assert task.should_run(ctx) is True
+
+    def test_nessuno_dovuto_ritorna_false(self):
+        task = _task()
+        ctx  = _make_ctx(device=FakeDevice(), matcher=FakeMatcher(),
+                          boost_should_run=False, produzione_dovute=[])
+        assert task.should_run(ctx) is False
+
+    def test_piu_produzioni_dovute_ritorna_true(self):
+        task = _task()
+        ctx  = _make_ctx(device=FakeDevice(), matcher=FakeMatcher(),
+                          boost_should_run=False, produzione_dovute=["legno", "petrolio"])
         assert task.should_run(ctx) is True
 
 
@@ -391,13 +488,15 @@ class TestBoost8h:
         return m
 
     def test_ritorna_ok_con_durata_8h(self):
+        """20/07/2026 — data non porta più 'durata' singola ma un riepilogo
+        per-slot (schema multi-slot); qui verifichiamo lo slot 'gathering'."""
         device = FakeDevice()
         ctx    = _make_ctx(device=device, matcher=self._matcher_8h())
         result = _task().run(ctx)
 
         assert result.success is True
         assert result.skipped is False
-        assert result.data.get("durata") == "8h"
+        assert result.data.get("gathering") == _Outcome.ATTIVATO_8H
 
     def test_tap_use_eseguito(self):
         device = FakeDevice()
@@ -414,6 +513,26 @@ class TestBoost8h:
         _task().run(ctx)
 
         assert device.back_count() == 1
+
+    def test_dialogo_gia_attivo_gathering_cancel(self):
+        """RETE DI SICUREZZA 20/07/2026: se il gathering era già attivo e il
+        riconoscimento pin_50_ ha fallito (borderline), dopo USE compare il
+        dialogo → CANCEL → GIA_ATTIVO (non consuma). Risolve il caso reale
+        osservato sul master (barra +50% tagliata quando la riga è in fondo)."""
+        cfg    = _cfg_zero()
+        device = FakeDevice()
+        m      = _matcher_popup_ok()
+        m.set_score(cfg.tmpl_speed_8h,  0.85)
+        m.set_score(cfg.tmpl_speed_use, 0.85)
+        m.set_find(cfg.tmpl_speed_use, FakeMatch(cx=700, cy=300, score=0.85))
+        m.set_score(cfg.tmpl_buff_replace, 0.95)   # dialogo già-attivo dopo USE
+        ctx = _make_ctx(device=device, matcher=m, boost_should_run=True,
+                         produzione_dovute=[])
+        result = _task().run(ctx)
+
+        assert result.data.get("gathering") == _Outcome.GIA_ATTIVO
+        cancel_taps = [c for c in device.calls if c[0] == "tap" and c[1:] == cfg.tap_dialog_cancel]
+        assert len(cancel_taps) == 1
 
 
 # ==============================================================================
@@ -438,7 +557,7 @@ class TestBoost1d:
         result = _task().run(ctx)
 
         assert result.success is True
-        assert result.data.get("durata") == "1d"
+        assert result.data.get("gathering") == _Outcome.ATTIVATO_1D
 
     def test_tap_use_eseguito(self):
         device = FakeDevice()
@@ -616,3 +735,310 @@ class TestBoostConfig:
         for attr in ("tmpl_boost", "tmpl_manage", "tmpl_speed",
                      "tmpl_50", "tmpl_speed_8h", "tmpl_speed_1d", "tmpl_speed_use"):
             assert "pin" in getattr(cfg, attr), f"{attr} non contiene 'pin'"
+
+    def test_default_produzioni_sono_4_risorse(self):
+        cfg = BoostConfig()
+        assert {p.risorsa for p in cfg.produzioni} == set(_RISORSE_PRODUZIONE)
+
+    def test_produzioni_template_paths_contengono_pin(self):
+        cfg = BoostConfig()
+        for p in cfg.produzioni:
+            assert "pin" in p.tmpl_row
+            assert "pin" in p.tmpl_active
+
+
+# ==============================================================================
+# Test: _esegui_produzione — boost produzione risorsa (20/07/2026)
+# ==============================================================================
+
+class TestEseguiProduzione:
+
+    @staticmethod
+    def _gate_chiude_dopo_back(m, cfg, device):
+        """Simula: dopo il primo tap sul back della sotto-pagina, il pulsante
+        USE sparisce (tornati alla lista) — così _chiudi_sottopagina conferma
+        il ritorno al primo tentativo."""
+        m.set_subpage_use_gate(
+            cfg.tmpl_speed_use,
+            lambda: not any(c[0] == "tap" and c[1:] == cfg.tap_subpage_back
+                            for c in device.calls),
+        )
+
+    def test_8h_attivato(self):
+        cfg      = _cfg_zero()
+        prod_cfg = cfg.produzioni[0]   # pomodoro
+        device   = FakeDevice()
+        m = FakeMatcher()
+        m.set_score(prod_cfg.tmpl_row, 0.90)
+        m.set_find(prod_cfg.tmpl_row, FakeMatch(cx=480, cy=310, score=0.90))
+        m.set_find_zone(cfg.tmpl_speed_use, cfg.zone_subpage_use_8h,
+                         FakeMatch(cx=727, cy=155, score=0.90))
+        self._gate_chiude_dopo_back(m, cfg, device)
+        task = BoostTask(config=cfg)
+
+        outcome, tipo = task._esegui_produzione(device, m, lambda msg: None, cfg, prod_cfg)
+
+        assert outcome == _Outcome.ATTIVATO_8H
+        assert tipo == "8h"
+        use_taps  = [c for c in device.calls if c[0] == "tap" and c[1:] == cfg.tap_subpage_use_8h]
+        back_taps = [c for c in device.calls if c[0] == "tap" and c[1:] == cfg.tap_subpage_back]
+        assert len(use_taps) == 1
+        assert len(back_taps) == 1   # ritorno confermato al primo back
+
+    def test_24h_fallback_se_8h_non_disponibile(self):
+        cfg      = _cfg_zero()
+        prod_cfg = cfg.produzioni[0]
+        device   = FakeDevice()
+        m = FakeMatcher()
+        m.set_score(prod_cfg.tmpl_row, 0.90)
+        m.set_find(prod_cfg.tmpl_row, FakeMatch(cx=480, cy=310, score=0.90))
+        m.set_find_zone(cfg.tmpl_speed_use, cfg.zone_subpage_use_8h, None)
+        m.set_find_zone(cfg.tmpl_speed_use, cfg.zone_subpage_use_24h,
+                         FakeMatch(cx=727, cy=232, score=0.90))
+        self._gate_chiude_dopo_back(m, cfg, device)
+        task = BoostTask(config=cfg)
+
+        outcome, tipo = task._esegui_produzione(device, m, lambda msg: None, cfg, prod_cfg)
+
+        assert outcome == _Outcome.ATTIVATO_1D
+        assert tipo == "1d"
+        use_taps = [c for c in device.calls if c[0] == "tap" and c[1:] == cfg.tap_subpage_use_24h]
+        assert len(use_taps) == 1
+
+    def test_back_ritentato_se_banner_blocca(self):
+        """BUG REALE 20/07/2026: il banner 'You used' blocca il back per
+        ~2-3s. Se il primo back non torna alla lista (USE ancora presente),
+        il task RITENTA il back finché non conferma il ritorno — mai
+        procedere alla cieca."""
+        cfg      = _cfg_zero()
+        prod_cfg = cfg.produzioni[0]
+        device   = FakeDevice()
+        m = FakeMatcher()
+        m.set_find(prod_cfg.tmpl_row, FakeMatch(cx=200, cy=310, score=0.90))
+        m.set_find_zone(cfg.tmpl_speed_use, cfg.zone_subpage_use_8h,
+                         FakeMatch(cx=727, cy=155, score=0.90))
+        # USE sparisce solo dopo il SECONDO back (il primo è "bloccato" dal banner).
+        m.set_subpage_use_gate(
+            cfg.tmpl_speed_use,
+            lambda: sum(1 for c in device.calls
+                        if c[0] == "tap" and c[1:] == cfg.tap_subpage_back) < 2,
+        )
+        task = BoostTask(config=cfg)
+
+        outcome, tipo = task._esegui_produzione(device, m, lambda msg: None, cfg, prod_cfg)
+
+        assert outcome == _Outcome.ATTIVATO_8H
+        back_taps = [c for c in device.calls if c[0] == "tap" and c[1:] == cfg.tap_subpage_back]
+        assert len(back_taps) == 2   # primo back bloccato, secondo conferma il ritorno
+
+    def test_gia_attivo_candidato_vicino_alla_riga(self):
+        """20/07/2026 — un candidato 'attivo' entro row_tol_produzione dalla
+        riga trovata → GIA_ATTIVO, nessun tap."""
+        cfg      = _cfg_zero()
+        prod_cfg = cfg.produzioni[0]
+        device   = FakeDevice()
+        m = FakeMatcher()
+        m.set_find(prod_cfg.tmpl_row, FakeMatch(cx=200, cy=310, score=0.90))
+        # candidato attivo a cy=350, Δcy=40 < row_tol_produzione (58)
+        m.set_find_all(prod_cfg.tmpl_active, [FakeMatch(cx=535, cy=350, score=0.95)])
+        task = BoostTask(config=cfg)
+
+        outcome, tipo = task._esegui_produzione(device, m, lambda msg: None, cfg, prod_cfg)
+
+        assert outcome == _Outcome.GIA_ATTIVO
+        assert device.tap_count() == 0
+
+    def test_falso_positivo_incrociato_non_scatta_gia_attivo(self):
+        """BUG REALE 20/07/2026 (test live FAU_01, individuato dall'utente):
+        la barra attiva di UN'ALTRA risorsa, lontana dalla riga corrente,
+        NON deve far scattare GIA_ATTIVO — il pattern ROW_TOL scarta il
+        candidato fuori tolleranza e il task prosegue col tap riga."""
+        cfg      = _cfg_zero()
+        prod_cfg = cfg.produzioni[0]   # pomodoro, riga a cy=310
+        device   = FakeDevice()
+        m = FakeMatcher()
+        m.set_find(prod_cfg.tmpl_row, FakeMatch(cx=200, cy=310, score=0.90))
+        # candidato attivo lontano (cy=180, Δcy=130 >> 58) = barra di
+        # un'altra risorsa altrove nel frame → deve essere scartato.
+        m.set_find_all(prod_cfg.tmpl_active, [FakeMatch(cx=535, cy=180, score=0.95)])
+        # USE presente nella sotto-pagina per completare il tap-flow.
+        m.set_find_zone(cfg.tmpl_speed_use, cfg.zone_subpage_use_8h,
+                         FakeMatch(cx=727, cy=155, score=0.90))
+        self._gate_chiude_dopo_back(m, cfg, device)
+        task = BoostTask(config=cfg)
+
+        outcome, tipo = task._esegui_produzione(device, m, lambda msg: None, cfg, prod_cfg)
+
+        assert outcome != _Outcome.GIA_ATTIVO
+        assert device.tap_count() >= 1
+
+    def test_non_trovato_dopo_max_swipe(self):
+        cfg      = _cfg_zero()
+        prod_cfg = cfg.produzioni[0]
+        device   = FakeDevice()
+        m = FakeMatcher()   # tutti gli score a 0.0
+        task = BoostTask(config=cfg)
+
+        outcome, tipo = task._esegui_produzione(device, m, lambda msg: None, cfg, prod_cfg)
+
+        assert outcome == _Outcome.SPEED_NON_TROVATO
+        swipes = [c for c in device.calls if c[0] in ("swipe", "scroll")]
+        assert len(swipes) == cfg.max_swipe
+
+    def test_dialogo_gia_attivo_produzione_cancel(self):
+        """RETE DI SICUREZZA 20/07/2026 (test live master, individuato
+        dall'utente): se dopo USE compare il dialogo 'buff già attivo →
+        replace the effect?', il task preme CANCEL (non consuma) → esito
+        GIA_ATTIVO. Secondo livello oltre al riconoscimento visivo."""
+        cfg      = _cfg_zero()
+        prod_cfg = cfg.produzioni[0]
+        device   = FakeDevice()
+        m = FakeMatcher()
+        m.set_find(prod_cfg.tmpl_row, FakeMatch(cx=200, cy=310, score=0.90))
+        # barra 'attivo' non riconosciuta (find_all vuoto) → entra ed usa
+        m.set_find_zone(cfg.tmpl_speed_use, cfg.zone_subpage_use_8h,
+                         FakeMatch(cx=727, cy=155, score=0.90))
+        # ma dopo USE compare il dialogo → deve fare CANCEL
+        m.set_score(cfg.tmpl_buff_replace, 0.95)
+        self._gate_chiude_dopo_back(m, cfg, device)
+        task = BoostTask(config=cfg)
+
+        outcome, tipo = task._esegui_produzione(device, m, lambda msg: None, cfg, prod_cfg)
+
+        assert outcome == _Outcome.GIA_ATTIVO
+        cancel_taps = [c for c in device.calls if c[0] == "tap" and c[1:] == cfg.tap_dialog_cancel]
+        assert len(cancel_taps) == 1
+
+    def test_ricentro_se_riga_in_fondo_schermo(self):
+        """EDGE CASE 20/07/2026 (test live FAU_02): riga trovata troppo in
+        basso (cy > soglia_ricentro_row) → mini-swipe di ricentro per non
+        tagliare la barra 'attivo' sotto la riga. Senza ricentro la riga a
+        cy=450 verrebbe trovata al primo screenshot SENZA alcuno swipe;
+        col ricentro deve esserci almeno uno swipe extra."""
+        cfg      = _cfg_zero()
+        prod_cfg = cfg.produzioni[0]
+        device   = FakeDevice()
+        m = FakeMatcher()
+        # riga trovata subito ma in fondo (cy=450 > soglia 400)
+        m.set_find(prod_cfg.tmpl_row, FakeMatch(cx=200, cy=450, score=0.90))
+        m.set_find_zone(cfg.tmpl_speed_use, cfg.zone_subpage_use_8h,
+                         FakeMatch(cx=727, cy=155, score=0.90))
+        self._gate_chiude_dopo_back(m, cfg, device)
+        task = BoostTask(config=cfg)
+
+        outcome, tipo = task._esegui_produzione(device, m, lambda msg: None, cfg, prod_cfg)
+
+        # ricentro eseguito: almeno 1 swipe pur avendo trovato la riga subito
+        swipes = [c for c in device.calls if c[0] in ("swipe", "scroll")]
+        assert len(swipes) >= 1
+        # e il flusso prosegue normalmente (riga non attiva → attiva 8h)
+        assert outcome == _Outcome.ATTIVATO_8H
+
+    def test_nessun_use_trovato_torna_alla_lista(self):
+        """Riga trovata, sotto-pagina aperta, ma nessun USE — deve comunque
+        tornare alla lista (tap_subpage_back), mai lasciare la sotto-pagina aperta."""
+        cfg      = _cfg_zero()
+        prod_cfg = cfg.produzioni[0]
+        device   = FakeDevice()
+        m = FakeMatcher()
+        m.set_score(prod_cfg.tmpl_row, 0.90)
+        m.set_find(prod_cfg.tmpl_row, FakeMatch(cx=480, cy=310, score=0.90))
+        task = BoostTask(config=cfg)
+
+        outcome, tipo = task._esegui_produzione(device, m, lambda msg: None, cfg, prod_cfg)
+
+        assert outcome == _Outcome.NESSUN_BOOST
+        back_taps = [c for c in device.calls if c[0] == "tap" and c[1:] == cfg.tap_subpage_back]
+        assert len(back_taps) == 1
+
+
+# ==============================================================================
+# Test: run() con più slot nello stesso tick (20/07/2026)
+# ==============================================================================
+
+class TestRunMultiSlot:
+
+    @staticmethod
+    def _pomodoro_gia_attivo(m, prod_cfg):
+        """Configura il matcher perché pomodoro risulti già attivo (riga
+        trovata + candidato attivo vicino, pattern ROW_TOL)."""
+        m.set_find(prod_cfg.tmpl_row, FakeMatch(cx=200, cy=200, score=0.90))
+        m.set_find_all(prod_cfg.tmpl_active, [FakeMatch(cx=535, cy=240, score=0.95)])
+
+    def test_gathering_e_una_produzione_insieme(self):
+        cfg      = _cfg_zero()
+        prod_cfg = cfg.produzioni[0]   # pomodoro
+        device   = FakeDevice()
+        m = _matcher_popup_ok()
+        m.set_score(cfg.tmpl_50, 0.90)                    # gathering già attivo
+        m.set_find(prod_cfg.tmpl_row, FakeMatch(cx=200, cy=140, score=0.90))  # pomodoro riga trovata
+        # pomodoro NON attivo (find_all vuoto) → prosegue col tap riga
+        m.set_find_zone(cfg.tmpl_speed_use, cfg.zone_subpage_use_8h,
+                         FakeMatch(cx=727, cy=155, score=0.90))
+        # USE della sotto-pagina sparisce dopo il back (ritorno confermato).
+        m.set_subpage_use_gate(
+            cfg.tmpl_speed_use,
+            lambda: not any(c[0] == "tap" and c[1:] == cfg.tap_subpage_back
+                            for c in device.calls),
+        )
+
+        ctx = _make_ctx(device=device, matcher=m, boost_should_run=True,
+                         produzione_dovute=["pomodoro"])
+        result = BoostTask(config=cfg).run(ctx)
+
+        assert result.success is True
+        assert result.data.get("gathering") == _Outcome.GIA_ATTIVO
+        assert result.data.get("pomodoro")  == _Outcome.ATTIVATO_8H
+        assert ctx.state.produzione_boost.pomodoro.tipo == "8h"
+        assert ctx.state.boost.tipo == "8h"
+
+    def test_produzioni_non_dovute_non_vengono_processate(self):
+        """Solo pomodoro è dovuto: legno/acciaio/petrolio non devono comparire
+        nel riepilogo (nessuno scroll/tap extra per loro)."""
+        cfg      = _cfg_zero()
+        prod_cfg = cfg.produzioni[0]   # pomodoro
+        device   = FakeDevice()
+        m = _matcher_popup_ok()
+        m.set_score(cfg.tmpl_50, 0.90)
+        self._pomodoro_gia_attivo(m, prod_cfg)
+
+        ctx = _make_ctx(device=device, matcher=m, boost_should_run=True,
+                         produzione_dovute=["pomodoro"])
+        result = BoostTask(config=cfg).run(ctx)
+
+        assert set(result.data.keys()) == {"gathering", "pomodoro"}
+
+    def test_chiude_popup_una_volta_se_gathering_non_attiva(self):
+        """gathering GIA_ATTIVO (non ATTIVATO) + 1 produzione già attiva →
+        chiusura standard (n_back_chiudi) UNA volta a fine tick."""
+        cfg      = _cfg_zero()
+        prod_cfg = cfg.produzioni[0]
+        device   = FakeDevice()
+        m = _matcher_popup_ok()
+        m.set_score(cfg.tmpl_50, 0.90)
+        self._pomodoro_gia_attivo(m, prod_cfg)
+
+        ctx = _make_ctx(device=device, matcher=m, boost_should_run=True,
+                         produzione_dovute=["pomodoro"])
+        BoostTask(config=cfg).run(ctx)
+
+        assert device.back_count() == cfg.n_back_chiudi
+
+    def test_non_chiude_extra_se_gathering_attiva_8h(self):
+        """Se gathering (processato per ultimo) attiva un boost 8h, il suo
+        singolo back() chiude l'intero popup — nessun _chiudi_popup extra
+        (altrimenti si rischiano back a vuoto su HOME, vedi commento in run())."""
+        cfg      = _cfg_zero()
+        prod_cfg = cfg.produzioni[0]
+        device   = FakeDevice()
+        m = _matcher_popup_ok()
+        self._pomodoro_gia_attivo(m, prod_cfg)    # pomodoro già attivo, nessun tap/back
+        m.set_score(cfg.tmpl_speed_8h,  0.85)
+        m.set_score(cfg.tmpl_speed_use, 0.85)
+        m.set_find(cfg.tmpl_speed_use, FakeMatch(cx=700, cy=300, score=0.85))
+
+        ctx = _make_ctx(device=device, matcher=m, boost_should_run=True,
+                         produzione_dovute=["pomodoro"])
+        BoostTask(config=cfg).run(ctx)
+
+        assert device.back_count() == 1
