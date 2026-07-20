@@ -73,6 +73,45 @@ _TAP_GLORY_CONTINUE = (471, 432)
 
 _MERCATO_MAX_ITER   = 20   # guard anti-loop totale (FASE 1 + FASE 2)
 
+# ──────────────────────────────────────────────────────────────────────────────
+# WU-Fase3b (20/07) — ACQUISTO PER LISTA PRIORITÀ (master).
+# Variante `task_varianti={"arena_mercato":"priorita"}`: invece dei 2 pack a
+# coordinate fisse, compra oggetti per TIPO riconosciuti via icona ovunque
+# nella griglia (robusto alla rotazione settimanale dello store), a saturazione
+# nell'ordine di priorità. Priorità master (utente 20/07): Honing Chip →
+# Pants Frag leggendari (oro) → Shoes Frag leggendari (oro).
+#
+# Meccanica d'acquisto CALIBRATA live 20/07 sul master:
+#   - tap sul PULSANTE PREZZO (non l'icona: quella apre solo il tooltip) →
+#     compra 1 + mostra quick-buy [x5][xMAX] a sinistra del prezzo.
+#   - tap xMAX → compra il massimo acquistabile con le medaglie correnti.
+#   - offset osservati: icona Honing Chip (655,200) → prezzo (787,248) →
+#     xMAX (654,248). Quindi prezzo ≈ icona+(132,48), xMAX ≈ prezzo+(-133,0).
+#
+# ⚠️ VALIDAZIONE LIVE PENDENTE: gli offset sono da 1 solo campione; i template
+# pants/scarpe ORO non sono ancora catturati (non in rotazione questa
+# settimana). Finché non validato, NON abilitare arena_mercato sul master.
+# Item con template assente → skip pulito (nessun tap). La lista è config-driven.
+@dataclass(frozen=True)
+class _ItemPrioritario:
+    nome:     str
+    template: str            # icona che INCLUDE la rarità (frame oro = leggendario)
+    soglia:   float = 0.80
+
+_PRIORITA_MASTER: tuple[_ItemPrioritario, ...] = (
+    _ItemPrioritario("honing_chip",     "pin/pin_honing_chip.png",     0.80),
+    _ItemPrioritario("pants_frag_oro",  "pin/pin_pants_frag_oro.png",  0.82),  # template da catturare
+    _ItemPrioritario("shoes_frag_oro",  "pin/pin_shoes_frag_oro.png",  0.82),  # template da catturare
+)
+
+_ROI_STORE      = (60, 70, 900, 430)   # area griglia oggetti (esclude header/footer)
+_PREZZO_DX      = 132   # icona-center → pulsante prezzo
+_PREZZO_DY      = 48
+_XMAX_DX        = -133  # pulsante prezzo → quick-buy xMAX (max acquistabile)
+_MERCATO_MAX_SCROLL = 4    # swipe per coprire tutta la griglia store
+_WAIT_ACQ       = 1.2  # dopo tap prezzo/xMAX (popup/animazione)
+_WAIT_SCROLL    = 1.2
+
 # WU115 (04/05) — debug screenshot via shared/debug_buffer (hot-reload).
 # Toggle config: globali.debug_tasks.arena_mercato (default False).
 # Sostituisce WU113 _DEBUG_MERCATO_DUMP modulo-level con architettura unificata.
@@ -299,6 +338,15 @@ class ArenaMercatoTask(Task):
             screen_post = ctx.device.screenshot()
             debug.snap("01_post_carrello", screen_post)
 
+        # WU-Fase3b — variante master "priorita": compra per lista priorità
+        # (Honing Chip → Pants/Shoes Frag oro) invece dei 2 pack fissi.
+        variante = (getattr(ctx.config, "task_varianti", None) or {}).get("arena_mercato")
+        if variante == "priorita":
+            tot = self._acquista_priorita(ctx)
+            ctx.device.back()
+            time.sleep(1.5)
+            return tot, 0
+
         acquisti_360     = 0
         acquisti_15      = 0
         pack360_esaurito = False
@@ -370,6 +418,61 @@ class ArenaMercatoTask(Task):
         ctx.device.back()
         time.sleep(1.5)
         return acquisti_360, acquisti_15
+
+    # ── Acquisto per lista priorità (variante master, WU-Fase3b) ───────────────
+
+    def _acquista_priorita(self, ctx: TaskContext) -> int:
+        """Compra gli oggetti della lista priorità (in ordine, a saturazione)
+        riconoscendone l'ICONA nella griglia ovunque sia, scorrendo lo store.
+        Per ogni occorrenza: tap PULSANTE PREZZO (icona+offset) → compra 1 +
+        mostra xMAX → tap xMAX (max acquistabile). Item con template assente
+        (es. pants/scarpe oro non ancora catturati) → skip pulito.
+
+        Robusto alla rotazione settimanale (match per tipo, non per posizione).
+        Ritorna il numero totale di transazioni d'acquisto eseguite.
+
+        ⚠️ VALIDAZIONE LIVE PENDENTE (vedi note _PRIORITA_MASTER): offset da 1
+        campione, gestione item-a-limite/budget da rifinire sul primo run reale.
+        """
+        device, matcher = ctx.device, ctx.matcher
+        log = ctx.log_msg
+        tot = 0
+        for item in _PRIORITA_MASTER:
+            comprati = 0
+            viste: set[tuple[int, int]] = set()
+            for scroll_n in range(_MERCATO_MAX_SCROLL + 1):
+                shot = device.screenshot()
+                if shot is None:
+                    break
+                try:
+                    matches = matcher.find_all(shot, item.template,
+                                               threshold=item.soglia,
+                                               zone=_ROI_STORE, cluster_px=30)
+                except Exception as exc:
+                    # template mancante/non caricabile (es. oro non ancora catturato)
+                    log(f"[MERCATO-PRIO] {item.nome}: template non disponibile ({exc}) — skip")
+                    matches = None
+                    break
+                nuove = 0
+                for m in (matches or []):
+                    key = (round(m.cx / 20), round(m.cy / 20))   # dedup grossolano
+                    if key in viste:
+                        continue
+                    viste.add(key)
+                    nuove += 1
+                    px, py = m.cx + _PREZZO_DX, m.cy + _PREZZO_DY
+                    device.tap(px, py)                     # compra 1 + mostra xMAX
+                    time.sleep(_WAIT_ACQ)
+                    device.tap(px + _XMAX_DX, py)          # xMAX (max acquistabile)
+                    time.sleep(_WAIT_ACQ)
+                    comprati += 1
+                    tot += 1
+                log(f"[MERCATO-PRIO] {item.nome}: scroll {scroll_n} — "
+                    f"{len(matches or [])} match, {nuove} nuovi")
+                device.swipe(480, 380, 480, 230, 500)      # scroll giù
+                time.sleep(_WAIT_SCROLL)
+            log(f"[MERCATO-PRIO] {item.nome}: {comprati} acquisti a saturazione")
+        return tot
 
     # ── Rilevamento stato pulsanti ────────────────────────────────────────────
 

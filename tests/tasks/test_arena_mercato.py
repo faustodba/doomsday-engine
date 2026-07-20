@@ -435,5 +435,84 @@ class TestArenaMercatoTask(unittest.TestCase):
         self.assertEqual(result.data["acquisti_15"], 0)
 
 
+# ──────────────────────────────────────────────────────────────────────────────
+# WU-Fase3b — acquisto per lista priorità (variante master)
+# ──────────────────────────────────────────────────────────────────────────────
+
+class _PMatch:
+    def __init__(self, cx, cy, score=0.90):
+        self.cx = cx; self.cy = cy; self.score = score; self.found = True
+
+
+class _PMatcher:
+    """find_all restituisce sequenze configurate per template (una lista per
+    chiamata). Template non presente → FileNotFoundError (simula icona non
+    ancora catturata, es. pants/scarpe oro)."""
+    def __init__(self, seq: dict):
+        self._seq = seq; self._pos = {}
+
+    def find_all(self, shot, tmpl, threshold=0.8, zone=None, cluster_px=20):
+        if tmpl not in self._seq:
+            raise FileNotFoundError(tmpl)
+        lst = self._seq[tmpl]; i = self._pos.get(tmpl, 0)
+        self._pos[tmpl] = i + 1
+        return lst[i] if i < len(lst) else []
+
+
+class _PDevice:
+    def __init__(self): self.taps = []; self.swipes = 0
+    def screenshot(self): return object()
+    def tap(self, x, y): self.taps.append((x, y))
+    def swipe(self, *a, **k): self.swipes += 1
+    def back(self): pass
+
+
+class _PCtx:
+    def __init__(self, matcher):
+        self.device = _PDevice(); self.matcher = matcher
+    def log_msg(self, *a, **k): pass
+
+
+class TestAcquistoPriorita(unittest.TestCase):
+    """Variante master: _acquista_priorita compra per icona a saturazione,
+    salta i template mancanti (pants/scarpe oro non ancora catturati)."""
+
+    def setUp(self):
+        self._sp = patch("tasks.arena_mercato.time.sleep"); self._sp.start()
+
+    def tearDown(self):
+        self._sp.stop()
+
+    def _task(self):
+        from tasks.arena_mercato import ArenaMercatoTask
+        return ArenaMercatoTask()
+
+    def test_honing_chip_compra_e_offset_calibrati(self):
+        # 2 honing chip allo scroll 0, poi vuoto; pants/scarpe oro assenti → skip
+        m = _PMatcher({"pin/pin_honing_chip.png": [[_PMatch(655, 200), _PMatch(655, 280)]]})
+        ctx = _PCtx(m)
+        tot = self._task()._acquista_priorita(ctx)
+        self.assertEqual(tot, 2)
+        # per ogni item: tap prezzo (icona+132,+48) poi xMAX (prezzo-133)
+        self.assertIn((787, 248), ctx.device.taps)   # prezzo honing #1 (calibrato live)
+        self.assertIn((654, 248), ctx.device.taps)   # xMAX honing #1
+        self.assertEqual(len(ctx.device.taps), 4)     # 2 chip × (prezzo+xMAX)
+
+    def test_template_assente_skip_pulito(self):
+        # nessun template configurato → tutti raise → 0 acquisti, 0 tap
+        m = _PMatcher({})
+        ctx = _PCtx(m)
+        tot = self._task()._acquista_priorita(ctx)
+        self.assertEqual(tot, 0)
+        self.assertEqual(len(ctx.device.taps), 0)
+
+    def test_dedup_stessa_posizione_non_ricomprata(self):
+        # stessa icona a posizione (quasi) identica su 2 scroll → comprata 1 sola volta
+        m = _PMatcher({"pin/pin_honing_chip.png": [[_PMatch(655, 200)], [_PMatch(657, 201)]]})
+        ctx = _PCtx(m)
+        tot = self._task()._acquista_priorita(ctx)
+        self.assertEqual(tot, 1)
+
+
 if __name__ == "__main__":
     unittest.main()
