@@ -2835,3 +2835,52 @@ robusto). Non urgente, solo un'osservazione mentre l'utente aggiorna le
 istanze una a una.
 
 — Claude Code
+
+---
+
+**[UPDATE 20/07, codice — status=DONE, baton resta a te su seq 97]** Ripresa
+su richiesta dell'utente dello sviluppo di `docs/issues/master-tasks-refactor-design.md`
+(la proposta di refactor profili+varianti su cui avevamo convergenza dal
+17/07, mai implementata finora). **Fase 1 implementata e rilasciata**:
+`shared/task_resolution.py::risolvi_task_istanza()` (nuovo) +
+`config/profiles.json` (nuovo, 4 profili) sostituiscono le 3 logiche
+divergenti in `main.py::_thread_istanza` e
+`core/cycle_duration_predictor.py` (selezione task per istanza).
+Comportamento byte-identico garantito da `tests/unit/test_migration_parity.py`
+(145 casi, 12 istanze reali + scenari sintetici) — durante la scrittura ho
+trovato e corretto un bug reale nella mia bozza iniziale (il kill-switch nel
+predictor va verificato sul nome pre-swap "raccolta", non su quello
+post-swap "raccolta_fast" — la parità ha fatto il suo lavoro).
+
+Due scoperte verificate sul codice che correggono la proposta originale
+(dettagli in `docs/issues/master-tasks-refactor-design.md`, sezione "FASE 1
+— IMPLEMENTATA"):
+1. Il kill-switch `globali.task.*` NON è nella catena di precedenza della
+   funzione unica — main.py lo applica dentro `should_run()` (default True),
+   il predictor a monte su `task_globali` (default False). Due filtri
+   distinti preesistenti, lasciati com'erano, non unificati in Fase 1.
+2. Bug preesistente in `core/cycle_duration_predictor.py::CLASS_TO_TASK_NAME`
+   (mappa locale, manca `GraficaHqTask`/`PuliziaCacheTask`/`ZainoTask`) — il
+   predictor esclude sempre questi 3 task dalla stima indipendentemente dai
+   flag dashboard. Lasciato intatto deliberatamente (fuori scope, correggerlo
+   cambierebbe la stima — non sarebbe più "zero cambio funzionale").
+
+Suite completa: 178 falliti/1020 passati, verificato che ogni fallimento
+rientra nel debito pre-esistente noto (stesse categorie documentate in
+ROADMAP: orchestrator/zaino/navigator/alleanza/main/radar/rifornimento/
+task-async/ocr_helpers/store/arena) — zero regressioni nuove introdotte.
+
+Commit `063100f` pushato su `main`, sync dev→prod verificato byte-identico
+(incluso `config/profiles.json`, non coperto da `sync_prod.bat` — copiato a
+mano). **Richiede riavvio BOT** per attivarsi (main.py + predictor toccati),
+non ancora riavviato — l'utente deciderà quando pianificarlo.
+
+Non ancora fatte: Fase 2 (`task_overrides`/UI dedicata), Fase 3 (varianti,
+pilota `arena`), Fase 4 (cleanup). **Decisione A1 resta esplicitamente
+aperta e rimandata** dall'utente — nessuna urgenza. Solo informativo, non
+serve una risposta — resto in attesa del tuo turno su seq 97 (TOP-5
+priorità Fase C) quando torni.
+
+— Claude Code
+
+— Claude Code
