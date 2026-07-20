@@ -1340,9 +1340,15 @@ def ui_advanced(request: Request):
 # WU-MasterTasks (17/07) — task selezionabili per il master via UI. Escludono
 # raccolta/raccolta_chiusura (sempre attivi per il master by design) e
 # raccolta_fast. Ordine = ordine logico di esecuzione (priority task_setup.json).
+# rifornimento/main_mission/zaino rimossi 20/07 (richiesta utente) — il master
+# e' il destinatario di rifornimento_comune (dooms_account), non un mittente;
+# main_mission/zaino non hanno senso operativo sul profilo raccolta_only del
+# master. Restano in TASK_CLASS_TO_NAME/task_setup.json (task ordinari delle
+# istanze normali) -- qui si toglie solo la possibilita' di selezionarli per
+# il master via dashboard.
 _MASTER_ELIGIBLE_TASKS = [
-    "grafica_hq", "pulizia_cache", "boost", "rifornimento", "truppe",
-    "donazione", "main_mission", "zaino", "vip", "alleanza", "messaggi",
+    "grafica_hq", "pulizia_cache", "boost", "truppe",
+    "donazione", "vip", "alleanza", "messaggi",
     "arena", "arena_mercato", "district_showdown", "store", "radar",
 ]
 
