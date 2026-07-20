@@ -15,7 +15,8 @@
   'rifornimento':'rifornimento','truppe':'addestra truppe','donazione':'donazione',
   'main_mission':'main mission','zaino':'zaino','vip':'VIP','alleanza':'alleanza',
   'messaggi':'messaggi','arena':'arena','arena_mercato':'arena mercato',
-  'district_showdown':'district showdown','store':'store','radar':'radar'} %}
+  'district_showdown':'district showdown','store':'store','radar':'radar',
+  'daily_mission_auto':'daily mission — auto complete','radar_master':'radar station — complete all'} %}
 
 {% if not masters %}
 <div class="section">
@@ -36,7 +37,7 @@
     Profilo <b>raccolta_only</b>: raccolta/raccolta_chiusura girano sempre, tutto il resto
     è opt-in. Le 3 sezioni sotto separano: task a comportamento standard (condivisi con le
     istanze ordinarie, selezionabili), task con parametri su misura, e task realmente
-    esclusivi del master (nessuno implementato al momento — vedi ③).
+    esclusivi del master (classe di codice dedicata — vedi ③).
   </p>
 
   <!-- ── 1. TASK STANDARD ──────────────────────────────────────────── -->
@@ -100,32 +101,60 @@
   <!-- ── 3. TASK SOLO MASTER ────────────────────────────────────────── -->
   <div style="border-left:3px solid #5b8def;padding-left:12px">
     <div style="font-weight:600;font-size:12px;margin-bottom:4px">③ Task Solo Master</div>
-    <p style="font-size:11px;color:var(--text-dim);margin:0">
+    <p style="font-size:11px;color:var(--text-dim);margin:0 0 8px">
       Task che esistono <b>esclusivamente</b> per il master, mai per le istanze ordinarie
-      (classe di codice dedicata, non un semplice toggle su un task condiviso).
-      <b>Nessuno al momento</b> — il vecchio <code>FauMorfeusSetupTask</code> è stato
-      rimosso col refactor WU-MasterTasks; tutti i task in ① sono condivisi col catalogo
-      delle istanze ordinarie. Se in futuro verrà introdotta una variante di comportamento
-      dedicata (es. schieramento truppe in <code>arena</code> —
-      <code>docs/issues/master-tasks-refactor-design.md</code>, decisione A1 aperta),
-      comparirà qui.
+      (classe di codice dedicata, non un semplice toggle su un task condiviso) — derivati
+      da <code>config/profiles.json</code>.
     </p>
+    {% if exclusive_master_tasks %}
+    <div style="display:flex;flex-wrap:wrap;gap:8px 18px">
+      {% for t in exclusive_master_tasks %}
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
+        <input class="mc-exclusive-task" data-master-nome="{{ m.nome }}" type="checkbox"
+               value="{{ t }}" {% if t in m.whitelist %}checked{% endif %}>
+        {{ task_labels.get(t, t) }}
+        {% if t not in verified_tasks %}
+        <span title="mai validato sul profilo master — attivare con cautela"
+              style="color:#e8a33d;font-size:10px">⚠</span>
+        {% endif %}
+      </label>
+      {% endfor %}
+    </div>
+    <div class="save-row" style="margin-top:10px">
+      <button class="btn btn-primary" onclick="mcSalvaStandard('{{ m.nome }}')">⬡ salva selezione</button>
+      <span class="save-note">runtime_overrides.json · dynamic · attivo al prossimo avvio dell'istanza</span>
+      <span class="save-ok" id="mc-excl-ok-{{ m.nome }}">✓ salvato</span>
+      <span class="save-err" id="mc-excl-err-{{ m.nome }}"></span>
+    </div>
+    {% else %}
+    <p style="font-size:11px;color:var(--text-dim);margin:0">
+      Nessuno al momento nel catalogo (<code>profiles.json["master"]</code> non ha task
+      fuori dal catalogo ordinario).
+    </p>
+    {% endif %}
   </div>
 </div>
 <div class="divider"></div>
 {% endfor %}
 
 <script>
-function mcShowMsg(okId, errId, ok, msg) {
-  const okEl = document.getElementById(okId), errEl = document.getElementById(errId);
+function mcShowMsg(okIds, errIds, ok, msg) {
+  const oks = Array.isArray(okIds) ? okIds : [okIds];
+  const errs = Array.isArray(errIds) ? errIds : [errIds];
   if (ok) {
-    if (okEl) { okEl.style.opacity='1'; setTimeout(()=>okEl.style.opacity='0', 3000); }
+    oks.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) { el.style.opacity='1'; setTimeout(()=>el.style.opacity='0', 3000); }
+    });
   } else {
-    if (errEl) {
-      errEl.textContent = '✗ ' + (msg || 'errore');
-      errEl.style.opacity='1';
-      setTimeout(()=>errEl.style.opacity='0', 5000);
-    }
+    errs.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) {
+        el.textContent = '✗ ' + (msg || 'errore');
+        el.style.opacity='1';
+        setTimeout(()=>el.style.opacity='0', 5000);
+      }
+    });
   }
 }
 
@@ -152,11 +181,19 @@ function mcSalvaPersonalizzati(nome) {
 }
 
 function mcSalvaStandard(nome) {
-  const tasks = Array.from(document.querySelectorAll('.mc-standard-task[data-master-nome="' + nome + '"]'))
+  // Sezioni ① (mc-standard-task) e ③ (mc-exclusive-task) scrivono lo stesso
+  // master_task_whitelist -- qualunque pulsante premuto salva lo stato
+  // combinato di entrambe (checkbox non selezionate in una sezione non
+  // vengono perse: sono nel DOM comunque, solo filtrate per .checked).
+  const tasks = Array.from(document.querySelectorAll(
+      '.mc-standard-task[data-master-nome="' + nome + '"], ' +
+      '.mc-exclusive-task[data-master-nome="' + nome + '"]'
+    ))
     .filter(cb => cb.checked)
     .map(cb => cb.value);
   mcPatchIstanza(nome, { master_task_whitelist: tasks },
-                 'mc-std-ok-' + nome, 'mc-std-err-' + nome);
+                 ['mc-std-ok-' + nome, 'mc-excl-ok-' + nome],
+                 ['mc-std-err-' + nome, 'mc-excl-err-' + nome]);
 }
 </script>
 

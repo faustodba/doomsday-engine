@@ -1385,7 +1385,25 @@ def ui_config_global(request: Request):
 _MASTER_VERIFIED_TASKS = [
     "grafica_hq", "pulizia_cache", "boost", "donazione",
     "vip", "alleanza", "messaggi", "district_showdown",
+    "daily_mission_auto",  # 20/07 -- validato live (trigger+claim) prima del rilascio
 ]
+
+
+def _master_exclusive_tasks() -> list[str]:
+    """Task esistenti SOLO per il master (classe di codice dedicata, es.
+    DailyMissionAutoTask/RadarMasterTask) — sezione ③ di config_master.html.
+
+    Derivato da config/profiles.json invece di una lista hardcoded (come
+    _MASTER_ELIGIBLE_TASKS): profilo "master" meno profilo "completo" =
+    esattamente i task che main.py NON registra mai per un'istanza ordinaria
+    (vedi commento in testa a profiles.json). Si aggiorna da solo quando un
+    nuovo task master-only viene registrato (WU-TaskResolution Fase 1) senza
+    toccare il codice della dashboard."""
+    from dashboard.services.config_manager import get_profiles
+    profili = get_profiles()
+    master_tasks = set(profili.get("master", {}).get("tasks", []))
+    completo_tasks = set(profili.get("completo", {}).get("tasks", []))
+    return sorted(master_tasks - completo_tasks)
 
 
 def _valore_standard_istanze(campo: str, default, master_names: set) -> object:
@@ -1417,11 +1435,16 @@ def ui_config_master(request: Request):
       2. Task Personalizzati — stesso task di tutti, parametri su misura
          (raccolta/raccolta_chiusura: livello nodo/trasporto).
       3. Task Solo Master — task esclusivi del master (classe di codice
-         dedicata, non un toggle su un task condiviso). Vuota oggi: nessun
-         task del genere esiste nel catalogo (FauMorfeusSetupTask rimosso
-         col refactor WU-MasterTasks). Corretto 19/07 dopo feedback utente:
-         la sez. 3 mostrava erroneamente la whitelist di task CONDIVISI con
-         le istanze ordinarie, non task esclusivi — spostata in sez. 1.
+         dedicata, non un toggle su un task condiviso), derivati da
+         config/profiles.json (profilo "master" meno profilo "completo" —
+         vedi _master_exclusive_tasks()) invece di una lista hardcoded, cosi'
+         un nuovo task master-only compare qui in automatico. Corretto 19/07
+         dopo feedback utente: la sez. 3 mostrava erroneamente la whitelist
+         di task CONDIVISI con le istanze ordinarie, non task esclusivi —
+         spostata in sez. 1. Corretto di nuovo 20/07: la sez. 3 restava
+         statica/vuota anche dopo l'introduzione dei primi task davvero
+         esclusivi (daily_mission_auto, radar_master) — mai cablata a una
+         fonte dati.
 
     Generico per costruzione: risolve il/i nome/i master via
     shared.instance_meta.get_master_instances() (nessun nome hardcoded qui),
@@ -1461,6 +1484,7 @@ def ui_config_master(request: Request):
         "active":  "master",
         "masters": masters,
         "eligible_master_tasks": _MASTER_ELIGIBLE_TASKS,
+        "exclusive_master_tasks": _master_exclusive_tasks(),
         "verified_tasks": _MASTER_VERIFIED_TASKS,
         "livello_standard": livello_standard,
         "trasporto_standard": trasporto_standard,

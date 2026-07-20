@@ -43,6 +43,7 @@ _PROD_ROOT          = Path(os.environ.get("DOOMSDAY_ROOT", str(_ROOT)))
 _GLOBAL_CONFIG_PATH = _PROD_ROOT / "config" / "global_config.json"
 _OVERRIDES_PATH     = _PROD_ROOT / "config" / "runtime_overrides.json"
 _INSTANCES_PATH     = _PROD_ROOT / "config" / "instances.json"
+_PROFILES_PATH      = _PROD_ROOT / "config" / "profiles.json"
 
 
 # ==============================================================================
@@ -98,6 +99,18 @@ def get_instances() -> list[dict]:
         return data if isinstance(data, list) else []
     except Exception:
         return []
+
+
+def get_profiles() -> dict:
+    """
+    Legge config/profiles.json (shared/task_resolution.py::risolvi_task_istanza).
+    Failsafe: {} su file assente/corrotto.
+    """
+    try:
+        with open(_PROFILES_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
 
 def get_instance(nome: str) -> Optional[dict]:
