@@ -49,35 +49,7 @@ from config.config_loader import (
     build_instance_cfg, GlobalConfig,
 )
 from core import launcher as _launcher
-
-
-# WU-MasterTasks (17/07) — mappa classe→nome canonico task, per il filtro
-# della whitelist del master (main.py registra per classe da task_setup.json,
-# la whitelist config usa i nomi snake_case). DEVE restare in sync con
-# _import_tasks()/task_setup.json — stesso vincolo di CLASS_TO_TASK_NAME in
-# core/cycle_duration_predictor.py (tenuto separato per non alterarne le stime).
-_TASK_CLASS_TO_NAME = {
-    "GraficaHqTask": "grafica_hq",
-    "PuliziaCacheTask": "pulizia_cache",
-    "RaccoltaTask": "raccolta",
-    "RaccoltaChiusuraTask": "raccolta_chiusura",
-    "RaccoltaFastTask": "raccolta_fast",
-    "RifornimentoTask": "rifornimento",
-    "DonazioneTask": "donazione",
-    "MainMissionTask": "main_mission",
-    "ZainoTask": "zaino",
-    "VipTask": "vip",
-    "AlleanzaTask": "alleanza",
-    "MessaggiTask": "messaggi",
-    "ArenaTask": "arena",
-    "ArenaMercatoTask": "arena_mercato",
-    "DistrictShowdownTask": "district_showdown",
-    "BoostTask": "boost",
-    "TruppeTask": "truppe",
-    "StoreTask": "store",
-    "RadarTask": "radar",
-    "RadarCensusTask": "radar_census",
-}
+from shared.task_resolution import risolvi_task_istanza, TASK_CLASS_TO_NAME as _TASK_CLASS_TO_NAME
 
 
 def _import_tasks() -> dict:
@@ -761,23 +733,26 @@ def _thread_istanza(ist, tasks_cls, dry_run, forza_solo_raccolta: bool = False):
     if _solo_raccolta and _master_whitelist and not forza_solo_raccolta:
         _log(nome, f"Master whitelist task: {_master_whitelist}")
 
-    for class_name, priority, interval_h, schedule in _carica_task_setup():
-        if _solo_raccolta and class_name not in ("RaccoltaTask", "RaccoltaChiusuraTask"):
-            _tnome = _TASK_CLASS_TO_NAME.get(class_name, "")
-            if forza_solo_raccolta or _tnome not in _master_whitelist:
-                continue
-        # WU57 — runtime swap RaccoltaTask -> RaccoltaFastTask (priority/interval/schedule preservati)
-        if _raccolta_fast and class_name == "RaccoltaTask":
-            class_name = "RaccoltaFastTask"
-        Cls = tasks_cls.get(class_name)
+    # WU-TaskResolution Fase 1 — risolvi_task_istanza() è la fonte unica per
+    # "quali task registra l'istanza" (sostituisce il filtro manuale
+    # tipologia/whitelist/swap fast qui sopra, comportamento byte-identico —
+    # garantito da tests/unit/test_migration_parity.py). _tipologia/
+    # _solo_raccolta/_raccolta_fast restano sopra SOLO per i messaggi di log.
+    _task_overrides = {t: True for t in _master_whitelist} if _master_whitelist else None
+    for _row in risolvi_task_istanza(
+        tipologia=_tipologia,
+        task_overrides=_task_overrides,
+        forza_solo_raccolta=forza_solo_raccolta,
+    ):
+        Cls = tasks_cls.get(_row["class_name"])
         if Cls is None:
             continue
         try:
             task    = Cls()
-            wrapped = _TaskWrapper(task, schedule, interval_h)
-            orc.register(wrapped, priority=priority)
+            wrapped = _TaskWrapper(task, _row["schedule"], _row["interval_hours"])
+            orc.register(wrapped, priority=_row["priority"])
         except Exception as exc:
-            _log(nome, f"[WARN] Impossibile registrare {class_name}: {exc}")
+            _log(nome, f"[WARN] Impossibile registrare {_row['class_name']}: {exc}")
 
     _log(nome, f"Orchestrator pronto -- {len(orc)} task: {orc.task_names()}")
 

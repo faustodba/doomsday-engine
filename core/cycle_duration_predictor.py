@@ -32,6 +32,10 @@ from pathlib import Path
 from typing import Optional
 
 from shared.task_scheduling import can_run_by_time_gate, is_in_ds_event_window
+from shared.task_resolution import (
+    risolvi_task_istanza,
+    TASK_CLASS_TO_NAME as _TASK_CLASS_TO_NAME_CANONICA,
+)
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Config rolling stats
@@ -628,7 +632,16 @@ def predict_cycle_duration(
 # Schedule-aware: legge state.schedule per dedurre quali task girano nel ciclo
 # ──────────────────────────────────────────────────────────────────────────────
 
-# Mapping task_setup.class → task_name (snake_case usato in task_durations_s)
+# Mapping task_setup.class → task_name (snake_case usato in task_durations_s).
+# USATA SOLO per task_setup_by_name/strict-schedule qui sotto — la selezione
+# task-per-tipologia (righe ~1018+) usa shared.task_resolution dalla Fase 1
+# (WU-TaskResolution). BUG NOTO preesistente (fuori scope Fase 1, non
+# correggere qui): manca GraficaHqTask/PuliziaCacheTask/ZainoTask rispetto
+# alla mappa canonica — task_setup_by_name quindi non contiene mai
+# "grafica_hq"/"pulizia_cache"/"zaino", che restano SEMPRE esclusi da
+# task_globali indipendentemente dai flag dashboard. Allineare le due mappe
+# cambierebbe la stima (es. zaino passerebbe da "mai considerato" a gated
+# 24h) — è un cambio funzionale, va fatto con un ticket dedicato, non qui.
 CLASS_TO_TASK_NAME = {
     "BoostTask": "boost", "RifornimentoTask": "rifornimento",
     "RaccoltaTask": "raccolta", "RaccoltaChiusuraTask": "raccolta_chiusura",
@@ -1023,37 +1036,29 @@ def predict_cycle_from_config(strict_schedule: bool = True,
             (i.get("profilo") for i in insts if i.get("nome") == inst), "full"
         )
 
-        if str(tipologia) == "raccolta_only":
-            # Raccolta + raccolta_chiusura + task extra della whitelist master.
-            # WU-MasterTasks (17/07): il master raccolta_only ora esegue i task
-            # selezionati in `master_task_whitelist` con la loro schedulazione
-            # normale.
-            #
-            # VINCOLO DI DESIGN (WU217): il master FauMorfeus è SEMPRE l'ultima
-            # istanza del ciclo, fuori dal ranking adattivo (posizione fissa,
-            # vedi `ordina_istanze_adaptive`). Quindi contare i suoi task extra
-            # NON cambia l'ordinamento — il master resta ultimo. Corregge solo la
-            # DURATA TOTALE stimata del ciclo (T_ciclo): prima il predictor
-            # ignorava questi task e sottostimava, ora la stima riflette il tempo
-            # reale in più che il master aggiunge in coda. È il tradeoff accettato
-            # ("più task sul master = ciclo un po' più lungo", per design).
-            # Si rispetta il kill-switch globale (`task_globali`), coerente con
-            # `should_run`/`task_abilitato`.
-            tasks_consid = [t for t in ("raccolta", "raccolta_chiusura")
-                            if t in task_globali]
-            for _t in (ist_o.get("master_task_whitelist") or []):
-                if _t in task_globali and _t not in tasks_consid:
-                    tasks_consid.append(_t)
-        elif str(tipologia) == "raccolta_fast":
-            # RaccoltaTask sostituita da RaccoltaFastTask runtime
-            tasks_consid = []
-            for t in task_globali:
-                if t == "raccolta":
-                    tasks_consid.append("raccolta_fast")
-                else:
-                    tasks_consid.append(t)
-        else:  # full
-            tasks_consid = list(task_globali)
+        # WU-TaskResolution Fase 1 — risolvi_task_istanza() è la fonte unica
+        # per "quali task esegue l'istanza" (sostituisce il branch manuale
+        # raccolta_only/raccolta_fast/full qui sopra, comportamento
+        # byte-identico — garantito da tests/unit/test_migration_parity.py).
+        # VINCOLO DI DESIGN (WU217): il master FauMorfeus è SEMPRE l'ultima
+        # istanza del ciclo, fuori dal ranking adattivo — contare i suoi task
+        # extra NON cambia l'ordinamento, solo la DURATA TOTALE stimata.
+        # Il kill-switch globale (`task_globali`) resta applicato QUI, non
+        # dentro risolvi_task_istanza (che non lo conosce — livello
+        # ortogonale gestito dal chiamante, stessa semantica di main.py).
+        _master_wl = ist_o.get("master_task_whitelist") or []
+        _task_overrides = {t: True for t in _master_wl} if _master_wl else None
+        tasks_consid = []
+        for _row in risolvi_task_istanza(tipologia=tipologia, task_overrides=_task_overrides):
+            # Kill-switch verificato sul nome NOMINALE (pre-swap) — replica
+            # l'ordine del branch raccolta_fast pre-refactor: il filtro su
+            # task_globali avviene PRIMA di applicare lo swap
+            # "raccolta"->"raccolta_fast", non dopo.
+            if _row["task_name"] not in task_globali:
+                continue
+            _eff_name = _TASK_CLASS_TO_NAME_CANONICA.get(_row["class_name"], _row["task_name"])
+            if _eff_name not in tasks_consid:
+                tasks_consid.append(_eff_name)
 
         if not strict_schedule:
             tpi[inst] = tasks_consid

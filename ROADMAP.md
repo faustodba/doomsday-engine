@@ -5,6 +5,56 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 20/07/2026 (9) — WU-TaskResolution Fase 1: `risolvi_task_istanza()`
+
+Ripresa dello sviluppo dei task extra/custom per Master e istanze ordinarie
+(`docs/issues/master-tasks-refactor-design.md`, convergenza Claude⇄Gemini
+17/07, mai implementata). Fase 1: sostituire le 3 logiche divergenti che
+decidono "quali task esegue l'istanza X" (main.py loop registrazione,
+predictor, dashboard hardcoded) con un'unica funzione, **zero cambio
+funzionale**, garantito da un test di parità automatico.
+
+**Implementato**: `shared/task_resolution.py::risolvi_task_istanza()` (nuovo)
++ `config/profiles.json` (nuovo, 4 profili: `completo`/`solo_raccolta`/
+`fast`/`master`). Sostituisce il filtro manuale in `main.py::_thread_istanza`
+(righe 739-780) e la selezione `tasks_consid` in
+`core/cycle_duration_predictor.py` (righe ~1018-1056). `main.py::_TASK_CLASS_TO_NAME`
+diventa alias della mappa canonica (era una copia manuale da tenere in sync).
+
+**Due scoperte durante l'implementazione** (verificate sul codice, correggono
+la proposta originale — dettagli in `docs/issues/master-tasks-refactor-design.md`):
+1. Il kill-switch `globali.task.*` NON è nella catena di precedenza della
+   funzione unica — resta un livello ortogonale gestito da ciascun chiamante
+   (main.py: dentro `should_run()`, default `True`; predictor: a monte,
+   default `False` — due filtri distinti preesistenti, non unificati).
+2. Bug preesistente in `core/cycle_duration_predictor.py::CLASS_TO_TASK_NAME`
+   (manca 3 classi) — il predictor esclude sempre `grafica_hq`/
+   `pulizia_cache`/`zaino` dalla stima indipendentemente dai flag dashboard.
+   Lasciato intatto deliberatamente (fuori scope, cambierebbe la stima).
+
+**Test**: 176 nuovi/riscritti, tutti verdi — `test_task_resolution.py` (15,
+algoritmo puro), `test_migration_parity.py` (145, vecchia logica congelata
+vs nuova su tutte le 12 istanze reali + scenari sintetici), riscritto
+`test_master_task_whitelist.py` (12, ora chiama la funzione vera invece di
+reimplementarla — era la quarta copia divergente). Durante la scrittura
+della parità trovato e corretto un bug reale nella bozza iniziale (kill-switch
+verificato su nome post-swap invece che pre-swap) — la parità ha fatto
+esattamente il suo lavoro. Suite completa: 178 falliti/1020 passati,
+verificato che ogni fallimento rientra nel debito pre-esistente noto
+(orchestrator/zaino/navigator/alleanza/main/radar/rifornimento/task-async/
+ocr_helpers/store/arena) — zero nuove regressioni.
+
+**Non ancora fatto**: Fase 2 (`task_overrides`/UI dedicata, sostituisce
+`master_task_whitelist`), Fase 3 (varianti — pilota `arena`, **decisione A1
+ancora aperta**: quali altri task differenziare oltre ad arena, rimandata
+esplicitamente dall'utente), Fase 4 (cleanup `tipologia` deprecata).
+
+**Richiede riavvio BOT** per essere attiva (main.py + predictor toccati) —
+non ancora riavviato, da pianificare (mai mid-tick). Commit + push +
+sync prod da completare in questa sessione.
+
+---
+
 ## Sessione 19/07/2026 (8) — Fix bug monitor (day-over-day) + pannello dedicato `/ui/config/master`
 
 Continuazione della sessione (7): mentre si attende il rientro di Gemini

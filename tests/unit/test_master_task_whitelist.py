@@ -57,26 +57,35 @@ def test_master_whitelist_none_normalizzata_a_lista():
 # ── Anti-drift: mappa classe→nome vs task_setup.json ──────────────────────
 
 def test_class_to_name_copre_task_setup():
-    from main import _TASK_CLASS_TO_NAME
+    from main import _TASK_CLASS_TO_NAME  # alias di shared.task_resolution.TASK_CLASS_TO_NAME
     setup = json.loads(_TASK_SETUP.read_text(encoding="utf-8"))
     classi_setup = {row["class"] for row in setup}
     mancanti = classi_setup - set(_TASK_CLASS_TO_NAME.keys())
     assert not mancanti, f"Classi in task_setup.json non mappate: {mancanti}"
 
 
-# ── Filtro registrazione (stessa logica del loop main.py) ─────────────────
+def test_main_task_class_to_name_e_lo_stesso_oggetto_di_shared():
+    # WU-TaskResolution Fase 1 — main._TASK_CLASS_TO_NAME è ora un alias
+    # dell'unica fonte di verità, non più una copia manuale da tenere in sync.
+    from main import _TASK_CLASS_TO_NAME
+    from shared.task_resolution import TASK_CLASS_TO_NAME
+    assert _TASK_CLASS_TO_NAME is TASK_CLASS_TO_NAME
+
+
+# ── Filtro registrazione (via risolvi_task_istanza — WU-TaskResolution Fase 1) ─
 
 def _simula_filtro(whitelist, forza_solo_raccolta=False):
-    from main import _TASK_CLASS_TO_NAME, _carica_task_setup
-    registrati = []
-    for row in _carica_task_setup():
-        class_name = row[0]
-        if class_name not in ("RaccoltaTask", "RaccoltaChiusuraTask"):
-            tn = _TASK_CLASS_TO_NAME.get(class_name, "")
-            if forza_solo_raccolta or tn not in whitelist:
-                continue
-        registrati.append(class_name)
-    return registrati
+    """Chiama la funzione REALE di risoluzione (non più una reimplementazione
+    a mano — quella reimplementazione era la quarta copia divergente che la
+    Fase 1 ha eliminato)."""
+    from shared.task_resolution import risolvi_task_istanza
+    task_overrides = {t: True for t in whitelist} if whitelist else None
+    rows = risolvi_task_istanza(
+        tipologia="raccolta_only",
+        task_overrides=task_overrides,
+        forza_solo_raccolta=forza_solo_raccolta,
+    )
+    return [r["class_name"] for r in rows]
 
 
 def test_filtro_master_registra_solo_whitelist_piu_raccolta():

@@ -1,0 +1,30 @@
+{
+  "_comment": "WU-TaskResolution Fase 1 (docs/issues/master-tasks-refactor-design.md). Profili = liste di task_name (nominali, snake_case, vocabolario shared/task_resolution.py::TASK_CLASS_TO_NAME). 'completo'/'fast' coprono le 19 classi di config/task_setup.json. 'master' e' il catalogo dichiarativo dei task eleggibili per il master (10 task, SENZA 'truppe' per byte-identita' con la whitelist attuale) MA in Fase 1 nessuna istanza seleziona mai il profilo 'master' -- FauMorfeus (tipologia=raccolta_only) mappa a 'solo_raccolta', e master_task_whitelist diventa un task_overrides additivo su quel profilo (bridge in main.py/predictor). 'master' resta inerte fino al wiring UI di Fase 2.",
+  "completo": {
+    "tasks": [
+      "grafica_hq", "pulizia_cache", "boost", "rifornimento", "raccolta",
+      "truppe", "donazione", "main_mission", "zaino", "vip", "alleanza",
+      "messaggi", "arena", "arena_mercato", "district_showdown", "store",
+      "radar", "radar_census", "raccolta_chiusura"
+    ]
+  },
+  "solo_raccolta": {
+    "tasks": ["raccolta", "raccolta_chiusura"]
+  },
+  "fast": {
+    "tasks": [
+      "grafica_hq", "pulizia_cache", "boost", "rifornimento", "raccolta",
+      "truppe", "donazione", "main_mission", "zaino", "vip", "alleanza",
+      "messaggi", "arena", "arena_mercato", "district_showdown", "store",
+      "radar", "radar_census", "raccolta_chiusura"
+    ],
+    "varianti": { "raccolta": "fast" }
+  },
+  "master": {
+    "tasks": [
+      "raccolta", "raccolta_chiusura", "grafica_hq", "pulizia_cache",
+      "boost", "donazione", "vip", "alleanza", "messaggi",
+      "district_showdown"
+    ]
+  }
+}

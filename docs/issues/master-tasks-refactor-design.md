@@ -1,9 +1,57 @@
 # Design — Refactor configurazione task (profili + varianti comportamentali)
 
-> **STATO: ✅ CONVERGENZA RAGGIUNTA (Claude ⇄ Gemini, 17/07 sera).**
-> Proposta definitiva consolidata sotto. Resta **1 sola DECISIONE APERTA per
-> l'utente (A1)**. Nessuna implementazione finché l'utente non approva.
-> Il dettaglio tecnico è nelle sezioni §0-§7; il log discussione è in fondo.
+> **STATO: ✅ CONVERGENZA RAGGIUNTA (Claude ⇄ Gemini, 17/07 sera). FASE 1
+> IMPLEMENTATA (20/07).** Proposta definitiva consolidata sotto. Resta **1
+> sola DECISIONE APERTA per l'utente (A1)**, rimandata esplicitamente — non
+> blocca la Fase 1. Il dettaglio tecnico è nelle sezioni §0-§7; il log
+> discussione è in fondo.
+
+---
+
+## ✅ FASE 1 — IMPLEMENTATA (20/07/2026)
+
+`shared/task_resolution.py::risolvi_task_istanza()` + `config/profiles.json`
+(4 profili default) sostituiscono le 3 logiche divergenti in `main.py`
+(loop registrazione) e `core/cycle_duration_predictor.py` (selezione
+`tasks_consid`). Comportamento **byte-identico** garantito da
+`tests/unit/test_migration_parity.py` (145 casi su tutte le 12 istanze reali
++ scenari sintetici: whitelist popolata, `forza_solo_raccolta`,
+`raccolta_fast`). `tests/unit/test_task_resolution.py` (15 casi) copre
+l'algoritmo puro. `tests/unit/test_master_task_whitelist.py` riscritto per
+chiamare la funzione reale invece di reimplementarla (era la quarta copia
+divergente).
+
+**Due scoperte durante l'implementazione, verificate sul codice, che
+correggono la proposta originale**:
+1. **Il kill-switch `globali.task.*` non è nella catena di precedenza della
+   funzione unica.** `main.py` non lo applica nel loop di registrazione
+   (resta dentro `should_run()` di ogni task, default `True`); il predictor
+   lo applica a monte con default `False`. Due filtri distinti con default
+   opposti, applicati dai chiamanti — `risolvi_task_istanza()` non lo
+   applica, resta un livello ortogonale come oggi.
+2. **Bug preesistente in `core/cycle_duration_predictor.py::CLASS_TO_TASK_NAME`**
+   (mappa locale, 17 entry) — manca `GraficaHqTask`/`PuliziaCacheTask`/
+   `ZainoTask` rispetto alla mappa canonica (20 entry). Il predictor esclude
+   sempre questi 3 task dalla stima, indipendentemente dai flag dashboard.
+   **Lasciato intatto deliberatamente** (fuori scope Fase 1 — allinearlo
+   cambierebbe la stima, non è "zero cambio funzionale"). Commentato nel
+   codice, da affrontare con un ticket dedicato se si vuole correggere.
+
+Il profilo `master` in `profiles.json` esiste come catalogo dichiarativo
+(10 task, senza `truppe`) ma **non è ancora selezionato da nessuna
+risoluzione reale** — il master (FauMorfeus, `tipologia=raccolta_only`)
+risolve tramite il profilo `solo_raccolta` + `master_task_whitelist`
+tradotta in `task_overrides` dal chiamante. Il wiring esplicito del profilo
+`master` è Fase 2.
+
+**Non ancora fatto**: Fase 2 (`task_overrides`/UI dedicata, sostituisce
+`master_task_whitelist` come meccanismo primario), Fase 3 (varianti — pilota
+`arena`, decisione A1 ancora aperta), Fase 4 (cleanup `tipologia`
+deprecata). File toccati: `shared/task_resolution.py` (nuovo),
+`config/profiles.json` (nuovo), `main.py`, `core/cycle_duration_predictor.py`,
+`tests/unit/test_task_resolution.py` (nuovo),
+`tests/unit/test_migration_parity.py` (nuovo),
+`tests/unit/test_master_task_whitelist.py`.
 
 ---
 
