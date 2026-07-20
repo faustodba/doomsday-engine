@@ -587,3 +587,27 @@ class TestVipStoreAttivo:
         result  = _task().run(ctx)
         assert result.success  is True
         assert result.skipped  is False
+
+
+# ── 20/07 — multi-template store (castello a livello massimo) ────────────────
+class TestMultiTemplateStore:
+    """_find_store prova pin_store + tmpl_store_extra (max-level) e ritorna il
+    match col punteggio migliore. Master max-level: pin_store_max vince."""
+
+    def test_max_level_vince_su_standard(self):
+        cfg = StoreConfig()
+        m = FakeMatcher({cfg.tmpl_store: 0.30, cfg.tmpl_store_extra[0]: 0.92})
+        r = StoreTask()._find_store(m, FakeScreenshot(), cfg, None)
+        assert abs(r.score - 0.92) < 1e-6 and r.found is True
+
+    def test_standard_vince_su_max(self):
+        cfg = StoreConfig()
+        m = FakeMatcher({cfg.tmpl_store: 0.88, cfg.tmpl_store_extra[0]: 0.20})
+        r = StoreTask()._find_store(m, FakeScreenshot(), cfg, None)
+        assert abs(r.score - 0.88) < 1e-6 and r.found is True
+
+    def test_nessun_match_sotto_soglia(self):
+        cfg = StoreConfig()
+        m = FakeMatcher({cfg.tmpl_store: 0.10, cfg.tmpl_store_extra[0]: 0.40})
+        r = StoreTask()._find_store(m, FakeScreenshot(), cfg, None)
+        assert r.found is False and abs(r.score - 0.40) < 1e-6

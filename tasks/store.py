@@ -112,6 +112,13 @@ class StoreConfig:
 
     # ── Template paths (relativi a templates/) ────────────────────────────────
     tmpl_store:         str = "pin/pin_store.png"
+    # 20/07 — template alternativi dell'edificio negozio (multi-template).
+    # Il master (castello a LIVELLO MASSIMO) ha il negozio con colori diversi
+    # (carrello metallico grigio vs tan standard) → pin_store non matcha. Lo
+    # scan prova sia pin_store sia questi extra e prende il punteggio migliore,
+    # così funziona per qualsiasi castello max-level senza regressione sulle
+    # ordinarie. NB: template candidato, da validare sul primo scan reale.
+    tmpl_store_extra:   tuple = ("pin/pin_store_max.png",)
     tmpl_store_attivo:  str = "pin/pin_store_attivo.png"
     tmpl_carrello:      str = "pin/pin_carrello.png"
     tmpl_merchant:       str = "pin/pin_merchant.png"
@@ -257,6 +264,20 @@ class StoreTask(Task):
 
     # ── Flusso principale ─────────────────────────────────────────────────────
 
+    def _find_store(self, matcher, shot, cfg: StoreConfig, zone):
+        """Match multi-template dell'edificio negozio: prova pin_store standard
+        + i template extra (cfg.tmpl_store_extra, es. max-level castle) e
+        ritorna il risultato con il punteggio migliore. find_one preserva
+        .found/.score/.cx/.cy. Zero regressione sulle ordinarie: pin_store_max
+        (carrello grigio) non supera pin_store sul negozio tan standard."""
+        best = matcher.find_one(shot, cfg.tmpl_store,
+                                threshold=cfg.soglia_store, zone=zone)
+        for _t in getattr(cfg, "tmpl_store_extra", ()) or ():
+            r = matcher.find_one(shot, _t, threshold=cfg.soglia_store, zone=zone)
+            if r.score > best.score:
+                best = r
+        return best
+
     def _esegui_store(
         self,
         device:  "MuMuDevice | FakeDevice",
@@ -297,9 +318,7 @@ class StoreTask(Task):
             )
             self._applica_delta_swipe(device, dx_m, dy_m, cfg)
             shot_memo = device.screenshot()
-            r_memo = matcher.find_one(shot_memo, cfg.tmpl_store,
-                                      threshold=cfg.soglia_store,
-                                      zone=roi_corrente)
+            r_memo = self._find_store(matcher, shot_memo, cfg, roi_corrente)
             log(
                 f"Verifica posizione memorizzata: score={r_memo.score:.3f} "
                 f"({r_memo.cx},{r_memo.cy})"
@@ -336,9 +355,7 @@ class StoreTask(Task):
             cumulative.append((cum_x, cum_y))
 
             shot = device.screenshot()
-            result = matcher.find_one(shot, cfg.tmpl_store,
-                                      threshold=cfg.soglia_store,
-                                      zone=roi_corrente)
+            result = self._find_store(matcher, shot, cfg, roi_corrente)
             log(
                 f"passo {n:02d} → score={result.score:.3f} ({result.cx},{result.cy})"
                 + ("  *** match ***" if result.found else "")
@@ -391,9 +408,7 @@ class StoreTask(Task):
             end_x, end_y = tgt_x, tgt_y
 
             shot = device.screenshot()
-            result = matcher.find_one(shot, cfg.tmpl_store,
-                                      threshold=cfg.soglia_store,
-                                      zone=roi_corrente)
+            result = self._find_store(matcher, shot, cfg, roi_corrente)
             log(f"  Re-match: score={result.score:.3f} ({result.cx},{result.cy})"
                 + ("  *** TROVATO ***" if result.found else "  fallito"))
 
