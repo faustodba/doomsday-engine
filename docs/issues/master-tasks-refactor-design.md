@@ -1,10 +1,57 @@
 # Design — Refactor configurazione task (profili + varianti comportamentali)
 
-> **STATO: ✅ CONVERGENZA RAGGIUNTA (Claude ⇄ Gemini, 17/07 sera). FASE 1
-> IMPLEMENTATA (20/07).** Proposta definitiva consolidata sotto. Resta **1
+> **STATO: ✅ CONVERGENZA RAGGIUNTA (Claude ⇄ Gemini, 17/07 sera). FASI 1 e 2
+> IMPLEMENTATE (20/07).** Proposta definitiva consolidata sotto. Resta **1
 > sola DECISIONE APERTA per l'utente (A1)**, rimandata esplicitamente — non
-> blocca la Fase 1. Il dettaglio tecnico è nelle sezioni §0-§7; il log
-> discussione è in fondo.
+> blocca le fasi implementate. Il dettaglio tecnico è nelle sezioni §0-§7; il
+> log discussione è in fondo.
+
+---
+
+## ✅ FASE 2 — IMPLEMENTATA (20/07/2026)
+
+`task_overrides` (dict[str,bool] add/remove) diventa il meccanismo GENERICO
+per-istanza di selezione task, letto da `runtime_overrides.json` e passato a
+`risolvi_task_istanza()` (che lo supportava dalla Fase 1, finora inerte).
+
+**Decisioni utente (20/07)**: (1) modello **ADDITIVO byte-identico** — il
+master resta profilo base `solo_raccolta`, la selezione diventa
+`task_overrides`; `master_task_whitelist` resta letto come compatibilità e
+verrà rimosso in Fase 4; (2) **UI GENERICA** per tutte le istanze, non solo
+il master.
+
+**Fase 2a — backend/plumbing** (byte-identico, commit `785417b`):
+- `config/config_loader.py::_InstanceCfg`: nuovo attributo `task_overrides`.
+- `main.py` + `core/cycle_duration_predictor.py`: mergiano il bridge legacy
+  `master_task_whitelist` con il `task_overrides` esplicito
+  (`{**whitelist, **overrides}`, l'esplicito vince) e passano `profilo`
+  (runtime, ignorato se non è un profilo noto). Nessun config attuale ha
+  `task_overrides` → leggerlo dà `None` → **zero cambio** (opt-in come Fase 1).
+- `tests/unit/test_task_resolution.py`: +4 test merge (esplicito vince,
+  unione, remove su completo, entrambi vuoti→None). Parità invariata.
+
+**Fase 2b — API + UI generica** (commit `6ceddaa`):
+- `dashboard/models.py::IstanzaOverride`: campi `profilo` + `task_overrides`.
+- `dashboard/routers/api_config_overrides.py`: PATCH allowlist estesa; nuovo
+  `GET /api/config/profiles` (profili + palette task, esclusi i sempre-attivi
+  raccolta/raccolta_chiusura).
+- `dashboard/app.py`: helper `_task_palette()` + `_task_override_effettivo()`
+  (merge come il bot); wiring in `/ui/advanced` e `/ui/config/master`.
+- `dashboard/templates/advanced.html`: tabella "override task per istanza"
+  (tri-state default/ON/OFF; task solo-master editabili solo sulla riga
+  master★, per non registrarli per errore su un'ordinaria).
+- `dashboard/templates/config_master.html`: sezioni task migrate da
+  `master_task_whitelist` a `task_overrides` (legge stato effettivo, scrive
+  `task_overrides` + azzera whitelist).
+
+**Coordinamento rilascio (vincolo reale)**: la migrazione config del master
+(azzerare la whitelist) e il deploy dashboard vanno **dopo** il riavvio bot
+con la 2a — il bot vecchio legge SOLO la whitelist, azzerarla prima del
+restart farebbe girare il master raccolta-only. Sequenza: sync 2a → riavvio
+bot → migrazione config (whitelist→task_overrides) → deploy dashboard.
+
+**Non ancora fatto**: Fase 3 (varianti — pilota `arena`, decisione A1 aperta),
+Fase 4 (cleanup `tipologia`/`master_task_whitelist` deprecate).
 
 ---
 
@@ -44,10 +91,10 @@ risolve tramite il profilo `solo_raccolta` + `master_task_whitelist`
 tradotta in `task_overrides` dal chiamante. Il wiring esplicito del profilo
 `master` è Fase 2.
 
-**Non ancora fatto**: Fase 2 (`task_overrides`/UI dedicata, sostituisce
-`master_task_whitelist` come meccanismo primario), Fase 3 (varianti — pilota
-`arena`, decisione A1 ancora aperta), Fase 4 (cleanup `tipologia`
-deprecata). File toccati: `shared/task_resolution.py` (nuovo),
+**Fase 2 implementata** (vedi sezione sopra). **Non ancora fatto**: Fase 3
+(varianti — pilota `arena`, decisione A1 ancora aperta), Fase 4 (cleanup
+`tipologia`/`master_task_whitelist` deprecate). File toccati Fase 1:
+`shared/task_resolution.py` (nuovo),
 `config/profiles.json` (nuovo), `main.py`, `core/cycle_duration_predictor.py`,
 `tests/unit/test_task_resolution.py` (nuovo),
 `tests/unit/test_migration_parity.py` (nuovo),
