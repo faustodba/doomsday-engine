@@ -130,7 +130,9 @@ def test_profilo_master_catalogo_dichiarativo_non_wired():
     assert "TruppeTask" not in nomi  # esclusa per byte-identità con la whitelist attuale
     assert "GraficaHqTask" in nomi
     assert "DistrictShowdownTask" in nomi
-    assert len(reg) == 10
+    # 20/07: +daily_mission_auto (task esclusivo master) → 11 (era 10)
+    assert "DailyMissionAutoTask" in nomi
+    assert len(reg) == 11
 
 
 # ── Ordine risultato (per priority, come task_setup.json) ─────────────────

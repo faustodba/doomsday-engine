@@ -86,6 +86,22 @@ _OLD_TASK_CLASS_TO_NAME = {
     "RadarCensusTask": "radar_census",
 }
 
+# Task master-only aggiunti DOPO la Fase 1 (WU-TaskResolution): non fanno
+# parte del contratto di parità (la logica pre-Fase1 non li conosceva). Sono
+# esclusi dal confronto vecchia/nuova — girano solo sul master via whitelist,
+# NON in profiles["completo"]/["fast"]. Esclusi sia per class_name che per
+# task_name (i filtri predictor lavorano sui nomi).
+_ESCLUSI_PARITA_CLASS = {"DailyMissionAutoTask"}
+_ESCLUSI_PARITA_NAME = {"daily_mission_auto"}
+
+
+def _senza_esclusi_class(s: set[str]) -> set[str]:
+    return {c for c in s if c not in _ESCLUSI_PARITA_CLASS}
+
+
+def _senza_esclusi_name(s: set[str]) -> set[str]:
+    return {n for n in s if n not in _ESCLUSI_PARITA_NAME}
+
 
 def _old_filtro_main(tipologia, forza_solo_raccolta, master_whitelist) -> set[str]:
     """Copia congelata di main.py:764-780 (pre-refactor). Ritorna il SET dei
@@ -103,7 +119,7 @@ def _old_filtro_main(tipologia, forza_solo_raccolta, master_whitelist) -> set[st
         if raccolta_fast and class_name == "RaccoltaTask":
             class_name = "RaccoltaFastTask"
         registrati.append(class_name)
-    return set(registrati)
+    return _senza_esclusi_class(set(registrati))
 
 
 def _new_filtro_main(tipologia, forza_solo_raccolta, master_whitelist) -> set[str]:
@@ -113,7 +129,7 @@ def _new_filtro_main(tipologia, forza_solo_raccolta, master_whitelist) -> set[st
         task_overrides=task_overrides,
         forza_solo_raccolta=forza_solo_raccolta,
     )
-    return {r["class_name"] for r in rows}
+    return _senza_esclusi_class({r["class_name"] for r in rows})
 
 
 def _old_filtro_predictor(tipologia, master_whitelist, task_globali) -> set[str]:
@@ -132,7 +148,7 @@ def _old_filtro_predictor(tipologia, master_whitelist, task_globali) -> set[str]
                 tasks_consid.append(t)
     else:
         tasks_consid = list(task_globali)
-    return set(tasks_consid)
+    return _senza_esclusi_name(set(tasks_consid))
 
 
 def _new_filtro_predictor(tipologia, master_whitelist, task_globali) -> set[str]:
@@ -147,7 +163,7 @@ def _new_filtro_predictor(tipologia, master_whitelist, task_globali) -> set[str]
             continue
         eff_name = _OLD_TASK_CLASS_TO_NAME.get(r["class_name"], r["task_name"])
         effettivi.add(eff_name)
-    return effettivi
+    return _senza_esclusi_name(effettivi)
 
 
 # Whitelist sintetiche da esercitare (prod ha whitelist vuota — il ramo va
