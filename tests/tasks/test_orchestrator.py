@@ -17,6 +17,7 @@ from core.orchestrator import (
     _TaskEntry,
     _e_dovuto_periodic,
     _e_dovuto_daily,
+    _e_dovuto_periodic_reset,
     _reset_daily_corrente,
     e_dovuto,
 )
@@ -53,6 +54,9 @@ class StubTask(Task):
     def interval_hours(self) -> float:
         return self._interval
 
+    def should_run(self, ctx: TaskContext) -> bool:
+        return True
+
     def run(self, ctx: TaskContext) -> TaskResult:
         self.call_count += 1
         if self._raise_exc:
@@ -69,12 +73,13 @@ def make_ctx() -> TaskContext:
     matcher = FakeMatcher()
     nav     = GameNavigator(device, matcher)
     return TaskContext(
+        instance_name="FAU_00",
+        config={},
+        state=None,
+        log=None,
         device=device,
         matcher=matcher,
         navigator=nav,
-        config={},
-        instance_id="FAU_00",
-        logger=None,
     )
 
 
@@ -152,6 +157,49 @@ class TestEDovutoDaily:
 
 
 # ==============================================================================
+# 2bis. Helpers scheduling — periodic_reset (ibrido daily+periodic, mega_armament)
+# ==============================================================================
+
+class TestEDovutoPeriodicReset:
+    """primo ciclo dopo reset 00:00 UTC OPPURE elapsed >= interval_hours."""
+
+    def test_mai_eseguito(self):
+        entry = make_entry(StubTask(schedule="periodic_reset", interval_h=8.0), last_run=0.0)
+        assert _e_dovuto_periodic_reset(entry) is True
+
+    def test_prima_del_reset_dovuto_anche_se_intervallo_non_scaduto(self):
+        """Ultimo run PRIMA del reset di oggi → primo giro dopo reset → dovuto,
+        indipendentemente dall'intervallo (branch reset, time-independent)."""
+        reset = _reset_daily_corrente()
+        prima_reset = (reset - timedelta(minutes=10)).timestamp()
+        entry = make_entry(StubTask(schedule="periodic_reset", interval_h=8.0),
+                           last_run=prima_reset)
+        assert _e_dovuto_periodic_reset(entry) is True
+
+    @patch("core.orchestrator.time.time")
+    @patch("core.orchestrator._reset_daily_corrente")
+    def test_dopo_reset_intervallo_non_scaduto(self, mock_reset, mock_time):
+        reset_dt = datetime(2026, 7, 21, 0, 0, 0, tzinfo=timezone.utc)
+        mock_reset.return_value = reset_dt
+        now = reset_dt + timedelta(hours=3)
+        mock_time.return_value = now.timestamp()
+        last = (reset_dt + timedelta(hours=1)).timestamp()   # dopo reset, 2h fa < 8h
+        entry = make_entry(StubTask(schedule="periodic_reset", interval_h=8.0), last_run=last)
+        assert _e_dovuto_periodic_reset(entry) is False
+
+    @patch("core.orchestrator.time.time")
+    @patch("core.orchestrator._reset_daily_corrente")
+    def test_dopo_reset_intervallo_scaduto(self, mock_reset, mock_time):
+        reset_dt = datetime(2026, 7, 21, 0, 0, 0, tzinfo=timezone.utc)
+        mock_reset.return_value = reset_dt
+        now = reset_dt + timedelta(hours=10)
+        mock_time.return_value = now.timestamp()
+        last = (reset_dt + timedelta(hours=1)).timestamp()   # dopo reset, 9h fa > 8h
+        entry = make_entry(StubTask(schedule="periodic_reset", interval_h=8.0), last_run=last)
+        assert _e_dovuto_periodic_reset(entry) is True
+
+
+# ==============================================================================
 # 3. e_dovuto — dispatch + enabled
 # ==============================================================================
 
@@ -164,6 +212,12 @@ class TestEDovuto:
 
     def test_periodic_dovuto(self):
         entry = make_entry(StubTask(schedule="periodic", interval_h=4.0),
+                           last_run=0.0)
+        assert e_dovuto(entry) is True
+
+    def test_periodic_reset_dispatch(self):
+        """e_dovuto dispatcha correttamente su periodic_reset."""
+        entry = make_entry(StubTask(schedule="periodic_reset", interval_h=8.0),
                            last_run=0.0)
         assert e_dovuto(entry) is True
 

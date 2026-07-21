@@ -912,6 +912,19 @@ def _is_task_due(task_name: str,
         # Gate orari centralizzati gestiti early (WU157), nessun edge qui.
         return True
 
+    # Branch schedule "periodic_reset" (ibrido daily+periodic) → replica
+    # core/orchestrator.py::_e_dovuto_periodic_reset: primo ciclo dopo reset
+    # 00:00 UTC OPPURE elapsed >= interval_h. Usato da mega_armament.
+    if schedule == "periodic_reset":
+        reset_oggi = now_utc.replace(hour=0, minute=0, second=0, microsecond=0)
+        if now_utc < reset_oggi:
+            from datetime import timedelta as _timedelta
+            reset_oggi = reset_oggi - _timedelta(days=1)
+        if last_dt < reset_oggi:
+            return True
+        elapsed_h = (now_utc - last_dt).total_seconds() / 3600.0
+        return elapsed_h >= interval_h
+
     # Branch schedule "periodic"
     elapsed_h = (now_utc - last_dt).total_seconds() / 3600.0
     if elapsed_h < interval_h:

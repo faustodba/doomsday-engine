@@ -115,12 +115,31 @@ def _e_dovuto_daily(entry: _TaskEntry) -> bool:
     return last_dt < reset
 
 
+def _e_dovuto_periodic_reset(entry: _TaskEntry) -> bool:
+    """True al PRIMO ciclo dopo il reset giornaliero (00:00 UTC) OPPURE se sono
+    trascorse interval_hours dall'ultimo run. Ibrido daily+periodic: usato da
+    mega_armament, che deve girare per PRIMO dopo il reset (per selezionare la
+    challenge del giorno prima che radar_master accumuli eventi) e poi ripetersi
+    ogni interval_hours per incassare le missioni +145 che maturano nel giorno."""
+    if entry.last_run == 0.0:
+        return True
+    reset = _reset_daily_corrente()
+    last_dt = datetime.fromtimestamp(entry.last_run, tz=timezone.utc)
+    if last_dt < reset:   # ultimo run prima del reset di oggi → primo giro dopo reset
+        return True
+    elapsed_h = (time.time() - entry.last_run) / 3600.0
+    return elapsed_h >= entry.task.interval_hours
+
+
 def e_dovuto(entry: _TaskEntry) -> bool:
     """Dispatch schedule_type → logica corretta."""
     if not entry.enabled:
         return False
-    if entry.task.schedule_type == "daily":
+    st = entry.task.schedule_type
+    if st == "daily":
         return _e_dovuto_daily(entry)
+    if st == "periodic_reset":
+        return _e_dovuto_periodic_reset(entry)
     return _e_dovuto_periodic(entry)
 
 

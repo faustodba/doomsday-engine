@@ -6,7 +6,7 @@
   {"class": "RaccoltaTask",           "priority": 15,  "interval_hours": 0.0,   "schedule": "always"},
   {"class": "TruppeTask",             "priority": 18,  "interval_hours": 4.0,   "schedule": "periodic"},
   {"class": "DonazioneTask",          "priority": 20,  "interval_hours": 8.0,   "schedule": "periodic"},
-  {"class": "MegaArmamentTask",       "priority": 21,  "interval_hours": 12.0,  "schedule": "periodic"},
+  {"class": "MegaArmamentTask",       "priority": 21,  "interval_hours": 8.0,   "schedule": "periodic_reset"},
   {"class": "MainMissionTask",        "priority": 22,  "interval_hours": 24.0,  "schedule": "daily"},
   {"class": "DailyMissionAutoTask",   "priority": 23,  "interval_hours": 0.0,   "schedule": "always"},
   {"class": "RadarMasterTask",        "priority": 24,  "interval_hours": 12.0,  "schedule": "periodic"},
