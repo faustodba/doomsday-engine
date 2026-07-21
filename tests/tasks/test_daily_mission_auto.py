@@ -11,7 +11,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 
-from tasks.daily_mission_auto import DailyMissionAutoTask, DailyMissionAutoConfig
+from unittest.mock import patch
+
+from tasks.daily_mission_auto import (
+    DailyMissionAutoTask, DailyMissionClaimTask, DailyMissionAutoConfig,
+)
 
 
 # ── Fake infra ─────────────────────────────────────────────────────────────
@@ -113,6 +117,10 @@ def _task():
     return DailyMissionAutoTask(config=_cfg_zero())
 
 
+def _claim_task():
+    return DailyMissionClaimTask(config=_cfg_zero())
+
+
 # ── should_run ─────────────────────────────────────────────────────────────
 
 class TestShouldRun:
@@ -181,62 +189,68 @@ class TestFaseClaim:
         s.trigger_ts = (datetime.now(timezone.utc) - timedelta(minutes=minuti_fa)).isoformat()
         return s
 
-    def test_claim_non_pronto_skip(self):
-        # trigger appena fatto (0 min fa) → attende, skip
-        s = self._stato_triggerato(minuti_fa=0)
-        ctx = _make_ctx(device=FakeDevice(), matcher=FakeMatcher(), stato=s)
-        result = _task().run(ctx)
-        assert result.skipped is True
-        assert ctx.state.daily_mission.claim_fatto is False
+    # 21/07: il CLAIM è ora DailyMissionClaimTask (priority 199), gira nello
+    # stesso ciclo del trigger. Attende SOLO il residuo dei 3 min (sleep
+    # patchato nei test). should_run: trigger fatto e claim non fatto.
 
-    def test_claim_pronto_esegue(self):
-        cfg = _cfg_zero()
+    def test_claim_should_run(self):
         s = self._stato_triggerato(minuti_fa=5)
-        device = FakeDevice()
-        m = FakeMatcher(claim_count=3, pin_claim=cfg.pin_claim)   # 3 CLAIM poi vuoto
-        ctx = _make_ctx(device=device, matcher=m, stato=s)
-        result = _task().run(ctx)
+        ctx = _make_ctx(device=FakeDevice(), matcher=FakeMatcher(), stato=s)
+        assert _claim_task().should_run(ctx) is True
 
+    def test_claim_should_run_false_senza_trigger(self):
+        from core.state import DailyMissionState
+        ctx = _make_ctx(device=FakeDevice(), matcher=FakeMatcher(), stato=DailyMissionState())
+        assert _claim_task().should_run(ctx) is False   # trigger non fatto
+
+    @patch("tasks.daily_mission_auto.time.sleep")
+    def test_claim_attende_residuo_poi_esegue(self, mock_sleep):
+        # trigger 0 min fa → attende residuo (~180s, sleep patchato) poi claim
+        cfg = _cfg_zero()
+        s = self._stato_triggerato(minuti_fa=0)
+        device = FakeDevice()
+        m = FakeMatcher(claim_count=3, pin_claim=cfg.pin_claim)
+        ctx = _make_ctx(device=device, matcher=m, stato=s)
+        result = _claim_task().run(ctx)
+        assert mock_sleep.called            # ha atteso il residuo
         assert result.success is True
         assert result.data.get("fase") == "claim"
         assert result.data.get("daily_claim") == 3
-        assert result.data.get("chest_claim") == 5   # tutti e 5 i chest tappati
+        assert result.data.get("chest_claim") == 5
         assert ctx.state.daily_mission.claim_fatto is True
 
-    def test_ritira_tutti_e_5_i_chest(self):
-        # con auto-complete tutti i chest sono raggiunti → 5 tap chest + 5 chiusure
+    @patch("tasks.daily_mission_auto.time.sleep")
+    def test_claim_pronto_esegue(self, _sleep):
+        cfg = _cfg_zero()
+        s = self._stato_triggerato(minuti_fa=5)   # residuo 0
+        device = FakeDevice()
+        m = FakeMatcher(claim_count=3, pin_claim=cfg.pin_claim)
+        ctx = _make_ctx(device=device, matcher=m, stato=s)
+        result = _claim_task().run(ctx)
+        assert result.success is True
+        assert result.data.get("daily_claim") == 3
+        assert result.data.get("chest_claim") == 5
+        assert ctx.state.daily_mission.claim_fatto is True
+
+    @patch("tasks.daily_mission_auto.time.sleep")
+    def test_ritira_tutti_e_5_i_chest(self, _sleep):
         cfg = _cfg_zero()
         s = self._stato_triggerato(minuti_fa=5)
         device = FakeDevice()
         m = FakeMatcher(claim_count=1, pin_claim=cfg.pin_claim)
         ctx = _make_ctx(device=device, matcher=m, stato=s)
-        _task().run(ctx)
-
+        _claim_task().run(ctx)
         chest_taps = [c for c in device.calls if c[0] == "tap" and (c[1], c[2]) in cfg.chest_coords]
-        assert len(chest_taps) == 5   # tutti e 5 i chest tappati incondizionatamente
+        assert len(chest_taps) == 5
 
-    def test_claim_primo_ritira_tutto(self):
-        # caso "un solo CLAIM ritira tutte le ricompense": claim_count=1,
-        # poi nessun altro CLAIM → il loop si ferma subito (nessun tap inutile).
-        cfg = _cfg_zero()
-        s = self._stato_triggerato(minuti_fa=5)
-        device = FakeDevice()
-        m = FakeMatcher(claim_count=1, pin_claim=cfg.pin_claim)
-        ctx = _make_ctx(device=device, matcher=m, stato=s)
-        result = _task().run(ctx)
-
-        assert result.data.get("daily_claim") == 1
-        assert ctx.state.daily_mission.claim_fatto is True
-
-    def test_claim_lista_vuota_scrolla_poi_stop(self):
-        # nessun CLAIM trovato: il loop scrolla max_scroll_vuoti volte poi stop.
+    @patch("tasks.daily_mission_auto.time.sleep")
+    def test_claim_lista_vuota_scrolla_poi_stop(self, _sleep):
         cfg = _cfg_zero()
         s = self._stato_triggerato(minuti_fa=5)
         device = FakeDevice()
         m = FakeMatcher(claim_count=0, pin_claim=cfg.pin_claim)
         ctx = _make_ctx(device=device, matcher=m, stato=s)
-        result = _task().run(ctx)
-
+        result = _claim_task().run(ctx)
         assert result.data.get("daily_claim") == 0
         swipes = [c for c in device.calls if c[0] == "swipe"]
         assert len(swipes) == cfg.max_scroll_vuoti

@@ -174,9 +174,11 @@ def test_profilo_master_catalogo_dichiarativo_non_wired():
     assert "GraficaHqTask" in nomi
     assert "DistrictShowdownTask" in nomi
     # 20/07: +daily_mission_auto +radar_master (task esclusivi master) → 12 (era 10)
+    # 21/07: +daily_mission_claim (claim fine ciclo) → 13
     assert "DailyMissionAutoTask" in nomi
+    assert "DailyMissionClaimTask" in nomi
     assert "RadarMasterTask" in nomi
-    assert len(reg) == 12
+    assert len(reg) == 13
 
 
 # ── Ordine risultato (per priority, come task_setup.json) ─────────────────

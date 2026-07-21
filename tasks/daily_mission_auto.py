@@ -1,33 +1,38 @@
 """
-tasks/daily_mission_auto.py — DailyMissionAutoTask V6
-=====================================================
-Task custom master #1 (20/07/2026). La pagina Daily Missions ha, per il
-master, un pulsante "Auto Complete" che esegue automaticamente tutte le
-missioni giornaliere. Struttura a DUE FASI differite (once/day, reset UTC),
-gestite da `ctx.state.daily_mission` (DailyMissionState):
+tasks/daily_mission_auto.py — DailyMissionAutoTask + DailyMissionClaimTask V6
+============================================================================
+Task custom master #1 (20/07/2026, redesign run-singolo 21/07). La pagina
+Daily Missions ha, per il master, un pulsante "Auto Complete" che esegue
+automaticamente tutte le missioni giornaliere. Once/day (reset UTC), stato in
+`ctx.state.daily_mission` (DailyMissionState).
 
-  Fase TRIGGER (tick N):
-    HOME -> apri pannello (33,398) -> tab Daily -> tap Auto Complete (843,225).
-    Parte un timer "Auto ends in ~1-3 min" (nessun popup di conferma —
-    verificato live su FauMorfeus). Conferma via comparsa di pin_auto_ends.
-    -> state.segna_trigger() (registra timestamp).
+**REDESIGN 21/07 — DUE TASK NELLO STESSO CICLO** (non più 2 fasi su cicli
+diversi). Motivo: l'Auto Complete avvia un timer di ~3 min; le ricompense si
+recuperano DOPO i 3 min, ma se il claim arriva nel CICLO SUCCESSIVO (per il
+master, ore dopo) **il timer si blocca** e recupera solo 1 missione invece di
+tutte (bug osservato 20-21/07: trigger 00:04 → claim 02:20, 2h16m dopo,
+claim=1). Fix (richiesta utente): trigger presto e non-bloccante, poi il claim
+a fine ciclo (prima di raccolta_chiusura), aspettando solo il RESIDUO dei 3
+min se gli altri task non li hanno già coperti.
 
-  Fase CLAIM (tick successivo, dopo wait_claim_min dal trigger):
-    HOME -> apri pannello -> tab Daily -> loop CLAIM (pin_btn_claim_mission,
-    con SCROLL: la lista auto-completata è lunga, ~29 missioni) -> chest
-    milestone con OCR Current AP (riuso _leggi_current_ap di MainMission).
-    -> state.segna_claim().
+  DailyMissionAutoTask  (priority 23):  fase TRIGGER, non-bloccante.
+    HOME -> apri pannello (33,398) -> tab Daily -> tap Auto Complete (843,225)
+    -> segna_trigger() (registra trigger_ts) -> return. NON attende, NON fa
+    claim: lascia girare gli altri task (radar/arena/store/... > 3 min).
 
-Un tick esegue UNA sola fase (guidata dallo stato). Il claim differito evita
-di dover coordinare trigger+claim nello stesso tick (nessun hook fine-tick nel
-bot). Se il pulsante Auto Complete non c'è (istanza senza la funzione) ->
-segna_non_disponibile() per non riprovare a vuoto tutto il giorno.
+  DailyMissionClaimTask (priority 199, subito PRIMA di raccolta_chiusura 200):
+    should_run solo se trigger fatto e claim non fatto oggi. Attende il
+    RESIDUO fino a wait_claim_min dal trigger (di norma 0: gli altri task
+    hanno già coperto i 3 min), poi: HOME -> pannello -> loop CLAIM (con
+    SCROLL, lista lunga ~29 missioni) -> ritira i 5 chest -> segna_claim().
 
-Navigazione + claim daily + OCR AP riusano coordinate/logica validate in
-tasks/main_mission.py.
+Se il pulsante Auto Complete non c'è (istanza senza la funzione/pass scaduto)
+-> segna_non_disponibile() nel trigger, il claim non parte.
 
-Registrazione: solo master (via master_task_whitelist). schedule "always"
-(il gate once/day è nello stato, non nello schedule). Priority 23.
+Navigazione + claim daily riusano coordinate validate in tasks/main_mission.py.
+Registrazione: entrambi solo master (via task_overrides + profilo master).
+schedule "always" (gate once/day nello stato). Priority 23 (trigger) / 199
+(claim). Config e helper condivisi in _DailyMissionBase.
 """
 
 from __future__ import annotations
@@ -102,56 +107,12 @@ class DailyMissionAutoConfig:
 # Task
 # ---------------------------------------------------------------------------
 
-class DailyMissionAutoTask(Task):
-    """
-    Auto-complete daily mission del master, due fasi once/day via
-    DailyMissionState. Vedi docstring modulo per il flusso completo.
-    """
+class _DailyMissionBase(Task):
+    """Base condivisa: config + helper + _fase_trigger/_fase_claim. Astratta
+    (name/should_run/run implementati nelle due sottoclassi trigger/claim)."""
 
     def __init__(self, config: DailyMissionAutoConfig | None = None) -> None:
         self._cfg = config or DailyMissionAutoConfig()
-
-    def name(self) -> str:
-        return "daily_mission_auto"
-
-    def should_run(self, ctx: TaskContext) -> bool:
-        if ctx.device is None or ctx.matcher is None:
-            return False
-        if hasattr(ctx.config, "task_abilitato"):
-            if not ctx.config.task_abilitato("daily_mission_auto"):
-                return False
-        stato = ctx.state.daily_mission
-        if not stato.should_run():
-            ctx.log_msg(f"[DAILY_MISSION] {stato.log_stato()} → skip")
-            return False
-        return True
-
-    def run(self, ctx: TaskContext) -> TaskResult:
-        cfg = self._cfg
-        log = ctx.log_msg
-        stato = ctx.state.daily_mission
-
-        if ctx.navigator is not None:
-            if not ctx.navigator.vai_in_home():
-                return TaskResult.fail("Navigator non ha raggiunto HOME", step="vai_in_home")
-
-        from shared.debug_buffer import DebugBuffer
-        debug = DebugBuffer.for_task("daily_mission_auto", getattr(ctx, "instance_name", "_unknown"))
-
-        try:
-            if not stato.trigger_fatto:
-                return self._fase_trigger(ctx, cfg, log, stato, debug)
-            # trigger già fatto: valuta la fase claim
-            if not stato.claim_pronto(cfg.wait_claim_min):
-                log(f"[DAILY_MISSION] trigger fatto, attendo completamento missioni "
-                    f"(< {cfg.wait_claim_min}min) → skip, riprovo al prossimo tick")
-                return TaskResult.skip("Attendo completamento auto-complete")
-            return self._fase_claim(ctx, cfg, log, stato, debug)
-        except Exception as exc:
-            log(f"[DAILY_MISSION] eccezione: {exc}")
-            debug.snap("99_exception", ctx.device.screenshot())
-            debug.flush(success=False, log_fn=log)
-            return TaskResult.fail(f"Eccezione: {exc}", step="run")
 
     # ------------------------------------------------------------------
     # Fase TRIGGER
@@ -288,3 +249,98 @@ class DailyMissionAutoTask(Task):
             time.sleep(cfg.wait_post_tap)
             n += 1
         return n
+
+
+# ---------------------------------------------------------------------------
+# Task TRIGGER (priority 23) — non-bloccante
+# ---------------------------------------------------------------------------
+
+class DailyMissionAutoTask(_DailyMissionBase):
+    """Fase TRIGGER: attiva l'Auto Complete e ritorna subito (il claim è del
+    task DailyMissionClaimTask a fine ciclo). Once/day via DailyMissionState."""
+
+    def name(self) -> str:
+        return "daily_mission_auto"
+
+    def should_run(self, ctx: TaskContext) -> bool:
+        if ctx.device is None or ctx.matcher is None:
+            return False
+        if hasattr(ctx.config, "task_abilitato"):
+            if not ctx.config.task_abilitato("daily_mission_auto"):
+                return False
+        stato = ctx.state.daily_mission
+        if not stato.should_run():           # già completato oggi
+            ctx.log_msg(f"[DAILY_MISSION] {stato.log_stato()} → skip")
+            return False
+        if stato.trigger_fatto:               # trigger già fatto → il claim è del claim-task
+            return False
+        return True
+
+    def run(self, ctx: TaskContext) -> TaskResult:
+        cfg, log, stato = self._cfg, ctx.log_msg, ctx.state.daily_mission
+        if ctx.navigator is not None and not ctx.navigator.vai_in_home():
+            return TaskResult.fail("Navigator non ha raggiunto HOME", step="vai_in_home")
+        from shared.debug_buffer import DebugBuffer
+        debug = DebugBuffer.for_task("daily_mission_auto", getattr(ctx, "instance_name", "_unknown"))
+        try:
+            return self._fase_trigger(ctx, cfg, log, stato, debug)
+        except Exception as exc:
+            log(f"[DAILY_MISSION] eccezione trigger: {exc}")
+            debug.snap("99_exception", ctx.device.screenshot())
+            debug.flush(success=False, log_fn=log)
+            return TaskResult.fail(f"Eccezione: {exc}", step="trigger")
+
+
+# ---------------------------------------------------------------------------
+# Task CLAIM (priority 199) — a fine ciclo, prima di raccolta_chiusura
+# ---------------------------------------------------------------------------
+
+class DailyMissionClaimTask(_DailyMissionBase):
+    """Fase CLAIM: gira a fine ciclo (priority 199) SOLO se il trigger è stato
+    fatto oggi e il claim no. Attende il RESIDUO fino a wait_claim_min dal
+    trigger (di norma 0 — gli altri task hanno già coperto i 3 min), poi
+    recupera le ricompense PRIMA che il timer auto-complete si blocchi."""
+
+    def name(self) -> str:
+        return "daily_mission_claim"
+
+    def should_run(self, ctx: TaskContext) -> bool:
+        if ctx.device is None or ctx.matcher is None:
+            return False
+        if hasattr(ctx.config, "task_abilitato"):
+            if not ctx.config.task_abilitato("daily_mission_claim"):
+                return False
+        stato = ctx.state.daily_mission
+        stato.should_run()                    # forza reset lazy mezzanotte UTC
+        return bool(stato.trigger_fatto and not stato.claim_fatto)
+
+    def _secondi_residui(self, stato) -> float:
+        """Secondi mancanti a wait_claim_min dal trigger (0 se già trascorsi)."""
+        import datetime as _dt
+        if not stato.trigger_ts:
+            return 0.0
+        try:
+            ts = _dt.datetime.fromisoformat(stato.trigger_ts)
+        except (ValueError, TypeError):
+            return 0.0
+        gap = (_dt.datetime.now(_dt.timezone.utc) - ts).total_seconds()
+        return max(0.0, self._cfg.wait_claim_min * 60.0 - gap)
+
+    def run(self, ctx: TaskContext) -> TaskResult:
+        cfg, log, stato = self._cfg, ctx.log_msg, ctx.state.daily_mission
+        resto = self._secondi_residui(stato)
+        if resto > 0:
+            log(f"[DAILY_MISSION] claim: attendo residuo timer auto-complete "
+                f"({resto:.0f}s a {cfg.wait_claim_min}min dal trigger)")
+            time.sleep(resto)
+        if ctx.navigator is not None and not ctx.navigator.vai_in_home():
+            return TaskResult.fail("Navigator non ha raggiunto HOME", step="vai_in_home")
+        from shared.debug_buffer import DebugBuffer
+        debug = DebugBuffer.for_task("daily_mission_auto", getattr(ctx, "instance_name", "_unknown"))
+        try:
+            return self._fase_claim(ctx, cfg, log, stato, debug)
+        except Exception as exc:
+            log(f"[DAILY_MISSION] eccezione claim: {exc}")
+            debug.snap("99_exception", ctx.device.screenshot())
+            debug.flush(success=False, log_fn=log)
+            return TaskResult.fail(f"Eccezione: {exc}", step="claim")

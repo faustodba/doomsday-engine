@@ -57,6 +57,7 @@ TASK_CLASS_TO_NAME = {
     "RadarTask": "radar",
     "RadarCensusTask": "radar_census",
     "DailyMissionAutoTask": "daily_mission_auto",   # 20/07 task custom master
+    "DailyMissionClaimTask": "daily_mission_claim",  # 21/07 claim a fine ciclo
     "RadarMasterTask": "radar_master",              # 20/07 task custom master
 }
 
