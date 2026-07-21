@@ -13,6 +13,7 @@ from unittest.mock import patch
 
 from core.device import FakeDevice
 from core.device import Screenshot
+from shared.template_matcher import FakeMatcher
 from shared.report_raccolta import (
     HEADER_Y0,
     VALUE_Y0,
@@ -20,6 +21,8 @@ from shared.report_raccolta import (
     _CAPACITA_MAX,
     _sort_mail_toggle_on,
     _assicura_sort_mail_off,
+    _assicura_sort_mail_on,
+    _seleziona_gathering_report,
     _elimina_report_letto,
     _report_vuoto_confermato,
     _tab_report_attivo,
@@ -34,6 +37,11 @@ from shared.report_raccolta import (
     TAP_TAB_REPORT,
     TAP_TAB_ALLIANCE,
     TAP_CLOSE,
+    PIN_GATHERING_REPORT,
+    PIN_GATHERING_HEADER,
+    PIN_REPORT_OTHER,
+    PIN_CHEVRON_UP,
+    MAX_TENTATIVI_GATHERING,
 )
 
 
@@ -60,9 +68,10 @@ def _ocr_tab_e_nomail(frame, roi, cfg):
 
 
 class _FakeCtx:
-    def __init__(self, device, instance_name="FAU_TEST"):
+    def __init__(self, device, instance_name="FAU_TEST", matcher=None):
         self.device = device
         self.instance_name = instance_name
+        self.matcher = matcher if matcher is not None else FakeMatcher()
 
 
 def _frame():
@@ -189,6 +198,137 @@ class TestSortMailToggle:
         _assicura_sort_mail_off(device, log=lambda m: None)
         assert device.taps == []
 
+    # WU199... (21/07) — _assicura_sort_mail_on: mirror invertito, usato dal
+    # fallback a categorie di _seleziona_gathering_report.
+
+    def test_assicura_on_non_tocca_se_gia_on(self):
+        device = FakeDevice()
+        device.add_screenshot(Screenshot(_frame_toggle(cursore_a_sinistra=False)))  # ON
+        _assicura_sort_mail_on(device, log=lambda m: None)
+        assert device.taps == []
+
+    def test_assicura_on_tappa_se_off(self):
+        device = FakeDevice()
+        device.add_screenshot(Screenshot(_frame_toggle(cursore_a_sinistra=True)))  # OFF
+        _assicura_sort_mail_on(device, log=lambda m: None)
+        assert device.taps == [TAP_SORT_MAIL]
+
+    def test_assicura_on_screenshot_none_non_solleva(self):
+        device = FakeDevice()  # nessuno screenshot in coda -> None
+        _assicura_sort_mail_on(device, log=lambda m: None)
+        assert device.taps == []
+
+
+class _SeqMatcher:
+    """Fake matcher con risultati DIVERSI a chiamate successive per lo
+    stesso template — a differenza di FakeMatcher (risultato statico), serve
+    a simulare stati che cambiano nel loop (es. 'Other' che passa da chiusa
+    ad aperta dopo il tap). `script`: {template: [MatchResult, ...]}
+    consumati in ordine; l'ultimo valore si ripete se le chiamate eccedono."""
+
+    def __init__(self, script: dict):
+        from core.device import MatchResult
+        self._script = {k: list(v) for k, v in script.items()}
+        self._idx = {k: 0 for k in script}
+        self._MatchResult = MatchResult
+
+    def find_one(self, screenshot, template_name: str, threshold=0.75, zone=None):
+        seq = self._script.get(template_name)
+        if not seq:
+            return self._MatchResult(found=False, score=0.0, cx=0, cy=0)
+        i = min(self._idx[template_name], len(seq) - 1)
+        self._idx[template_name] += 1
+        return seq[i]
+
+
+def _mr(found, cx=0, cy=0, score=None):
+    from core.device import MatchResult
+    return MatchResult(found=found, score=(score if score is not None else (0.9 if found else 0.1)),
+                       cx=cx, cy=cy)
+
+
+class TestSelezionaGatheringReport:
+    """WU199... (21/07, bug utente) — con altri eventi nel report (es. il
+    master, centinaia di Battle Report), Gathering Report NON è l'unico
+    elemento della lista flat (assunzione WU199sexies errata): il bot
+    scrollava e leggeva la lista sbagliata (0 righe raccolta, osservato live
+    sul master). Fix a 2 fasi: fast path OFF (istanze pulite, economico),
+    fallback ON+categorie sotto 'Other' (istanze con altri eventi)."""
+
+    def test_fast_path_off_trova_subito(self):
+        """Istanza pulita: Gathering Report visibile subito con Sort Mail
+        OFF, nessun bisogno di toggle/categorie/scroll."""
+        device = FakeDevice()
+        for _ in range(3):  # toggle-off check, ricerca, conferma header
+            device.add_screenshot(Screenshot(_frame()))
+        matcher = FakeMatcher()
+        matcher.set_result(PIN_GATHERING_REPORT, (150, 300))
+        matcher.set_result(PIN_GATHERING_HEADER, (400, 75))
+        ctx = _FakeCtx(device, matcher=matcher)
+
+        ok = _seleziona_gathering_report(ctx, device, lambda m: None)
+
+        assert ok is True
+        assert device.taps == [(150, 300)]   # nessun toggle (già OFF, frame nero)
+
+    def test_fast_path_off_fallito_other_mai_trovata_abort_sicuro(self):
+        """Nessun altro evento visibile MA Gathering Report introvabile
+        anche a categorie ('Other' mai rilevata, es. report vuoto/anomalo)
+        -> abort dopo MAX tentativi, nessuna azione distruttiva."""
+        device = FakeDevice()
+        # toggle-off(1) + ricerca-off(1) + toggle-on(1) + N iterazioni (1 ciascuna)
+        for _ in range(3 + MAX_TENTATIVI_GATHERING):
+            device.add_screenshot(Screenshot(_frame()))
+        matcher = FakeMatcher()  # nulla configurato -> tutto not-found
+        ctx = _FakeCtx(device, matcher=matcher)
+
+        with patch("shared.report_raccolta.time.sleep"):   # MAX_TENTATIVI_GATHERING iterazioni, no wall-clock reale
+            ok = _seleziona_gathering_report(ctx, device, lambda m: None)
+
+        assert ok is False
+        # unico tap: il toggle Sort Mail (OFF->ON, frame nero rilevato OFF)
+        # per entrare nella vista a categorie — MAI un tap su Gathering o
+        # Other (mai trovati): sicuro.
+        assert device.taps == [TAP_SORT_MAIL]
+        assert len(device.swipe_calls) == MAX_TENTATIVI_GATHERING
+
+    def test_categorie_other_chiusa_poi_aperta_poi_gathering_trovato(self):
+        """Fallback completo: fast path OFF miss -> 'Other' chiusa (tap per
+        aprire) -> 'Other' aperta ma Gathering Report sotto il fold (scroll)
+        -> Gathering Report trovato e confermato. Replica esatta il flusso
+        osservato live sul master (screenshot reali 21/07)."""
+        device = FakeDevice()
+        for _ in range(7):
+            device.add_screenshot(Screenshot(_frame()))
+        matcher = _SeqMatcher({
+            PIN_GATHERING_REPORT: [
+                _mr(False),   # FASE1 (OFF): non trovato
+                _mr(False),   # FASE2 iter1: non trovato
+                _mr(False),   # FASE2 iter2: non trovato
+                _mr(True, 204, 424),   # FASE2 iter3: trovato
+            ],
+            PIN_REPORT_OTHER: [
+                _mr(True, 73, 298),   # iter1
+                _mr(True, 73, 298),   # iter2
+            ],
+            PIN_CHEVRON_UP: [
+                _mr(False),   # iter1: 'Other' chiusa
+                _mr(True),    # iter2: 'Other' aperta
+            ],
+            PIN_GATHERING_HEADER: [
+                _mr(True),    # conferma finale
+            ],
+        })
+        ctx = _FakeCtx(device, matcher=matcher)
+
+        ok = _seleziona_gathering_report(ctx, device, lambda m: None)
+
+        assert ok is True
+        # toggle Sort Mail ON + tap 'Other' (apertura, iter1) + tap
+        # Gathering Report (iter3)
+        assert device.taps == [TAP_SORT_MAIL, (73, 298), (204, 424)]
+        assert len(device.swipe_calls) == 1   # 1 scroll (iter2, 'Other' aperta ma GR sotto il fold)
+
 
 class TestReportVuotoConfermato:
     """WU199octies: verifica POSITIVA via OCR 'No mail received', non
@@ -295,13 +435,16 @@ class TestEseguiReportRaccoltaAbortSuTabSbagliato:
 
         # screenshot in ordine: check tab iniziale (fail), check tab retry
         # (ok), check toggle Sort Mail dentro _assicura_sort_mail_off
-        # (pixel, non OCR -- frame nero = toggle OFF, nessun tap), check
-        # finale dentro _elimina_report_letto ("No mail received")
-        device.add_screenshot(Screenshot(_frame()))
-        device.add_screenshot(Screenshot(_frame()))
-        device.add_screenshot(Screenshot(_frame()))
-        device.add_screenshot(Screenshot(_frame()))
-        ctx = _FakeCtx(device)
+        # (pixel, non OCR -- frame nero = toggle OFF, nessun tap), ricerca
+        # Gathering Report (fast path OFF, matcher configurato -> trovato),
+        # conferma header, check finale dentro _elimina_report_letto
+        # ("No mail received")
+        for _ in range(6):
+            device.add_screenshot(Screenshot(_frame()))
+        matcher = FakeMatcher()
+        matcher.set_result(PIN_GATHERING_REPORT, (150, 300))
+        matcher.set_result(PIN_GATHERING_HEADER, (400, 75))
+        ctx = _FakeCtx(device, matcher=matcher)
 
         with patch("shared.report_raccolta._ocr_raw", side_effect=_ocr_side_effect):
             esito = esegui_report_raccolta(ctx, solo_reset=True)
@@ -310,6 +453,34 @@ class TestEseguiReportRaccoltaAbortSuTabSbagliato:
         assert esito["delete_ok"] is True
         assert TAP_READ_CLAIM_ALL in device.taps
         assert TAP_DELETE_READ in device.taps
+
+
+class TestEseguiReportRaccoltaAbortSuGatheringNonTrovato:
+    """WU199... (21/07, bug utente) — tab OK ma Gathering Report non
+    selezionabile (nessun match, né OFF né tra le categorie ON): mai
+    un'azione distruttiva (Read/Delete) su una selezione non confermata —
+    stesso principio di sicurezza di TestEseguiReportRaccoltaAbortSuTabSbagliato,
+    applicato al passo successivo (selezione del thread, non solo il tab)."""
+
+    def test_gathering_non_trovato_nessun_tap_distruttivo(self):
+        device = FakeDevice()
+        # tab ok(1) + toggle-off(1) + ricerca-off(1) + toggle-on(1)
+        # + N iterazioni categorie (1 ciascuna, tutte a vuoto)
+        for _ in range(4 + MAX_TENTATIVI_GATHERING):
+            device.add_screenshot(Screenshot(_frame()))
+        matcher = FakeMatcher()   # nulla configurato -> mai trovato
+        ctx = _FakeCtx(device, matcher=matcher)
+
+        with patch("shared.report_raccolta._ocr_raw", side_effect=_ocr_tab_e_nomail), \
+             patch("shared.report_raccolta.time.sleep"):   # MAX_TENTATIVI_GATHERING iterazioni, no wall-clock reale
+            esito = esegui_report_raccolta(ctx, solo_reset=True)
+
+        assert TAP_READ_CLAIM_ALL not in device.taps
+        assert TAP_DELETE_READ not in device.taps
+        assert esito["errore"] == "gathering_report_non_selezionato"
+        assert esito["delete_ok"] is None
+        # naviga, tenta la selezione, poi si richiude in sicurezza (Alliance + close)
+        assert device.taps[-2:] == [TAP_TAB_ALLIANCE, TAP_CLOSE]
 
 
 class TestScrollFermoConfermaFineLista:
@@ -325,14 +496,26 @@ class TestScrollFermoConfermaFineLista:
             for i in range(4)
         ]
 
+    def _matcher_fast_path(self) -> FakeMatcher:
+        """Matcher configurato per far succedere il fast path OFF di
+        _seleziona_gathering_report al primo colpo (nessuno swipe/tap
+        aggiuntivo rispetto al comportamento pre-fix — questi test coprono
+        la logica dedup/scroll della LETTURA pagine, non la selezione)."""
+        matcher = FakeMatcher()
+        matcher.set_result(PIN_GATHERING_REPORT, (150, 300))
+        matcher.set_result(PIN_GATHERING_HEADER, (400, 75))
+        return matcher
+
     def test_pagina_identica_dopo_scroll_conferma_fine_lista(self):
         device = FakeDevice()
         device.add_screenshot(Screenshot(_frame()))  # tab check
-        device.add_screenshot(Screenshot(_frame()))  # toggle check
+        device.add_screenshot(Screenshot(_frame()))  # toggle-off check
+        device.add_screenshot(Screenshot(_frame()))  # ricerca Gathering Report (fast path)
+        device.add_screenshot(Screenshot(_frame()))  # conferma header
         device.add_screenshot(Screenshot(_frame()))  # pagina 1
         device.add_screenshot(Screenshot(_frame()))  # pagina 2 (identica)
         device.add_screenshot(Screenshot(_frame()))  # finale _elimina_report_letto
-        ctx = _FakeCtx(device)
+        ctx = _FakeCtx(device, matcher=self._matcher_fast_path())
 
         pagina = self._righe_full_page("70", 1)
 
@@ -344,15 +527,18 @@ class TestScrollFermoConfermaFineLista:
         assert esito["fine_lista_raggiunta"] is True
         assert esito["delete_ok"] is True
         assert esito["nuove"] == 4  # solo dalla prima pagina, la seconda è tutta dedup
-        assert len(device.swipe_calls) == 1  # un solo swipe, tra pagina 1 e 2
+        # 1 solo swipe: quello tra pagina 1 e 2 (il fast path OFF non scrolla)
+        assert len(device.swipe_calls) == 1
 
     def test_pagine_diverse_non_scattano_falso_positivo(self):
         device = FakeDevice()
         device.add_screenshot(Screenshot(_frame()))  # tab check
-        device.add_screenshot(Screenshot(_frame()))  # toggle check
+        device.add_screenshot(Screenshot(_frame()))  # toggle-off check
+        device.add_screenshot(Screenshot(_frame()))  # ricerca Gathering Report (fast path)
+        device.add_screenshot(Screenshot(_frame()))  # conferma header
         device.add_screenshot(Screenshot(_frame()))  # pagina 1
         device.add_screenshot(Screenshot(_frame()))  # pagina 2 (diversa)
-        ctx = _FakeCtx(device)
+        ctx = _FakeCtx(device, matcher=self._matcher_fast_path())
 
         pagina1 = self._righe_full_page("70", 1)
         pagina2 = [

@@ -467,16 +467,51 @@ MAX_PAGINE         = 15   # cap sicurezza modalità lettura completa (non usato 
 # WU199sexies (10/07/2026): toggle "Sort Mail" in alto a sinistra del tab
 # Report — verificato live su FAU_10 che NON riordina le righe (ipotesi
 # iniziale errata), ma cambia vista: OFF = "Gathering Report" diretto come
-# unico elemento in lista (quello che vogliamo), ON = vista a categorie
-# (Battle/Group Battles/Jungle Crisis/Zombie/Scout/Other, Gathering Report
-# annidato sotto "Other"). Manteniamo sempre OFF. Rilevamento stato via
-# luminosità: il cursore chiaro del toggle sta a sinistra quando OFF, si
-# sposta a destra quando ON — confrontiamo due piccole ROI invece di un
-# singolo pixel per robustezza al rumore JPEG/compressione ADB.
+# unico elemento in lista, ON = vista a categorie (Battle/Group Battles/
+# Jungle Crisis/Zombie/Scout/Other, Gathering Report annidato sotto "Other").
+# Rilevamento stato via luminosità: il cursore chiaro del toggle sta a
+# sinistra quando OFF, si sposta a destra quando ON — confrontiamo due
+# piccole ROI invece di un singolo pixel per robustezza al rumore JPEG/
+# compressione ADB.
+#
+# WU199... (21/07/2026, bug utente): l'assunzione WU199sexies "OFF = unico
+# elemento" era SBAGLIATA — vale solo su istanze con report raccolta-only.
+# Su istanze con ALTRI report (battaglie/eventi, es. il master con centinaia
+# di Battle Report), con OFF il Gathering Report NON è l'unico elemento della
+# lista flat: il bot scrollava e leggeva la lista sbagliata (0 righe raccolta,
+# osservato live sul master — 15 pagine, 0 nuove). Fix: Sort Mail SEMPRE ON
+# (vista a categorie) + selezione esplicita di "Gathering Report" sotto
+# "Other" via _seleziona_gathering_report() — posizione-indipendente (vedi
+# sotto), mai assunzione di elemento unico/posizione fissa.
 TAP_SORT_MAIL      = (54, 71)
 _TOGGLE_ROI_L      = (22, 62, 45, 80)   # box sinistra cursore (x1,y1,x2,y2)
 _TOGGLE_ROI_R      = (62, 62, 85, 80)   # box destra cursore
 WAIT_TOGGLE        = 1.5
+
+# WU199... (21/07) — navigazione categorie (Sort Mail ON) fino a
+# "Gathering Report" sotto "Other". Calibrato live sul master (960x540):
+# posizione di "Other" e di "Gathering Report" VARIA (dipende da quante altre
+# categorie sono espanse sopra, quante voci ha "Other") → navigazione SEMPRE
+# via template match + scroll, mai coordinate fisse. Il chevron (^ aperta,
+# v chiusa) sta sulla stessa riga del testo categoria, offset X costante.
+PIN_REPORT_OTHER     = "pin/pin_report_other.png"
+PIN_CHEVRON_UP       = "pin/pin_chevron_up.png"
+PIN_GATHERING_REPORT = "pin/pin_gathering_report.png"
+PIN_GATHERING_HEADER = "pin/pin_gathering_header.png"
+SOGLIA_CATEGORIE     = 0.80
+
+ZONA_PANNELLO_SX     = (0, 90, 320, 540)   # colonna sinistra del tab Report
+# offset X del chevron rispetto al match del testo "Other" sulla stessa riga
+# (calibrato live 21/07: pin_report_other @cx=73, pin_chevron_up @cx=286).
+CHEVRON_OFFSET_X     = 213
+CHEVRON_ZONA_HALF_W  = 25
+CHEVRON_ZONA_HALF_H  = 18
+
+SWIPE_SX_DA          = (160, 450)
+SWIPE_SX_A           = (160, 150)
+SWIPE_SX_DURATA_MS   = 500
+WAIT_CATEGORIA       = 2.0
+MAX_TENTATIVI_GATHERING = 8
 
 # WU199sexies: sostituito il "Delete" diretto con "Read and claim all" +
 # "Delete read" su richiesta utente (2 tap invece di 1). Verificato live
@@ -507,22 +542,164 @@ def _sort_mail_toggle_on(frame: np.ndarray) -> bool:
 
 def _assicura_sort_mail_off(device, log) -> None:
     """Tocca il toggle Sort Mail SOLO se rilevato ON — mai un tap alla
-    cieca (rischio di accenderlo invece di spegnerlo). Best-effort: uno
-    screenshot fallito qui non blocca il resto del flusso.
-
-    WU199decies (10/07): log esplicito in OGNI caso (non solo quando tocca
-    qualcosa) — utente ha notato che il check era silenzioso quando trovava
-    già OFF, nessuna traccia visibile che fosse stato eseguito davvero."""
+    cieca. Usato dal FAST PATH (vista flat) di _seleziona_gathering_report:
+    la maggior parte delle istanze ha SOLO Gathering Report nella lista
+    flat (nessun altro evento) → visibile subito, senza il costo di
+    navigare le categorie. Vedi _assicura_sort_mail_on per lo stato ON
+    (fallback quando OFF non basta)."""
     screen = device.screenshot()
     if screen is None:
         log("[REPORT-RACCOLTA] Sort Mail — screenshot None, check saltato")
         return
     if _sort_mail_toggle_on(screen.frame):
-        log("[REPORT-RACCOLTA] Sort Mail ON — riporto a OFF")
+        log("[REPORT-RACCOLTA] Sort Mail ON — riporto a OFF (fast path)")
         device.tap(TAP_SORT_MAIL)
         time.sleep(WAIT_TOGGLE)
     else:
         log("[REPORT-RACCOLTA] Sort Mail già OFF — nessuna azione")
+
+
+def _assicura_sort_mail_on(device, log) -> None:
+    """Tocca il toggle Sort Mail SOLO se rilevato OFF — mai un tap alla
+    cieca. Best-effort: uno screenshot fallito qui non blocca il resto del
+    flusso. WU199... (21/07): invertito rispetto a WU199sexies — ON (vista a
+    categorie) è ora il default, necessario per isolare "Gathering Report"
+    sotto "Other" quando ci sono altri eventi nel report (vedi nota sopra
+    TAP_SORT_MAIL).
+
+    WU199decies (10/07): log esplicito in OGNI caso (non solo quando tocca
+    qualcosa) — utente ha notato che il check era silenzioso quando trovava
+    già lo stato atteso, nessuna traccia visibile che fosse stato eseguito
+    davvero."""
+    screen = device.screenshot()
+    if screen is None:
+        log("[REPORT-RACCOLTA] Sort Mail — screenshot None, check saltato")
+        return
+    if not _sort_mail_toggle_on(screen.frame):
+        log("[REPORT-RACCOLTA] Sort Mail OFF — attivo ON (vista a categorie)")
+        device.tap(TAP_SORT_MAIL)
+        time.sleep(WAIT_TOGGLE)
+    else:
+        log("[REPORT-RACCOLTA] Sort Mail già ON — nessuna azione")
+
+
+def _other_aperta(matcher, screen, m_other) -> bool:
+    """True se la categoria 'Other' (già localizzata in m_other) è espansa
+    (chevron ^ visibile sulla sua riga). Zona di ricerca ristretta attorno
+    all'offset calibrato per non confondersi col chevron di un'altra
+    categoria eventualmente aperta altrove nel pannello."""
+    zona = (m_other.cx + CHEVRON_OFFSET_X - CHEVRON_ZONA_HALF_W,
+            m_other.cy - CHEVRON_ZONA_HALF_H,
+            m_other.cx + CHEVRON_OFFSET_X + CHEVRON_ZONA_HALF_W,
+            m_other.cy + CHEVRON_ZONA_HALF_H)
+    return matcher.find_one(screen, PIN_CHEVRON_UP,
+                            threshold=SOGLIA_CATEGORIE, zone=zona).found
+
+
+def _tap_e_conferma_gathering(device, matcher, m_gr, log, contesto: str) -> bool:
+    """Tap sul match di Gathering Report + conferma POSITIVA via
+    pin_gathering_header nel contenuto destro. Helper condiviso da fast
+    path (OFF) e fallback (ON+categorie)."""
+    log(f"[REPORT-RACCOLTA] Gathering Report ({contesto}) @({m_gr.cx},{m_gr.cy}) "
+        f"score={m_gr.score:.3f} → seleziono")
+    device.tap(m_gr.cx, m_gr.cy)
+    time.sleep(WAIT_CATEGORIA)
+    screen2 = device.screenshot()
+    confermato = screen2 is not None and matcher.find_one(
+        screen2, PIN_GATHERING_HEADER, threshold=SOGLIA_CATEGORIE).found
+    if confermato:
+        log(f"[REPORT-RACCOLTA] Gathering Report CONFERMATO ({contesto})")
+    else:
+        log(f"[REPORT-RACCOLTA] tap su Gathering Report ({contesto}) ma header "
+            f"non confermato")
+    return confermato
+
+
+def _seleziona_gathering_report(ctx, device, log) -> bool:
+    """Seleziona "Gathering Report" nel tab Report, a 2 fasi:
+
+    FASE 1 — fast path (Sort Mail OFF, vista flat): la maggior parte delle
+    istanze ha SOLO Gathering Report in lista (nessun altro evento) →
+    visibile subito in cima, un solo screenshot, nessuno scroll/toggle
+    aggiuntivo. Se trovato e confermato → fine, economico.
+
+    FASE 2 — fallback (Sort Mail ON, vista a categorie), SOLO se la fase 1
+    non trova nulla: bug WU199sexies — con altri eventi nel report (es. il
+    master con centinaia di Battle Report) Gathering Report NON è visibile/
+    unico nella lista flat, il bot scrollava leggendo la lista sbagliata (0
+    righe raccolta). ON raggruppa per categoria; Gathering Report è sempre
+    annidato sotto "Other". Posizione di "Other" e di Gathering Report
+    VARIABILE (dipende da quali altre categorie sono espanse sopra e da
+    quante voci ha "Other") → ricerca sempre via TEMPLATE MATCH con scroll
+    del pannello sinistro, mai coordinate fisse. Loop (max
+    MAX_TENTATIVI_GATHERING):
+      1. Gathering Report già in vista → tap, conferma via header, fine.
+      2. "Other" non in vista → scroll pannello sinistro, ritenta.
+      3. "Other" in vista ma CHIUSA (chevron v) → tap per aprirla, ritenta.
+      4. "Other" in vista e APERTA ma Gathering Report non visibile (sotto
+         il fold, altre voci sopra in "Other") → scroll, ritenta.
+
+    Ritorna True solo con conferma POSITIVA (pin_gathering_header nel
+    contenuto destro) — mai un'azione distruttiva (Delete) su una selezione
+    non verificata. False = abort pulito, nessuna azione."""
+    matcher = ctx.matcher
+
+    # FASE 1 — fast path: Sort Mail OFF, ricerca diretta senza scroll.
+    _assicura_sort_mail_off(device, log)
+    screen = device.screenshot()
+    if screen is not None:
+        m_gr = matcher.find_one(screen, PIN_GATHERING_REPORT,
+                                threshold=SOGLIA_CATEGORIE, zone=ZONA_PANNELLO_SX)
+        if m_gr.found:
+            if _tap_e_conferma_gathering(device, matcher, m_gr, log, "fast path OFF"):
+                return True
+            log("[REPORT-RACCOLTA] fast path OFF non confermato → fallback categorie")
+        else:
+            log(f"[REPORT-RACCOLTA] Gathering Report non visibile con Sort Mail OFF "
+                f"(score={m_gr.score:.3f}) → fallback vista a categorie (altri eventi "
+                f"presenti nel report)")
+    else:
+        log("[REPORT-RACCOLTA] screenshot None dopo Sort Mail OFF → fallback categorie")
+
+    # FASE 2 — fallback: Sort Mail ON, naviga a categorie fino a "Other".
+    _assicura_sort_mail_on(device, log)
+    for tentativo in range(1, MAX_TENTATIVI_GATHERING + 1):
+        screen = device.screenshot()
+        if screen is None:
+            log("[REPORT-RACCOLTA] screenshot None durante navigazione categorie — abort")
+            return False
+
+        m_gr = matcher.find_one(screen, PIN_GATHERING_REPORT,
+                                threshold=SOGLIA_CATEGORIE, zone=ZONA_PANNELLO_SX)
+        if m_gr.found:
+            if _tap_e_conferma_gathering(device, matcher, m_gr, log, "categorie ON"):
+                return True
+            continue
+
+        m_other = matcher.find_one(screen, PIN_REPORT_OTHER,
+                                   threshold=SOGLIA_CATEGORIE, zone=ZONA_PANNELLO_SX)
+        if not m_other.found:
+            log(f"[REPORT-RACCOLTA] categoria 'Other' non in vista "
+                f"(score={m_other.score:.3f}) → scroll {tentativo}/{MAX_TENTATIVI_GATHERING}")
+            device.swipe(SWIPE_SX_DA[0], SWIPE_SX_DA[1], SWIPE_SX_A[0], SWIPE_SX_A[1],
+                        duration_ms=SWIPE_SX_DURATA_MS)
+            time.sleep(WAIT_CATEGORIA)
+            continue
+
+        if _other_aperta(matcher, screen, m_other):
+            log(f"[REPORT-RACCOLTA] 'Other' aperta ma Gathering Report non in vista "
+                f"→ scroll {tentativo}/{MAX_TENTATIVI_GATHERING}")
+            device.swipe(SWIPE_SX_DA[0], SWIPE_SX_DA[1], SWIPE_SX_A[0], SWIPE_SX_A[1],
+                        duration_ms=SWIPE_SX_DURATA_MS)
+            time.sleep(WAIT_CATEGORIA)
+        else:
+            log(f"[REPORT-RACCOLTA] 'Other' chiusa @({m_other.cx},{m_other.cy}) → apro")
+            device.tap(m_other.cx, m_other.cy)
+            time.sleep(WAIT_CATEGORIA)
+
+    log(f"[REPORT-RACCOLTA] Gathering Report non trovato dopo "
+        f"{MAX_TENTATIVI_GATHERING} tentativi — abort in sicurezza")
+    return False
 
 
 def _tab_report_attivo(frame: np.ndarray) -> bool:
@@ -611,7 +788,24 @@ def esegui_report_raccolta(ctx, log_fn=None, solo_reset: bool = True) -> dict:
             log(f"[REPORT-RACCOLTA] completato: {esito}")
             return esito
 
-        _assicura_sort_mail_off(device, log)
+        # WU199... (21/07) — seleziona ESPLICITAMENTE "Gathering Report"
+        # prima di leggere/cancellare. Necessario in ENTRAMBE le modalità:
+        # "Delete" è sempre contestuale alla riga selezionata (mai un'azione
+        # su "tutto il tab"), quindi anche solo_reset=True colpirebbe il
+        # thread sbagliato se un altro fosse selezionato di default (bug
+        # WU199sexies: l'assunzione "unico elemento" non regge con altri
+        # eventi nel report). Fallimento selezione → abort pulito, stesso
+        # pattern del tab non confermato sopra.
+        if not _seleziona_gathering_report(ctx, device, log):
+            esito["errore"] = "gathering_report_non_selezionato"
+            log("[REPORT-RACCOLTA] [WARN] Gathering Report non selezionato — "
+                "abort, nessuna azione eseguita")
+            device.tap(TAP_TAB_ALLIANCE)
+            time.sleep(WAIT_RESTORE_TAB)
+            device.tap(TAP_CLOSE)
+            time.sleep(WAIT_CLOSE)
+            log(f"[REPORT-RACCOLTA] completato: {esito}")
+            return esito
 
         if solo_reset:
             log("[REPORT-RACCOLTA] modalità solo_reset — Read+Delete diretto, nessuna lettura")
