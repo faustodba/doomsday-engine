@@ -332,7 +332,7 @@ class _SpecialPromoContestBase(Task):
         "COLLECT ALL" (match template) lo tappa e chiude il popup, in loop
         finché resta COLLECT ALL. "Keep Claiming" (nessun match) = a pagamento
         → skip. Per i contest con sotto-tab prima si va sul sotto-tab traccia."""
-        if self._cfg.has_subtabs:
+        if cfg.has_subtabs:   # NB: cfg passato (nel task globale i contest differiscono)
             log(f"[{self.name().upper()}] traccia → apro sotto-tab traccia")
             ctx.device.tap(*cfg.tap_subtab_track)
             time.sleep(cfg.wait_subtab)
@@ -364,7 +364,39 @@ class _SpecialPromoContestBase(Task):
             ctx.navigator.vai_in_home()
 
     # ------------------------------------------------------------------
-    # run
+    # Processa UN menù contest (pannello GIÀ APERTO — non apre né chiude)
+    # ------------------------------------------------------------------
+
+    def _processa_menu(self, ctx, cfg, log, debug, prefix: str = "") -> dict:
+        """Trova la voce (scroll sidebar) → gate pallino → seleziona → claim
+        (sotto-tab se has_subtabs) → COLLECT ALL, per il contest `cfg`. Assume
+        il pannello Special Promo GIÀ APERTO; NON apre né chiude. Usato sia dai
+        task singoli (via run()) sia dal task globale SpecialPromoTask che lo
+        chiama in loop su più contest tra un unico apri e chiudi.
+        Ritorna dict con menu/esito/conteggi."""
+        match, frame = self._trova_menu(ctx, cfg, log)
+        if match is None:
+            log(f"[{self.name().upper()}] voce {cfg.menu_nome} non trovata → skip")
+            return {"menu": cfg.menu_nome, "esito": "assente"}
+        if not self._ha_badge_rosso(frame, match.cy, log):
+            log(f"[{self.name().upper()}] {cfg.menu_nome}: nessun pallino → skip")
+            return {"menu": cfg.menu_nome, "esito": "no_pallino"}
+
+        self._seleziona_menu(ctx, cfg, log, match)
+        debug.snap(f"{prefix}menu", ctx.device.screenshot())
+
+        n_daily = n_chal = 0
+        if cfg.has_subtabs:
+            n_daily = self._claim_subtab(ctx, cfg, log, cfg.tap_subtab_daily, "Daily Missions")
+            n_chal = self._claim_subtab(ctx, cfg, log, cfg.tap_subtab_challenges, "Challenges")
+        n_collect = self._collect_all_traccia(ctx, cfg, log)
+        debug.snap(f"{prefix}collect", ctx.device.screenshot())
+        log(f"[{self.name().upper()}] {cfg.menu_nome} — claim={n_daily+n_chal} collect={n_collect}")
+        return {"menu": cfg.menu_nome, "esito": "ok",
+                "daily": n_daily, "challenges": n_chal, "collect": n_collect}
+
+    # ------------------------------------------------------------------
+    # run (task singolo: apri + processa il proprio menù + chiudi)
     # ------------------------------------------------------------------
 
     def run(self, ctx: TaskContext) -> TaskResult:
@@ -377,44 +409,85 @@ class _SpecialPromoContestBase(Task):
         try:
             self._apri_special_promo(ctx, cfg, log)
             debug.snap("01_special_promo", ctx.device.screenshot())
-
-            match, frame = self._trova_menu(ctx, cfg, log)
-            if match is None:
-                log(f"[{self.name().upper()}] voce {cfg.menu_nome} non trovata → skip")
-                self._esci(ctx, cfg)
-                debug.flush(success=True, force=True, log_fn=log)
-                return TaskResult.skip(f"{cfg.menu_nome} non disponibile")
-
-            # Gate pallino rosso: nessun badge → nessuna ricompensa → skip
-            if not self._ha_badge_rosso(frame, match.cy, log):
-                log(f"[{self.name().upper()}] nessun pallino rosso → nulla da ritirare → skip")
-                self._esci(ctx, cfg)
-                debug.flush(success=True, log_fn=log)
-                return TaskResult.skip(f"{cfg.menu_nome}: nessuna ricompensa (no pallino)")
-
-            self._seleziona_menu(ctx, cfg, log, match)
-            debug.snap("03_menu", ctx.device.screenshot())
-
-            n_daily = n_chal = 0
-            if cfg.has_subtabs:
-                n_daily = self._claim_subtab(ctx, cfg, log, cfg.tap_subtab_daily, "Daily Missions")
-                debug.snap("04_post_daily", ctx.device.screenshot())
-                n_chal = self._claim_subtab(ctx, cfg, log, cfg.tap_subtab_challenges, "Challenges")
-                debug.snap("05_post_challenges", ctx.device.screenshot())
-
-            n_collect = self._collect_all_traccia(ctx, cfg, log)
-            debug.snap("06_post_collect", ctx.device.screenshot())
-
+            res = self._processa_menu(ctx, cfg, log, debug, prefix="02_")
             self._esci(ctx, cfg)
-            tot = n_daily + n_chal + n_collect
-            log(f"[{self.name().upper()}] completato — daily={n_daily} challenges={n_chal} "
-                f"collect_all={n_collect}")
+            if res["esito"] != "ok":
+                debug.flush(success=True, force=(res["esito"] == "assente"), log_fn=log)
+                return TaskResult.skip(f"{cfg.menu_nome}: {res['esito']}")
+            tot = res["daily"] + res["challenges"] + res["collect"]
             debug.flush(success=True, force=(tot == 0), log_fn=log)
-            return TaskResult.ok(f"{cfg.menu_nome} — claim verdi={n_daily+n_chal} "
-                                 f"collect_all={n_collect}",
-                                 daily=n_daily, challenges=n_chal, collect_all=n_collect)
+            return TaskResult.ok(f"{cfg.menu_nome} — claim verdi={res['daily']+res['challenges']} "
+                                 f"collect_all={res['collect']}",
+                                 daily=res["daily"], challenges=res["challenges"],
+                                 collect_all=res["collect"])
         except Exception as exc:
             log(f"[{self.name().upper()}] eccezione: {exc}")
+            debug.snap("99_exception", ctx.device.screenshot())
+            debug.flush(success=False, log_fn=log)
+            return TaskResult.fail(f"Eccezione: {exc}", step="run")
+
+
+# ==========================================================================
+# Task GLOBALE: processa tutti i contest COLLECT-ALL in un'unica sessione
+# ==========================================================================
+
+class SpecialPromoTask(_SpecialPromoContestBase):
+    """Task globale (21/07): apre Special Promo UNA sola volta e processa in
+    sequenza i contest COLLECT-ALL (parts, customization, vehicle, chip) SENZA
+    uscire e rientrare dal pannello — 1 apri/chiudi invece di 4. mega_armament
+    resta un task separato (deve precedere radar_master). Solo master.
+
+    I contest sono in ordine top→bottom nella sidebar e `_trova_menu` scrolla
+    verso il basso, quindi l'ordine della lista rispetta la sidebar (nessuna
+    navigazione all'indietro). Ogni contest è gate-skippato se senza pallino."""
+
+    _CONTESTS = [
+        SpecialPromoContestConfig(pin_menu="pin/pin_parts_contest.png",
+                                  menu_nome="Parts Contest", has_subtabs=True),
+        SpecialPromoContestConfig(pin_menu="pin/pin_customization_contest.png",
+                                  menu_nome="Customization Contest", has_subtabs=False),
+        SpecialPromoContestConfig(pin_menu="pin/pin_vehicle_redesign.png",
+                                  menu_nome="Vehicle Redesign", has_subtabs=False),
+        SpecialPromoContestConfig(pin_menu="pin/pin_chip_challenge.png",
+                                  menu_nome="Chip Challenge", has_subtabs=False),
+    ]
+
+    def __init__(self, config: SpecialPromoContestConfig | None = None) -> None:
+        super().__init__(config or SpecialPromoContestConfig(menu_nome="Special Promo"))
+
+    def name(self) -> str:
+        return "special_promo"
+
+    def run(self, ctx: TaskContext) -> TaskResult:
+        cfg, log = self._cfg, ctx.log_msg
+        if ctx.navigator is not None and not ctx.navigator.vai_in_home():
+            return TaskResult.fail("Navigator non ha raggiunto HOME", step="vai_in_home")
+
+        from shared.debug_buffer import DebugBuffer
+        debug = DebugBuffer.for_task("special_promo", getattr(ctx, "instance_name", "_unknown"))
+        try:
+            self._apri_special_promo(ctx, cfg, log)
+            debug.snap("01_special_promo", ctx.device.screenshot())
+
+            risultati = []
+            for i, contest in enumerate(self._CONTESTS):
+                prefix = f"{i+2:02d}_{contest.menu_nome.split()[0].lower()}_"
+                res = self._processa_menu(ctx, contest, log, debug, prefix=prefix)
+                risultati.append(res)
+
+            self._esci(ctx, cfg)
+            ok = [r for r in risultati if r["esito"] == "ok"]
+            tot_collect = sum(r.get("collect", 0) for r in ok)
+            tot_claim = sum(r.get("daily", 0) + r.get("challenges", 0) for r in ok)
+            dettaglio = ", ".join(f"{r['menu']}={r['esito']}" for r in risultati)
+            log(f"[SPECIAL_PROMO] completato — {len(ok)}/{len(risultati)} processati, "
+                f"claim={tot_claim} collect={tot_collect} | {dettaglio}")
+            debug.flush(success=True, force=(tot_claim + tot_collect == 0), log_fn=log)
+            return TaskResult.ok(f"Special Promo — {len(ok)}/{len(risultati)} contest, "
+                                 f"claim={tot_claim} collect={tot_collect}",
+                                 contest_ok=len(ok), claim=tot_claim, collect_all=tot_collect)
+        except Exception as exc:
+            log(f"[SPECIAL_PROMO] eccezione: {exc}")
             debug.snap("99_exception", ctx.device.screenshot())
             debug.flush(success=False, log_fn=log)
             return TaskResult.fail(f"Eccezione: {exc}", step="run")

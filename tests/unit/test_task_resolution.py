@@ -201,17 +201,18 @@ def test_profilo_master_catalogo_dichiarativo_non_wired():
     # 20/07: +daily_mission_auto +radar_master (task esclusivi master) → 12 (era 10)
     # 21/07: daily_mission_claim NON è nel profilo (è companion di
     # daily_mission_auto) ma viene aggiunto in risoluzione → 13 totali.
-    # 21/07: +parts_contest +customization_contest +vehicle_redesign
-    # +mega_armament +chip_challenge (task esclusivi master, Special Promo) → 18.
+    # 21/07: i 4 contest COLLECT-ALL (parts/custom/vehicle/chip) sono ora
+    # mappati nel task GLOBALE `special_promo` (1 solo task che li processa in
+    # sequenza); mega_armament resta separato (prima di radar). → 15.
     assert "DailyMissionAutoTask" in nomi
     assert "DailyMissionClaimTask" in nomi   # aggiunto come companion
     assert "RadarMasterTask" in nomi
-    assert "PartsContestTask" in nomi
-    assert "CustomizationContestTask" in nomi
-    assert "VehicleRedesignTask" in nomi
     assert "MegaArmamentTask" in nomi
-    assert "ChipChallengeTask" in nomi
-    assert len(reg) == 18
+    assert "SpecialPromoTask" in nomi
+    # i task individuali NON sono più registrati (mappati in special_promo)
+    assert "PartsContestTask" not in nomi
+    assert "ChipChallengeTask" not in nomi
+    assert len(reg) == 15
 
 
 # ── Ordine risultato (per priority, come task_setup.json) ─────────────────

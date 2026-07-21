@@ -83,6 +83,7 @@ def _import_tasks() -> dict:
         ("tasks.vehicle_redesign", "VehicleRedesignTask"),            # 21/07 task custom master (Special Promo)
         ("tasks.mega_armament",   "MegaArmamentTask"),                # 21/07 task custom master (Special Promo, prima di radar_master)
         ("tasks.chip_challenge",  "ChipChallengeTask"),               # 21/07 task custom master (Special Promo)
+        ("tasks.special_promo",   "SpecialPromoTask"),                # 21/07 task GLOBALE master (processa i 4 contest COLLECT-ALL in sequenza)
     ]
     for module_path, class_name in _catalogue:
         try:
