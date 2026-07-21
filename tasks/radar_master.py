@@ -74,9 +74,16 @@ class RadarMasterConfig:
 
     wait_apertura_radar:      float = 0.5
     wait_notifiche:            float = 10.0
-    wait_after_complete_all:  float = 4.0   # animazione ricompense (richiesta utente)
+    wait_after_complete_all:  float = 4.0   # attesa base animazione ricompense
     wait_after_use_emergency: float = 1.0
     wait_after_close_stamina: float = 1.5
+    # 21/07 (bug utente) — su batch grandi l'animazione della maschera ricompensa
+    # dura OLTRE wait_after_complete_all: screenshottare a metà animazione fa
+    # fallire tutti i riconoscimenti → falso "stato inatteso" → abort prematuro,
+    # eventi non tutti completati. Dopo il wait base si POLLA finché compare uno
+    # stato noto (completed/stamina/titolo) o scade max_wait_stato_post.
+    max_wait_stato_post:  float = 12.0  # finestra di poll aggiuntiva dopo il wait base
+    poll_stato_interval:  float = 1.5
 
 
 class _Esito:
@@ -166,21 +173,46 @@ class RadarMasterTask(Task):
                 ctx.device.tap(*cfg.tap_complete_all)
                 time.sleep(cfg.wait_after_complete_all)
 
-                shot2 = ctx.device.screenshot()
+                # POLL post-Complete-All: l'animazione della maschera ricompensa
+                # può durare più del wait base (batch grandi). Invece di
+                # screenshottare una sola volta (a metà animazione → nessuno
+                # stato riconosciuto → falso abort → il task ESCE senza aver
+                # completato tutto), pollo finché compare uno stato noto
+                # (completed/stamina/titolo) o scade max_wait_stato_post — così
+                # RIENTRA nel loop e continua finché non vede "completed".
+                shot2, stato = None, None
+                _t0 = time.time()
+                while True:
+                    shot2 = ctx.device.screenshot()
+                    if shot2 is None:
+                        break
+                    if ctx.matcher.find_one(shot2, cfg.pin_radar_completed,
+                                            threshold=cfg.soglia_template).found:
+                        stato = "completed"; break
+                    if ctx.matcher.find_one(shot2, cfg.pin_stamina_mask,
+                                            threshold=cfg.soglia_template).found:
+                        stato = "stamina"; break
+                    if ctx.matcher.find_one(shot2, cfg.pin_radar_title,
+                                            threshold=cfg.soglia_template).found:
+                        stato = "title"; break
+                    if time.time() - _t0 >= cfg.max_wait_stato_post:
+                        break
+                    log(f"[ITER {i}] stato non ancora stabile (animazione reward?) "
+                        f"— attendo {cfg.poll_stato_interval}s")
+                    time.sleep(cfg.poll_stato_interval)
+
                 if shot2 is None:
                     log("screenshot None dopo Complete All — abort")
                     esito = _Esito.ERRORE
                     break
 
-                if ctx.matcher.find_one(shot2, cfg.pin_radar_completed,
-                                        threshold=cfg.soglia_template).found:
+                if stato == "completed":
                     log(f"[ITER {i}] eventi completati (post-tap) — fine")
                     esito = _Esito.COMPLETATO
                     debug.snap("01_completato", shot2)
                     break
 
-                if ctx.matcher.find_one(shot2, cfg.pin_stamina_mask,
-                                        threshold=cfg.soglia_template).found:
+                if stato == "stamina":
                     log(f"[ITER {i}] maschera STAMINA rilevata — saturo")
                     debug.snap(f"02_stamina_{i}", shot2)
                     self._satura_stamina(ctx, cfg, log)
@@ -190,17 +222,17 @@ class RadarMasterTask(Task):
                     stato_inatteso_consec = 0
                     continue
 
-                # né completato né maschera stamina: verifica di essere
-                # ancora sulla Radar Station (guardia di sicurezza — mitiga
-                # il rischio di un tap caduto su una schermata inattesa).
-                if ctx.matcher.find_one(shot2, cfg.pin_radar_title,
-                                        threshold=cfg.soglia_template).found:
+                # titolo radar visibile → missione completata silenziosamente,
+                # ancora sulla Radar Station → ritento (rientra nel loop).
+                if stato == "title":
                     log(f"[ITER {i}] missione completata silenziosamente — ritento")
                     stato_inatteso_consec = 0
                     continue
 
+                # stato ancora sconosciuto DOPO il poll (timeout): solo qui è un
+                # vero stato inatteso (non un falso positivo da mid-animazione).
                 stato_inatteso_consec += 1
-                log(f"[ITER {i}] stato radar non riconosciuto "
+                log(f"[ITER {i}] stato radar non riconosciuto dopo poll "
                     f"({stato_inatteso_consec}/{cfg.max_stato_inatteso})")
                 debug.snap(f"99_stato_inatteso_{i}", shot2)
                 if stato_inatteso_consec >= cfg.max_stato_inatteso:
