@@ -36,7 +36,7 @@ Special Promo verificata con retry** (tap singolo talvolta non apre),
 **selezione voce sidebar verificata con retry** (tap singolo talvolta non
 commuta), **gate pallino rosso** sulla voce sidebar (badge → processa; no badge
 → skip). Validato live FAU_00: customization badge→COLLECT ALL, no-badge→skip,
-regressione parts OK. Priority 27/12h. I prossimi contest (vehicle, mega, chip)
+regressione parts OK. Priority 27/12h. **Vehicle Redesign** (3° contest, priority 28, has_subtabs=False, validato live sul master) rilasciato nella stessa sessione. Restano mega/chip
 sono sottoclassi banali della base.
 
 ---
