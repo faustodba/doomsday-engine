@@ -79,6 +79,7 @@ def _import_tasks() -> dict:
         ("tasks.daily_mission_auto", "DailyMissionClaimTask"), # 21/07 claim fine ciclo
         ("tasks.radar_master",   "RadarMasterTask"),           # 20/07 task custom master
         ("tasks.parts_contest",  "PartsContestTask"),          # 21/07 task custom master (Special Promo)
+        ("tasks.customization_contest", "CustomizationContestTask"),  # 21/07 task custom master (Special Promo)
     ]
     for module_path, class_name in _catalogue:
         try:

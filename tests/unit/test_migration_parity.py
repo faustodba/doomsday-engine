@@ -92,9 +92,9 @@ _OLD_TASK_CLASS_TO_NAME = {
 # NON in profiles["completo"]/["fast"]. Esclusi sia per class_name che per
 # task_name (i filtri predictor lavorano sui nomi).
 _ESCLUSI_PARITA_CLASS = {"DailyMissionAutoTask", "DailyMissionClaimTask", "RadarMasterTask",
-                         "PartsContestTask"}
+                         "PartsContestTask", "CustomizationContestTask"}
 _ESCLUSI_PARITA_NAME = {"daily_mission_auto", "daily_mission_claim", "radar_master",
-                        "parts_contest"}
+                        "parts_contest", "customization_contest"}
 
 
 def _senza_esclusi_class(s: set[str]) -> set[str]:
