@@ -81,6 +81,7 @@ def _import_tasks() -> dict:
         ("tasks.parts_contest",  "PartsContestTask"),          # 21/07 task custom master (Special Promo)
         ("tasks.customization_contest", "CustomizationContestTask"),  # 21/07 task custom master (Special Promo)
         ("tasks.vehicle_redesign", "VehicleRedesignTask"),            # 21/07 task custom master (Special Promo)
+        ("tasks.mega_armament",   "MegaArmamentTask"),                # 21/07 task custom master (Special Promo, prima di radar_master)
     ]
     for module_path, class_name in _catalogue:
         try:
