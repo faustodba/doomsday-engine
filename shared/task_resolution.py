@@ -63,6 +63,7 @@ TASK_CLASS_TO_NAME = {
     "CustomizationContestTask": "customization_contest",  # 21/07 task custom master (Special Promo)
     "VehicleRedesignTask": "vehicle_redesign",            # 21/07 task custom master (Special Promo)
     "MegaArmamentTask": "mega_armament",                  # 21/07 task custom master (Special Promo)
+    "ChipChallengeTask": "chip_challenge",                # 21/07 task custom master (Special Promo)
 }
 
 # Mapping legacy tipologia(dynamic)/profilo(static) -> profilo nuovo
