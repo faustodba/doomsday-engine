@@ -16,7 +16,8 @@
   'main_mission':'main mission','zaino':'zaino','vip':'VIP','alleanza':'alleanza',
   'messaggi':'messaggi','arena':'arena','arena_mercato':'arena mercato',
   'district_showdown':'district showdown','store':'store','radar':'radar',
-  'daily_mission_auto':'daily mission — auto complete','radar_master':'radar station — complete all'} %}
+  'daily_mission_auto':'daily mission — auto complete','radar_master':'radar station — complete all',
+  'mega_armament':'mega armament — challenge + missioni','special_promo':'special promo — contest (4)'} %}
 
 {% if not masters %}
 <div class="section">
@@ -35,9 +36,9 @@
   </div>
   <p style="font-size:11px;color:var(--text-dim);margin:2px 0 14px">
     Profilo <b>raccolta_only</b>: raccolta/raccolta_chiusura girano sempre, tutto il resto
-    è opt-in. Le 3 sezioni sotto separano: task a comportamento standard (condivisi con le
-    istanze ordinarie, selezionabili), task con parametri su misura, e task realmente
-    esclusivi del master (classe di codice dedicata — vedi ③).
+    è opt-in. Le 3 sezioni sotto separano: ① task a comportamento <b>standard</b> (identici
+    alle ordinarie), ② task <b>personalizzati</b> (parametri su misura + task con variante
+    master come arena/store), e ③ task <b>esclusivi</b> del master (classe di codice dedicata).
   </p>
 
   <!-- ── 1. TASK STANDARD ──────────────────────────────────────────── -->
@@ -49,7 +50,7 @@
       con la sua schedulazione normale.
     </p>
     <div style="display:flex;flex-wrap:wrap;gap:8px 18px">
-      {% for t in eligible_master_tasks %}
+      {% for t in standard_master_tasks %}
       <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer">
         <input class="mc-standard-task" data-master-nome="{{ m.nome }}" type="checkbox"
                value="{{ t }}" {% if t in m.whitelist %}checked{% endif %}>
@@ -95,6 +96,33 @@
       <span class="save-note">runtime_overrides.json · dynamic · attivo al prossimo avvio dell'istanza</span>
       <span class="save-ok" id="mc-cust-ok-{{ m.nome }}">✓ salvato</span>
       <span class="save-err" id="mc-cust-err-{{ m.nome }}"></span>
+    </div>
+
+    <!-- task CONDIVISI ma con variante/comportamento dedicato al master -->
+    <div style="margin-top:16px;border-top:1px dashed var(--border,#333);padding-top:12px">
+      <div style="font-weight:600;font-size:11px;margin-bottom:4px">🔧 Task con variante master</div>
+      <p style="font-size:11px;color:var(--text-dim);margin:0 0 8px">
+        Stesso task delle istanze ordinarie, ma il master lo esegue con un
+        comportamento su misura (variante o codice dedicato). Selezionabili come
+        gli standard; il badge mostra la variante attiva.
+      </p>
+      <div style="display:flex;flex-wrap:wrap;gap:8px 18px">
+        {% for c in m.customized %}
+        <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer"
+               title="{{ c.desc }}">
+          <input class="mc-variante-task" data-master-nome="{{ m.nome }}" type="checkbox"
+                 value="{{ c.task }}" {% if c.on %}checked{% endif %}>
+          {{ task_labels.get(c.task, c.task) }}
+          <span style="color:#e8a33d;font-size:10px">🔧{% if c.variante %} {{ c.variante }}{% endif %}</span>
+        </label>
+        {% endfor %}
+      </div>
+      <div class="save-row" style="margin-top:10px">
+        <button class="btn btn-primary" onclick="mcSalvaStandard('{{ m.nome }}')">⬡ salva selezione</button>
+        <span class="save-note">runtime_overrides.json · dynamic · attivo al prossimo avvio dell'istanza</span>
+        <span class="save-ok" id="mc-var-ok-{{ m.nome }}">✓ salvato</span>
+        <span class="save-err" id="mc-var-err-{{ m.nome }}"></span>
+      </div>
     </div>
   </div>
 
@@ -188,8 +216,11 @@ function mcSalvaStandard(nome) {
   // completare la migrazione (il merge nel bot resta idempotente durante la
   // transizione). Le box non spuntate non vengono perse: sono nel DOM,
   // filtrate per .checked.
+  // Include anche i task con variante (sez.② blocco varianti, .mc-variante-task):
+  // sono task_overrides come gli altri — se esclusi qui verrebbero SPENTI al save.
   const tasks = Array.from(document.querySelectorAll(
       '.mc-standard-task[data-master-nome="' + nome + '"], ' +
+      '.mc-variante-task[data-master-nome="' + nome + '"], ' +
       '.mc-exclusive-task[data-master-nome="' + nome + '"]'
     ))
     .filter(cb => cb.checked)
@@ -199,8 +230,8 @@ function mcSalvaStandard(nome) {
   mcPatchIstanza(nome,
                  { task_overrides: Object.keys(overrides).length ? overrides : null,
                    master_task_whitelist: null },
-                 ['mc-std-ok-' + nome, 'mc-excl-ok-' + nome],
-                 ['mc-std-err-' + nome, 'mc-excl-err-' + nome]);
+                 ['mc-std-ok-' + nome, 'mc-var-ok-' + nome, 'mc-excl-ok-' + nome],
+                 ['mc-std-err-' + nome, 'mc-var-err-' + nome, 'mc-excl-err-' + nome]);
 }
 </script>
 

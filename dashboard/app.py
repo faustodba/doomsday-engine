@@ -1359,6 +1359,20 @@ _MASTER_ELIGIBLE_TASKS = [
     "arena", "arena_mercato", "district_showdown", "store",
 ]
 
+# WU-MasterPanel (21/07, richiesta utente) — task CONDIVISI con le istanze
+# ordinarie ma che il MASTER esegue con un comportamento PERSONALIZZATO (variante
+# in task_varianti, o codice dedicato). Sono selezionabili come gli standard
+# (restano in _MASTER_ELIGIBLE_TASKS → config_global invariato), ma il pannello
+# master li mostra in sez.② "Personalizzati" con badge variante invece che in
+# sez.① "Standard" (non sono identici alle ordinarie). Valore = descrizione
+# della personalizzazione. La variante EFFETTIVA (es. arena=no_modifica) è letta
+# a runtime da task_varianti del master.
+_MASTER_CUSTOMIZED_TASKS = {
+    "arena":         "salta lo schieramento truppe (combatte col deploy esistente)",
+    "arena_mercato": "acquisti per priorità: chip → frammenti leggendari",
+    "store":         "multi-template per castello a livello massimo",
+}
+
 
 @app.get("/ui/config/global", include_in_schema=False)
 def ui_config_global(request: Request):
@@ -1521,20 +1535,35 @@ def ui_config_master(request: Request):
             continue
         ov = ov_istanze.get(nome, {}) or {}
         eff = eff_all.get(nome, {})
+        varianti = ov.get("task_varianti", {}) or {}
         # task attivi = quelli con override effettivo True
         attivi = sorted(t for t, on in eff.items() if on)
+        # Task personalizzati (variante) del master — sez.②: stato ON/OFF +
+        # variante effettiva letta da task_varianti + descrizione.
+        customized = [{
+            "task": t,
+            "on": bool(eff.get(t, False)),
+            "variante": varianti.get(t),
+            "desc": desc,
+        } for t, desc in _MASTER_CUSTOMIZED_TASKS.items()]
         masters.append({
             "nome": nome,
             "whitelist": attivi,   # stato effettivo (task ON), non solo il campo legacy
             "livello": ov.get("livello", ist.get("livello", livello_standard)),
             "livello_trasporto": ov.get("livello_trasporto",
                                         ist.get("livello_trasporto", trasporto_standard)),
+            "customized": customized,
         })
+
+    # Sez.① Standard = eligible MENO i personalizzati (che vanno in sez.②).
+    standard_master_tasks = [t for t in _MASTER_ELIGIBLE_TASKS
+                             if t not in _MASTER_CUSTOMIZED_TASKS]
 
     return templates.TemplateResponse(request, "config_master.html", {
         "active":  "master",
         "masters": masters,
         "eligible_master_tasks": _MASTER_ELIGIBLE_TASKS,
+        "standard_master_tasks": standard_master_tasks,
         "exclusive_master_tasks": _master_exclusive_tasks(),
         "verified_tasks": _MASTER_VERIFIED_TASKS,
         "livello_standard": livello_standard,
