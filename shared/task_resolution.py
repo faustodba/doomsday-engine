@@ -87,6 +87,12 @@ _DEFAULT_PROFILO = "completo"
 # override: rimuovere il principale rimuove anche il companion.
 _TASK_COMPANION: dict[str, tuple[str, ...]] = {
     "daily_mission_auto": ("daily_mission_claim",),
+    # WU (21/07) — modalità WAR master: raccolta_chiusura è companion di raccolta
+    # (chiude il tick raccolta). Disabilitare raccolta (override raccolta:false,
+    # es. master in guerra) rimuove AUTOMATICAMENTE raccolta_chiusura. Con
+    # raccolta attiva (default) resta invariato (raccolta_chiusura già nel
+    # profilo). Accoppiamento one-directional come daily_mission_auto→claim.
+    "raccolta": ("raccolta_chiusura",),
 }
 
 

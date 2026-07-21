@@ -41,6 +41,21 @@
     misura: arena/arena_mercato/store), ③ <b>esclusivi</b> del master (classe di codice dedicata).
   </p>
 
+  <!-- ── MODALITÀ WAR: disabilita raccolta (+ chiusura companion) ───── -->
+  <div style="border-left:3px solid #f87171;padding-left:12px;margin-bottom:18px">
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;cursor:pointer;font-weight:600">
+      <input class="mc-war-mode" data-master-nome="{{ m.nome }}" type="checkbox"
+             {% if m.war_mode %}checked{% endif %} onchange="mcSalvaStandard('{{ m.nome }}')">
+      ⚔️ Modalità WAR — disabilita <b>raccolta</b> (e <b>raccolta_chiusura</b> in automatico)
+    </label>
+    <p style="font-size:11px;color:var(--text-dim);margin:4px 0 0">
+      In guerra il master non raccoglie: raccolta + raccolta_chiusura non girano.
+      raccolta_chiusura segue raccolta (companion). Si salva al toggle.
+      <span class="save-ok" id="mc-war-ok-{{ m.nome }}">✓ salvato</span>
+      <span class="save-err" id="mc-war-err-{{ m.nome }}"></span>
+    </p>
+  </div>
+
   <!-- ── 1. TASK STANDARD ──────────────────────────────────────────── -->
   <div style="border-left:3px solid #4caf7d;padding-left:12px;margin-bottom:18px">
     <div style="font-weight:600;font-size:12px;margin-bottom:4px">① Task Standard</div>
@@ -191,11 +206,16 @@ function mcSalvaStandard(nome) {
     .map(cb => cb.value);
   const overrides = {};
   tasks.forEach(t => { overrides[t] = true; });
+  // Modalità WAR: se il toggle è ON, disabilita raccolta con override false
+  // (raccolta_chiusura la segue via companion nel resolver). Se OFF, non si
+  // aggiunge raccolta → resta il default del profilo (raccolta attiva).
+  const war = document.querySelector('.mc-war-mode[data-master-nome="' + nome + '"]');
+  if (war && war.checked) { overrides['raccolta'] = false; }
   mcPatchIstanza(nome,
                  { task_overrides: Object.keys(overrides).length ? overrides : null,
                    master_task_whitelist: null },
-                 ['mc-std-ok-' + nome, 'mc-var-ok-' + nome, 'mc-excl-ok-' + nome],
-                 ['mc-std-err-' + nome, 'mc-var-err-' + nome, 'mc-excl-err-' + nome]);
+                 ['mc-std-ok-' + nome, 'mc-var-ok-' + nome, 'mc-excl-ok-' + nome, 'mc-war-ok-' + nome],
+                 ['mc-std-err-' + nome, 'mc-var-err-' + nome, 'mc-excl-err-' + nome, 'mc-war-err-' + nome]);
 }
 </script>
 

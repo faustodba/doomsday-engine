@@ -1531,6 +1531,10 @@ def ui_config_master(request: Request):
             "nome": nome,
             "whitelist": attivi,   # stato effettivo (task ON), non solo il campo legacy
             "customized": customized,
+            # Modalità WAR: raccolta disabilitata via override (raccolta:false).
+            # raccolta_chiusura la segue in automatico (companion in
+            # task_resolution._TASK_COMPANION). Default False = raccolta attiva.
+            "war_mode": (eff.get("raccolta") is False),
         })
 
     # Sez.① Standard = eligible MENO i personalizzati (che vanno in sez.②).
