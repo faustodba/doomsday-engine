@@ -216,29 +216,39 @@ class _SpecialPromoContestBase(Task):
         l'apertura: a pannello aperto l'icona sparisce dalla barra (schermata
         coperta). Il tap singolo talvolta non apre → retry. Ritorna True se
         aperto entro i tentativi."""
+        def _trova_icona():
+            return ctx.matcher.find_one(ctx.device.screenshot(), cfg.pin_special_promo,
+                                        threshold=cfg.soglia_promo, zone=cfg.zona_barra_eventi)
+
         for att in range(3):
-            shot = ctx.device.screenshot()
-            m = ctx.matcher.find_one(shot, cfg.pin_special_promo,
-                                     threshold=cfg.soglia_promo, zone=cfg.zona_barra_eventi)
+            m = _trova_icona()
             if not m.found:
-                # icona non in barra: pannello già aperto (schermata coperta) →
-                # procedi. (Se invece la barra c'è ma il template fallisse, la
-                # ricerca menù successiva andrà in skip senza tap spuri.)
-                log(f"[{self.name().upper()}] icona non in barra (score={m.score:.3f}) "
-                    f"→ pannello già aperto o assente, procedo")
-                return True
+                # icona non in barra: o pannello già aperto (schermata coperta),
+                # o transiente (banner/popup su HOME copre la barra un istante).
+                # Ri-controlla un paio di volte prima di concludere "già aperto"
+                # (evita di procedere a vuoto restando in HOME).
+                transiente = False
+                for _ in range(2):
+                    time.sleep(1.0)
+                    m = _trova_icona()
+                    if m.found:
+                        transiente = True
+                        break
+                if not transiente:
+                    log(f"[{self.name().upper()}] icona non in barra (score={m.score:.3f}) "
+                        f"→ pannello già aperto, procedo")
+                    return True
+                # era un transiente: ora l'icona c'è → prosegui a tapparla
             ty = m.cy - cfg.promo_tap_dy
             log(f"[{self.name().upper()}] Special Promo @({m.cx},{m.cy}) "
                 f"score={m.score:.3f} → tap icona ({m.cx},{ty})")
             ctx.device.tap(m.cx, ty)
             time.sleep(cfg.wait_apri_promo)
             # verifica apertura: l'icona non deve più essere nella barra eventi
-            m2 = ctx.matcher.find_one(ctx.device.screenshot(), cfg.pin_special_promo,
-                                      threshold=cfg.soglia_promo, zone=cfg.zona_barra_eventi)
-            if not m2.found:
+            if not _trova_icona().found:
                 return True
-            log(f"[{self.name().upper()}] pannello non aperto (icona ancora in barra "
-                f"score={m2.score:.3f}) → retry {att+1}/3")
+            log(f"[{self.name().upper()}] pannello non aperto (icona ancora in barra) "
+                f"→ retry {att+1}/3")
         log(f"[{self.name().upper()}] apertura Special Promo non confermata dopo 3 tentativi")
         return False
 
