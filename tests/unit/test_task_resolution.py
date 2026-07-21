@@ -127,6 +127,31 @@ def test_merge_entrambi_vuoti_equivale_a_none():
     assert _merge_caller(None, None) is None
 
 
+# ── Companion task (daily_mission_auto → daily_mission_claim) ───────────────
+
+def test_companion_principale_trascina_companion():
+    # abilitare il principale aggiunge il companion (non è nel profilo)
+    reg = risolvi_task_istanza(tipologia="raccolta_only",
+                               task_overrides={"daily_mission_auto": True})
+    nomi = _class_names(reg)
+    assert "DailyMissionAutoTask" in nomi
+    assert "DailyMissionClaimTask" in nomi   # companion agganciato
+
+
+def test_companion_senza_principale_rimosso():
+    # il companion NON è attivabile da solo: senza il principale viene rimosso
+    reg = risolvi_task_istanza(tipologia="raccolta_only",
+                               task_overrides={"daily_mission_claim": True})
+    assert "DailyMissionClaimTask" not in _class_names(reg)
+
+
+def test_companion_rimuovere_principale_rimuove_companion():
+    # partendo dal profilo completo (che non ha daily_mission_*), niente companion
+    reg = risolvi_task_istanza(tipologia="full")
+    assert "DailyMissionClaimTask" not in _class_names(reg)
+    assert "DailyMissionAutoTask" not in _class_names(reg)
+
+
 # ── forza_solo_raccolta (doppio giro FAU_00) — precedenza assoluta ────────
 
 def test_forza_solo_raccolta_ignora_profilo_completo():
@@ -174,9 +199,10 @@ def test_profilo_master_catalogo_dichiarativo_non_wired():
     assert "GraficaHqTask" in nomi
     assert "DistrictShowdownTask" in nomi
     # 20/07: +daily_mission_auto +radar_master (task esclusivi master) → 12 (era 10)
-    # 21/07: +daily_mission_claim (claim fine ciclo) → 13
+    # 21/07: daily_mission_claim NON è nel profilo (è companion di
+    # daily_mission_auto) ma viene aggiunto in risoluzione → 13 totali.
     assert "DailyMissionAutoTask" in nomi
-    assert "DailyMissionClaimTask" in nomi
+    assert "DailyMissionClaimTask" in nomi   # aggiunto come companion
     assert "RadarMasterTask" in nomi
     assert len(reg) == 13
 

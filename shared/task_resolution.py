@@ -72,6 +72,17 @@ _LEGACY_TIPOLOGIA_TO_PROFILO = {
 
 _DEFAULT_PROFILO = "completo"
 
+# WU (21/07) — COMPANION TASK: un task "principale" trascina il suo companion,
+# che NON è selezionabile da solo (non sta in alcun profilo, non è un toggle in
+# dashboard). Serve per task accoppiati come daily_mission_auto (trigger, pri
+# 23) -> daily_mission_claim (claim, pri 199): la dashboard mostra on/off solo
+# il primo, il secondo si accende/spegne con lui. Dipendenza one-directional
+# (il principale attiva il companion, mai il contrario). Applicato DOPO gli
+# override: rimuovere il principale rimuove anche il companion.
+_TASK_COMPANION: dict[str, tuple[str, ...]] = {
+    "daily_mission_auto": ("daily_mission_claim",),
+}
+
 
 def _load_profiles(path: str | None = None) -> dict:
     p = path or _PROFILES_PATH_DEFAULT
@@ -152,6 +163,16 @@ def risolvi_task_istanza(
                 tasks_nominali.add(tname)
             else:
                 tasks_nominali.discard(tname)
+
+        # Companion: il principale trascina il companion; assente il principale,
+        # il companion è rimosso (accoppiamento one-directional, dashboard mostra
+        # solo il principale). Vedi _TASK_COMPANION.
+        for base, companions in _TASK_COMPANION.items():
+            if base in tasks_nominali:
+                tasks_nominali.update(companions)
+            else:
+                for c in companions:
+                    tasks_nominali.discard(c)
 
         if task_varianti:
             varianti = {**varianti, **task_varianti}
