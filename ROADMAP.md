@@ -5,6 +5,32 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 21/07/2026 — Task master `parts_contest` (Special Promo)
+
+Nuovo task custom master `parts_contest`: ritira le ricompense **GRATIS**
+dell'evento Special Promo → Parts Contest, tappando **solo pulsanti verdi**
+("Claim" nei sotto-tab Daily Missions/Challenges) + "COLLECT ALL" sulla
+traccia. **Mai** pulsanti a pagamento ("Keep Claiming"/euro).
+
+**Discriminanti** (validati live su FAU_00, 960×540):
+- Sotto-tab: scan **colore** bande verdi (verde=gratis; ambra "Keep Claiming"/
+  "Go"=skip). Un tap incassa tutte le missioni complete.
+- Traccia: **match TESTO** `pin_collect_all` — "COLLECT ALL" è **ambra** come
+  "Keep Claiming" (il colore NON li distingue, match 1.000 vs 0.371) → tap
+  posizione fissa (575,503) solo se il testo matcha.
+- Navigazione a posizioni variabili via template: `pin_special_promo` (barra
+  eventi HOME, tap sull'**icona** `cy-15` non la label) + `pin_parts_contest`
+  (sidebar + scroll). Struttura interna a **coordinate fisse**.
+
+**Validato end-to-end**: claim verdi → Lv.1→Lv.3 → COLLECT ALL → box ritirati,
+badge Parts Contest azzerato, nessun pagamento. Skip path OK (FAU_01 senza
+evento). Commit `feat`+`chore`, 167/167 test, sync prod OK. Config master
+`task_overrides.parts_contest=true` (runtime_overrides dev+prod, non committato)
+→ **richiede riavvio bot**. Solo master per ora. Priority 26/12h/periodic
+(27-29 riservati a futuri contest: customization, vehicle, ecc.).
+
+---
+
 ## Sessione 20/07/2026 (9) — WU-TaskResolution Fase 1: `risolvi_task_istanza()`
 
 Ripresa dello sviluppo dei task extra/custom per Master e istanze ordinarie
