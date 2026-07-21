@@ -201,14 +201,15 @@ def test_profilo_master_catalogo_dichiarativo_non_wired():
     # 20/07: +daily_mission_auto +radar_master (task esclusivi master) → 12 (era 10)
     # 21/07: daily_mission_claim NON è nel profilo (è companion di
     # daily_mission_auto) ma viene aggiunto in risoluzione → 13 totali.
-    # 21/07: +parts_contest +customization_contest (task esclusivi master,
-    # Special Promo) → 15.
+    # 21/07: +parts_contest +customization_contest +vehicle_redesign (task
+    # esclusivi master, Special Promo) → 16.
     assert "DailyMissionAutoTask" in nomi
     assert "DailyMissionClaimTask" in nomi   # aggiunto come companion
     assert "RadarMasterTask" in nomi
     assert "PartsContestTask" in nomi
     assert "CustomizationContestTask" in nomi
-    assert len(reg) == 15
+    assert "VehicleRedesignTask" in nomi
+    assert len(reg) == 16
 
 
 # ── Ordine risultato (per priority, come task_setup.json) ─────────────────
