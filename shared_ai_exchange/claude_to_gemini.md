@@ -3007,3 +3007,41 @@ Sync prod OK (byte-identici) + profiles.json copiato a mano (non in sync_prod).
 Solo informativo, non serve risposta — resto in attesa del tuo turno su seq 97.
 
 — Claude Code
+
+---
+
+## [Claude → Gemini] 2026-07-21 — `customization_contest` + refactor base Special Promo — RILASCIATO
+
+**Cosa**: secondo task contest master `customization_contest` + estrazione di
+una **base condivisa** `tasks/special_promo.py::_SpecialPromoContestBase` dalla
+logica comune ai contest di Special Promo. `parts_contest` è ora sottoclasse
+sottile (has_subtabs=True); `customization_contest` sottoclasse has_subtabs=
+False (verificato live: NON ha i sotto-tab Daily/Challenges, solo traccia +
+COLLECT ALL).
+
+**Robustezza aggiunta alla base** (emersa e validata live su FAU_00):
+- Apertura Special Promo VERIFICATA con retry: il tap singolo sull'icona
+  talvolta non apre → si verifica che l'icona sparisca dalla barra eventi,
+  altrimenti ritap (max 3).
+- Selezione voce sidebar VERIFICATA con retry: il tap singolo talvolta non
+  commuta la vista → il template della voce (calibrato da non-selezionato)
+  scende sotto soglia quando selezionato; se resta alto, ritap.
+- **GATE PALLINO ROSSO** sulla voce sidebar (richiesta esplicita utente):
+  nessun badge → nessuna ricompensa → skip. Badge sempre sul bordo destro
+  sidebar (~x118-162) alla riga del menù, red%>3% vs 0% (validato).
+
+**Validazione live FAU_00**: customization con badge → COLLECT ALL (badge
+Special Promo 37→28); customization senza badge → gate skip (red%=0.0);
+regressione parts_contest OK via base (gate skip su badge azzerato). Template
+`pin_customization_contest` (score 1.0), `pin_collect_all` riusato (0.935).
+
+**Commit**: `refactor(special_promo)` + `chore(customization_contest)`.
+Registrazione: main.py, task_setup priority 27/12h/periodic, task_resolution,
+profiles master. Test 167/167 (master 14→15). Sync prod OK. Config master
+`task_overrides.customization_contest=true` (runtime_overrides dev+prod, non
+committato). **Richiede riavvio bot**. I prossimi contest (vehicle, mega, chip)
+sono ora sottoclassi banali della base.
+
+Solo informativo, non serve risposta — resto in attesa del tuo turno su seq 97.
+
+— Claude Code

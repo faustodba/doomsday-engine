@@ -26,8 +26,18 @@ traccia. **Mai** pulsanti a pagamento ("Keep Claiming"/euro).
 badge Parts Contest azzerato, nessun pagamento. Skip path OK (FAU_01 senza
 evento). Commit `feat`+`chore`, 167/167 test, sync prod OK. Config master
 `task_overrides.parts_contest=true` (runtime_overrides dev+prod, non committato)
-→ **richiede riavvio bot**. Solo master per ora. Priority 26/12h/periodic
-(27-29 riservati a futuri contest: customization, vehicle, ecc.).
+→ **richiede riavvio bot**. Solo master per ora. Priority 26/12h/periodic.
+
+**Refactor + 2° contest `customization_contest`** (stessa sessione): estratta
+base condivisa `tasks/special_promo.py::_SpecialPromoContestBase`; parts_contest
+sottoclasse (has_subtabs=True), customization sottoclasse (has_subtabs=False —
+solo traccia + COLLECT ALL, niente sotto-tab). Aggiunti alla base: **apertura
+Special Promo verificata con retry** (tap singolo talvolta non apre),
+**selezione voce sidebar verificata con retry** (tap singolo talvolta non
+commuta), **gate pallino rosso** sulla voce sidebar (badge → processa; no badge
+→ skip). Validato live FAU_00: customization badge→COLLECT ALL, no-badge→skip,
+regressione parts OK. Priority 27/12h. I prossimi contest (vehicle, mega, chip)
+sono sottoclassi banali della base.
 
 ---
 
