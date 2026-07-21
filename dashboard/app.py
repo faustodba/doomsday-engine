@@ -1464,25 +1464,6 @@ def _task_override_effettivo(overrides: dict) -> dict:
     return out
 
 
-def _valore_standard_istanze(campo: str, default, master_names: set) -> object:
-    """Valore più diffuso di `campo` tra le istanze ORDINARIE (non master),
-    merge dynamic>static>default (stesso pattern R-09, config_loader.py).
-    Usato per mostrare "standard: X" a confronto col valore del master."""
-    from collections import Counter
-    from dashboard.services.config_manager import get_instances, get_overrides
-    ov_ist = (get_overrides() or {}).get("istanze", {}) or {}
-    counts = Counter()
-    for ist in (get_instances() or []):
-        nome = ist.get("nome")
-        if not nome or nome in master_names:
-            continue
-        val = (ov_ist.get(nome, {}) or {}).get(campo, ist.get(campo, default))
-        counts[val] += 1
-    if not counts:
-        return default
-    return counts.most_common(1)[0][0]
-
-
 @app.get("/ui/config/master", include_in_schema=False)
 def ui_config_master(request: Request):
     """Pannello dedicato al profilo MASTER (istanza raccolta_only + task
@@ -1490,8 +1471,11 @@ def ui_config_master(request: Request):
     con la config generica di tutte le istanze. 3 sezioni:
       1. Task Standard   — comportamento identico alle istanze ordinarie,
          selezione interattiva (whitelist) di quali far girare sul master.
-      2. Task Personalizzati — stesso task di tutti, parametri su misura
-         (raccolta/raccolta_chiusura: livello nodo/trasporto).
+      2. Task con variante master — stesso task delle ordinarie ma con
+         comportamento su misura sul master (variante task_varianti o codice
+         dedicato): arena/arena_mercato/store. Derivati da _MASTER_CUSTOMIZED_TASKS
+         (21/07: rimossi i parametri raccolta livello/trasporto, non utili qui —
+         si editano nella vista istanze).
       3. Task Solo Master — task esclusivi del master (classe di codice
          dedicata, non un toggle su un task condiviso), derivati da
          config/profiles.json (profilo "master" meno profilo "completo" —
@@ -1509,8 +1493,8 @@ def ui_config_master(request: Request):
     quindi resta valido se in futuro cambia quale istanza è il master.
 
     Salvataggio: riusa l'endpoint esistente
-    PATCH /api/config/overrides/istanze/{nome} (già supporta livello,
-    livello_trasporto, master_task_whitelist — nessuna nuova API introdotta.
+    PATCH /api/config/overrides/istanze/{nome} (task_overrides — nessuna nuova
+    API introdotta).
     """
     from dashboard.services.config_manager import get_instances, get_overrides
     from shared.instance_meta import get_master_instances
@@ -1519,9 +1503,6 @@ def ui_config_master(request: Request):
     overrides = get_overrides() or {}
     ov_istanze = overrides.get("istanze", {}) or {}
     instances = get_instances() or []
-
-    livello_standard = _valore_standard_istanze("livello", 6, master_names)
-    trasporto_standard = _valore_standard_istanze("livello_trasporto", 20, master_names)
 
     # WU-TaskResolution Fase 2 — selezione task del master via task_overrides
     # (merge col bridge legacy master_task_whitelist, esplicito vince). La UI
@@ -1549,9 +1530,6 @@ def ui_config_master(request: Request):
         masters.append({
             "nome": nome,
             "whitelist": attivi,   # stato effettivo (task ON), non solo il campo legacy
-            "livello": ov.get("livello", ist.get("livello", livello_standard)),
-            "livello_trasporto": ov.get("livello_trasporto",
-                                        ist.get("livello_trasporto", trasporto_standard)),
             "customized": customized,
         })
 
@@ -1566,8 +1544,6 @@ def ui_config_master(request: Request):
         "standard_master_tasks": standard_master_tasks,
         "exclusive_master_tasks": _master_exclusive_tasks(),
         "verified_tasks": _MASTER_VERIFIED_TASKS,
-        "livello_standard": livello_standard,
-        "trasporto_standard": trasporto_standard,
         **_env_label(),
     })
 

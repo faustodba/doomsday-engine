@@ -5,8 +5,8 @@
 {% block content %}
 
 <div class="banner-restart">
-  <strong>master</strong> = pannello dedicato al profilo master (raccolta_only + task extra) ·
-  <span style="color:#f87171">Sezione ①/② richiedono il prossimo avvio dell'istanza</span> per applicarsi.<br>
+  <strong>master</strong> = pannello del profilo master (raccolta_only + task extra abilitabili).
+  <span style="color:#f87171">Le modifiche si applicano al prossimo avvio dell'istanza.</span><br>
   Config generica di tutte le istanze: <a href="{{ url_prefix }}/ui/config/global">config</a>
 </div>
 
@@ -35,10 +35,10 @@
     {{ m.nome }} <span title="master" style="color:#f5c542">★</span>
   </div>
   <p style="font-size:11px;color:var(--text-dim);margin:2px 0 14px">
-    Profilo <b>raccolta_only</b>: raccolta/raccolta_chiusura girano sempre, tutto il resto
-    è opt-in. Le 3 sezioni sotto separano: ① task a comportamento <b>standard</b> (identici
-    alle ordinarie), ② task <b>personalizzati</b> (parametri su misura + task con variante
-    master come arena/store), e ③ task <b>esclusivi</b> del master (classe di codice dedicata).
+    Profilo <b>raccolta_only</b>: raccolta/raccolta_chiusura girano sempre, il resto è opt-in.
+    Le 3 sezioni raggruppano i task per come si comportano sul master: ① <b>standard</b>
+    (identici alle ordinarie), ② con <b>variante master</b> (stesso task, comportamento su
+    misura: arena/arena_mercato/store), ③ <b>esclusivi</b> del master (classe di codice dedicata).
   </p>
 
   <!-- ── 1. TASK STANDARD ──────────────────────────────────────────── -->
@@ -70,59 +70,30 @@
     </div>
   </div>
 
-  <!-- ── 2. TASK PERSONALIZZATI ─────────────────────────────────────── -->
+  <!-- ── 2. TASK CON VARIANTE MASTER ────────────────────────────────── -->
   <div style="border-left:3px solid #e8a33d;padding-left:12px;margin-bottom:18px">
-    <div style="font-weight:600;font-size:12px;margin-bottom:4px">② Task Personalizzati</div>
+    <div style="font-weight:600;font-size:12px;margin-bottom:4px">② Task con variante master</div>
     <p style="font-size:11px;color:var(--text-dim);margin:0 0 8px">
-      Stesso task di tutte le istanze (<b>raccolta</b>/<b>raccolta_chiusura</b>, sempre
-      attivi — non richiedono selezione), ma con parametri su misura per il master.
+      Stesso task delle istanze ordinarie, ma il master lo esegue con un comportamento
+      su misura (variante o codice dedicato). Selezionabili come gli standard; il badge
+      mostra la variante attiva.
     </p>
-    <div style="display:flex;flex-wrap:wrap;gap:14px 24px;align-items:flex-end">
-      <label style="font-size:12px">
-        livello nodo
-        <input type="number" id="mc-livello-{{ m.nome }}" value="{{ m.livello }}"
-               style="width:60px;margin-left:6px">
-        <span style="color:var(--text-dim);font-size:11px">standard istanze: {{ livello_standard }}</span>
+    <div style="display:flex;flex-wrap:wrap;gap:8px 18px">
+      {% for c in m.customized %}
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer"
+             title="{{ c.desc }}">
+        <input class="mc-variante-task" data-master-nome="{{ m.nome }}" type="checkbox"
+               value="{{ c.task }}" {% if c.on %}checked{% endif %}>
+        {{ task_labels.get(c.task, c.task) }}
+        <span style="color:#e8a33d;font-size:10px">🔧{% if c.variante %} {{ c.variante }}{% endif %}</span>
       </label>
-      <label style="font-size:12px">
-        livello trasporto
-        <input type="number" id="mc-trasporto-{{ m.nome }}" value="{{ m.livello_trasporto }}"
-               style="width:60px;margin-left:6px">
-        <span style="color:var(--text-dim);font-size:11px">standard istanze: {{ trasporto_standard }}</span>
-      </label>
+      {% endfor %}
     </div>
     <div class="save-row" style="margin-top:10px">
-      <button class="btn btn-primary" onclick="mcSalvaPersonalizzati('{{ m.nome }}')">⬡ salva parametri</button>
+      <button class="btn btn-primary" onclick="mcSalvaStandard('{{ m.nome }}')">⬡ salva selezione</button>
       <span class="save-note">runtime_overrides.json · dynamic · attivo al prossimo avvio dell'istanza</span>
-      <span class="save-ok" id="mc-cust-ok-{{ m.nome }}">✓ salvato</span>
-      <span class="save-err" id="mc-cust-err-{{ m.nome }}"></span>
-    </div>
-
-    <!-- task CONDIVISI ma con variante/comportamento dedicato al master -->
-    <div style="margin-top:16px;border-top:1px dashed var(--border,#333);padding-top:12px">
-      <div style="font-weight:600;font-size:11px;margin-bottom:4px">🔧 Task con variante master</div>
-      <p style="font-size:11px;color:var(--text-dim);margin:0 0 8px">
-        Stesso task delle istanze ordinarie, ma il master lo esegue con un
-        comportamento su misura (variante o codice dedicato). Selezionabili come
-        gli standard; il badge mostra la variante attiva.
-      </p>
-      <div style="display:flex;flex-wrap:wrap;gap:8px 18px">
-        {% for c in m.customized %}
-        <label style="display:flex;align-items:center;gap:5px;font-size:12px;cursor:pointer"
-               title="{{ c.desc }}">
-          <input class="mc-variante-task" data-master-nome="{{ m.nome }}" type="checkbox"
-                 value="{{ c.task }}" {% if c.on %}checked{% endif %}>
-          {{ task_labels.get(c.task, c.task) }}
-          <span style="color:#e8a33d;font-size:10px">🔧{% if c.variante %} {{ c.variante }}{% endif %}</span>
-        </label>
-        {% endfor %}
-      </div>
-      <div class="save-row" style="margin-top:10px">
-        <button class="btn btn-primary" onclick="mcSalvaStandard('{{ m.nome }}')">⬡ salva selezione</button>
-        <span class="save-note">runtime_overrides.json · dynamic · attivo al prossimo avvio dell'istanza</span>
-        <span class="save-ok" id="mc-var-ok-{{ m.nome }}">✓ salvato</span>
-        <span class="save-err" id="mc-var-err-{{ m.nome }}"></span>
-      </div>
+      <span class="save-ok" id="mc-var-ok-{{ m.nome }}">✓ salvato</span>
+      <span class="save-err" id="mc-var-err-{{ m.nome }}"></span>
     </div>
   </div>
 
@@ -199,13 +170,6 @@ async function mcPatchIstanza(nome, payload, okId, errId) {
   } catch (e) {
     mcShowMsg(okId, errId, false, 'network error');
   }
-}
-
-function mcSalvaPersonalizzati(nome) {
-  const livello = parseInt(document.getElementById('mc-livello-' + nome).value, 10);
-  const trasporto = parseInt(document.getElementById('mc-trasporto-' + nome).value, 10);
-  mcPatchIstanza(nome, { livello: livello, livello_trasporto: trasporto },
-                 'mc-cust-ok-' + nome, 'mc-cust-err-' + nome);
 }
 
 function mcSalvaStandard(nome) {
