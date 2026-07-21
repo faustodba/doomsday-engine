@@ -5,6 +5,58 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 21/07/2026 (continuazione) — Pannello master + fix radar_master + fix report_raccolta
+
+**Pannello master riorganizzato** (`dashboard/templates/config_master.html`,
+richiede riavvio dashboard): arena/arena_mercato/store spostati da ①Standard a
+②**"Task con variante master"** (hanno comportamento personalizzato sul
+master — variante task_varianti o codice dedicato — non sono identici alle
+ordinarie). Rimossi i parametri raccolta (livello nodo/trasporto) da ②, non
+utili qui (si editano nella vista istanze). Nuovo toggle **⚔️ Modalità WAR**:
+disabilita raccolta (e raccolta_chiusura in automatico via companion
+`_TASK_COMPANION["raccolta"]=("raccolta_chiusura",)` in
+`shared/task_resolution.py`). Commit `f2c3c34` (WAR mode) + `6fb20f0`/`5ef0ea3`
+(riorganizzazione pannello). 167/167 test.
+
+**Fix `radar_master`** (`tasks/radar_master.py`, commit `4cb6f8e`): bug utente
+osservato nel tick reale del master — dopo il tap Complete All il codice
+aspettava un tempo FISSO poi un SOLO screenshot; su batch grandi l'animazione
+della maschera ricompensa dura di più → screenshot a metà animazione → nessuno
+stato riconosciuto → falso "stato inatteso" → abort prematuro (radar_master
+era l'unico task fallito nel tick di validazione). Fix: **poll** post-tap
+(screenshot+check ogni 1.5s, max 12s) finché lo stato si stabilizza. 14/14 test.
+
+**Fix `report_raccolta`** (`shared/report_raccolta.py`, commit `a555d65`,
+calibrato live sul master via ADB): con altri eventi nel report (il master ha
+centinaia di Battle Report) l'assunzione WU199sexies "Gathering Report è
+l'unico elemento della lista flat" era falsa → il bot scrollava 15 pagine
+leggendo la lista sbagliata, 0 righe raccolta. Fix a 2 fasi: FASE1 fast-path
+(Sort Mail OFF, ricerca diretta, economico per istanze pulite); FASE2
+fallback SOLO se Fase1 fallisce (Sort Mail ON, vista a categorie, Gathering
+Report sempre sotto "Other", navigazione via template match+scroll, mai
+posizione fissa). Selezione ora richiesta esplicitamente prima di
+leggere/cancellare (anche in solo_reset=True) — mai azione distruttiva su
+selezione non confermata. 4 template nuovi (`pin_report_other`,
+`pin_chevron_up`, `pin_gathering_header`, + `pin_gathering_report` già in
+repo). 30/30 test. **Non ancora validato live post-fix** (bot spento durante
+l'implementazione) — da verificare al prossimo riavvio.
+
+**Validazione end-to-end contest in produzione** (tick reale del master,
+prima del fix radar_master): mega_armament OK (guard once/day, grid claim 2,
+collect 1), special_promo OK (Parts Contest claim 1+collect 1, altri 3 skip
+corretto), radar_master FALLITO (causa del fix sopra). Diagnosi fatta
+incrociando `bot.log` (locale, solo eventi MAIN/orchestrator) con la JSONL
+per-istanza (dettaglio task, `data/logs/<istanza>.jsonl`) e lo state
+`schedule.<task>.last_run` (UTC) — nota: bot.log e state sono in fusi orari
+diversi, va sempre convertito prima di confrontare timestamp.
+
+**Bot SPENTO a fine sessione** (utente l'ha fermato per lavoro live sul
+master) — **richiede riavvio** per caricare tutto il codice sopra. Pending:
+challenge Mega per-istanza (avviato, non completato — FAU_09/10 non
+raggiungibili), fix daily_mission da validare, follow-up store/arena/raccolta.
+
+---
+
 ## Sessione 21/07/2026 — Task master `parts_contest` (Special Promo)
 
 Nuovo task custom master `parts_contest`: ritira le ricompense **GRATIS**
