@@ -91,8 +91,10 @@ _OLD_TASK_CLASS_TO_NAME = {
 # esclusi dal confronto vecchia/nuova — girano solo sul master via whitelist,
 # NON in profiles["completo"]/["fast"]. Esclusi sia per class_name che per
 # task_name (i filtri predictor lavorano sui nomi).
-_ESCLUSI_PARITA_CLASS = {"DailyMissionAutoTask", "DailyMissionClaimTask", "RadarMasterTask"}
-_ESCLUSI_PARITA_NAME = {"daily_mission_auto", "daily_mission_claim", "radar_master"}
+_ESCLUSI_PARITA_CLASS = {"DailyMissionAutoTask", "DailyMissionClaimTask", "RadarMasterTask",
+                         "PartsContestTask"}
+_ESCLUSI_PARITA_NAME = {"daily_mission_auto", "daily_mission_claim", "radar_master",
+                        "parts_contest"}
 
 
 def _senza_esclusi_class(s: set[str]) -> set[str]:

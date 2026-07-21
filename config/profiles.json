@@ -24,7 +24,8 @@
     "tasks": [
       "raccolta", "raccolta_chiusura", "grafica_hq", "pulizia_cache",
       "boost", "donazione", "vip", "alleanza", "messaggi",
-      "district_showdown", "daily_mission_auto", "radar_master"
+      "district_showdown", "daily_mission_auto", "radar_master",
+      "parts_contest"
     ]
   }
 }

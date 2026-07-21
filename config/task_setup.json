@@ -9,6 +9,7 @@
   {"class": "MainMissionTask",        "priority": 22,  "interval_hours": 24.0,  "schedule": "daily"},
   {"class": "DailyMissionAutoTask",   "priority": 23,  "interval_hours": 0.0,   "schedule": "always"},
   {"class": "RadarMasterTask",        "priority": 24,  "interval_hours": 12.0,  "schedule": "periodic"},
+  {"class": "PartsContestTask",       "priority": 26,  "interval_hours": 12.0,  "schedule": "periodic"},
   {"class": "ZainoTask",              "priority": 25,  "interval_hours": 24.0,  "schedule": "daily"},
   {"class": "VipTask",                "priority": 30,  "interval_hours": 24.0,  "schedule": "daily"},
   {"class": "AlleanzaTask",           "priority": 35,  "interval_hours": 4.0,   "schedule": "periodic"},
