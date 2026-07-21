@@ -36,7 +36,7 @@ Special Promo verificata con retry** (tap singolo talvolta non apre),
 **selezione voce sidebar verificata con retry** (tap singolo talvolta non
 commuta), **gate pallino rosso** sulla voce sidebar (badge → processa; no badge
 → skip). Validato live FAU_00: customization badge→COLLECT ALL, no-badge→skip,
-regressione parts OK. Priority 27/12h. **Vehicle Redesign** (3° contest, priority 28, has_subtabs=False, validato live sul master) rilasciato nella stessa sessione. Rilasciato anche **Mega Armament** (4° contest, il più complesso: scelta challenge giornaliera radar once/day + grid claim + collect all, priority 21 prima di radar_master). Resta solo Chip Challenge
+regressione parts OK. Priority 27/12h. **Vehicle Redesign** (3° contest, priority 28, has_subtabs=False, validato live sul master) rilasciato nella stessa sessione. Rilasciato anche **Mega Armament** (4° contest, il più complesso: scelta challenge giornaliera radar once/day + grid claim + collect all, priority 21 prima di radar_master). Rilasciato anche **Chip Challenge** (5° e ultimo, priority 29). Serie contest Special Promo COMPLETA (mega 21, parts 26, custom 27, vehicle 28, chip 29)
 sono sottoclassi banali della base.
 
 ---
