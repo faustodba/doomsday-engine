@@ -71,6 +71,7 @@ class TaskFlags(BaseModel):
     truppe:             bool = True
     store:              bool = True
     mall_daily:         bool = True
+    mega_armament:      bool = True
 
 
 # ==============================================================================

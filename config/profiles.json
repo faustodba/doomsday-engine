@@ -5,7 +5,8 @@
       "grafica_hq", "pulizia_cache", "boost", "rifornimento", "raccolta",
       "truppe", "donazione", "main_mission", "zaino", "vip", "alleanza",
       "messaggi", "arena", "arena_mercato", "district_showdown", "store",
-      "radar", "radar_census", "raccolta_chiusura", "mall_daily"
+      "radar", "radar_census", "raccolta_chiusura", "mall_daily",
+      "mega_armament"
     ]
   },
   "solo_raccolta": {
@@ -16,7 +17,8 @@
       "grafica_hq", "pulizia_cache", "boost", "rifornimento", "raccolta",
       "truppe", "donazione", "main_mission", "zaino", "vip", "alleanza",
       "messaggi", "arena", "arena_mercato", "district_showdown", "store",
-      "radar", "radar_census", "raccolta_chiusura", "mall_daily"
+      "radar", "radar_census", "raccolta_chiusura", "mall_daily",
+      "mega_armament"
     ],
     "varianti": { "raccolta": "fast" }
   },
