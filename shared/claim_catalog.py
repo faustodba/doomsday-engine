@@ -13,26 +13,35 @@
 #  con eventi che ruotano) — le coordinate fisse non sono un'identità
 #  affidabile.
 #
-#  Fix: l'identità di una voce è ora l'IMMAGINE DEL TITOLO (crop del
-#  titolo del sottomenu, es. "Login Rewards"), riconosciuta via template
-#  matching (stesso principio già validato per il pulsante CLAIM — non
-#  serve OCR, troppo rumoroso: "Survival Preparations" letto come "> a
-#  Survival Preparat"). La POSIZIONE (profondità scroll + Y del pallino)
-#  resta solo un'informazione EFFIMERA per il tap del giro corrente — mai
-#  una cache attendibile tra run diversi o istanze diverse.
+#  Fix 1: l'identità di una voce è l'IMMAGINE (non OCR, troppo rumoroso:
+#  "Survival Preparations" letto come "> a Survival Preparat"). La
+#  POSIZIONE (profondità scroll + Y del pallino) resta solo
+#  un'informazione EFFIMERA per il tap del giro corrente — mai una cache
+#  attendibile tra run diversi o istanze diverse.
+#
+#  Fix 2 (22/07 sera, richiesta utente dopo validazione cross-istanza su
+#  FAU_01): l'immagine-identità si legge dalla RIGA SIDEBAR stessa (icona
+#  + etichetta, visibili PRIMA di aprire), non dal titolo del sottomenu
+#  aperto. Motivo: per le voci già note come NON claimabili non serve mai
+#  aprire il sottomenu — costo di tempo puro senza beneficio (~4-8s per
+#  voce, su una sidebar con più voci note-non-claimabili che nuove). Si
+#  apre SOLO se: (a) la riga non è riconosciuta (mai vista, serve aprire
+#  per verificare il widget CLAIM), oppure (b) è nota E claimabile (serve
+#  aprire per cliccare).
 #
 #  Flusso: OGNI run (già schedulato 1×/giorno per istanza via
 #  task_setup.json "daily") scansiona l'intera sidebar per profondità di
-#  scroll, trova pallini rossi GENERICI, per ognuno tappa e RICONOSCE il
-#  titolo via template matching contro tutti i titoli già visti:
-#    - Titolo noto e claimabile   → verifica/clicca il claim.
-#    - Titolo noto e non claimabile → skip immediato (mai più verificato).
-#    - Titolo mai visto           → verifica il widget CLAIM già noto
-#      (mai un tap esplorativo su qualcosa di ignoto) → impara il
-#      risultato E salva il crop del titolo per riconoscerlo la prossima
-#      volta, su QUALUNQUE istanza (catalogo condiviso dev+prod).
+#  scroll, trova pallini rossi GENERICI, per ognuno RICONOSCE la riga
+#  (icona+etichetta, crop dalla STESSA screenshot del rilevamento pallino
+#  — zero screenshot extra) contro tutte le righe già viste:
+#    - Riga nota e claimabile      → apri, verifica/clicca il claim.
+#    - Riga nota e non claimabile  → skip, NESSUN tap di apertura.
+#    - Riga mai vista              → apri, verifica il widget CLAIM già
+#      noto (mai un tap esplorativo su qualcosa di ignoto) → impara il
+#      risultato E salva il crop riga per riconoscerla la prossima volta,
+#      su QUALUNQUE istanza (catalogo condiviso dev+prod).
 #
-#  Persistenza: data/claim_titles/<id>.png (crop titolo) +
+#  Persistenza: data/claim_titles/<id>.png (crop riga sidebar) +
 #  data/claim_catalog_learned.json (id → {claimable, label, ...}).
 # ==============================================================================
 
@@ -85,9 +94,15 @@ BADGE_RED_S_MIN:   int                       = 100
 BADGE_RED_V_MIN:   int                       = 100
 BADGE_RED_MIN_FRAC: float                    = 0.08
 
-# Identità titolo (immagine, non OCR) + claim
-TITLE_CROP_ZONE:    tuple[int, int, int, int] = (40, 15, 500, 55)
-TITLE_MATCH_THRESHOLD: float                  = 0.85
+# Identità RIGA sidebar (icona+etichetta, immagine — non OCR, non il
+# titolo del sottomenu aperto): crop centrato sulla Y del pallino trovato,
+# larghezza piena colonna sidebar. Calibrato live: badge tipico centrato
+# sulla riga, righe adiacenti tipicamente >55-60px di distanza (2 righe
+# non si sovrappongono in un crop di 50px), validato visivamente su
+# "Titan Approaches" (icona+etichetta pulite, nessun bleed da righe vicine).
+ROW_CROP_X:        tuple[int, int]            = (0, 220)
+ROW_CROP_HALF_H:    int                        = 25
+ROW_MATCH_THRESHOLD: float                     = 0.85
 CLAIM_TEMPLATE:      str                      = "pin/pin_login_rewards_claim.png"
 CLAIM_ZONE:          tuple[int, int, int, int] = (780, 150, 925, 520)
 CLAIM_THRESHOLD:      float                   = 0.80
@@ -145,7 +160,9 @@ def trova_pallini_sidebar(frame) -> list[tuple[int, int]]:
 
 
 # ------------------------------------------------------------------
-# Identità voce — immagine del titolo (NON posizione, NON OCR testo)
+# Identità voce — immagine della RIGA sidebar (NON posizione, NON OCR,
+# NON il titolo del sottomenu — riconosciuta PRIMA di aprire, vedi
+# docstring modulo)
 # ------------------------------------------------------------------
 
 def carica_catalogo() -> dict:
@@ -165,9 +182,9 @@ def salva_catalogo(catalogo: dict) -> None:
     os.replace(tmp, _LEARNED_PATH)
 
 
-def carica_crop_titoli() -> dict:
-    """{id: frame_bgr_titolo} — carica tutti i template titolo noti
-    (seed verificati a mano + appresi in discovery) per il riconoscimento."""
+def carica_crop_righe() -> dict:
+    """{id: frame_bgr_riga} — carica tutti i crop riga noti (seed
+    verificati a mano + appresi in discovery) per il riconoscimento."""
     import cv2
     out = {}
     if not os.path.isdir(_TITLES_DIR):
@@ -182,23 +199,35 @@ def carica_crop_titoli() -> dict:
     return out
 
 
-def salva_crop_titolo(titolo_id: str, frame) -> None:
-    """Salva il crop titolo (zona TITLE_CROP_ZONE) come nuovo template
-    riconoscibile in futuro, su qualunque istanza (catalogo condiviso)."""
+def ritaglia_riga(frame, by: int):
+    """Crop della riga sidebar (icona+etichetta) centrato sulla Y del
+    pallino — stessa zona usata sia per salvare che per riconoscere,
+    così un crop salvato ora e uno letto in futuro sono sempre
+    confrontabili (stessa shape)."""
+    x0, x1 = ROW_CROP_X
+    y0 = max(0, by - ROW_CROP_HALF_H)
+    y1 = by + ROW_CROP_HALF_H
+    return frame[y0:y1, x0:x1]
+
+
+def salva_crop_riga(riga_id: str, frame, by: int) -> None:
+    """Salva il crop della riga sidebar (icona+etichetta, centrato sulla Y
+    del pallino) come nuovo template riconoscibile in futuro, su
+    qualunque istanza (catalogo condiviso) — SENZA bisogno di aprire il
+    sottomenu per le prossime volte che questa riga viene incontrata."""
     import cv2
     os.makedirs(_TITLES_DIR, exist_ok=True)
-    x0, y0, x1, y1 = TITLE_CROP_ZONE
-    crop = frame[y0:y1, x0:x1]
-    cv2.imwrite(os.path.join(_TITLES_DIR, f"{titolo_id}.png"), crop)
+    crop = ritaglia_riga(frame, by)
+    cv2.imwrite(os.path.join(_TITLES_DIR, f"{riga_id}.png"), crop)
 
 
-def riconosci_titolo(frame, crops: dict) -> tuple[str | None, float]:
-    """Confronta il titolo del sottomenu corrente (crop di
-    TITLE_CROP_ZONE) contro tutti i template titolo noti. Ritorna
-    (id, score) del migliore se >= soglia, altrimenti (None, best_score)."""
+def riconosci_riga(frame, by: int, crops: dict) -> tuple[str | None, float]:
+    """Confronta la riga sidebar al pallino (bx,by) — crop dalla STESSA
+    screenshot già usata per trova_pallini_sidebar, zero screenshot extra
+    — contro tutte le righe già viste. Ritorna (id, score) del migliore
+    se >= soglia, altrimenti (None, best_score)."""
     import cv2
-    x0, y0, x1, y1 = TITLE_CROP_ZONE
-    crop = frame[y0:y1, x0:x1]
+    crop = ritaglia_riga(frame, by)
     best_id, best_score = None, 0.0
     for tid, tmpl in crops.items():
         if tmpl.shape[:2] != crop.shape[:2]:
@@ -207,7 +236,7 @@ def riconosci_titolo(frame, crops: dict) -> tuple[str | None, float]:
         score = float(res.max())
         if score > best_score:
             best_id, best_score = tid, score
-    if best_id is not None and best_score >= TITLE_MATCH_THRESHOLD:
+    if best_id is not None and best_score >= ROW_MATCH_THRESHOLD:
         return best_id, best_score
     return None, best_score
 

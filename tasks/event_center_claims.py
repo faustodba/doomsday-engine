@@ -7,32 +7,46 @@ che alterna label ("Event Center"/"Water War"/"Arms Race"/ecc. a seconda
 dell'evento in vetrina del giorno — stesso tap target indipendentemente
 dalla label mostrata).
 
-IDENTITÀ = IMMAGINE DEL TITOLO, non posizione. Osservazione utente: la
-stessa voce sidebar può comparire a profondità di scroll diverse su
-istanze diverse (o nel tempo, con eventi che ruotano) — coordinate fisse
-non sono un'identità affidabile, né lo è l'OCR del titolo (troppo
-rumoroso: "Survival Preparations" letto come "> a Survival Preparat").
-Il titolo del sottomenu (crop immagine, stesso principio già validato per
-il pulsante CLAIM) è invece un'identità robusta e indipendente dalla
-posizione — riconosciuto via template matching (`shared/claim_catalog.py`).
+IDENTITÀ = IMMAGINE DELLA RIGA SIDEBAR (icona+etichetta), non posizione,
+non il titolo del sottomenu aperto. Osservazione utente: la stessa voce
+sidebar può comparire a profondità di scroll diverse su istanze diverse
+(o nel tempo, con eventi che ruotano) — coordinate fisse non sono
+un'identità affidabile, né lo è l'OCR del titolo (troppo rumoroso:
+"Survival Preparations" letto come "> a Survival Preparat"). Il crop
+della riga sidebar (icona+etichetta, stesso principio già validato per
+il pulsante CLAIM) è un'identità robusta e indipendente dalla posizione
+— riconosciuto via template matching (`shared/claim_catalog.py`).
+
+Fix 22/07 (v2, stesso giorno dopo v1 a identità-titolo-post-tap):
+riconoscere DALLA SCREENSHOT DELLA SIDEBAR, PRIMA di aprire il
+sottomenu — non più tap-poi-riconosci. Motivo (utente, dal vivo): le
+voci già catalogate come non-claimabili venivano comunque APERTE ogni
+volta solo per leggerne il titolo e scoprire che non c'era nulla da
+fare — tempo sprecato. Il crop riga (icona+etichetta) è visibile e
+stabile già nello screenshot usato per `trova_pallini_sidebar`, quindi
+il riconoscimento non costa uno screenshot né un tap in più.
 
 FLUSSO (un run = una scansione completa, già schedulato 1×/giorno per
 istanza via task_setup.json "daily" — nessun gate interno aggiuntivo):
   - HOME → pallino su icona HOME (posizione fissa, non scorre)? No → skip.
   - Apro hub. Per ogni profondità di scroll (reset a inizio lista +
     N swipe avanti): trovo pallini rossi GENERICI nella colonna sidebar
-    (posizione — solo per il tap di QUESTO giro).
-  - Per ogni pallino: tap sulla riga → riconosco il titolo del sottomenu
-    aperto via template matching contro tutti i titoli già noti
-    (catalogo condiviso dev+prod, cresce nel tempo):
-      * Titolo noto e claimabile    → verifico/clicco il widget CLAIM.
-      * Titolo noto e non claimabile → skip immediato, nessun tap oltre
-        l'apertura del sottomenu.
-      * Titolo mai visto            → verifico SOLO il widget CLAIM già
-        noto (mai un tap esplorativo su qualcosa di ignoto) → imparo il
-        risultato E salvo il crop titolo per riconoscerlo la prossima
-        volta, su qualunque istanza.
-    → torno alla sidebar dell'hub.
+    (posizione — solo per SAPERE QUALI RIGHE guardare in QUESTO giro).
+  - Per ogni pallino (bx,by): riconosco SUBITO la riga (crop dalla
+    screenshot già in mano) via template matching contro tutte le righe
+    già note (catalogo condiviso dev+prod, cresce nel tempo):
+      * Riga nota e claimabile     → tap per aprire, verifico/clicco il
+        widget CLAIM.
+      * Riga nota e non claimabile → skip immediato, ZERO tap — questo
+        è l'intero punto del redesign.
+      * Riga mai vista              → tap per aprire (unico caso in cui
+        si apre "per scoprire"), verifico SOLO il widget CLAIM già noto
+        (mai un tap esplorativo su qualcosa di ignoto) → imparo il
+        risultato E salvo il crop RIGA (quello di PRIMA del tap) per
+        riconoscerla la prossima volta, su qualunque istanza, senza
+        più aprirla.
+    → la sidebar resta sempre visibile, nessun "ritorno" necessario tra
+      una riga e l'altra.
   - Back → back → vai_in_home() di sicurezza.
 
 REGOLA SICUREZZA: mai tap su un pulsante non verificato dal widget CLAIM
@@ -70,9 +84,10 @@ from shared.claim_catalog import (
     trova_pallini_sidebar,
     carica_catalogo,
     salva_catalogo,
-    carica_crop_titoli,
-    salva_crop_titolo,
-    riconosci_titolo,
+    carica_crop_righe,
+    salva_crop_riga,
+    riconosci_riga,
+    ritaglia_riga,
     prossimo_id,
     ts_ora,
 )
@@ -202,7 +217,7 @@ class EventCenterClaimsTask(Task):
             debug.snap("01_hub", ctx.device.screenshot())
 
             catalogo = carica_catalogo()
-            crops = carica_crop_titoli()
+            crops = carica_crop_righe()
             risultati: dict[str, int] = {}
             processate_run: set[str] = set()
 
@@ -214,51 +229,65 @@ class EventCenterClaimsTask(Task):
                     continue
                 log(f"[EVENT_CENTER_CLAIMS] depth={depth}: {len(pallini)} pallini")
                 for (_bx, by) in pallini:
+                    # Riconoscimento PRIMA di aprire — crop dalla screenshot
+                    # già in mano (stessa usata per trova_pallini_sidebar),
+                    # zero screenshot/tap extra. Questo è ciò che permette
+                    # di saltare le righe già note come non claimabili
+                    # SENZA mai aprirle.
+                    riga_id, score = riconosci_riga(shot.frame, by, crops)
+
+                    if riga_id is not None:
+                        dati = catalogo.get(riga_id, {})
+                        label = dati.get("label", riga_id)
+                        if riga_id in processate_run:
+                            log(f"[EVENT_CENTER_CLAIMS] '{label}' già processata "
+                                f"in questo giro (vista a più profondità) → skip")
+                            continue
+                        dati["last_seen"] = ts_ora()
+                        catalogo[riga_id] = dati
+                        processate_run.add(riga_id)
+                        if not dati.get("claimable"):
+                            log(f"[EVENT_CENTER_CLAIMS] '{label}' nota non "
+                                f"claimabile (score={score:.3f}) → skip, "
+                                f"nessun tap")
+                            continue
+                        log(f"[EVENT_CENTER_CLAIMS] '{label}' nota claimabile "
+                            f"(score={score:.3f}) → apro e verifico")
+                        ctx.device.tap(ROW_TAP_X, by)
+                        time.sleep(cfg.wait_open_s)
+                        shot2 = ctx.device.screenshot()
+                        n = self._claim_loop(ctx, log)
+                        risultati[label] = risultati.get(label, 0) + n
+                        debug.snap(f"02_{riga_id}", shot2)
+                        continue
+
+                    # Riga mai vista — unico caso in cui si apre "per
+                    # scoprire". Salvo il crop di QUESTA screenshot (prima
+                    # del tap): è la riga sidebar, non il titolo aperto.
+                    riga_id = prossimo_id(crops)
+                    salva_crop_riga(riga_id, shot.frame, by)
+                    crops[riga_id] = ritaglia_riga(shot.frame, by)
+
                     ctx.device.tap(ROW_TAP_X, by)
                     time.sleep(cfg.wait_open_s)
                     shot2 = ctx.device.screenshot()
-                    titolo_id, score = riconosci_titolo(shot2.frame, crops)
-
-                    if titolo_id is None:
-                        # Titolo mai visto — verifico SOLO il widget CLAIM
-                        # già noto (mai tap esplorativo), poi imparo.
-                        titolo_id = prossimo_id(crops)
-                        salva_crop_titolo(titolo_id, shot2.frame)
-                        crops[titolo_id] = shot2.frame[15:55, 40:500]
-                        m = ctx.matcher.find_one(shot2, CLAIM_TEMPLATE,
-                                                 threshold=CLAIM_THRESHOLD, zone=CLAIM_ZONE)
-                        claimable = bool(m.found)
-                        log(f"[EVENT_CENTER_CLAIMS] NUOVO titolo '{titolo_id}' "
-                            f"(depth={depth}, y={by}) → claimabile={claimable} "
-                            f"(score={m.score:.3f})")
-                        catalogo[titolo_id] = {
-                            "claimable": claimable,
-                            "label": titolo_id,
-                            "first_seen": ts_ora(),
-                            "last_seen": ts_ora(),
-                        }
-                        if claimable:
-                            n = self._claim_loop(ctx, log)
-                            risultati[titolo_id] = risultati.get(titolo_id, 0) + n
-                    else:
-                        dati = catalogo.get(titolo_id, {})
-                        label = dati.get("label", titolo_id)
-                        dati["last_seen"] = ts_ora()
-                        catalogo[titolo_id] = dati
-                        if titolo_id in processate_run:
-                            log(f"[EVENT_CENTER_CLAIMS] '{label}' già processata "
-                                f"in questo giro (vista a più profondità) → skip")
-                        elif not dati.get("claimable"):
-                            log(f"[EVENT_CENTER_CLAIMS] '{label}' nota non claimabile "
-                                f"(score={score:.3f}) → skip")
-                        else:
-                            log(f"[EVENT_CENTER_CLAIMS] '{label}' nota claimabile "
-                                f"(score={score:.3f}) → verifico")
-                            n = self._claim_loop(ctx, log)
-                            risultati[label] = risultati.get(label, 0) + n
-                        processate_run.add(titolo_id)
-
-                    debug.snap(f"02_{titolo_id}", shot2)
+                    m = ctx.matcher.find_one(shot2, CLAIM_TEMPLATE,
+                                             threshold=CLAIM_THRESHOLD, zone=CLAIM_ZONE)
+                    claimable = bool(m.found)
+                    log(f"[EVENT_CENTER_CLAIMS] NUOVA riga '{riga_id}' "
+                        f"(depth={depth}, y={by}) → claimabile={claimable} "
+                        f"(score={m.score:.3f})")
+                    catalogo[riga_id] = {
+                        "claimable": claimable,
+                        "label": riga_id,
+                        "first_seen": ts_ora(),
+                        "last_seen": ts_ora(),
+                    }
+                    processate_run.add(riga_id)
+                    if claimable:
+                        n = self._claim_loop(ctx, log)
+                        risultati[riga_id] = risultati.get(riga_id, 0) + n
+                    debug.snap(f"02_{riga_id}", shot2)
                     # NIENTE tap "back" qui: la sidebar resta SEMPRE visibile
                     # insieme al contenuto (verificato dal vivo navigando a
                     # mano tra le voci) — TAP_HUB_BACK chiude l'INTERO hub,
