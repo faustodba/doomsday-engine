@@ -46,6 +46,7 @@ TASK_CLASS_TO_NAME = {
     "MainMissionTask": "main_mission",
     "ZainoTask": "zaino",
     "VipTask": "vip",
+    "MallDailyTask": "mall_daily",                   # 22/07 claim gratuiti Mall
     "AlleanzaTask": "alleanza",
     "MessaggiTask": "messaggi",
     "ArenaTask": "arena",
