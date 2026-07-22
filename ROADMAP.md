@@ -5,6 +5,41 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 22/07/2026 (2) — WU236: mega_armament — challenge giornaliera anche sulle ordinarie
+
+**Segnalazione utente**: sul task `mega_armament`, per le istanze diverse dal
+master serve mappare una challenge diversa da "Radar Station Events" (che
+ha senso solo per il master, unico a eseguire `radar_master`).
+
+**Ricognizione live** (FAU_00, ADB diretto): aperta la schermata "Select
+today's Challenge" nel carosello Mega Armament — tra le opzioni c'è
+**"Resource Gathering"** ("Gather a total of 1,000,000 resources on the
+World Map"), che matura da sola tramite `raccolta` (verificato: nella
+griglia missioni la voce equivalente più piccola era già 500.000/500.000
+CLAIM pronta). Stesso principio del master con radar: la challenge scelta
+deve corrispondere a un task che l'istanza esegue comunque.
+
+**Fix** (`tasks/mega_armament.py`): generalizzato `_seleziona_challenge_radar`
+→ `_seleziona_challenge_giornaliera` con dispatcher `_target_challenge()` su
+`is_master_instance(ctx.instance_name)` (`shared/instance_meta.py`) — master
+→ pin/soglia/nome radar (invariato), ordinarie → nuovo
+`pin_mega_resource_icon.png` (croppato live da FAU_00, verificato
+match=1.0 sulla sorgente) + "Resource Gathering". Logica di carosello/
+scroll/conferma "once selected can't be changed" **identica**, solo
+parametrizzata — zero rischio sul ramo master già validato. 167/167 test
+(`test_task_resolution.py`+`test_migration_parity.py`) verdi, import/
+dispatcher testati a mano (master→radar, FAU_00→resource, corretto).
+
+Commit `6735b06`, pushato, sync prod fatto (verificato byte-per-byte
+codice+template). **Nessuna istanza abilitata ancora** — `mega_armament`
+resta opt-in per-istanza via `task_overrides`, rollout pianificato
+**pilota su FAU_00 prima**, dato che la SELECT è una tantum al giorno e
+irreversibile in game (stesso vincolo di sicurezza del master). Attivazione
+FAU_00 in sospeso, richiede conferma esplicita utente prima del primo run
+reale.
+
+---
+
 ## Sessione 22/07/2026 — WU235: radar_master schedule `periodic`→`periodic_reset`
 
 **Segnalazione utente**: `radar_master` deve girare al primo avvio
