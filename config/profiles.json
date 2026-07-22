@@ -6,7 +6,7 @@
       "truppe", "donazione", "main_mission", "zaino", "vip", "alleanza",
       "messaggi", "arena", "arena_mercato", "district_showdown", "store",
       "radar", "radar_census", "raccolta_chiusura", "mall_daily",
-      "mega_armament"
+      "mega_armament", "event_center_claims"
     ]
   },
   "solo_raccolta": {
@@ -18,7 +18,7 @@
       "truppe", "donazione", "main_mission", "zaino", "vip", "alleanza",
       "messaggi", "arena", "arena_mercato", "district_showdown", "store",
       "radar", "radar_census", "raccolta_chiusura", "mall_daily",
-      "mega_armament"
+      "mega_armament", "event_center_claims"
     ],
     "varianti": { "raccolta": "fast" }
   },
@@ -27,7 +27,7 @@
       "raccolta", "raccolta_chiusura", "grafica_hq", "pulizia_cache",
       "boost", "donazione", "vip", "alleanza", "messaggi",
       "district_showdown", "daily_mission_auto", "radar_master",
-      "mega_armament", "special_promo", "mall_daily"
+      "mega_armament", "special_promo", "mall_daily", "event_center_claims"
     ]
   }
 }

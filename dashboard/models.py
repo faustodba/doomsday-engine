@@ -72,6 +72,7 @@ class TaskFlags(BaseModel):
     store:              bool = True
     mall_daily:         bool = True
     mega_armament:      bool = True
+    event_center_claims: bool = True
 
 
 # ==============================================================================
