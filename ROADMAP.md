@@ -5,6 +5,39 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 22/07/2026 (11) — WU248: titan_approaches standard su tutte le istanze
+
+**Richiesta utente**: "procedi" (a "perché titan_approaches non è in
+produzione?") — dopo la validazione automatica end-to-end su FAU_02
+(WU247), stesso trattamento "standard" già dato a
+mall_daily/mega_armament/event_center_claims in questa sessione.
+
+**Fatto**: `config/profiles.json` — `titan_approaches` aggiunto a
+`completo`/`fast` (ON default per le 10 ordinarie) + `master` (catalogo
+dichiarativo, nessuna logica master-specific). Wiring dashboard
+identico ai precedenti: `TaskFlags.titan_approaches`,
+`GlobalConfig.task_titan_approaches`, `valid_tasks`, i 2 `ORDER` in
+app.py, `_MASTER_ELIGIBLE_TASKS`, checkbox grid `config_global.html`.
+**Non** aggiunto a `_MASTER_VERIFIED_TASKS` (mai eseguito sul profilo
+master/FauMorfeus specificamente) — badge ⚠ prudenziale in UI, stesso
+trattamento degli altri 3 task standard di oggi.
+
+Test: rimosso da `_ESCLUSI_PARITA_*`, conteggi aggiornati (completo/fast
+22→23, override 21→22, master 17→18). 167/167 verdi. Sync prod fatto
+(verificato byte-identico). Commit `812d544`, pushato.
+
+**Nota operativa**: il bot gira già in produzione (avviato dall'utente
+alle 16:08, ciclo 581, zero anomalie durante tutta la sessione di test
+di oggi). Questa modifica avrà effetto al **prossimo riavvio**
+bot+dashboard, non sul processo corrente — coerente col comportamento
+già visto per WU246.
+
+**event_center_claims + titan_approaches ora entrambi standard su tutta
+la farm** — nessun task rimasto pilot-only dall'intera esplorazione
+live iniziata con mall_daily/mega_armament questa sessione.
+
+---
+
 ## Sessione 22/07/2026 (10) — WU247: nuovo task titan_approaches
 
 **Ultimo task della sessione**: "apri hub center di fau_00 e seleziona titan
