@@ -84,6 +84,21 @@ originariamente su FAU_00). Non trattato come coverage bug — il sistema
 impara correttamente ciò che c'è, non deve inventare ciò che non c'è.
 Da riconfermare senza urgenza se ricompare in futuro.
 
+**Run 3 — prova CROSS-ISTANZA (FAU_03, mai toccata da questa sessione)**:
+dopo chiusura FAU_02 + boot completo FAU_03 (447s, HOME OK, 1 retry
+su `am start` + 1 instabilità HOME temporanea, entrambi gestiti dal
+recovery esistente — nessuna anomalia). `run_task.py --force`:
+**t001/t003/t005/t007 — imparate sessioni fa su FAU_02 — riconosciute
+correttamente su FAU_03 e skippate a zero tap** (score 0.944-0.985).
+Prova diretta che l'identità-riga è davvero indipendente dall'istanza,
+non solo dal tempo/posizione (l'assunto architetturale del redesign
+WU244/245). Più 2 righe nuove non-claimabili (t010,t012) e 1 nuova
+claimabile scoperta e riscattata (t011, score 1.000). 165.1s (tra i
+139s "tutto noto" e i 199s "tutto nuovo" — coerente con la miscela).
+Hub-open retry necessario anche qui (tentativo 1 score 0.040 →
+tentativo 2 score 1.000) — pattern ormai consistente su 3/3 istanze
+testate. Catalogo (12 voci) + crop sync su prod.
+
 ---
 
 ## Sessione 22/07/2026 (7) — WU241→244: task `event_center_claims` + sistema di discovery, redesign dopo test live
