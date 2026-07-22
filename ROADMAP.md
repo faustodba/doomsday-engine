@@ -5,6 +5,40 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 22/07/2026 — WU235: radar_master schedule `periodic`→`periodic_reset`
+
+**Segnalazione utente**: `radar_master` deve girare al primo avvio
+dell'istanza master dopo il reset 00:00 UTC (quando il gioco rigenera
+ricompense/missioni radar), poi ogni 12h — non solo "12h dall'ultimo run"
+puro. Osservato in produzione 21-22/07: `radar_master` (priorità 24,
+`interval_hours=12.0`, `schedule: "periodic"`) ultimo run 21/07 17:07 UTC →
+rimasto "non dovuto" per tutti i tick del master del 22/07 fino alle 05:07
+UTC, indipendentemente dal reset giornaliero.
+
+**Causa**: `schedule_type: "periodic"` (`core/orchestrator.py::_e_dovuto_periodic`)
+è puro rolling-interval dall'ultimo run, mai ancorato al reset. Esiste già
+in codice il meccanismo corretto, `"periodic_reset"`
+(`_e_dovuto_periodic_reset`, vero al primo tick dopo il reset 00:00 UTC
+OPPURE se trascorse `interval_hours`) — usato da `MegaArmamentTask` dal
+21/07, il cui docstring dichiara esplicitamente l'intento originale: mega
+deve girare per primo dopo il reset "prima che radar_master accumuli
+eventi" — intento mai applicato a `radar_master` stesso.
+
+**Fix**: una riga in `config/task_setup.json`, `RadarMasterTask.schedule`
+da `"periodic"` a `"periodic_reset"`. Nessuna modifica a
+`tasks/radar_master.py` (schedule_type/interval_hours iniettati da
+`main.py::_TaskWrapper` leggendo `task_setup.json`, non hardcoded nella
+classe). **Ordine già corretto senza altre modifiche**: priorità
+`mega_armament=21 < radar_master=24` garantisce che al primo tick
+post-reset la challenge del giorno sia selezionata da mega_armament PRIMA
+che radar_master raccolga gli eventi.
+
+Doc: `docs/OVERVIEW.md` §5.6-ter, `docs/issues/radar.md` (WU235).
+**Richiede riavvio bot** (`task_setup.json` letto solo all'import del
+modulo). Non ancora validato live post-fix (in attesa di riavvio).
+
+---
+
 ## Sessione 21/07/2026 (continuazione) — Pannello master + fix radar_master + fix report_raccolta
 
 **Pannello master riorganizzato** (`dashboard/templates/config_master.html`,

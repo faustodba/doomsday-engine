@@ -611,7 +611,7 @@ Complete è assente (istanza senza la funzione) → `segna_non_disponibile()`.
 Calibrato + validato live su FauMorfeus (auto-complete → missioni → claim
 batch → 5/5 chest, badge a 0).
 
-### 5.6-ter RadarMasterTask (priority 24, periodic 12h — task custom MASTER, 20/07)
+### 5.6-ter RadarMasterTask (priority 24, periodic_reset 12h — task custom MASTER, 20/07, WU235 22/07)
 
 [tasks/radar_master.py](../tasks/radar_master.py) — Task esclusivo del master
 (FauMorfeus, via `master_task_whitelist`). Il master ha un **Radar Station
@@ -622,6 +622,16 @@ consumando stamina (50/missione, cap 1500). Indipendente da
 nessuna condivisione di stato o codice, ma stessa cadenza di schedulazione
 (`interval_hours=12.0`, 2 volte/giorno, richiesta esplicita utente per
 allinearsi al ciclo di generazione missioni radar).
+
+**WU235 (22/07)**: `schedule` cambiato da `"periodic"` a `"periodic_reset"`
+in `config/task_setup.json` — il tetto puramente rolling (12h dall'ultimo
+run reale) non si riallineava mai al reset 00:00 UTC, quando il gioco
+rigenera ricompense/missioni radar. Ora vero al primo tick dopo il reset
+OPPURE se trascorse 12h dall'ultimo run (stesso meccanismo di
+`MegaArmamentTask`, `core/orchestrator.py::_e_dovuto_periodic_reset`).
+L'ordine priorità `mega_armament(21) < radar_master(24)` garantisce che la
+challenge del giorno sia selezionata prima che radar_master raccolga gli
+eventi, anche al primo tick post-reset.
 
 **Idempotente, nessuno `state` dedicato**: il cooldown "Refresh in HH:MM:SS"
 è visibile a schermo dal gioco stesso — se già esaurito il task esce subito
