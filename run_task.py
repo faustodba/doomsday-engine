@@ -66,6 +66,9 @@ _TASK_CATALOGUE = {
     "store":          ("tasks.store",           "StoreTask"),
     "radar":          ("tasks.radar",           "RadarTask"),
     "radar_census":   ("tasks.radar_census",    "RadarCensusTask"),
+    "mall_daily":          ("tasks.mall_daily",          "MallDailyTask"),
+    "mega_armament":       ("tasks.mega_armament",       "MegaArmamentTask"),
+    "event_center_claims": ("tasks.event_center_claims", "EventCenterClaimsTask"),
 }
 
 # Task con schedule daily (eseguiti una volta al giorno)

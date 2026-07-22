@@ -27,7 +27,10 @@
 
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
+from datetime import datetime, timezone
 
 
 @dataclass(frozen=True)
@@ -150,3 +153,102 @@ def frazione_pallino_rosso(frame, roi: tuple[int, int, int, int]) -> float:
     h = hsv[..., 0]; s = hsv[..., 1]; v = hsv[..., 2]
     red = ((h <= 8) | (h >= 172)) & (s > BADGE_RED_S_MIN) & (v > BADGE_RED_V_MIN)
     return float(red.mean())
+
+
+# ==============================================================================
+#  DISCOVERY — auto-apprendimento voci sidebar non catalogate (22/07/2026)
+# ==============================================================================
+#
+#  Su richiesta utente: "la prima istanza che entra fa anche uno scan completo
+#  degli eventi, quando ne trova uno non catalogato impara se c'è un claim e
+#  lo clicca ed aggiorna il catalogo". Stesso principio di
+#  shared/banner_learner.py (WU93/WU190) ma con un margine di sicurezza in
+#  più: non si tappa MAI un pulsante mai visto — si cerca solo il widget
+#  CLAIM verde GIÀ VERIFICATO (oggi: pin_login_rewards_claim.png, dimostrato
+#  riusato identico su 2 sistemi eventi diversi, score 1.0 su entrambi). Se
+#  in un nuovo menu quel widget non matcha, la voce viene imparata come
+#  "non claimabile" e non più ri-visitata — mai un tap esplorativo su
+#  qualcosa di sconosciuto.
+#
+#  Rilevamento pallini GENERICO (a differenza di badge_roi, fisso per voce
+#  nota): scansiona l'intera colonna sidebar via blob HSV rosso, filtrato
+#  per colonna X (dove il gioco disegna sempre i badge numerici) e area
+#  minima (scarta il rumore di icone con tinte rosse/arancioni nell'artwork
+#  — calibrato live: badge reali area>=150, rumore icone area<80).
+
+SIDEBAR_ZONE_ROI:  tuple[int, int, int, int] = (0, 60, 220, 520)
+BADGE_COLUMN_X:    tuple[int, int]           = (185, 215)
+BADGE_MIN_AREA:    int                       = 150
+MAX_SCROLL_DEPTH:  int                       = 6   # margine oltre le ~5 profondità osservate
+TITLE_OCR_ZONE:    tuple[int, int, int, int] = (40, 15, 500, 55)
+ROW_TAP_X:         int                       = 105
+DISCOVERY_CLAIM_TEMPLATE: str                = "pin/pin_login_rewards_claim.png"
+DISCOVERY_CLAIM_ZONE:     tuple[int, int, int, int] = (780, 150, 925, 520)
+DISCOVERY_CLAIM_THRESHOLD: float             = 0.80
+
+_DATA_DIR             = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+_LEARNED_PATH          = os.path.join(_DATA_DIR, "claim_catalog_learned.json")
+_DISCOVERY_STATE_PATH  = os.path.join(_DATA_DIR, "claim_discovery_state.json")
+
+
+def trova_pallini_sidebar(frame) -> list[tuple[int, int]]:
+    """Trova tutti i pallini rossi (badge notifica) nella colonna sidebar,
+    filtrando il rumore delle icone (area minima + colonna X dei badge,
+    calibrato live su screenshot reale: 3/3 badge veri isolati, rumore
+    icone scartato). Ritorna centroidi (x,y) in coordinate ASSOLUTE frame."""
+    import cv2
+    x0, y0, x1, y1 = SIDEBAR_ZONE_ROI
+    roi = frame[y0:y1, x0:x1]
+    hsv = cv2.cvtColor(roi, cv2.COLOR_BGR2HSV)
+    h = hsv[..., 0]; s = hsv[..., 1]; v = hsv[..., 2]
+    mask = (((h <= 8) | (h >= 172)) & (s > BADGE_RED_S_MIN) & (v > BADGE_RED_V_MIN)).astype("uint8") * 255
+    n, _labels, stats, centroids = cv2.connectedComponentsWithStats(mask, connectivity=8)
+    out = []
+    for i in range(1, n):
+        area = stats[i, cv2.CC_STAT_AREA]
+        if area < BADGE_MIN_AREA:
+            continue
+        cx = centroids[i][0] + x0
+        cy = centroids[i][1] + y0
+        if BADGE_COLUMN_X[0] <= cx <= BADGE_COLUMN_X[1]:
+            out.append((int(cx), int(cy)))
+    return out
+
+
+def carica_appreso() -> dict:
+    """Catalogo appreso (voci scoperte in discovery, claimabili o no).
+    Persistito in data/claim_catalog_learned.json, sopravvive ai restart."""
+    try:
+        with open(_LEARNED_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
+
+
+def salva_appreso(catalogo: dict) -> None:
+    os.makedirs(_DATA_DIR, exist_ok=True)
+    tmp = _LEARNED_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(catalogo, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, _LEARNED_PATH)
+
+
+def serve_discovery_oggi() -> bool:
+    """True se la scansione completa non è ancora stata fatta oggi (UTC).
+    'La prima istanza che entra' = la prima che trova questo flag scaduto."""
+    oggi = datetime.now(timezone.utc).date().isoformat()
+    try:
+        with open(_DISCOVERY_STATE_PATH, encoding="utf-8") as f:
+            st = json.load(f)
+        return st.get("last_scan_date") != oggi
+    except Exception:
+        return True
+
+
+def segna_discovery_fatta() -> None:
+    oggi = datetime.now(timezone.utc).date().isoformat()
+    os.makedirs(_DATA_DIR, exist_ok=True)
+    tmp = _DISCOVERY_STATE_PATH + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"last_scan_date": oggi}, f)
+    os.replace(tmp, _DISCOVERY_STATE_PATH)
