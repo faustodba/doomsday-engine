@@ -5,6 +5,60 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 22/07/2026 (10) — WU247: nuovo task titan_approaches
+
+**Ultimo task della sessione**: "apri hub center di fau_00 e seleziona titan
+approaches" — l'utente guida dal vivo, passo-passo, l'intero flusso
+dell'evento "Titan Approaches" (3 attacchi giornalieri gratuiti contro un
+boss, ricompense indipendenti dall'esito), confermando ogni pulsante e
+coordinata prima di procedere. Poi: "implementa e testiamolo su fau_01".
+
+**Design**: nuovo task dedicato (non esteso nel sistema generico di
+`event_center_claims` — quello è per discovery/claim semplice, qui serve
+una sequenza multi-step di combattimento, autorizzata esplicitamente
+dall'utente). Riusa apertura hub + navigazione sidebar di
+`shared/claim_catalog.py`, template dedicato per la riga (evento noto).
+
+**2 situazioni distinte dopo GO** (la seconda scoperta durante il test su
+FAU_01 — "ho aperto la maschera per le istanze nuove mancano gli
+schieramenti"):
+- Schieramento **preimpostato** (FAU_00/master, istanze con
+  progressione) → Deployment Queue già 3/3 → non si tocca → CHALLENGE
+  diretto.
+- Schieramento **mancante** (istanze nuove) → 3 slot vuoti con "+" → tap
+  propone comandante/truppe default, tap READY conferma → ripetuto fino
+  a 3 volte. Rilevato automaticamente via template match (nessuna
+  assunzione sull'ordine di comparsa GO/Quick Battle).
+
+**Bug fix in corso d'opera**: il primo test su FAU_01 riportava "nessun
+pallino" mentre l'utente vedeva chiaramente il badge rosso a schermo
+("verifica meglio c'è il pallino rosso"). Analisi pixel HSV: il badge si
+sovrappone all'angolo alto dell'icona (picco dy=-19 dal centro del match
+riga, banda [-30,-9]), non è centrato sul testo come assunto — la ROI
+v1 (±15 dal centro) catturava solo la coda della macchia → frazione
+diluita sotto soglia (4-5% invece di 28%). Ricalibrata empiricamente su
+screenshot reale, verificato 28.4% dopo il fix.
+
+**Validato end-to-end**: prima manualmente su FAU_01 (utente guida ogni
+tap, scoperta del caso "schieramento mancante"), poi in **automatico
+completo** su FAU_02 dopo aver integrato la logica nel codice — 3 slot
+riempiti da soli (score 0.98-1.000), 1° attacco GO+CHALLENGE+skip
+(retry funzionante, skip trovato al 3° tentativo), 2° attacco
+schieramento riconosciuto già pieno (non ritoccato), 3° Quick Battle
+istantaneo. `go=2 quick=1 tot=3/3`, 138.6s, zero tap non sicuri.
+
+Registrato in `task_setup.json` (priority 33, daily) + `main.py` +
+`shared/task_resolution.py` + `core/cycle_duration_predictor.py` +
+`run_task.py` catalogue. **Pilot-only** (escluso da
+`test_migration_parity`, non in `profiles.json`) — non ancora abilitato
+su nessuna istanza. 167/167 test verdi. Commit `21aab50`, pushato, sync
+prod fatto (verificato byte-identico, incluso i 7 nuovi template PNG).
+
+Sessione chiusa con "ok pronto per ripartire e testare tutto" — bot in
+riavvio (a cura dell'utente).
+
+---
+
 ## Sessione 22/07/2026 (9) — WU246: event_center_claims standard su tutte le istanze
 
 **Richiesta utente**: "abilitiamo per tutte le istanze" — dopo la verifica live
