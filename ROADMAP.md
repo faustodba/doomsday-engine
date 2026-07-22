@@ -5,6 +5,43 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 22/07/2026 (6) — WU240: mega_armament standard su tutte le istanze + UI dashboard
+
+**Richiesta utente**: "abilita per tutte le istanze, sono fiducioso" —
+dopo la verifica live WU236 (Resource Gathering per le ordinarie), stesso
+trattamento standard di WU239/mall_daily anche per `mega_armament`.
+
+**Fatto**: `config/profiles.json` — `mega_armament` aggiunto a
+`completo`/`fast` (ON di default per le 10 ordinarie, ereditato dal
+profilo). Era già in `master` + `task_overrides` di FauMorfeus dal
+21/07, nessuna modifica lì. **Zero modifiche a `tasks/mega_armament.py`**:
+il dispatcher `is_master_instance()` introdotto in WU236 seleziona già
+la challenge corretta per profilo (Radar Station Events master /
+Resource Gathering ordinarie), la generalizzazione era già pronta per
+questo esatto momento.
+
+Wiring dashboard identico a WU239: `TaskFlags.mega_armament`,
+`GlobalConfig.task_mega_armament`, `valid_tasks`, i due `ORDER` in
+app.py, `_MASTER_ELIGIBLE_TASKS` (sposta `mega_armament` dalla sezione
+"③ Solo Master" del pannello master alla sezione "① Standard", dato che
+`_master_exclusive_tasks()` è derivato da `master_tasks - completo_tasks`
+e ora è in entrambi), checkbox grid `config_global.html`.
+
+**Test**: rimosso `mega_armament`/`MegaArmamentTask` da
+`_ESCLUSI_PARITA_*` in `test_migration_parity.py` (stesso motivo di
+WU239 — non più additivo, old/new logic concordano). Conteggi
+aggiornati in `test_task_resolution.py` (completo 20→21, override
+19→20; il conteggio del profilo `master` resta 16, invariato —
+`mega_armament` c'era già in quella lista). 261/263 verdi.
+
+Commit `9e5e5fb`, pushato, sync prod fatto (verificato byte-per-byte).
+**mega_armament ora attivo su tutta la farm** (10 ordinarie + master),
+insieme a mall_daily (WU239) — nessun task rimasto in stato pilot-only
+da questa sessione di esplorazione live su FAU_00. Effetto al prossimo
+riavvio bot + dashboard.
+
+---
+
 ## Sessione 22/07/2026 (5) — WU239: mall_daily standard su tutte le istanze + UI dashboard
 
 **Richiesta utente**: `mall_daily` (WU238) non deve restare un pilot opt-in
