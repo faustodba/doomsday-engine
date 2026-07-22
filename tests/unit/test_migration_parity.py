@@ -86,20 +86,21 @@ _OLD_TASK_CLASS_TO_NAME = {
     "RadarCensusTask": "radar_census",
 }
 
-# Task master-only aggiunti DOPO la Fase 1 (WU-TaskResolution): non fanno
-# parte del contratto di parità (la logica pre-Fase1 non li conosceva). Sono
-# esclusi dal confronto vecchia/nuova — girano solo sul master via whitelist,
-# NON in profiles["completo"]/["fast"]. Esclusi sia per class_name che per
-# task_name (i filtri predictor lavorano sui nomi). Nota: mall_daily (WU238)
-# e mega_armament (WU236, standardizzato WU240 22/07) NON sono qui — resi
-# standard (profiles["completo"]/["fast"] + ["master"]), quindi old/new
-# logic concordano di nuovo su di loro, nessuna esclusione necessaria.
+# Task additivi opt-in via task_overrides, NON in profiles["completo"]/
+# ["fast"]: non fanno parte del contratto di parità (la logica pre-Fase1
+# non li conosceva). Esclusi dal confronto vecchia/nuova sia per class_name
+# che per task_name (i filtri predictor lavorano sui nomi). Nota: mall_daily
+# (WU238) e mega_armament (WU236, standardizzati WU239/240 22/07) NON sono
+# qui — resi standard (profiles["completo"]/["fast"] + ["master"]), quindi
+# old/new logic concordano di nuovo su di loro, nessuna esclusione
+# necessaria. event_center_claims (WU241, 22/07) e' pilot-only per ora
+# (in attesa di test su un'altra istanza prima del rollout standard).
 _ESCLUSI_PARITA_CLASS = {"DailyMissionAutoTask", "DailyMissionClaimTask", "RadarMasterTask",
                          "PartsContestTask", "CustomizationContestTask", "VehicleRedesignTask",
-                         "ChipChallengeTask", "SpecialPromoTask"}
+                         "ChipChallengeTask", "SpecialPromoTask", "EventCenterClaimsTask"}
 _ESCLUSI_PARITA_NAME = {"daily_mission_auto", "daily_mission_claim", "radar_master",
                         "parts_contest", "customization_contest", "vehicle_redesign",
-                        "chip_challenge", "special_promo"}
+                        "chip_challenge", "special_promo", "event_center_claims"}
 
 
 def _senza_esclusi_class(s: set[str]) -> set[str]:

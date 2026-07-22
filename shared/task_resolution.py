@@ -47,6 +47,7 @@ TASK_CLASS_TO_NAME = {
     "ZainoTask": "zaino",
     "VipTask": "vip",
     "MallDailyTask": "mall_daily",                   # 22/07 claim gratuiti Mall
+    "EventCenterClaimsTask": "event_center_claims",  # 22/07 claim gratuiti hub Event Center
     "AlleanzaTask": "alleanza",
     "MessaggiTask": "messaggi",
     "ArenaTask": "arena",

@@ -66,6 +66,7 @@ def _import_tasks() -> dict:
         ("tasks.zaino",          "ZainoTask"),
         ("tasks.vip",            "VipTask"),
         ("tasks.mall_daily",     "MallDailyTask"),         # 22/07 claim gratuiti Mall (Daily Boost + Daily Present)
+        ("tasks.event_center_claims", "EventCenterClaimsTask"),  # 22/07 claim gratuiti hub Event Center (catalogo estensibile)
         ("tasks.alleanza",       "AlleanzaTask"),
         ("tasks.messaggi",       "MessaggiTask"),
         ("tasks.arena",          "ArenaTask"),

@@ -649,6 +649,7 @@ CLASS_TO_TASK_NAME = {
     "DonazioneTask": "donazione", "AlleanzaTask": "alleanza",
     "MessaggiTask": "messaggi", "VipTask": "vip",
     "MallDailyTask": "mall_daily",
+    "EventCenterClaimsTask": "event_center_claims",
     "ArenaTask": "arena", "ArenaMercatoTask": "arena_mercato",
     "StoreTask": "store", "ZainoTask": "zaino",
     "TruppeTask": "truppe", "DistrictShowdownTask": "district_showdown",

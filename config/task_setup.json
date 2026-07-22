@@ -14,6 +14,7 @@
   {"class": "ZainoTask",              "priority": 25,  "interval_hours": 24.0,  "schedule": "daily"},
   {"class": "VipTask",                "priority": 30,  "interval_hours": 24.0,  "schedule": "daily"},
   {"class": "MallDailyTask",          "priority": 31,  "interval_hours": 24.0,  "schedule": "daily"},
+  {"class": "EventCenterClaimsTask",  "priority": 32,  "interval_hours": 24.0,  "schedule": "daily"},
   {"class": "AlleanzaTask",           "priority": 35,  "interval_hours": 4.0,   "schedule": "periodic"},
   {"class": "MessaggiTask",           "priority": 40,  "interval_hours": 4.0,   "schedule": "periodic"},
   {"class": "ArenaTask",              "priority": 50,  "interval_hours": 24.0,  "schedule": "daily"},
