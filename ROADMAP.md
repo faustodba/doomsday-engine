@@ -5,6 +5,61 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 22/07/2026 (8) — WU245: event_center_claims, identità riga-sidebar (skip zero-tap)
+
+**Continuazione della stessa esplorazione live**, questa volta su FAU_01
+(seconda istanza di test, WU244 validato solo su FAU_00). Due osservazioni
+dell'utente dal vivo:
+1. *"hai aperto due menu contenenti pallini rossi ma che nel censimento
+   precedente dovrebbero essere stati catalogati non claimabili"* +
+   *"sui pallini rossi riconosciuti non claimabili non devi entrare, costo
+   di tempo inutile"* — col design WU244 (identità = titolo del sottomenu),
+   il riconoscimento avveniva **dopo** il tap (serviva aprire per leggere
+   il titolo), quindi ogni voce nota-non-claimabile veniva comunque aperta
+   ogni run solo per scoprire che non c'era nulla da fare.
+2. *"mi aspetto che fai lo scanning di tutti i menù, riconosci quelli nuovi
+   e/o quelli rossi, se i rossi sono claimabili entri, se non claimabili
+   non entri"* — conferma esplicita del comportamento atteso.
+
+**Fix — identità spostata da "titolo del sottomenu aperto" (post-tap) a
+"riga sidebar" (icona+etichetta, pre-tap)**: il crop è preso dalla stessa
+screenshot già catturata per `trova_pallini_sidebar` — zero screenshot e
+zero tap aggiuntivi per il riconoscimento in sé.
+
+`shared/claim_catalog.py`: `TITLE_CROP_ZONE`/`TITLE_MATCH_THRESHOLD` →
+`ROW_CROP_X`/`ROW_CROP_HALF_H`/`ROW_MATCH_THRESHOLD`; `riconosci_titolo`/
+`salva_crop_titolo`/`carica_crop_titoli` → `riconosci_riga(frame, by,
+crops)`/`salva_crop_riga(id, frame, by)`/`carica_crop_righe()` +
+`ritaglia_riga(frame, by)` pubblica (stessa zona usata per salvare,
+riconoscere e aggiornare la cache in RAM — sempre confrontabili).
+
+`tasks/event_center_claims.py`: loop per-pallino riordinato —
+`riconosci_riga()` **prima** di qualunque tap:
+- riga nota **non claimabile** → skip immediato, **zero tap** (l'intero
+  punto del fix);
+- riga nota **claimabile** → tap diretto, apri, claim;
+- riga **mai vista** → unico caso di tap esplorativo (per imparare),
+  crop salvato è quello di **prima** del tap (riga sidebar, non il
+  titolo del sottomenu che si aprirà).
+
+Vecchi crop (`data/claim_titles/t001-t008.png`, formato titolo 40×460) e
+`data/claim_catalog_learned.json` **resettati** (dev+prod): incompatibili
+per shape coi nuovi crop-riga (~50×220), il sistema si auto-reimpara dal
+vivo per design — già la logica esistente, nessun seed manuale rifatto.
+
+Verificato: sintassi + import runtime puliti (zero riferimenti residui ai
+vecchi nomi in tutto il repo), 167/167 test verdi
+(`test_task_resolution.py` + `test_migration_parity.py`). Commit
+`8f07415`, pushato, sync prod fatto (codice byte-identico verificato +
+`data/` ripulita a mano, stesso stato pre-reset trovato anche lì).
+**Ancora non abilitato su nessuna istanza** (resta pilot, come WU244 —
+nessuna richiesta esplicita di renderlo standard finora).
+
+Verifica dal vivo del nuovo comportamento (zero-tap sui non-claimabili)
+rimandata al prossimo run su istanza reale (FAU_02, in corso).
+
+---
+
 ## Sessione 22/07/2026 (7) — WU241→244: task `event_center_claims` + sistema di discovery, redesign dopo test live
 
 **Continuazione della stessa esplorazione ADB su FAU_00**: dopo mall_daily,
