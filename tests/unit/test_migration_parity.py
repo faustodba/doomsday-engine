@@ -96,16 +96,14 @@ _OLD_TASK_CLASS_TO_NAME = {
 # necessaria. event_center_claims (WU241, 22/07) reso standard in WU246
 # (22/07, dopo verifica live cross-istanza FAU_01/02/03) — stesso motivo,
 # rimosso dagli esclusi.
-# titan_approaches (WU247, 22/07) — nuovo, pilot-only per ora (in
-# task_setup.json ma non in profiles.json, in attesa di test su FAU_01
-# prima del rollout standard) — stesso stato in cui era event_center_claims
-# tra WU241 e WU246.
+# titan_approaches (WU247, 22/07) reso standard nella stessa sessione
+# (WU248, dopo validazione automatica end-to-end su FAU_02) — stesso
+# motivo di event_center_claims, rimosso dagli esclusi.
 _ESCLUSI_PARITA_CLASS = {"DailyMissionAutoTask", "DailyMissionClaimTask", "RadarMasterTask",
                          "PartsContestTask", "CustomizationContestTask", "VehicleRedesignTask",
-                         "ChipChallengeTask", "SpecialPromoTask", "TitanApproachesTask"}
+                         "ChipChallengeTask", "SpecialPromoTask"}
 _ESCLUSI_PARITA_NAME = {"daily_mission_auto", "daily_mission_claim", "radar_master",
                         "parts_contest", "customization_contest", "vehicle_redesign",
-                        "titan_approaches",
                         "chip_challenge", "special_promo"}
 
 

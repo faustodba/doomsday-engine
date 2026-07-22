@@ -686,7 +686,7 @@ async def toggle_task(task_name: str, request: Request):
         "rifornimento", "donazione", "zaino",
         "arena", "arena_mercato", "district_showdown", "boost", "truppe", "store",
         "grafica_hq", "pulizia_cache", "mall_daily", "mega_armament",
-        "event_center_claims",
+        "event_center_claims", "titan_approaches",
     }
     if task_name not in valid_tasks:
         raise HTTPException(

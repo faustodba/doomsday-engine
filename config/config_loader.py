@@ -85,6 +85,7 @@ _DEFAULTS: dict[str, Any] = {
     "task_mall_daily":        True,
     "task_mega_armament":     True,
     "task_event_center_claims": True,
+    "task_titan_approaches":  True,
 
     # Rifornimento — parametri comuni
     "DOOMS_ACCOUNT":                    "",
@@ -823,6 +824,7 @@ class GlobalConfig:
     task_mall_daily:        bool = True
     task_mega_armament:     bool = True
     task_event_center_claims: bool = True
+    task_titan_approaches:  bool = True
 
     # WU55 — Data collection OCR slot (debug analisi HOME vs MAPPA)
     raccolta_ocr_debug:     bool = False
@@ -982,6 +984,7 @@ class GlobalConfig:
             task_mall_daily        = bool(t.get("mall_daily",        True)),
             task_mega_armament     = bool(t.get("mega_armament",     True)),
             task_event_center_claims = bool(t.get("event_center_claims", True)),
+            task_titan_approaches  = bool(t.get("titan_approaches",  True)),
 
             # WU55 — debug OCR slot (legge da raw o globali.raccolta_ocr_debug)
             raccolta_ocr_debug     = bool(
@@ -1127,6 +1130,7 @@ class GlobalConfig:
                 "mall_daily":        self.task_mall_daily,
                 "mega_armament":     self.task_mega_armament,
                 "event_center_claims": self.task_event_center_claims,
+                "titan_approaches":  self.task_titan_approaches,
             },
             "rifornimento_comune": {
                 "dooms_account":        self.dooms_account,
@@ -1449,6 +1453,7 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
                 "mall_daily":            gcfg.task_mall_daily,
                 "mega_armament":         gcfg.task_mega_armament,
                 "event_center_claims":   gcfg.task_event_center_claims,
+                "titan_approaches":      gcfg.task_titan_approaches,
             }
             return mappa.get(nome_task, True)
 

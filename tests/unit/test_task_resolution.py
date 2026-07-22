@@ -26,9 +26,9 @@ def test_tipologia_full_risolve_profilo_completo():
     assert "RaccoltaTask" in _class_names(reg)
     assert "ArenaTask" in _class_names(reg)
     assert "GraficaHqTask" in _class_names(reg)
-    # tutte le 22 classi del profilo completo presenti (19 + mall_daily WU238
-    # + mega_armament WU240 + event_center_claims WU246)
-    assert len(reg) == 22
+    # tutte le 23 classi del profilo completo presenti (19 + mall_daily WU238
+    # + mega_armament WU240 + event_center_claims WU246 + titan_approaches WU248)
+    assert len(reg) == 23
 
 
 def test_tipologia_raccolta_only_risolve_solo_raccolta():
@@ -51,8 +51,8 @@ def test_tipologia_raccolta_fast_applica_swap():
 def test_tipologia_sconosciuta_o_assente_fallback_completo():
     reg_assente = risolvi_task_istanza(tipologia=None)
     reg_ignota = risolvi_task_istanza(tipologia="qualcosa_di_strano")
-    assert len(reg_assente) == 22
-    assert len(reg_ignota) == 22
+    assert len(reg_assente) == 23
+    assert len(reg_ignota) == 23
 
 
 # ── task_overrides (add/remove) ────────────────────────────────────────────
@@ -60,7 +60,7 @@ def test_tipologia_sconosciuta_o_assente_fallback_completo():
 def test_override_rimuove_task_da_profilo_completo():
     reg = risolvi_task_istanza(tipologia="full", task_overrides={"boost": False})
     assert "BoostTask" not in _class_names(reg)
-    assert len(reg) == 21
+    assert len(reg) == 22
 
 
 def test_override_aggiunge_task_a_solo_raccolta():
@@ -209,6 +209,8 @@ def test_profilo_master_catalogo_dichiarativo_non_wired():
     # nel catalogo dichiarativo master) → 16.
     # 22/07 (WU246): +event_center_claims (stesso trattamento, verifica live
     # cross-istanza FAU_01/02/03 completata) → 17.
+    # 22/07 (WU248): +titan_approaches (stesso trattamento, verifica
+    # automatica end-to-end su FAU_02 completata) → 18.
     assert "DailyMissionAutoTask" in nomi
     assert "DailyMissionClaimTask" in nomi   # aggiunto come companion
     assert "RadarMasterTask" in nomi
@@ -216,10 +218,11 @@ def test_profilo_master_catalogo_dichiarativo_non_wired():
     assert "SpecialPromoTask" in nomi
     assert "MallDailyTask" in nomi
     assert "EventCenterClaimsTask" in nomi
+    assert "TitanApproachesTask" in nomi
     # i task individuali NON sono più registrati (mappati in special_promo)
     assert "PartsContestTask" not in nomi
     assert "ChipChallengeTask" not in nomi
-    assert len(reg) == 17
+    assert len(reg) == 18
 
 
 # ── Ordine risultato (per priority, come task_setup.json) ─────────────────
