@@ -650,6 +650,7 @@ CLASS_TO_TASK_NAME = {
     "MessaggiTask": "messaggi", "VipTask": "vip",
     "MallDailyTask": "mall_daily",
     "EventCenterClaimsTask": "event_center_claims",
+    "TitanApproachesTask": "titan_approaches",
     "ArenaTask": "arena", "ArenaMercatoTask": "arena_mercato",
     "StoreTask": "store", "ZainoTask": "zaino",
     "TruppeTask": "truppe", "DistrictShowdownTask": "district_showdown",
