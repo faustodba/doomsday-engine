@@ -55,8 +55,34 @@ vecchi nomi in tutto il repo), 167/167 test verdi
 **Ancora non abilitato su nessuna istanza** (resta pilot, come WU244 —
 nessuna richiesta esplicita di renderlo standard finora).
 
-Verifica dal vivo del nuovo comportamento (zero-tap sui non-claimabili)
-rimandata al prossimo run su istanza reale (FAU_02, in corso).
+**Verifica dal vivo su FAU_02** (dopo chiusura FAU_01 + boot completo
+FAU_02 via `core/launcher.py`, 426s, HOME OK): 2 run consecutivi con
+`run_task.py --force`.
+- **Run 1** (catalogo vuoto post-reset): hub-open retry scattato
+  correttamente (tentativo 1 score 0.040 → tentativo 2 score 1.000,
+  fix WU244 confermato ancora necessario/funzionante), scan 6
+  profondità, **9 righe nuove scoperte e imparate** (t001-t009), 2
+  claimabili (t002, t004) → claimati con successo (score 1.000).
+  199.4s totali.
+- **Run 2** (stesso catalogo, subito dopo): **t003/t005/t006/t008
+  riconosciute come non-claimabili e skippate con ZERO tap**
+  (score 0.865-0.983, ben sopra soglia 0.85) — la verifica diretta
+  del comportamento richiesto dall'utente ("sui pallini rossi
+  riconosciuti non claimabili non devi entrare"). t002/t004
+  (claimati nel run 1) non ricompaiono (badge sparito). 139.5s totali
+  (-30% vs run 1, coerente col minor numero di tap). Risultato
+  `{}` (tot=0, nulla da reclamare) — corretto.
+
+Catalogo appreso (9 voci reali, non più il seed vuoto) + crop riga
+`t001-t009.png` sincronizzati su prod (stesso pattern manuale di WU244,
+non coperto da `sync_prod.bat`).
+
+Login Rewards non compare nello scan né su FAU_01 (sessione precedente)
+né su FAU_02 — 2/2 istanze test recenti. Ipotesi più probabile: evento
+a tempo non più attivo in questo momento (era stato seedato a mano
+originariamente su FAU_00). Non trattato come coverage bug — il sistema
+impara correttamente ciò che c'è, non deve inventare ciò che non c'è.
+Da riconfermare senza urgenza se ricompare in futuro.
 
 ---
 
