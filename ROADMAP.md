@@ -5,6 +5,59 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 22/07/2026 (4) — WU238: nuovo task `mall_daily` (Daily Boost + Daily Present)
+
+**Contesto**: continuando l'esplorazione live su FAU_00 (ADB diretto, bot
+fermo) partita per WU236/237, l'utente ha chiesto di entrare nel menu
+"Mall" (icona vicino a Special Promo in HOME) per vedere se c'era
+qualcosa da automatizzare.
+
+**Ricognizione live**: il Mall è prevalentemente un negozio a pagamento
+(Arising Conflict, Mystery Treasure, Premium Packs, Doomsday Courier,
+Privileges Subscription...) ma contiene **due claim esplicitamente
+gratuiti**, entrambi verificati dal vivo con tap reali:
+- **Daily Boost** → icona "Claim" (badge rosso, separata dai pacchetti a
+  pagamento X1/X2/X3 sottostanti) → "You obtained Intermediate Resource
+  Pack X2!".
+- **Limited-Time Promo** → sotto-tab di default "Daily Present" (label
+  "FREE") → pulsante verde "Free" → "You obtained 5m Construction
+  Speedup X5, Battle Manual (100 EXP) X5, 1,000 Food X5, 1,000 Wood X5,
+  500 Steel X5!". Dopo il claim la vista avanza automaticamente sulla
+  sotto-tab successiva a pagamento (es. Monthly Special Pack) — il task
+  esce subito, non la tocca.
+
+**Implementazione**: nuovo `tasks/mall_daily.py` (`MallDailyTask`),
+posizioni **fisse** (confermato dall'utente: "tutto il mapping è fisso"),
+con gate via template match su "Claim"/"Free" prima di ogni tap (mai i
+pacchetti a pagamento). Riusa il template del banner WU237
+(`pin_privileges_subscription_title.png`) per gestire il popup
+Privileges Subscription Trial se ricompare come intro Mall. Registrato
+in `main.py` + `shared/task_resolution.py::TASK_CLASS_TO_NAME` +
+`core/cycle_duration_predictor.py::CLASS_TO_TASK_NAME` +
+`config/task_setup.json` (priority 31, `schedule: "daily"`).
+
+**Bug di test trovato e corretto in corsa**: la prima versione rompeva
+56 test di `test_migration_parity.py` — il task, essendo in
+`task_setup.json` ma non in `profiles.json["completo"/"fast"]`, veniva
+incluso dalla logica "vecchia" congelata (`_old_filtro_main`, itera
+tutto `task_setup.json`) ma correttamente escluso dalla nuova
+(`risolvi_task_istanza`, rispetta i profili) — esattamente lo stesso
+trattamento riservato ai task master-only (WU-TaskResolution). Fix:
+aggiunto `MallDailyTask`/`mall_daily` a `_ESCLUSI_PARITA_CLASS`/
+`_ESCLUSI_PARITA_NAME` in `test_migration_parity.py`. 167/167 verdi
+dopo il fix.
+
+**NON in `profiles.json`** (completo/fast) — additivo opt-in via
+`task_overrides`, stesso pattern del rollout WU236 (mega_armament):
+pilota su FAU_00 prima di un'eventuale estensione. Nessuna istanza
+abilitata ancora.
+
+Commit `d381fb2`, pushato, sync prod fatto (verificato byte-per-byte
+codice+template+registrazioni). Effetto al prossimo riavvio bot
+(catalogo task letto all'import).
+
+---
+
 ## Sessione 22/07/2026 (3) — WU237: banner catalog — "Privileges Subscription Trial"
 
 **Contesto**: durante la sessione di calibrazione live su FAU_00 (ADB
