@@ -1,19 +1,26 @@
 """
 tasks/mega_armament.py — MegaArmamentTask V6
 ============================================================================
-Task custom master (21/07/2026) — evento Special Promo → Mega Armament Sale.
-Il più complesso della serie contest: oltre a traccia + collect all, ha una
-SCELTA GIORNALIERA della "challenge del giorno" (once/day, irreversibile) e
-una GRIGLIA di missioni +145 con pulsanti CLAIM/GO.
+Task custom (21/07/2026 master, 22/07/2026 esteso alle ordinarie) — evento
+Special Promo → Mega Armament Sale. Il più complesso della serie contest:
+oltre a traccia + collect all, ha una SCELTA GIORNALIERA della "challenge del
+giorno" (once/day, irreversibile) e una GRIGLIA di missioni +145 con
+pulsanti CLAIM/GO.
 
-LOGICA (appresa live 21/07 sul master, dall'utente):
-  1. Ogni giorno si sceglie l'evento fisso della giornata (bonus punti). Per il
-     MASTER va scelta **"Radar Station Events"** perché il master esegue
-     radar_master → completa la challenge → punti. Le altre missioni semplici
-     (grid) danno punti minori.
-  2. **Vincolo di ordine**: mega_armament deve girare PRIMA di radar_master
-     (priority 21 < 24) così la challenge radar è già selezionata quando radar
-     accumula gli eventi.
+LOGICA (appresa live 21/07 sul master, dall'utente; estesa 22/07):
+  1. Ogni giorno si sceglie l'evento fisso della giornata (bonus punti). La
+     challenge scelta deve corrispondere a un task che l'istanza esegue
+     DAVVERO, così si completa da sola senza azioni dedicate:
+     - **MASTER**: "Radar Station Events" (esegue radar_master).
+     - **ISTANZE ORDINARIE**: "Resource Gathering" (eseguono raccolta —
+       "Gather X resources on the World Map" matura naturalmente).
+     Selezione dispatcher via `is_master_instance(ctx.instance_name)`
+     (`shared/instance_meta.py`). Le altre missioni semplici (grid) danno
+     punti minori indipendentemente dalla challenge scelta.
+  2. **Vincolo di ordine (master)**: mega_armament deve girare PRIMA di
+     radar_master (priority 21 < 24) così la challenge radar è già
+     selezionata quando radar accumula gli eventi. Non applicabile alle
+     ordinarie (raccolta gira comunque, non dipende dall'ordine con mega).
 
 FLUSSO:
   - Sidebar → Mega Armament (base: apri promo + trova voce + gate pallino).
@@ -30,11 +37,13 @@ FLUSSO:
     attivo/ambra; grigio non matcha) → tap posizione fissa, loop.
 
 REGOLA SICUREZZA: si tappano solo CLAIM verdi + Collect All (gratis) + il SELECT
-della challenge radar (scelta corretta per il master). Mai GO, mai
+della challenge del giorno (radar sul master, resource gathering sulle
+ordinarie — scelta corretta per il profilo dell'istanza). Mai GO, mai
 Purchase Level/€. Il SELECT apre un dialog "once selected can't be changed";
-si conferma OK (radar è la scelta giusta per il master).
+si conferma OK.
 
-Solo master, periodico 12h (via task_overrides + profilo master).
+Periodico 12h (via task_overrides). Master abilitato dal 21/07; ordinarie
+abilitabili singolarmente via `task_overrides.mega_armament=true`.
 """
 
 from __future__ import annotations
@@ -43,6 +52,7 @@ import time
 from dataclasses import dataclass
 
 from core.task import TaskContext, TaskResult
+from shared.instance_meta import is_master_instance
 from tasks.special_promo import SpecialPromoContestConfig, _SpecialPromoContestBase, _frame
 
 
@@ -62,9 +72,13 @@ class MegaArmamentConfig(SpecialPromoContestConfig):
     zona_plus:       tuple[int, int, int, int] = (0, 100, 300, 320)
     tap_plus:        tuple[int, int] = (155, 185)
     wait_carosello:  float = 2.0
-    # carosello challenge: cerca l'icona radar, scorrendo
-    pin_radar_icon:  str = "pin/pin_mega_radar_icon.png"
-    soglia_radar:    float = 0.85
+    # carosello challenge: cerca l'icona target (radar sul master, resource
+    # gathering sulle ordinarie — dispatch in _seleziona_challenge_giornaliera),
+    # scorrendo
+    pin_radar_icon:    str = "pin/pin_mega_radar_icon.png"
+    soglia_radar:      float = 0.85
+    pin_resource_icon: str = "pin/pin_mega_resource_icon.png"
+    soglia_resource:   float = 0.85
     # zona centrale: accetta il radar SOLO se centrato (il pulsante SELECT sotto
     # deve essere interamente on-screen). Al bordo (cx>~810) il SELECT esce dallo
     # schermo → non accettare, scrollare ancora. Validato FAU_00 21/07.
@@ -102,8 +116,9 @@ class MegaArmamentConfig(SpecialPromoContestConfig):
 
 
 class MegaArmamentTask(_SpecialPromoContestBase):
-    """Mega Armament Sale: seleziona la challenge radar (once/day), claima le
-    missioni +145 verdi e raccoglie la traccia. Solo master. run() custom."""
+    """Mega Armament Sale: seleziona la challenge del giorno (once/day, radar
+    sul master / resource gathering sulle ordinarie), claima le missioni
+    +145 verdi e raccoglie la traccia. run() custom."""
 
     def __init__(self, config: MegaArmamentConfig | None = None) -> None:
         super().__init__(config or MegaArmamentConfig())
@@ -115,9 +130,20 @@ class MegaArmamentTask(_SpecialPromoContestBase):
     # SELECT today's Challenge (once/day)
     # ------------------------------------------------------------------
 
-    def _seleziona_challenge_radar(self, ctx, cfg, log) -> str:
+    def _target_challenge(self, ctx, cfg) -> tuple[str, float, str]:
+        """Challenge target per il profilo dell'istanza corrente:
+        master → Radar Station Events (completata da radar_master); ordinarie
+        → Resource Gathering (completata dalla raccolta). Ritorna
+        (pin_path, soglia, nome_leggibile)."""
+        if is_master_instance(getattr(ctx, "instance_name", None)):
+            return cfg.pin_radar_icon, cfg.soglia_radar, "Radar Station Events"
+        return cfg.pin_resource_icon, cfg.soglia_resource, "Resource Gathering"
+
+    def _seleziona_challenge_giornaliera(self, ctx, cfg, log) -> str:
         """Se non ancora scelta oggi (pin_select_plus presente) sceglie la
-        challenge Radar Station Events. Ritorna 'already'|'selected'|'not_found'."""
+        challenge del giorno target per il profilo istanza (vedi
+        _target_challenge). Ritorna 'already'|'selected'|'not_found'."""
+        pin_challenge, soglia_challenge, nome_challenge = self._target_challenge(ctx, cfg)
         shot = ctx.device.screenshot()
         m_plus = ctx.matcher.find_one(shot, cfg.pin_select_plus,
                                       threshold=cfg.soglia_plus, zone=cfg.zona_plus)
@@ -125,16 +151,17 @@ class MegaArmamentTask(_SpecialPromoContestBase):
             log(f"[MEGA_ARMAMENT] challenge già selezionata oggi "
                 f"(no '+', score={m_plus.score:.3f}) → skip selezione")
             return "already"
-        log(f"[MEGA_ARMAMENT] challenge non selezionata → apro carosello")
+        log(f"[MEGA_ARMAMENT] challenge non selezionata → apro carosello "
+            f"(target={nome_challenge})")
         ctx.device.tap(*cfg.tap_plus)
         time.sleep(cfg.wait_carosello)
         for i in range(cfg.max_carosello_scroll + 1):
             shot = ctx.device.screenshot()
-            m = ctx.matcher.find_one(shot, cfg.pin_radar_icon,
-                                     threshold=cfg.soglia_radar, zone=cfg.zona_carosello)
+            m = ctx.matcher.find_one(shot, pin_challenge,
+                                     threshold=soglia_challenge, zone=cfg.zona_carosello)
             if m.found:
                 sel = (m.cx, m.cy + cfg.select_dy)
-                log(f"[MEGA_ARMAMENT] Radar Station Events @({m.cx},{m.cy}) "
+                log(f"[MEGA_ARMAMENT] {nome_challenge} @({m.cx},{m.cy}) "
                     f"score={m.score:.3f} → SELECT {sel}")
                 ctx.device.tap(*sel)
                 time.sleep(cfg.wait_confirm)
@@ -151,12 +178,12 @@ class MegaArmamentTask(_SpecialPromoContestBase):
                     ctx.device.tap(*cfg.tap_confirm_ok)
                 time.sleep(cfg.wait_confirm)
                 return "selected"
-            log(f"[MEGA_ARMAMENT] radar non in vista (score={m.score:.3f}) → "
+            log(f"[MEGA_ARMAMENT] {nome_challenge} non in vista (score={m.score:.3f}) → "
                 f"scroll carosello {i+1}/{cfg.max_carosello_scroll}")
             x0, y0, x1, y1 = cfg.carosello_scroll
             ctx.device.swipe(x0, y0, x1, y1, cfg.carosello_scroll_dur_ms)
             time.sleep(cfg.wait_scroll)
-        log(f"[MEGA_ARMAMENT] Radar Station Events NON trovato nel carosello "
+        log(f"[MEGA_ARMAMENT] {nome_challenge} NON trovato nel carosello "
             f"→ chiudo senza selezionare")
         ctx.device.tap(*cfg.tap_back)   # chiude il carosello
         time.sleep(cfg.wait_back_missions)
@@ -251,7 +278,7 @@ class MegaArmamentTask(_SpecialPromoContestBase):
             time.sleep(cfg.wait_missions)
             debug.snap("04_missions", ctx.device.screenshot())
 
-            esito_sel = self._seleziona_challenge_radar(ctx, cfg, log)
+            esito_sel = self._seleziona_challenge_giornaliera(ctx, cfg, log)
             debug.snap("05_post_select", ctx.device.screenshot())
 
             n_grid = self._claim_griglia(ctx, cfg, log)
