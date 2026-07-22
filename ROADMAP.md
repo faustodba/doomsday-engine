@@ -5,6 +5,71 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 22/07/2026 (7) — WU241→244: task `event_center_claims` + sistema di discovery, redesign dopo test live
+
+**Continuazione della stessa esplorazione ADB su FAU_00**: dopo mall_daily,
+richiesta di scansionare a fondo il menu "Event Center" (icona rotante
+top-right HOME) e costruire un sistema **generalizzato** che impara da
+solo quali sottomenu hanno un claim gratuito.
+
+**WU241 — prima versione**: catalogo dichiarativo (`shared/claim_catalog.py`,
+stesso pattern di `banner_catalog.py`) con 2 voci verificate a mano
+(Login Rewards, Survival Preparations — claim gratuiti confermati con tap
+reali) + un motore di discovery a **coordinate fisse** (profondità scroll
++ posizione Y).
+
+**WU242**: aggiunto supporto scroll multi-profondità (`n_scroll` per voce)
+dopo aver scoperto che la sidebar ha 15+ voci sotto la piega.
+
+**WU243 — sistema di auto-apprendimento**: su richiesta esplicita
+dell'utente ("la prima istanza che entra fa uno scan completo... impara
+se c'è un claim... aggiorna il catalogo"), aggiunta discovery generica
+via blob rossi (`trova_pallini_sidebar`, HSV filtrato per colonna+area,
+scarta rumore icone). Bug trovato e corretto in validazione live:
+`wait_scroll_s=0.6` catturava lo screenshot a metà animazione scroll
+(inerzia MuMu) → 0 badge rilevati; alzato a 1.5s → rilevamento corretto.
+
+**WU244 — redesign completo dopo 2 osservazioni live dell'utente**
+(entrambe bug reali, non ipotetici):
+1. *"gli stessi sottomenù possono trovarsi in posizioni diverse a seconda
+   dell'istanza o la presenza di eventi"* → l'identità per **posizione**
+   (profondità+Y) non è affidabile tra istanze/nel tempo. Fix:
+   **identità = immagine del titolo del sottomenu** (crop + template
+   matching, mai OCR — troppo rumoroso: "Survival Preparations" letto
+   "> a Survival Preparat"; verificato score 1.0 su rivisitazioni, 0.50-0.60
+   tra voci diverse). La posizione resta solo un'informazione effimera
+   per il tap del giro corrente.
+2. *"non sei nel menu"* / *"continui a scrollare fuori dal menu hub"* →
+   (a) il tap sull'icona HOME a volte non apre l'hub (animazione in
+   corso) → task scansionava alla cieca la schermata sbagliata per 105s;
+   fix: verifica apertura hub (`pin_event_center_hub_open.png`, back-arrow,
+   score 1.0 su 4 sottotab diversi vs ~0.53 su HOME) + retry + abort
+   pulito. (b) il tap "back" dopo ogni voce chiudeva l'INTERO hub (mai
+   verificato prima — la sidebar in realtà resta sempre visibile insieme
+   al contenuto), causando esattamente il sintomo descritto; fix: rimosso,
+   nessun tap back tra una voce e l'altra.
+
+Rimosso anche il gate interno "una volta al giorno" (ridondante con lo
+schedule `daily` già in `task_setup.json`, e comunque incompatibile con
+l'identità per-titolo — ogni run deve rivedere le posizioni correnti).
+
+**Validato live end-to-end** (`run_task.py --force` su FAU_00, aggiunto
+alle 3 nuove task nel suo catalogo — mancavano, tool utile per testare un
+singolo task reale senza il bot completo): scan completo 6 profondità,
+titoli noti riconosciuti correttamente su rivisitazioni multiple, **2
+titoli nuovi scoperti e imparati** — Season Events, Titan Approaches
+(verificati visivamente dai crop salvati, entrambi correttamente non
+claimabili: richiedono azioni di gioco reali). Zero tap non sicuri in
+tutte le iterazioni di test.
+
+Commit `7be4f88`→`1356f35`, pushati, sync prod fatto (codice + template +
+seed `data/claim_catalog_learned.json`/`data/claim_titles/*.png`, 5 voci,
+copiati a mano non essendo coperti da `sync_prod.bat`). 261/263 test
+verdi. **Non ancora abilitato su nessuna istanza** (task registrato,
+pilot — nessun `task_overrides`/profilo ancora impostato).
+
+---
+
 ## Sessione 22/07/2026 (6) — WU240: mega_armament standard su tutte le istanze + UI dashboard
 
 **Richiesta utente**: "abilita per tutte le istanze, sono fiducioso" —
