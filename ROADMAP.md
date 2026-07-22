@@ -5,6 +5,53 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 22/07/2026 (5) — WU239: mall_daily standard su tutte le istanze + UI dashboard
+
+**Richiesta utente**: `mall_daily` (WU238) non deve restare un pilot opt-in
+su FAU_00 — è un task standard (nessun comportamento master-specific) e va
+abilitato per tutte le istanze, visibile/gestibile sia dal pannello
+master che dal pannello home standard.
+
+**Fatto**:
+- `config/profiles.json`: `mall_daily` aggiunto a `completo`/`fast` (ON di
+  default per tutte le 10 istanze ordinarie, ereditato dal profilo — zero
+  `task_overrides` necessari) + al catalogo dichiarativo `master`.
+- `FauMorfeus` (prod `runtime_overrides.json`): `task_overrides.mall_daily
+  = true` esplicito (il master non usa il profilo `completo`, serve
+  l'override diretto come per gli altri task condivisi).
+- **Wiring dashboard completo** (stesso trattamento di vip/arena/store,
+  non solo dei task master-only):
+  - `dashboard/models.py::TaskFlags.mall_daily` (kill-switch globale)
+  - `config/config_loader.py::GlobalConfig.task_mall_daily` (default,
+    `_DEFAULTS`, `from_dict`, `to_dict`, `task_abilitato` mappa)
+  - `dashboard/routers/api_config_overrides.py::valid_tasks`
+  - `dashboard/app.py`: `ORDER` in `partial_task_flags_v2` (home
+    standard) + `mobile_partial_flags`, `_MASTER_ELIGIBLE_TASKS`
+    (pannello master, sez. ① Standard)
+  - `dashboard/templates/config_global.html`: checkbox grid Jinja +
+    array `taskList` JS
+
+**Fix test in corsa**: aggiungere `mall_daily` a `completo`/`fast` ha
+cambiato i conteggi attesi in `test_task_resolution.py` (profilo
+completo 19→20, profilo master 15→16 — aggiornati con commento). Rimosso
+`mall_daily`/`MallDailyTask` da `_ESCLUSI_PARITA_CLASS`/`_NAME` in
+`test_migration_parity.py`: non è più additivo-opt-in, quindi old/new
+logic concordano di nuovo su di lui senza bisogno di esclusione. 261/263
+verdi (2 fail pre-esistenti in `test_orchestrator.py`, confermati
+invariati via `git stash`, non correlati).
+
+**Gap trovato e corretto**: `config/profiles.json` non era mai stato
+aggiunto alla lista di sync di `sync_prod.bat` (solo `task_setup.json`
+lo era) — sync manuale fino ad ora, rischio concreto di drift dev/prod
+silenzioso per qualunque modifica futura ai profili. Aggiunta riga
+dedicata + commento nello script.
+
+Commit `f58a4c3`, pushato, sync prod fatto (verificato byte-per-byte su
+tutti i file toccati). Effetto al prossimo riavvio bot (task
+registration) + dashboard (UI checkbox).
+
+---
+
 ## Sessione 22/07/2026 (4) — WU238: nuovo task `mall_daily` (Daily Boost + Daily Present)
 
 **Contesto**: continuando l'esplorazione live su FAU_00 (ADB diretto, bot
