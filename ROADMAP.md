@@ -5,6 +5,61 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 22/07/2026 (9) — WU246: event_center_claims standard su tutte le istanze
+
+**Richiesta utente**: "abilitiamo per tutte le istanze" — dopo la verifica live
+cross-istanza (FAU_01/02/03) di WU245, stesso trattamento "standard" già
+dato a `mall_daily` (WU239) e `mega_armament` (WU240).
+
+**Fatto**: `config/profiles.json` — `event_center_claims` aggiunto a
+`completo`/`fast` (ON default per le 10 ordinarie) + `master` (catalogo
+dichiarativo — nessuna logica master-specific, finisce in sez.①
+Standard del pannello master via `_master_exclusive_tasks()` derivato).
+Wiring dashboard identico a WU239/240: `TaskFlags.event_center_claims`,
+`GlobalConfig.task_event_center_claims` (+`_DEFAULTS`/`from_dict`/
+`to_dict`/`task_abilitato`), `valid_tasks`, i 2 `ORDER` in app.py
+(`ui_config_global` + `mobile_partial_flags`) + `_MASTER_ELIGIBLE_TASKS`,
+checkbox grid `config_global.html`. **Non** aggiunto a
+`_MASTER_VERIFIED_TASKS` (mai eseguito sul profilo master/FauMorfeus
+specificamente, solo su ordinarie) — badge ⚠ prudenziale in UI se
+selezionato lì, stesso trattamento già riservato a mega_armament/mall_daily.
+
+Verificato che tutti gli altri punti d'aggancio (`main.py` import,
+`shared/task_resolution.py::TASK_CLASS_TO_NAME`,
+`core/cycle_duration_predictor.py::CLASS_TO_TASK_NAME`,
+`core/orchestrator.py`, `config_master.html` template,
+`runtime_overrides.json`) erano già a posto da WU241 o non richiedevano
+modifiche (pattern consolidato: task_labels/verified/runtime_overrides
+non necessitano voce esplicita quando il default basta — stesso
+comportamento già osservato per mall_daily/mega_armament).
+
+**Test**: rimosso `EventCenterClaimsTask`/`event_center_claims` da
+`_ESCLUSI_PARITA_*` in `test_migration_parity.py`. Conteggi aggiornati
+in `test_task_resolution.py` (completo/fast 21→22, override 20→21,
+master 16→17). 167/167 verdi (`test_task_resolution.py` +
+`test_migration_parity.py`).
+
+**Nota — suite pytest completa**: lanciata per scrupolo prima del
+rilascio, 143 fallimenti su 1296 test totali. Verificato uno per uno
+che sono debito tecnico **pre-esistente e scollegato** da questa WU:
+plugin `pytest-asyncio` mancante nell'ambiente (test scritti con
+`async def test_...` in `test_task.py`/`test_rifornimento_base.py`,
+errore "async def functions are not natively supported" — nessuna
+relazione con la regola V6 "mai async def run" nel codice applicativo,
+è solo la firma del *test* stesso) + un test OCR con firma disallineata
+(`test_ocr_helpers.py::test_zone_custom`, `ocr_risorse()` non accetta
+più `zone_risorse`) + 2 in `test_orchestrator.py` non correlati. Nessuno
+tocca i file modificati oggi. Da segnalare come issue separato se non
+già noto — non indagato oltre, fuori scope di questa sessione.
+
+Commit `a6795b5`, pushato, sync prod fatto (verificato byte-identico).
+**event_center_claims ora attivo su tutta la farm** (10 ordinarie +
+master), stesso stato di mall_daily/mega_armament — nessun task rimasto
+pilot-only da questa esplorazione. Effetto al prossimo riavvio
+bot+dashboard.
+
+---
+
 ## Sessione 22/07/2026 (8) — WU245: event_center_claims, identità riga-sidebar (skip zero-tap)
 
 **Continuazione della stessa esplorazione live**, questa volta su FAU_01
