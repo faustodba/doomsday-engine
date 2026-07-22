@@ -1357,6 +1357,7 @@ _MASTER_ELIGIBLE_TASKS = [
     "grafica_hq", "pulizia_cache", "boost", "truppe",
     "donazione", "vip", "alleanza", "messaggi",
     "arena", "arena_mercato", "district_showdown", "store",
+    "mall_daily",
 ]
 
 # WU-MasterPanel (21/07, richiesta utente) — task CONDIVISI con le istanze
@@ -1778,6 +1779,7 @@ def partial_task_flags_v2(request: Request):
         "radar", "arena_mercato",
         "district_showdown",
         "grafica_hq", "pulizia_cache",
+        "mall_daily",
     ]
 
     # auto-WU22 (27/04): rewrite as 2-col checkbox rows (style rifornimento .rr-cb)
@@ -5232,7 +5234,8 @@ def mobile_partial_flags(request: Request):
     ALWAYS_ON = {"raccolta"}
     ORDER = ["raccolta","rifornimento","zaino","vip","boost","truppe",
              "arena","store","alleanza","donazione","messaggi",
-             "main_mission","radar","arena_mercato","district_showdown"]
+             "main_mission","radar","arena_mercato","district_showdown",
+             "mall_daily"]
     rendered = []
     for name in ORDER:
         if name not in flags:

@@ -86,21 +86,20 @@ _OLD_TASK_CLASS_TO_NAME = {
     "RadarCensusTask": "radar_census",
 }
 
-# Task aggiunti DOPO la Fase 1 (WU-TaskResolution) come ADDITIVI opt-in via
-# task_overrides: non fanno parte del contratto di parità (la logica
-# pre-Fase1 non li conosceva). Sono esclusi dal confronto vecchia/nuova —
-# NON in profiles["completo"]/["fast"] (girano solo dove esplicitamente
-# abilitati via task_overrides, es. master-only via whitelist o pilot su
-# una singola istanza come mall_daily WU 22/07). Esclusi sia per
-# class_name che per task_name (i filtri predictor lavorano sui nomi).
+# Task master-only aggiunti DOPO la Fase 1 (WU-TaskResolution): non fanno
+# parte del contratto di parità (la logica pre-Fase1 non li conosceva). Sono
+# esclusi dal confronto vecchia/nuova — girano solo sul master via whitelist,
+# NON in profiles["completo"]/["fast"]. Esclusi sia per class_name che per
+# task_name (i filtri predictor lavorano sui nomi). Nota: mall_daily (WU238,
+# 22/07) NON è qui — è stato reso standard (profiles["completo"]/["fast"] +
+# ["master"]), quindi old/new logic concordano di nuovo su di lui, nessuna
+# esclusione necessaria.
 _ESCLUSI_PARITA_CLASS = {"DailyMissionAutoTask", "DailyMissionClaimTask", "RadarMasterTask",
                          "PartsContestTask", "CustomizationContestTask", "VehicleRedesignTask",
-                         "MegaArmamentTask", "ChipChallengeTask", "SpecialPromoTask",
-                         "MallDailyTask"}
+                         "MegaArmamentTask", "ChipChallengeTask", "SpecialPromoTask"}
 _ESCLUSI_PARITA_NAME = {"daily_mission_auto", "daily_mission_claim", "radar_master",
                         "parts_contest", "customization_contest", "vehicle_redesign",
-                        "mega_armament", "chip_challenge", "special_promo",
-                        "mall_daily"}
+                        "mega_armament", "chip_challenge", "special_promo"}
 
 
 def _senza_esclusi_class(s: set[str]) -> set[str]:

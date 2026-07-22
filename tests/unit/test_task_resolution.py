@@ -26,8 +26,8 @@ def test_tipologia_full_risolve_profilo_completo():
     assert "RaccoltaTask" in _class_names(reg)
     assert "ArenaTask" in _class_names(reg)
     assert "GraficaHqTask" in _class_names(reg)
-    # tutte le 19 classi di task_setup.json presenti
-    assert len(reg) == 19
+    # tutte le 20 classi del profilo completo presenti (19 + mall_daily WU238)
+    assert len(reg) == 20
 
 
 def test_tipologia_raccolta_only_risolve_solo_raccolta():
@@ -50,8 +50,8 @@ def test_tipologia_raccolta_fast_applica_swap():
 def test_tipologia_sconosciuta_o_assente_fallback_completo():
     reg_assente = risolvi_task_istanza(tipologia=None)
     reg_ignota = risolvi_task_istanza(tipologia="qualcosa_di_strano")
-    assert len(reg_assente) == 19
-    assert len(reg_ignota) == 19
+    assert len(reg_assente) == 20
+    assert len(reg_ignota) == 20
 
 
 # ── task_overrides (add/remove) ────────────────────────────────────────────
@@ -59,7 +59,7 @@ def test_tipologia_sconosciuta_o_assente_fallback_completo():
 def test_override_rimuove_task_da_profilo_completo():
     reg = risolvi_task_istanza(tipologia="full", task_overrides={"boost": False})
     assert "BoostTask" not in _class_names(reg)
-    assert len(reg) == 18
+    assert len(reg) == 19
 
 
 def test_override_aggiunge_task_a_solo_raccolta():
@@ -204,15 +204,18 @@ def test_profilo_master_catalogo_dichiarativo_non_wired():
     # 21/07: i 4 contest COLLECT-ALL (parts/custom/vehicle/chip) sono ora
     # mappati nel task GLOBALE `special_promo` (1 solo task che li processa in
     # sequenza); mega_armament resta separato (prima di radar). → 15.
+    # 22/07: +mall_daily (task standard, non esclusivo, ma ora presente anche
+    # nel catalogo dichiarativo master) → 16.
     assert "DailyMissionAutoTask" in nomi
     assert "DailyMissionClaimTask" in nomi   # aggiunto come companion
     assert "RadarMasterTask" in nomi
     assert "MegaArmamentTask" in nomi
     assert "SpecialPromoTask" in nomi
+    assert "MallDailyTask" in nomi
     # i task individuali NON sono più registrati (mappati in special_promo)
     assert "PartsContestTask" not in nomi
     assert "ChipChallengeTask" not in nomi
-    assert len(reg) == 15
+    assert len(reg) == 16
 
 
 # ── Ordine risultato (per priority, come task_setup.json) ─────────────────

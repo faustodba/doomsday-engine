@@ -82,6 +82,7 @@ _DEFAULTS: dict[str, Any] = {
     "task_store":             True,
     "task_radar":             True,
     "task_radar_census":      False,
+    "task_mall_daily":        True,
 
     # Rifornimento — parametri comuni
     "DOOMS_ACCOUNT":                    "",
@@ -817,6 +818,7 @@ class GlobalConfig:
     task_store:             bool = True
     task_radar:             bool = True
     task_radar_census:      bool = False
+    task_mall_daily:        bool = True
 
     # WU55 — Data collection OCR slot (debug analisi HOME vs MAPPA)
     raccolta_ocr_debug:     bool = False
@@ -973,6 +975,7 @@ class GlobalConfig:
             task_store             = bool(t.get("store",             True)),
             task_radar             = bool(t.get("radar",             True)),
             task_radar_census      = bool(t.get("radar_census",      False)),
+            task_mall_daily        = bool(t.get("mall_daily",        True)),
 
             # WU55 — debug OCR slot (legge da raw o globali.raccolta_ocr_debug)
             raccolta_ocr_debug     = bool(
@@ -1115,6 +1118,7 @@ class GlobalConfig:
                 "store":             self.task_store,
                 "radar":             self.task_radar,
                 "radar_census":      self.task_radar_census,
+                "mall_daily":        self.task_mall_daily,
             },
             "rifornimento_comune": {
                 "dooms_account":        self.dooms_account,
@@ -1434,6 +1438,7 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
                 "store":                 gcfg.task_store,
                 "radar":                 gcfg.task_radar,
                 "radar_census":          gcfg.task_radar_census,
+                "mall_daily":            gcfg.task_mall_daily,
             }
             return mappa.get(nome_task, True)
 

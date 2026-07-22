@@ -11,6 +11,10 @@ REM    - shared/*.py      : utility condivise (OCR, template matcher, helpers)
 REM    - config/*.py      : loader e validazione configurazione
 REM    - config/task_setup.json : schema scheduler (priorita', intervalli, schedule)
 REM                                aggiornato in dev e propagato a prod come codice
+REM    - config/profiles.json   : schema profili task per-tipologia (WU-TaskResolution)
+REM                                stesso trattamento di task_setup.json — aggiunto
+REM                                22/07 (gap: profiles.json esisteva da prima ma non
+REM                                era mai stato aggiunto qui, sync manuale fino ad ora)
 REM    - monitor/*.py     : MCP server log analysis
 REM    - radar_tool/      : sottomodulo radar
 REM    - dashboard/       : intera dashboard FastAPI (py + templates + static)
@@ -54,6 +58,7 @@ xcopy /Y /Q "%SRC%\tools\*.py"                 "%DST%\tools\"      || goto :err
 
 REM --- Schema scheduler (codice, non configurazione runtime) ---
 xcopy /Y /Q "%SRC%\config\task_setup.json"     "%DST%\config\"     || goto :err
+xcopy /Y /Q "%SRC%\config\profiles.json"       "%DST%\config\"     || goto :err
 
 REM --- Tool esterni e dashboard ---
 xcopy /Y /E /Q "%SRC%\radar_tool\"              "%DST%\radar_tool\" || goto :err
