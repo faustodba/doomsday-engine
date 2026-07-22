@@ -52,6 +52,11 @@ class ClaimMenuSpec:
                          accidentale)
         max_claims:      loop safety — numero massimo di claim consecutivi
                          per questa voce in un singolo run
+        n_scroll:        numero di swipe "avanti" (SIDEBAR_SCROLL_FWD) da
+                         applicare DOPO aver riportato la sidebar in cima
+                         (SIDEBAR_SCROLL_RESET), per rivelare voci sotto la
+                         piega. 0 = voce già visibile in cima (nessuno
+                         scroll, es. Login Rewards).
         wait_open_s:     attesa dopo il tap sulla voce sidebar
         wait_claim_s:    attesa dopo il tap sul claim (animazione popup)
         wait_close_s:    attesa dopo la chiusura del popup
@@ -64,6 +69,7 @@ class ClaimMenuSpec:
     claim_threshold: float = 0.80
     tap_close_safe:  tuple[int, int] = (100, 450)
     max_claims:      int = 10
+    n_scroll:        int = 0
     wait_open_s:     float = 2.0
     wait_claim_s:    float = 2.0
     wait_close_s:    float = 1.5
@@ -75,6 +81,15 @@ HOME_BADGE_ROI:  tuple[int, int, int, int]   = (935, 45, 960, 68)
 
 # Uscita hub
 TAP_HUB_BACK:    tuple[int, int]             = (30, 30)
+
+# Scroll sidebar: alcune voci catalogate sono sotto la piega (es. Survival
+# Preparations, Titan Approaches...), la sidebar va scorsa per rivelarle.
+# RESET riporta sempre in cima (overshoot sicuro: il rebound si ferma da
+# solo a inizio lista), FWD rivela un "blocco" di voci più in basso.
+# Calibrato live su FAU_00 22/07 (swipe (105,450)->(105,250) = 1 blocco).
+SIDEBAR_SCROLL_RESET_N:  int = 4   # ripetizioni overshoot per garantire la cima
+SIDEBAR_SCROLL_RESET:    tuple[int, int, int, int, int] = (105, 250, 105, 450, 500)
+SIDEBAR_SCROLL_FWD:      tuple[int, int, int, int, int] = (105, 450, 105, 250, 600)
 
 # Soglia frazione pixel rossi per considerare un pallino "presente"
 # (stesso ordine di grandezza di _ha_badge_rosso in tasks/special_promo.py)
@@ -93,6 +108,26 @@ CLAIM_CATALOG: list[ClaimMenuSpec] = [
         claim_threshold=0.80,
         tap_close_safe=(100, 450),
         max_claims=7,
+    ),
+    # 22/07 — "Survival Preparations — Plan for the future": stesso
+    # identico pulsante CLAIM di Login Rewards (verificato: score 1.0 sulla
+    # sorgente, riusa lo stesso template). Missioni gratuite guidate dal
+    # gameplay normale (Daily Check-In, Empty N Resource Nodes — matura da
+    # sola con raccolta; Use Normal Search Map; Buy from Mysterious
+    # Merchant — matura con store). Verificato dal vivo: un tap ha claimato
+    # in batch Daily Check-In + Empty 1/2/5 Resource Nodes insieme (il gioco
+    # risolve tutti i claim pronti in un colpo, non serve un tap per riga).
+    # Sotto la piega della sidebar: 1 blocco di scroll da cima.
+    ClaimMenuSpec(
+        name="survival_preparations",
+        tap_sidebar=(105, 105),
+        badge_roi=(185, 85, 215, 105),
+        claim_template="pin/pin_login_rewards_claim.png",
+        claim_zone=(780, 150, 925, 520),
+        claim_threshold=0.80,
+        tap_close_safe=(100, 450),
+        max_claims=6,
+        n_scroll=1,
     ),
 ]
 

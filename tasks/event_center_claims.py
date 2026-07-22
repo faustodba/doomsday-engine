@@ -25,11 +25,15 @@ GATE A 3 LIVELLI (dal più economico al più costoso):
 FLUSSO:
   - HOME → screenshot → pallino su icona HOME? No → skip task.
   - Tap icona HOME (895,68) → entro nell'hub.
-  - Per ogni voce del catalogo: pallino sidebar? No → prossima voce.
-    Sì → tap voce → loop claim (screenshot, cerca template, tap, chiudi
-    popup in zona sicura, ripeti fino a max_claims o nessun claim trovato)
-    → torno alla sidebar dell'hub (nessuna navigazione extra: le voci sono
-    tab della stessa sidebar, un tap sulla prossima voce basta).
+  - Per ogni voce del catalogo: riporto la sidebar in cima (overshoot
+    sicuro) + applico gli swipe "avanti" calibrati per quella voce (alcune
+    sono sotto la piega, es. Survival Preparations) → pallino sidebar?
+    No → prossima voce. Sì → tap voce → loop claim (screenshot, cerca
+    template, tap, chiudi popup in zona sicura, ripeti fino a max_claims o
+    nessun claim trovato — nota: il gioco può risolvere più claim pronti
+    in un solo tap, osservato live su Survival Preparations) → torno alla
+    sidebar dell'hub (le voci sono tab della stessa sidebar, un tap sulla
+    prossima voce basta, la posizione scroll viene sempre ripristinata).
   - Back → back → vai_in_home() di sicurezza.
 
 REGOLA SICUREZZA: mai tap su un claim non verificato dal template
@@ -50,6 +54,9 @@ from shared.claim_catalog import (
     TAP_HOME_ICON,
     TAP_HUB_BACK,
     BADGE_RED_MIN_FRAC,
+    SIDEBAR_SCROLL_RESET,
+    SIDEBAR_SCROLL_RESET_N,
+    SIDEBAR_SCROLL_FWD,
     ClaimMenuSpec,
     frazione_pallino_rosso,
 )
@@ -59,6 +66,7 @@ from shared.claim_catalog import (
 class EventCenterClaimsConfig:
     wait_hub_open:  float = 2.0
     wait_hub_back:  float = 1.5
+    wait_scroll_s:  float = 0.6
 
 
 class EventCenterClaimsTask(Task):
@@ -81,6 +89,22 @@ class EventCenterClaimsTask(Task):
         return True
 
     # ------------------------------------------------------------------
+
+    def _posiziona_sidebar(self, ctx, spec: ClaimMenuSpec, log) -> None:
+        """Riporta la sidebar in cima (overshoot sicuro, il rebound si
+        ferma da solo a inizio lista) poi applica n_scroll swipe "avanti"
+        per rivelare la voce catalogata. Sempre dallo stesso punto di
+        partenza noto, indipendentemente da dove si trovava lo scroll
+        prima — garantisce posizioni riproducibili."""
+        cfg = self._cfg
+        for _ in range(SIDEBAR_SCROLL_RESET_N):
+            x0, y0, x1, y1, dur = SIDEBAR_SCROLL_RESET
+            ctx.device.swipe(x0, y0, x1, y1, dur)
+            time.sleep(cfg.wait_scroll_s)
+        for _ in range(spec.n_scroll):
+            x0, y0, x1, y1, dur = SIDEBAR_SCROLL_FWD
+            ctx.device.swipe(x0, y0, x1, y1, dur)
+            time.sleep(cfg.wait_scroll_s)
 
     def _claim_voce(self, ctx, spec: ClaimMenuSpec, log) -> int:
         """Entra nella voce sidebar catalogata e claima in loop finché il
@@ -130,6 +154,7 @@ class EventCenterClaimsTask(Task):
 
             risultati: dict[str, int] = {}
             for spec in CLAIM_CATALOG:
+                self._posiziona_sidebar(ctx, spec, log)
                 shot_sidebar = ctx.device.screenshot()
                 frac = frazione_pallino_rosso(shot_sidebar.frame, spec.badge_roi)
                 if frac <= BADGE_RED_MIN_FRAC:
