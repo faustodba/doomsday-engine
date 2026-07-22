@@ -173,6 +173,30 @@ BANNER_CATALOG: list[BannerSpec] = [
     ),
 
     # ==================================================================
+    # PRIORITY 3 — "Privileges Subscription Trial" popup IAP (discovery 22/07/2026)
+    # ==================================================================
+    # Popup promo abbonamento (30gg trial "gratis", ma trattato come IAP:
+    # nessun tap oltre alla chiusura, mai "Go Claim" — un trial subscription
+    # puo' avere conseguenze diverse da un semplice claim risorse, es. rinnovo).
+    # Osservato sulle istanze SENZA acquisti reali (tutte le ordinarie) —
+    # ricorrente, non un evento raro. Titolo "Privileges Subscription Trial"
+    # su banner scuro bordato oro + pulsante "Go Claim" (MAI tappato) + X
+    # cerchio dorato in alto a destra, posizione fissa diversa dal canonico
+    # DEFAULT_X_TOPRIGHT (910,80) — override dismiss_coords.
+    # Scoperta live via ADB diretto su FAU_00 (bot fermo), non da
+    # debug_task/boot_unknown/ come gli altri 3.
+    BannerSpec(
+        name="privileges_subscription_trial",
+        template="pin/pin_privileges_subscription_title.png",
+        roi=(150, 125, 660, 185),
+        threshold=0.80,
+        dismiss_action="tap_x_topright",
+        dismiss_coords=(813, 94),
+        wait_after_s=1.0,
+        priority=3,
+    ),
+
+    # ==================================================================
     # PRIORITY 5 — banner laterale eventi (HOME, non-modale)
     # ==================================================================
     # DISABILITATO 26/04/2026 (auto-WU16) — il tap di chiusura su (345,63)

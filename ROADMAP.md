@@ -5,6 +5,34 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 22/07/2026 (3) — WU237: banner catalog — "Privileges Subscription Trial"
+
+**Contesto**: durante la sessione di calibrazione live su FAU_00 (ADB
+diretto, bot fermo, per il fix WU236), aperto per curiosità il menu
+"Mall" vicino a Special Promo — mostra subito un popup IAP "Privileges
+Subscription Trial" (30gg trial gratis). L'utente segnala: ricorrente su
+**tutte le istanze ordinarie** (nessun acquisto reale fatto), va chiuso
+sempre con la X, mai con "Go Claim" (trial subscription ≠ semplice claim
+risorse, rischio rinnovo automatico non verificato).
+
+**Fix**: aggiunto come 4° banner al catalogo esistente (issue #54,
+`shared/banner_catalog.py`) — stesso framework già usato per
+`exit_game_dialog`/`auto_collect_afk_banner`/`equipment_report`. Nuovo
+template `pin_privileges_subscription_title.png` (510×60, titolo
+completo, croppato dal vivo). `dismiss_action="tap_x_topright"` con
+`dismiss_coords=(813,94)` (posizione X non coincide col canonico
+`DEFAULT_X_TOPRIGHT`). Priority 3. Verificato: match score 1.0 sulla
+sorgente, `catalog_size()` 3→4.
+
+Commit pending (vedi sync/push sotto), sync prod fatto. Doc:
+`docs/issues/ocr-vision.md` (WU237), `.claude/CLAUDE.md` riassunto issue
+#54 corretto (era già stale: elencava `banner_eventi_laterale` come
+attivo, in realtà disabilitato dal 26/04 — ora riflette lo stato reale:
+`exit_game_dialog`+`auto_collect_afk_banner`+`equipment_report`+
+`privileges_subscription_trial`). Effetto al prossimo riavvio bot.
+
+---
+
 ## Sessione 22/07/2026 (2) — WU236: mega_armament — challenge giornaliera anche sulle ordinarie
 
 **Segnalazione utente**: sul task `mega_armament`, per le istanze diverse dal
