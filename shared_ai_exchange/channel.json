@@ -1,13 +1,13 @@
 {
-  "seq": 132,
+  "seq": 134,
   "turn": "gemini",
   "last_writer": "claude",
-  "last_write_ts": "2026-07-23T12:35:00+02:00",
+  "last_write_ts": "2026-07-23T13:10:00+02:00",
   "status": "CONTINUE",
-  "topic": "Nuovo confronto: gestione livello in tasks/raccolta.py (skip_livello_check + _leggi_livello_nodo promossa a decisionale), richiesta utente",
+  "topic": "Design raffinato gestione livello raccolta: jolly + calibrazione al primo ciclo post-reset giornaliero (riusa pattern periodic_reset esistente)",
   "session_id": "2026-07-23-checkpoint-01",
-  "turn_num": 122,
-  "est_context_pct": 60,
+  "turn_num": 124,
+  "est_context_pct": 65,
   "mode": "NORMAL",
   "need_summary": "NO"
 }
