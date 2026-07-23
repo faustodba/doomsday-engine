@@ -26,9 +26,10 @@ def test_tipologia_full_risolve_profilo_completo():
     assert "RaccoltaTask" in _class_names(reg)
     assert "ArenaTask" in _class_names(reg)
     assert "GraficaHqTask" in _class_names(reg)
-    # tutte le 23 classi del profilo completo presenti (19 + mall_daily WU238
-    # + mega_armament WU240 + event_center_claims WU246 + titan_approaches WU248)
-    assert len(reg) == 23
+    # tutte le 24 classi del profilo completo presenti (19 + mall_daily WU238
+    # + mega_armament WU240 + event_center_claims WU246 + titan_approaches WU248
+    # + special_promo WU253, reso standard 23/07)
+    assert len(reg) == 24
 
 
 def test_tipologia_raccolta_only_risolve_solo_raccolta():
@@ -51,8 +52,8 @@ def test_tipologia_raccolta_fast_applica_swap():
 def test_tipologia_sconosciuta_o_assente_fallback_completo():
     reg_assente = risolvi_task_istanza(tipologia=None)
     reg_ignota = risolvi_task_istanza(tipologia="qualcosa_di_strano")
-    assert len(reg_assente) == 23
-    assert len(reg_ignota) == 23
+    assert len(reg_assente) == 24
+    assert len(reg_ignota) == 24
 
 
 # ── task_overrides (add/remove) ────────────────────────────────────────────
@@ -60,7 +61,7 @@ def test_tipologia_sconosciuta_o_assente_fallback_completo():
 def test_override_rimuove_task_da_profilo_completo():
     reg = risolvi_task_istanza(tipologia="full", task_overrides={"boost": False})
     assert "BoostTask" not in _class_names(reg)
-    assert len(reg) == 22
+    assert len(reg) == 23
 
 
 def test_override_aggiunge_task_a_solo_raccolta():

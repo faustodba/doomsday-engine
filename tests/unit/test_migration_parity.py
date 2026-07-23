@@ -99,12 +99,20 @@ _OLD_TASK_CLASS_TO_NAME = {
 # titan_approaches (WU247, 22/07) reso standard nella stessa sessione
 # (WU248, dopo validazione automatica end-to-end su FAU_02) — stesso
 # motivo di event_center_claims, rimosso dagli esclusi.
+# special_promo reso standard 23/07 (richiesta utente: "deve essere per
+# tutte le istanze") — verificato che ne' SpecialPromoTask ne' la sua
+# base condivisa hanno assunzioni hardcoded sul master (solo
+# ctx.device/ctx.matcher/task_abilitato generico), stesso motivo degli
+# altri, rimosso dagli esclusi. I 4 sotto-contest (parts_contest,
+# customization_contest, vehicle_redesign, chip_challenge) restano
+# esclusi: non hanno mai un'entry propria in task_setup.json, sono
+# classi-config usate internamente da SpecialPromoTask, mai task a se'.
 _ESCLUSI_PARITA_CLASS = {"DailyMissionAutoTask", "DailyMissionClaimTask", "RadarMasterTask",
                          "PartsContestTask", "CustomizationContestTask", "VehicleRedesignTask",
-                         "ChipChallengeTask", "SpecialPromoTask"}
+                         "ChipChallengeTask"}
 _ESCLUSI_PARITA_NAME = {"daily_mission_auto", "daily_mission_claim", "radar_master",
                         "parts_contest", "customization_contest", "vehicle_redesign",
-                        "chip_challenge", "special_promo"}
+                        "chip_challenge"}
 
 
 def _senza_esclusi_class(s: set[str]) -> set[str]:
