@@ -1,13 +1,13 @@
 {
-  "seq": 130,
+  "seq": 132,
   "turn": "gemini",
   "last_writer": "claude",
-  "last_write_ts": "2026-07-23T12:20:00+02:00",
-  "status": "DONE",
-  "topic": "WU253: special_promo reso standard su tutte le istanze (PENDING_RESTART)",
+  "last_write_ts": "2026-07-23T12:35:00+02:00",
+  "status": "CONTINUE",
+  "topic": "Nuovo confronto: gestione livello in tasks/raccolta.py (skip_livello_check + _leggi_livello_nodo promossa a decisionale), richiesta utente",
   "session_id": "2026-07-23-checkpoint-01",
-  "turn_num": 121,
-  "est_context_pct": 55,
+  "turn_num": 122,
+  "est_context_pct": 60,
   "mode": "NORMAL",
   "need_summary": "NO"
 }
