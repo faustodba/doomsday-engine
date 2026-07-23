@@ -14,6 +14,7 @@ from unittest.mock import patch, MagicMock
 
 from core.device import FakeDevice
 from core.navigator import GameNavigator
+from core.state import InstanceState, RaccoltaState
 from core.task import TaskContext, TaskResult
 from shared.template_matcher import FakeMatcher
 from tasks.raccolta import (
@@ -22,6 +23,7 @@ from tasks.raccolta import (
     BlacklistFuori,
     _cfg,
     _calcola_sequenza,
+    _calibra_livello_giornaliero,
     _cerca_nodo,
     _invia_squadra,
     _reset_leggero_lente,
@@ -1045,3 +1047,180 @@ class TestCanaryResetLeggeroStrumentazione:
         msgs = self._msgs(ctx)
         marker = [m for m in msgs if "CANARY-RESET-LEGGERO" in m]
         assert any("ABORT" in m and "7c5e789" in m for m in marker)
+
+
+# ==============================================================================
+# WU254 (23/07) — Modalità "jolly": skip verifica OCR pannello livello ad ogni
+# CERCA (fallback a False, garanzia livello, riservato al livello di fallback),
+# più calibrazione esplicita una volta al giorno. Vedi core.state.RaccoltaState
+# + tasks.raccolta._calibra_livello_giornaliero.
+# ==============================================================================
+
+class TestLivelloJollyFlag:
+
+    def _ctx_livelli_multipli(self, **overrides):
+        # RACCOLTA_LIVELLO=6 -> sequenza_livelli=[6,7], due giri nel loop.
+        base = {"RACCOLTA_LIVELLO": 6}
+        base.update(overrides)
+        return ctx_base(**base)
+
+    def test_default_flag_off(self):
+        ctx = make_ctx()
+        assert _cfg(ctx, "RACCOLTA_LIVELLO_JOLLY_ABILITATO") is False
+
+    def test_override_flag_on(self):
+        ctx = make_ctx({"RACCOLTA_LIVELLO_JOLLY_ABILITATO": True})
+        assert _cfg(ctx, "RACCOLTA_LIVELLO_JOLLY_ABILITATO") is True
+
+    @patch("tasks.raccolta._reset_to_mappa")
+    @patch("tasks.raccolta._leggi_coord_nodo", return_value=None)
+    def test_jolly_off_skip_livello_check_mai_true(self, mock_coord, mock_reset, tmp_path):
+        """Regressione: senza il flag (default assente = False), nessun
+        tentativo passa skip_livello_check=True — comportamento standard
+        preesistente invariato, byte-identico a prima di WU254."""
+        ctx = self._ctx_livelli_multipli()
+        chiamate = []
+        def fake_cerca(ctx, tipo, livello_override=0, **kw):
+            chiamate.append(kw.get("skip_livello_check", False))
+            return True
+        with patch("tasks.raccolta._cerca_nodo", side_effect=fake_cerca):
+            _invia_squadra(ctx, "campo", Blacklist(),
+                           BlacklistFuori(data_dir=str(tmp_path)), {}, 0, set(), 4)
+        assert chiamate == [False, False]
+
+    @patch("tasks.raccolta._reset_to_mappa")
+    @patch("tasks.raccolta._leggi_coord_nodo", return_value=None)
+    def test_jolly_on_skip_solo_primo_tentativo(self, mock_coord, mock_reset, tmp_path):
+        """Con jolly attivo: il PRIMO tentativo (livello primario) passa
+        skip_livello_check=True; il fallback (livello successivo, quando il
+        primo non trova nodi) passa sempre False — al fallback serve la
+        garanzia di cambiare davvero livello, non solo 'quello che c'è'."""
+        ctx = self._ctx_livelli_multipli(RACCOLTA_LIVELLO_JOLLY_ABILITATO=True)
+        chiamate = []
+        def fake_cerca(ctx, tipo, livello_override=0, **kw):
+            chiamate.append(kw.get("skip_livello_check", False))
+            return True
+        with patch("tasks.raccolta._cerca_nodo", side_effect=fake_cerca):
+            _invia_squadra(ctx, "campo", Blacklist(),
+                           BlacklistFuori(data_dir=str(tmp_path)), {}, 0, set(), 4)
+        assert chiamate == [True, False]
+
+    @patch("tasks.raccolta._reset_to_mappa")
+    def test_jolly_on_singolo_livello_sempre_skip(self, mock_reset, tmp_path):
+        """Istanza con RACCOLTA_LIVELLO fuori 6/7 (sequenza_livelli a un solo
+        elemento, niente fallback): con jolly attivo l'unico tentativo è
+        comunque il 'primo' della sequenza -> skip_livello_check=True."""
+        ctx = ctx_base(RACCOLTA_LIVELLO=3, RACCOLTA_LIVELLO_JOLLY_ABILITATO=True)
+        chiamate = []
+        def fake_cerca(ctx, tipo, livello_override=0, **kw):
+            chiamate.append(kw.get("skip_livello_check", False))
+            return True
+        with patch("tasks.raccolta._cerca_nodo", side_effect=fake_cerca), \
+             patch("tasks.raccolta._leggi_coord_nodo", return_value="700_500"):
+            _invia_squadra(ctx, "campo", Blacklist(),
+                           BlacklistFuori(data_dir=str(tmp_path)), {}, 0, set(), 4)
+        assert chiamate == [True]
+
+
+class TestCalibrazioneGiornalieraLivello:
+
+    def _ctx_con_state(self, **overrides):
+        ctx = ctx_base(**overrides)
+        ctx.state = InstanceState(instance_name="FAU_00")
+        return ctx
+
+    @patch("tasks.raccolta.time.sleep")
+    def test_calibra_tutti_i_tipi_skip_livello_check_false(self, mock_sleep):
+        """Cicla sui 4 tipi, chiama _cerca_nodo con skip_livello_check=False
+        per ciascuno (verifica/aggiustamento OCR classico, mai il tap diretto
+        jolly) — la calibrazione DEVE garantire il livello, non presumerlo."""
+        ctx = self._ctx_con_state(RACCOLTA_LIVELLO=7)
+        chiamate = []
+        def fake_cerca(ctx, tipo, **kw):
+            chiamate.append((tipo, kw.get("skip_livello_check")))
+            return True
+        with patch("tasks.raccolta._cerca_nodo", side_effect=fake_cerca):
+            _calibra_livello_giornaliero(ctx)
+        assert chiamate == [(t, False) for t in _TUTTI_I_TIPI]
+
+    @patch("tasks.raccolta.time.sleep")
+    def test_calibra_chiude_lente_dopo_ogni_tipo(self, mock_sleep):
+        ctx = self._ctx_con_state()
+        with patch("tasks.raccolta._cerca_nodo", return_value=True):
+            _calibra_livello_giornaliero(ctx)
+        assert ctx.device.key_calls.count("KEYCODE_BACK") == len(_TUTTI_I_TIPI)
+
+    @patch("tasks.raccolta.time.sleep")
+    def test_calibra_registra_stato_a_fine_giro(self, mock_sleep):
+        ctx = self._ctx_con_state()
+        assert ctx.state.raccolta.ultima_calibrazione_livello is None
+        with patch("tasks.raccolta._cerca_nodo", return_value=True):
+            _calibra_livello_giornaliero(ctx)
+        assert ctx.state.raccolta.ultima_calibrazione_livello is not None
+
+    @patch("tasks.raccolta.time.sleep")
+    def test_calibra_fail_safe_un_tipo_fallito_non_blocca_gli_altri(self, mock_sleep):
+        """Fail-safe non bloccante: un tipo che fallisce (es. tipo non
+        selezionato) viene loggato e saltato, ma non impedisce la
+        calibrazione degli altri 3 né la registrazione finale."""
+        ctx = self._ctx_con_state()
+        risultati = iter([True, False, True, True])
+        with patch("tasks.raccolta._cerca_nodo",
+                   side_effect=lambda *a, **k: next(risultati)):
+            _calibra_livello_giornaliero(ctx)
+        assert ctx.device.key_calls.count("KEYCODE_BACK") == len(_TUTTI_I_TIPI)
+        assert ctx.state.raccolta.ultima_calibrazione_livello is not None
+
+    @patch("tasks.raccolta.time.sleep")
+    def test_calibra_eccezione_singolo_tipo_non_blocca_gli_altri(self, mock_sleep):
+        """Stesso fail-safe ma per un'eccezione (non solo un esito False)."""
+        ctx = self._ctx_con_state()
+        chiamate = []
+        def fake_cerca(ctx, tipo, **kw):
+            chiamate.append(tipo)
+            if tipo == "segheria":
+                raise RuntimeError("boom")
+            return True
+        with patch("tasks.raccolta._cerca_nodo", side_effect=fake_cerca):
+            _calibra_livello_giornaliero(ctx)
+        assert chiamate == _TUTTI_I_TIPI   # tutti e 4 tentati comunque
+        assert ctx.state.raccolta.ultima_calibrazione_livello is not None
+
+
+class TestRaccoltaStateCalibrazioneDovuta:
+    """Unit test puri su core.state.RaccoltaState (nessun mock device/matcher
+    necessario) — la logica "primo ciclo dopo il reset giornaliero"."""
+
+    def test_mai_calibrato_dovuta(self):
+        from datetime import datetime, timezone
+        rs = RaccoltaState()
+        assert rs.calibrazione_dovuta(datetime.now(timezone.utc)) is True
+
+    def test_calibrato_oggi_non_dovuta(self):
+        from datetime import datetime, timezone
+        rs = RaccoltaState()
+        rs.registra_calibrazione(datetime.now(timezone.utc))
+        reset_oggi = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        assert rs.calibrazione_dovuta(reset_oggi) is False
+
+    def test_calibrato_ieri_dovuta_oggi(self):
+        from datetime import datetime, timezone, timedelta
+        rs = RaccoltaState()
+        ieri = datetime.now(timezone.utc) - timedelta(days=1)
+        rs.registra_calibrazione(ieri)
+        reset_oggi = datetime.now(timezone.utc).replace(
+            hour=0, minute=0, second=0, microsecond=0)
+        assert rs.calibrazione_dovuta(reset_oggi) is True
+
+    def test_stato_corrotto_fail_safe_dovuta(self):
+        rs = RaccoltaState(ultima_calibrazione_livello="non-una-data")
+        from datetime import datetime, timezone
+        assert rs.calibrazione_dovuta(datetime.now(timezone.utc)) is True
+
+    def test_roundtrip_dict(self):
+        from datetime import datetime, timezone
+        rs = RaccoltaState()
+        rs.registra_calibrazione(datetime.now(timezone.utc))
+        rs2 = RaccoltaState.from_dict(rs.to_dict())
+        assert rs2.ultima_calibrazione_livello == rs.ultima_calibrazione_livello

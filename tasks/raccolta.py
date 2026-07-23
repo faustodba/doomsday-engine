@@ -235,6 +235,12 @@ _DEFAULTS: dict = {
     # salva crop+screenshot in data/ocr_dataset/ per analisi offline.
     # NON cambia il comportamento del bot (passive shadow OCR in MAPPA).
     "RACCOLTA_OCR_DEBUG": False,
+    # WU254 (23/07) — modalità "jolly": skip verifica OCR pannello livello ad
+    # ogni CERCA, calibrazione esplicita solo al primo ciclo dopo il reset
+    # giornaliero (00:00 UTC). Vedi _calibra_livello_giornaliero() e
+    # RaccoltaTask.run(). Default False — comportamento invariato finché non
+    # abilitato esplicitamente per istanza in runtime_overrides.json.
+    "RACCOLTA_LIVELLO_JOLLY_ABILITATO": False,
     # Blacklist
     "BLACKLIST_COMMITTED_TTL":  120,
     "BLACKLIST_RESERVED_TTL":   45,
@@ -977,6 +983,46 @@ def _cerca_nodo(ctx: TaskContext, tipo: str,
     time.sleep(delay_cerca)
     ctx.log_msg(f"Raccolta: CERCA eseguita per {tipo} Lv.{livello}")
     return True
+
+
+# ==============================================================================
+# WU254 (23/07) — Calibrazione giornaliera pannello livello (modalità "jolly")
+# ==============================================================================
+
+def _calibra_livello_giornaliero(ctx: TaskContext) -> None:
+    """
+    Chiamata SOLO quando RACCOLTA_LIVELLO_JOLLY_ABILITATO=True e la
+    calibrazione non è ancora stata fatta oggi (RaccoltaState.
+    calibrazione_dovuta). Per ciascuno dei 4 tipi, forza la verifica/
+    aggiustamento OCR classico del pannello (skip_livello_check=False,
+    stesso codice che gira sempre quando il jolly è disabilitato) per
+    portarlo al livello target, poi chiude la lente con BACK prima di
+    passare al tipo successivo.
+
+    Fail-safe non bloccante: un tipo che fallisce (es. tipo non
+    selezionato) viene loggato e saltato — non impedisce la calibrazione
+    degli altri 3, né il proseguimento del ciclo raccolta. La calibrazione
+    viene comunque registrata come "fatta oggi" al termine, per evitare
+    retry a raffica se il problema è persistente (si ritenterà al
+    prossimo reset giornaliero).
+    """
+    livello = max(1, min(7, int(ctx.config.get("livello", _cfg(ctx, "RACCOLTA_LIVELLO")))))
+    ctx.log_msg(f"Raccolta: [JOLLY] calibrazione giornaliera livello — target Lv.{livello}")
+    for tipo in _TUTTI_I_TIPI:
+        try:
+            ok = _cerca_nodo(ctx, tipo, livello_override=livello, skip_livello_check=False)
+            ctx.log_msg(
+                f"Raccolta: [JOLLY] {tipo} calibrato a Lv.{livello}" if ok
+                else f"Raccolta: [JOLLY] {tipo} calibrazione fallita (tipo non selezionato) — salto"
+            )
+        except Exception as exc:
+            ctx.log_msg(f"Raccolta: [JOLLY] {tipo} eccezione durante calibrazione: {exc}")
+        finally:
+            ctx.device.key("KEYCODE_BACK")
+            time.sleep(0.5)
+    if hasattr(ctx, "state") and ctx.state is not None:
+        ctx.state.raccolta.registra_calibrazione()
+    ctx.log_msg("Raccolta: [JOLLY] calibrazione giornaliera completata")
 
 
 # ==============================================================================
@@ -1822,10 +1868,20 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
     # `[CANARY-RESET-LEGGERO]`. Consumato (rimesso a False) subito dopo l'uso.
     _dopo_reset_leggero = False
     _reset_leggero_on = bool(_cfg(ctx, "RACCOLTA_RESET_LEGGERO_ABILITATO"))
+    # WU254 (23/07) — jolly: skip verifica OCR pannello SOLO sul tentativo
+    # primario (il pannello dovrebbe già essere lì, calibrato al primo ciclo
+    # del giorno o lasciato dal tentativo precedente). Il fallback su livello
+    # diverso (sequenza_livelli[1], quando esiste) usa SEMPRE la verifica
+    # classica: qui serve la garanzia di cambiare davvero livello, non solo
+    # "qualunque cosa sia già impostata".
+    _jolly_on = bool(_cfg(ctx, "RACCOLTA_LIVELLO_JOLLY_ABILITATO"))
 
     for lv in sequenza_livelli:
-        ctx.log_msg(f"Raccolta: tentativo CERCA {tipo} Lv.{lv}")
+        _skip_lv_check = _jolly_on and lv == sequenza_livelli[0]
+        ctx.log_msg(f"Raccolta: tentativo CERCA {tipo} Lv.{lv}"
+                    + (" [JOLLY]" if _skip_lv_check else ""))
         ok = _cerca_nodo(ctx, tipo, livello_override=lv,
+                         skip_livello_check=_skip_lv_check,
                          canary_reset_leggero=_dopo_reset_leggero)
         _dopo_reset_leggero = False   # single-shot, consumato
         if not ok:
@@ -1996,11 +2052,23 @@ def _invia_squadra(ctx: TaskContext, tipo: str,
     # log "[LV-PANEL] Level:N match=N"). OCR popup `_leggi_livello_nodo` resta
     # come diagnostica: se discorda, log WARN ma non blocca (CERCA filtra per
     # livello, fallback diversi sono casi edge non osservati).
+    # WU254 (23/07) — ECCEZIONE quando il tentativo che ha trovato il nodo era
+    # in modalità jolly: il pannello NON è stato verificato, quindi `lv` non è
+    # garanzia di nulla — la lettura del popup diventa il ground truth (invece
+    # della diagnostica) per la telemetria/conciliazione. Senza jolly, invariato.
+    _jolly_su_questo_tentativo = _jolly_on and lv == sequenza_livelli[0]
     livello_nodo = lv
     cap = -1
     if screen_popup is not None:
         livello_ocr = _leggi_livello_nodo(ctx, screen_popup)
-        if livello_ocr != -1 and livello_ocr != lv:
+        if _jolly_su_questo_tentativo and livello_ocr != -1:
+            if livello_ocr != lv:
+                ctx.log_msg(
+                    f"Raccolta [{tipo}]: [JOLLY] livello reale Lv.{livello_ocr} "
+                    f"(pannello non verificato, target teorico Lv.{lv})"
+                )
+            livello_nodo = livello_ocr
+        elif livello_ocr != -1 and livello_ocr != lv:
             ctx.log_msg(
                 f"Raccolta [{tipo}]: WARN livello discrepanza "
                 f"CERCA=Lv.{lv} OCR_popup=Lv.{livello_ocr} — uso CERCA"
@@ -2685,6 +2753,20 @@ class RaccoltaTask(Task):
                         f"{len(blacklist_fuori)} nodi noti")
 
         ctx._deposito_ocr = deposito_ocr  # type: ignore
+
+        # WU254 (23/07) — modalità "jolly": calibrazione esplicita del
+        # pannello livello solo al primo ciclo dopo il reset giornaliero
+        # (00:00 UTC), stessa logica di core.orchestrator._reset_daily_corrente
+        # (replicata qui per non introdurre una dipendenza cross-modulo su una
+        # funzione privata per 3 righe di calcolo).
+        if (bool(_cfg(ctx, "RACCOLTA_LIVELLO_JOLLY_ABILITATO"))
+                and hasattr(ctx, "state") and ctx.state is not None):
+            from datetime import datetime as _dt2, timezone as _tz2, timedelta as _td2
+            _now = _dt2.now(_tz2.utc)
+            _reset_oggi = _now.replace(hour=0, minute=0, second=0, microsecond=0)
+            _reset_corrente = _reset_oggi if _now >= _reset_oggi else _reset_oggi - _td2(days=1)
+            if ctx.state.raccolta.calibrazione_dovuta(_reset_corrente):
+                _calibra_livello_giornaliero(ctx)
 
         # Loop esterno: MAX_TENTATIVI_CICLO tentativi di riempire gli slot.
         # Ogni tentativo: naviga in mappa → _loop_invio_marce → HOME + OCR check.

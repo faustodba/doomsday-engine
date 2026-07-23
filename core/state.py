@@ -1347,6 +1347,51 @@ class MetricsState:
 
 
 # ==============================================================================
+# RaccoltaState — calibrazione giornaliera pannello livello ("jolly")
+# ==============================================================================
+
+@dataclass
+class RaccoltaState:
+    """
+    Traccia l'ultima calibrazione del pannello livello LENTE per istanza,
+    usata dalla modalità "jolly" (RACCOLTA_LIVELLO_JOLLY_ABILITATO): quando
+    attiva, `tasks/raccolta.py` salta la verifica OCR del livello ad ogni
+    CERCA e si affida al valore già impostato nel pannello (persistito lato
+    account di gioco, non resettato dai normali riavvii istanza) — tranne
+    al primo ciclo dopo il reset giornaliero (00:00 UTC), quando fa un giro
+    esplicito sui 4 tipi per riportare il pannello al livello target.
+
+    Formato JSON in state/<ISTANZA>.json:
+      "raccolta": {
+        "ultima_calibrazione_livello": "2026-07-23T00:00:00+00:00"
+      }
+    """
+
+    ultima_calibrazione_livello: str | None = None  # ISO UTC, None = mai calibrato
+
+    def calibrazione_dovuta(self, reset_corrente: datetime) -> bool:
+        if self.ultima_calibrazione_livello is None:
+            return True
+        try:
+            ultimo = datetime.fromisoformat(self.ultima_calibrazione_livello)
+        except (ValueError, TypeError):
+            return True   # stato corrotto → conservativo, ricalibra
+        return ultimo < reset_corrente
+
+    def registra_calibrazione(self, riferimento: datetime | None = None) -> None:
+        self.ultima_calibrazione_livello = (riferimento or _utc_now()).isoformat()
+
+    # ── Serializzazione ───────────────────────────────────────────────────────
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "RaccoltaState":
+        return cls(ultima_calibrazione_livello=d.get("ultima_calibrazione_livello", None))
+
+    def to_dict(self) -> dict:
+        return {"ultima_calibrazione_livello": self.ultima_calibrazione_livello}
+
+
+# ==============================================================================
 # InstanceState — contenitore principale
 # ==============================================================================
 
@@ -1374,6 +1419,7 @@ class InstanceState:
     arena:        ArenaState        = field(default_factory=ArenaState)
     truppe:       TruppeState       = field(default_factory=TruppeState)   # 06/05
     district_showdown: DistrictShowdownState = field(default_factory=DistrictShowdownState)  # 18/07
+    raccolta:     RaccoltaState     = field(default_factory=RaccoltaState)  # 23/07 calibrazione livello jolly
 
     # auto-WU14: produzione oraria per sessione
     produzione_corrente: ProduzioneSession | None = None
@@ -1400,6 +1446,7 @@ class InstanceState:
             "arena":         self.arena.to_dict(),
             "truppe":        self.truppe.to_dict(),   # 06/05 consumo addestramento
             "district_showdown": self.district_showdown.to_dict(),   # 18/07 throttle ven/sab
+            "raccolta":      self.raccolta.to_dict(),   # 23/07 calibrazione livello jolly
             # auto-WU14: produzione oraria
             "produzione_corrente": self.produzione_corrente.to_dict() if self.produzione_corrente else None,
             "produzione_storico":  [s.to_dict() for s in self.produzione_storico],
@@ -1428,6 +1475,7 @@ class InstanceState:
             arena=ArenaState.from_dict(d.get("arena", {})),
             truppe=TruppeState.from_dict(d.get("truppe", {})),   # 06/05
             district_showdown=DistrictShowdownState.from_dict(d.get("district_showdown", {})),  # 18/07
+            raccolta=RaccoltaState.from_dict(d.get("raccolta", {})),   # 23/07
             produzione_corrente=pc,
             produzione_storico=ps,
             ultimo_errore=d.get("ultimo_errore", None),

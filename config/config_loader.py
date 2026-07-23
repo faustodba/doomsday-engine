@@ -1394,6 +1394,15 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
         RACCOLTA_RESET_LEGGERO_ABILITATO = bool(_ovr(
             "raccolta_reset_leggero_abilitato", False,
         ))
+        # WU254 (23/07) — modalità "jolly" livello raccolta: skip verifica OCR
+        # pannello livello ad ogni CERCA, calibrazione esplicita solo al primo
+        # ciclo dopo il reset giornaliero (vedi core.state.RaccoltaState +
+        # tasks/raccolta.py). Solo runtime override, nessun default statico
+        # (pattern REPORT_RACCOLTA_ABILITATO/RESET_LEGGERO): si abilita a mano
+        # su UNA istanza pilota prima di estendere.
+        RACCOLTA_LIVELLO_JOLLY_ABILITATO = bool(_ovr(
+            "raccolta_livello_jolly_abilitato", False,
+        ))
         # WU199 (09/07) — report_raccolta: chiamata diretta da
         # main.py::_leggi_risorse(), NON un task schedulato. Per-istanza
         # (non in instances.json — nuovo, nessun default statico) così da
