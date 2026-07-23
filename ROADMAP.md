@@ -5,6 +5,62 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 23/07/2026 — WU249: fix vai_in_home bloccato + rivalutazione periodica catalogo
+
+**Continua notte**: l'utente osserva dal vivo un popup di dettaglio nodo
+mappa ("Lv 6 Oil Refinery") rimasto aperto per ore su FAU_10 — "non
+doveva essere chiuso tranne quando era attivo il gioco district?".
+
+**Causa radice** (log `FAU_10.jsonl`, 01:43-01:46 UTC): `vai_in_home()`
+in `core/navigator.py` rilevava ripetutamente una freccia BACK non
+catalogata (`_unmatched_tap_back`) via `dismiss_banners_loop`, la
+trattava come "banner chiuso" e faceva sempre `continue` — scavalcando
+sistematicamente il fallback (tap overlay / Android back reale) che
+avrebbe potuto sbloccare davvero la UI. 8 tentativi consumati ripetendo
+lo stesso tap a vuoto. Colpite anche FAU_09 (stesso pattern, log
+03:24-03:30).
+
+**Collaborazione con Gemini** (richiesta esplicita supporto nel canale):
+diagnosi corretta e utile, ma verificando con lo standard a 3 livelli
+solo 1 dei 3 fix dichiarati risultava realmente scritto sul disco.
+Applicati da Claude: `tasks/titan_approaches.py` (controllo return di
+`vai_in_home()` finale) e `core/navigator.py` (contatore
+`unmatched_streak` — se dismiss_banners_loop ritorna solo tap generici
+per 2+ tentativi consecutivi, forza il fallback invece di continuare).
+Verificato senza regressioni via `git stash` (stessi fallimenti
+pre-esistenti con e senza il fix). **Nuova regola utente**: Gemini
+propone, Claude verifica sempre sul file reale e scrive lui le
+modifiche (memoria `feedback_workflow_gemini_validazione.md`).
+
+**Incidente successivo**: dopo il commit del fix, entrambi i file
+(`navigator.py`, `titan_approaches.py`) sono stati sovrascritti da un
+intervento esterno che ha **rimosso i fix appena verificati** e
+introdotto codice malformato (return irraggiungibile dopo un altro
+return, `__repr__` duplicato). Rilevato subito al successivo giro di
+verifica pre-commit, ripristinato alla versione corretta via `git
+checkout HEAD --`. Nessuna perdita — il commit precedente era già la
+fonte di verità.
+
+**Secondo problema, stessa sessione — rivalutazione periodica**:
+l'utente nota "Login Rewards" con pallino rosso mai reclamata. Causa:
+`claimable=False` deciso al primissimo incontro (22/07 12:06, subito
+dopo il reset catalogo WU245) e mai più rivalutato — ma Login Rewards è
+un evento CICLICO (si rinnova ogni giorno), a differenza di voci con
+stato davvero fisso (Match Predictions, Titan Approaches). Niente
+whitelist (richiesta esplicita utente: "non ha senso") — nuovo campo
+`last_checked` (distinto da `last_seen`) + funzione `deve_rivalutare()`:
+ogni voce non-claimabile viene riaperta per riverifica dopo
+`RIVALUTAZIONE_GIORNI=2` dall'ultima verifica reale, indipendentemente
+dal motivo per cui era stata segnata così. Forzata la rivalutazione
+immediata di t001 (Login Rewards, falso negativo confermato
+dall'osservazione diretta) invece di aspettare i 2 giorni pieni.
+
+Commit `5a58ca7` (fix navigator/titan_approaches) + `5da7d07`
+(rivalutazione periodica + ripristino), pushati. 167/167 test verdi,
+sync prod verificato byte-identico su tutti i file coinvolti.
+
+---
+
 ## Sessione 22/07/2026 (11) — WU248: titan_approaches standard su tutte le istanze
 
 **Richiesta utente**: "procedi" (a "perché titan_approaches non è in
