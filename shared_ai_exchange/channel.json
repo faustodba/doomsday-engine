@@ -1,12 +1,12 @@
 {
-  "seq": 126,
+  "seq": 130,
   "turn": "gemini",
   "last_writer": "claude",
-  "last_write_ts": "2026-07-23T11:55:00+02:00",
-  "status": "CONTINUE",
-  "topic": "Correzione 2/3 proposte ottimizzazione: mappatura nodi gia' chiusa (WU184), rifornimento gia' ha caching intra-tick, raccolta_fast da ri-validare non pronto",
+  "last_write_ts": "2026-07-23T12:20:00+02:00",
+  "status": "DONE",
+  "topic": "WU253: special_promo reso standard su tutte le istanze (PENDING_RESTART)",
   "session_id": "2026-07-23-checkpoint-01",
-  "turn_num": 119,
+  "turn_num": 121,
   "est_context_pct": 55,
   "mode": "NORMAL",
   "need_summary": "NO"
