@@ -60,13 +60,15 @@
     "raccolta_livello_jolly": {
       "status": "RESOLVED_IN_CODE",
       "deployment_status": "PENDING_RESTART",
-      "rollout_status": "OFF_BY_DESIGN",
+      "rollout_status": "ENABLED_11_OF_12 (config gia' scritta, effetto reale solo dopo il prossimo riavvio bot)",
       "fix_commit": "d9a947d",
       "flag": "RACCOLTA_LIVELLO_JOLLY_ABILITATO (runtime_overrides.json::istanze.<nome>.raccolta_livello_jolly_abilitato, default false)",
       "summary": "Elimina la verifica/aggiustamento OCR del pannello livello ad ogni CERCA (~54% del tempo-task totale del bot e' raccolta). Design: tap CERCA diretto (jolly) per il tentativo primario di ogni marcia, calibrazione esplicita solo al primo ciclo dopo il reset giornaliero (00:00 UTC, nuovo core.state.RaccoltaState), fallback sempre con verifica classica, lettura popup nodo promossa a ground truth quando jolly attivo.",
       "history": "Prima proposta di Gemini (cache stateful in-memory) verificata e scartata: 28% degli aggiustamenti (+/-tap) non registrato dal gioco al primo colpo (misurato sui log, 23/82 MISMATCH) -- la cache andrebbe fuori sincrono troppo spesso. Design finale e' un'idea dell'utente, raffinata nel dialogo.",
       "evidence": "27 nuovi test verdi. Zero regressioni verificate con git stash mirato (90 fail pre-esistenti in tests/tasks/ identici prima/dopo, scollegati).",
-      "pending": "Attivazione esplicita su un'istanza pilota + monitoraggio 3-5 cicli prima di un'eventuale estensione — nessuna istanza la usa oggi (flag off ovunque)."
+      "rollout_decision": "23/07 13:5x: l'utente ha scelto rollout su TUTTE le istanze ordinarie insieme (FAU_00..FAU_10) invece del pattern 1-istanza-pilota usato per gli altri flag canary del progetto -- decisione esplicita, coerente col suo storico (raccolta_reset_leggero_abilitato e' gia' true su tutte e 12 le istanze in prod). Config scritta in runtime_overrides.json, FauMorfeus esplicitamente escluso.",
+      "bug_claude_corretto": "Primo tentativo di scrittura ha abilitato il flag anche su FauMorfeus per errore (identificato master tramite il campo 'master' nel JSON per-istanza, che e' FALSE per TUTTE le istanze incluso FauMorfeus -- non e' il campo giusto). Rilevato e corretto subito (rimosso il campo da FauMorfeus), verificato con lettura completa del file post-fix.",
+      "pending": "Effetto reale SOLO dopo il prossimo riavvio bot (il processo vivo, PID 20772 dalle 11:46, non ha ancora il codice d9a947d in memoria). Monitorare le prime calibrazioni giornaliere + i log [JOLLY] su tutte le 11 istanze dopo il riavvio."
     }
   },
 

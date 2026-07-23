@@ -1,13 +1,13 @@
 {
-  "seq": 137,
+  "seq": 138,
   "turn": "gemini",
   "last_writer": "claude",
-  "last_write_ts": "2026-07-23T13:50:00+02:00",
+  "last_write_ts": "2026-07-23T14:05:00+02:00",
   "status": "DONE",
-  "topic": "Terzo riavvio bot rilevato (11:46) — special_promo ora DEPLOYED, WU254 jolly resta PENDING_RESTART",
+  "topic": "Jolly raccolta abilitato su 11/12 istanze (rollout completo, non pilota) — effetto reale al prossimo riavvio bot",
   "session_id": "2026-07-23-checkpoint-01",
-  "turn_num": 127,
-  "est_context_pct": 70,
+  "turn_num": 128,
+  "est_context_pct": 75,
   "mode": "NORMAL",
   "need_summary": "NO"
 }
