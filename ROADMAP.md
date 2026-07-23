@@ -5,6 +5,65 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 23/07/2026 — WU250: schema statico+dinamico completo per i task master-only
+
+**Filo dell'indagine**: l'utente nota che i nuovi task (Special Promo,
+Mega Armament) non appaiono selezionati né nel pannello master né in
+quello standard, nonostante girino dal vivo. Prima ipotesi ("la pagina
+legge lo statico invece del merge") corretta dall'utente ("sei sicuro?
+verifica meglio") — la lettura statico-only di `/ui/config/global` è
+**comportamento intenzionale** (banner esplicito: baseline di reset),
+uguale per TUTTI i task standard da sempre (`alleanza`/`arena`/`boost`
+sono `false` nello statico pur essendo live-attivi), non un bug dei 4
+task nuovi.
+
+**Regola esplicita dell'utente** che ne è scaturita: ogni task
+implementato/modificato deve avere SIA il campo statico (default
+`false`, baseline neutra) SIA l'aggancio dinamico (on/off runtime),
+verificato per ENTRAMBI i pannelli (standard + master), con delega a
+Gemini della ricognizione più ampia su discrepanze dati e logica di
+lettura live.
+
+**Audit** `task_setup.json` vs `global_config.json`: 9 task registrati
+senza schema statico. `raccolta_chiusura` esente (companion di
+`raccolta`, nessuna chiamata `task_abilitato` propria). Restano 8 reali:
+4 già agganciati lato Python (WU246-248: `mall_daily`, `mega_armament`,
+`event_center_claims`, `titan_approaches`) ma mai arrivati nello schema
+statico, e 4 senza alcun aggancio (`daily_mission_auto`,
+`daily_mission_claim`, `radar_master`, `special_promo` — chiamano
+`ctx.config.task_abilitato()` ma `config_loader.py` non li conosceva).
+
+**Fix**: 8 campi in `global_config.json` (dev+prod, tutti `false`);
+aggancio Python a 5 punti (`_DEFAULTS`/dataclass/`from_dict`/`to_dict`/
+mappa `task_abilitato`, default `True` per i 4 master-only, a
+preservare il comportamento live attuale). Verificando anche
+`dashboard/models.py::TaskFlags` (come richiesto per il pannello),
+trovato un **secondo gap reale**, stesso bug-pattern storico di
+`raccolta` (WU102): i 4 campi master-only mancavano dal modello
+Pydantic che alimenta il roundtrip Advanced/reset — un salvataggio li
+avrebbe eliminati silenziosamente da `runtime_overrides.json` (extra
+field ignorato, non rifiutato). Confermato con un test round-trip
+diretto prima/dopo la fix.
+
+**Delimitazione scope verificata**: `valid_tasks` dell'endpoint standard
+(`api_config_overrides.py`) correttamente non include i 4 master-only —
+`profiles.json` conferma che non sono mai in `completo`/`fast`, la loro
+registrazione passa dal meccanismo per-istanza `task_overrides` del
+pannello master (sezione③), indipendente dal kill-switch globale. Da
+`shared/task_resolution.py` emerge una distinzione architetturale
+intenzionale e già documentata nel modulo: REGISTRAZIONE (profilo +
+task_overrides) e KILL-SWITCH GLOBALE (`task_abilitato()`) sono due
+filtri ortogonali con default opposti a seconda del chiamante — non un
+bug, ma la causa più profonda della "discrepanza percepita" tra
+pannelli, segnalata come base per la ricognizione Gemini.
+
+Commit `1a5915e`, pushato. 167 (`test_task_resolution`) + 43
+(`test_config`+`test_config_static_fallback`) verdi. Sync prod
+verificato byte-identico su `config_loader.py`+`dashboard/models.py`.
+`global_config.json` non sincronizzato per design (per-ambiente).
+
+---
+
 ## Sessione 23/07/2026 — WU249: fix vai_in_home bloccato + rivalutazione periodica catalogo
 
 **Continua notte**: l'utente osserva dal vivo un popup di dettaglio nodo
