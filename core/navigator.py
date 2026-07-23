@@ -162,10 +162,19 @@ class GameNavigator:
 
         Issue #63 — Banner sconosciuti residui sono gestiti dal fallback
         tap X automatico in dismiss_banners_loop (no più screenshot su disco).
+
+        WU-fix (23/07, trovato dal vivo su FAU_09/FAU_10) — dismiss_banners_loop
+        può ritornare SOLO tap generici non riconosciuti (chiavi "_unmatched_*",
+        es. una freccia BACK sempre nello stesso punto che non porta mai a
+        HOME). Prima trattare questo come "banner chiuso" (continue) consumava
+        tutti gli `attempt` ripetendo lo stesso tap a vuoto, senza MAI arrivare
+        al fallback sotto (Android back reale / tap overlay) che spesso sblocca
+        davvero la UI — vedi `_unmatched_streak` più sotto.
         """
         cfg = self.config
         none_streak = 0
         adb_recovery_done = False
+        unmatched_streak = 0
         for attempt in range(cfg.max_attempts):
             shot = self.device.screenshot()
             if shot is None:
@@ -231,9 +240,24 @@ class GameNavigator:
                     mini.matcher = self.matcher
                     bd = dismiss_banners_loop(mini, max_iter=2, log_fn=self._log)
                     if bd:
-                        # Banner trovato e chiuso, salta tap/back di questa iter
-                        time.sleep(1.0)
-                        continue
+                        # WU-fix 23/07 — distingue banner VERI (catalogati/
+                        # learned, chiavi senza "_") dai tap generici di
+                        # fallback (chiavi "_unmatched_*"): solo i primi sono
+                        # un vero progresso. Se per 2+ tentativi consecutivi
+                        # arrivano SOLO unmatched, smetti di fare continue e
+                        # scendi al fallback sotto (Android back / tap overlay).
+                        solo_unmatched = all(k.startswith("_") for k in bd)
+                        unmatched_streak = unmatched_streak + 1 if solo_unmatched else 0
+                        if not solo_unmatched or unmatched_streak < 2:
+                            time.sleep(1.0)
+                            continue
+                        self._log(
+                            f"[NAV] {unmatched_streak} tentativi consecutivi "
+                            f"con solo dismiss generici {bd} — forzo fallback "
+                            f"(back/overlay) invece di ripetere lo stesso tap"
+                        )
+                    else:
+                        unmatched_streak = 0
             except Exception:
                 pass
 

@@ -373,8 +373,8 @@ class TitanApproachesTask(Task):
 
             ctx.device.tap(*TAP_HUB_BACK)
             time.sleep(cfg.wait_hub_back)
-            if ctx.navigator is not None:
-                ctx.navigator.vai_in_home()
+            if ctx.navigator is not None and not ctx.navigator.vai_in_home():
+                return TaskResult.fail("Navigator non ha raggiunto HOME post-task", step="vai_in_home_post")
             debug.snap("03_home", ctx.device.screenshot())
 
             tot = n_quick + n_go
