@@ -74,6 +74,10 @@ class TaskFlags(BaseModel):
     mega_armament:      bool = True
     event_center_claims: bool = True
     titan_approaches:   bool = True
+    daily_mission_auto:  bool = True
+    daily_mission_claim: bool = True
+    radar_master:        bool = True
+    special_promo:       bool = True
 
 
 # ==============================================================================

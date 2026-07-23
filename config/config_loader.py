@@ -86,6 +86,10 @@ _DEFAULTS: dict[str, Any] = {
     "task_mega_armament":     True,
     "task_event_center_claims": True,
     "task_titan_approaches":  True,
+    "task_daily_mission_auto": True,
+    "task_daily_mission_claim": True,
+    "task_radar_master":      True,
+    "task_special_promo":     True,
 
     # Rifornimento — parametri comuni
     "DOOMS_ACCOUNT":                    "",
@@ -825,6 +829,10 @@ class GlobalConfig:
     task_mega_armament:     bool = True
     task_event_center_claims: bool = True
     task_titan_approaches:  bool = True
+    task_daily_mission_auto: bool = True
+    task_daily_mission_claim: bool = True
+    task_radar_master:      bool = True
+    task_special_promo:     bool = True
 
     # WU55 — Data collection OCR slot (debug analisi HOME vs MAPPA)
     raccolta_ocr_debug:     bool = False
@@ -985,6 +993,10 @@ class GlobalConfig:
             task_mega_armament     = bool(t.get("mega_armament",     True)),
             task_event_center_claims = bool(t.get("event_center_claims", True)),
             task_titan_approaches  = bool(t.get("titan_approaches",  True)),
+            task_daily_mission_auto = bool(t.get("daily_mission_auto", True)),
+            task_daily_mission_claim = bool(t.get("daily_mission_claim", True)),
+            task_radar_master      = bool(t.get("radar_master",      True)),
+            task_special_promo     = bool(t.get("special_promo",     True)),
 
             # WU55 — debug OCR slot (legge da raw o globali.raccolta_ocr_debug)
             raccolta_ocr_debug     = bool(
@@ -1131,6 +1143,10 @@ class GlobalConfig:
                 "mega_armament":     self.task_mega_armament,
                 "event_center_claims": self.task_event_center_claims,
                 "titan_approaches":  self.task_titan_approaches,
+                "daily_mission_auto": self.task_daily_mission_auto,
+                "daily_mission_claim": self.task_daily_mission_claim,
+                "radar_master":      self.task_radar_master,
+                "special_promo":     self.task_special_promo,
             },
             "rifornimento_comune": {
                 "dooms_account":        self.dooms_account,
@@ -1454,6 +1470,10 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
                 "mega_armament":         gcfg.task_mega_armament,
                 "event_center_claims":   gcfg.task_event_center_claims,
                 "titan_approaches":      gcfg.task_titan_approaches,
+                "daily_mission_auto":    gcfg.task_daily_mission_auto,
+                "daily_mission_claim":   gcfg.task_daily_mission_claim,
+                "radar_master":          gcfg.task_radar_master,
+                "special_promo":         gcfg.task_special_promo,
             }
             return mappa.get(nome_task, True)
 

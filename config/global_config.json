@@ -34,7 +34,15 @@
     "district_showdown": false,
     "truppe": false,
     "grafica_hq": true,
-    "pulizia_cache": true
+    "pulizia_cache": true,
+    "mall_daily": false,
+    "mega_armament": false,
+    "event_center_claims": false,
+    "titan_approaches": false,
+    "daily_mission_auto": false,
+    "daily_mission_claim": false,
+    "radar_master": false,
+    "special_promo": false
   },
   "rifugio": {
     "_note": "Coordinate edificio rifugio per rifornimento via mappa",
