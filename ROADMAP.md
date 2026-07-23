@@ -40,8 +40,31 @@ graduale già consolidato nel progetto).
 zaino, scollegati) confermati identici con `git stash` mirato
 prima/dopo le modifiche.
 
-Commit `d9a947d`, pushato. Sync prod byte-identico. Pending:
-attivazione su istanza pilota + monitoraggio prima di estendere.
+Commit `d9a947d`, pushato. Sync prod byte-identico.
+
+**Seguito stesso giorno — rollout + bug scoperto + fix**: l'utente
+sceglie rollout su TUTTE le 11 istanze ordinarie insieme (FAU_00..
+FAU_10, FauMorfeus escluso) invece del pattern 1-istanza-pilota usuale
+del progetto — decisione esplicita, coerente con `raccolta_reset_
+leggero_abilitato` (già `true` ovunque). Dopo il riavvio bot che carica
+`d9a947d`, il monitoraggio attivo (log MCP) rivela un bug di
+posizionamento: `_calibra_livello_giornaliero()` viene chiamata PRIMA
+della prima `vai_in_mappa()` del ciclo, mentre l'istanza è ancora in
+HOME — `_apri_lente_verificata()` usa coordinate fisse pensate per la
+vista MAPPA, quindi il tap sulla lente fallisce sistematicamente
+(osservato 6/11 istanze: FAU_02/04/05/07/08/10, log dettagliato
+"[LENTE] tap NON ha aperto la lente" ×3 tentativi + BACK recovery).
+Impatto pratico nullo — il resto del flusso raccolta con jolly
+funziona regolarmente ereditando il pannello livello già calibrato dal
+giorno prima — ma la calibrazione esplicita giornaliera falliva sempre,
+su tutte le istanze.
+
+Fix (confermato dall'utente dopo spiegazione): spostata la chiamata
+dentro il ramo "primo tentativo", subito dopo la prima `vai_in_mappa()`
+riuscita. `tests/tasks/test_raccolta.py` 96/96 verdi. Commit `7cebc12`,
+pushato, sync prod verificato sul file reale (non solo sul log di
+sync). Pending: riavvio bot (già armato dall'utente al momento del
+deploy) per caricare il fix in memoria.
 
 ---
 
