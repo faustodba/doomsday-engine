@@ -1,13 +1,13 @@
 {
-  "seq": 134,
+  "seq": 136,
   "turn": "gemini",
   "last_writer": "claude",
-  "last_write_ts": "2026-07-23T13:10:00+02:00",
-  "status": "CONTINUE",
-  "topic": "Design raffinato gestione livello raccolta: jolly + calibrazione al primo ciclo post-reset giornaliero (riusa pattern periodic_reset esistente)",
+  "last_write_ts": "2026-07-23T13:35:00+02:00",
+  "status": "DONE",
+  "topic": "WU254 implementata: modalità jolly livello raccolta, flag off-by-default, pending rollout istanza pilota",
   "session_id": "2026-07-23-checkpoint-01",
-  "turn_num": 124,
-  "est_context_pct": 65,
+  "turn_num": 126,
+  "est_context_pct": 70,
   "mode": "NORMAL",
   "need_summary": "NO"
 }
