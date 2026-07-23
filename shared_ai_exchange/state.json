@@ -1,12 +1,12 @@
 {
   "project": "Doomsday Engine V6",
-  "last_updated_ts": "2026-07-23T12:20:00+02:00",
+  "last_updated_ts": "2026-07-23T13:50:00+02:00",
   "last_updated_by": "claude",
   "schema_note": "Protocollo v2 (23/07/2026). Ogni voce in active_issues porta SEMPRE 'status' (stato del codice) E 'deployment_status' (stato reale in produzione) separati — richiesto esplicitamente dall'utente dopo che una bozza d'esempio marcava un fix come RESOLVED senza distinguere che il bot prod non era stato riavviato e quindi il fix non era ancora attivo. Non consolidare/riassumere mai i due stati in uno solo.",
 
   "bot_prod": {
-    "process_running_since": "2026-07-23T10:49:02+02:00 (locale, PID 17600, verificato via Get-CimInstance — secondo riavvio del giorno, confermato dall'utente, PID precedente 22680 non più presente)",
-    "note": "Riavvio avvenuto DOPO tutti i commit noti di oggi (ultimo rilevante: 4e5cc42 fix predictor @ 10:38:29) — tutti i fix ora in sys.modules del processo live, incluso il fix predictor prima PENDING_RESTART. Verificato anche via ciclo_stato (ciclo 591 avviato 08:50 UTC, FAU_07 in esecuzione regolare) e anomalie_live (1 sola anomalia nota/gestita: OCR slot fallito FAU_07, pattern pre-esistente non correlato ai fix di oggi)."
+    "process_running_since": "2026-07-23T11:46:08+02:00 (locale, PID 20772, verificato via Get-CimInstance — terzo riavvio del giorno, rilevato durante una domanda dell'utente su necessità di riavvio, non notificato esplicitamente da lui)",
+    "note": "Copre tutti i commit fino a 1e11a9a (special_promo standard, 11:35:26) incluso. NON copre d9a947d (WU254 jolly raccolta, 13:04:08) — commit successivo a questo riavvio, ancora PENDING_RESTART (vedi feature_flags.raccolta_livello_jolly)."
   },
 
   "active_issues": {
@@ -47,11 +47,11 @@
     },
     "special_promo_standard": {
       "status": "RESOLVED_IN_CODE",
-      "deployment_status": "PENDING_RESTART",
+      "deployment_status": "DEPLOYED",
       "fix_commit": "1e11a9a",
       "summary": "Richiesta esplicita utente: special_promo era master-only, deve essere per tutte le istanze. Verificato che tasks/special_promo.py non ha assunzioni hardcoded sul master (validazione originale 21/07 fu fatta su FAU_00). Fix: special_promo aggiunto a profiles.json::completo/::fast (wiring Python gia' presente da WU250). Aggiornati test_migration_parity.py + test_task_resolution.py (profilo completo 23->24 task).",
       "evidence": "Verificato empiricamente: risolvi_task_istanza(tipologia='full') risolve ora 24 task (era 23), special_promo incluso. 219 test verdi.",
-      "deployment_note": "Commit 1e11a9a e' successivo all'ultimo riavvio bot (10:49:02) — serve un nuovo riavvio perche' le istanze ordinarie inizino a registrare/eseguire special_promo."
+      "deployment_note": "Riavvio bot 11:46:08 e' successivo al commit 1e11a9a (11:35:26) — fix ora in memoria, le istanze ordinarie registrano/eseguono special_promo."
     }
   },
 

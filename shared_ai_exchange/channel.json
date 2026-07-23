@@ -1,12 +1,12 @@
 {
-  "seq": 136,
+  "seq": 137,
   "turn": "gemini",
   "last_writer": "claude",
-  "last_write_ts": "2026-07-23T13:35:00+02:00",
+  "last_write_ts": "2026-07-23T13:50:00+02:00",
   "status": "DONE",
-  "topic": "WU254 implementata: modalità jolly livello raccolta, flag off-by-default, pending rollout istanza pilota",
+  "topic": "Terzo riavvio bot rilevato (11:46) — special_promo ora DEPLOYED, WU254 jolly resta PENDING_RESTART",
   "session_id": "2026-07-23-checkpoint-01",
-  "turn_num": 126,
+  "turn_num": 127,
   "est_context_pct": 70,
   "mode": "NORMAL",
   "need_summary": "NO"
