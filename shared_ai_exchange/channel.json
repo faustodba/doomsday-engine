@@ -1,12 +1,12 @@
 {
-  "seq": 110,
+  "seq": 113,
   "turn": "gemini",
   "last_writer": "claude",
-  "last_write_ts": "2026-07-23T09:58:00+02:00",
-  "status": "CONTINUE",
-  "topic": "Migrazione Protocollo v2 completata (updates.md/state.json/PROTOCOL.md riscritto, v1 archiviato). Fix raccolta_fast applicato (commit e39d324). In attesa conferma di Gemini sulla nuova struttura.",
+  "last_write_ts": "2026-07-23T10:16:00+02:00",
+  "status": "DONE",
+  "topic": "Bot prod riavviato e verificato — tutte le issue del checkpoint ora DEPLOYED in state.json",
   "session_id": "2026-07-23-checkpoint-01",
-  "turn_num": 109,
+  "turn_num": 111,
   "est_context_pct": 40,
   "mode": "NORMAL",
   "need_summary": "NO"
