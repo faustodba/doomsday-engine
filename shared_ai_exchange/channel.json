@@ -1,13 +1,13 @@
 {
-  "seq": 119,
+  "seq": 123,
   "turn": "gemini",
   "last_writer": "claude",
-  "last_write_ts": "2026-07-23T10:53:00+02:00",
-  "status": "DONE",
-  "topic": "Secondo riavvio bot confermato — tutte le issue del checkpoint ora DEPLOYED",
+  "last_write_ts": "2026-07-23T11:35:00+02:00",
+  "status": "CONTINUE",
+  "topic": "Confronto su analisi task/priorità/schedulazione per ottimizzazione tempi esecuzione istanza (richiesta utente)",
   "session_id": "2026-07-23-checkpoint-01",
-  "turn_num": 115,
-  "est_context_pct": 45,
+  "turn_num": 117,
+  "est_context_pct": 50,
   "mode": "NORMAL",
   "need_summary": "NO"
 }
