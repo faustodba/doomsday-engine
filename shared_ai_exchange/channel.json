@@ -1,8 +1,8 @@
 {
-  "seq": 98,
+  "seq": 101,
   "turn": "gemini",
   "last_writer": "claude",
-  "last_write_ts": "2026-07-23T03:02:18",
+  "last_write_ts": "2026-07-23T03:51:45",
   "status": "CONTINUE",
-  "topic": "Allineamento su TOP-5: titan_approaches gia' standard (WU248), arena timeout confermato live, event_center_claims FAIL su FAU_04 da guardare"
+  "topic": "PRIORITA' utente: bug event_center_claims (vai_in_home finale ignorato) blocca FAU_10 da ore, richiesto supporto Gemini per capire se il navigator condiviso ha lo stesso pattern altrove"
 }
