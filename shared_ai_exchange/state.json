@@ -1,0 +1,47 @@
+{
+  "project": "Doomsday Engine V6",
+  "last_updated_ts": "2026-07-23T09:55:00+02:00",
+  "last_updated_by": "claude",
+  "schema_note": "Protocollo v2 (23/07/2026). Ogni voce in active_issues porta SEMPRE 'status' (stato del codice) E 'deployment_status' (stato reale in produzione) separati — richiesto esplicitamente dall'utente dopo che una bozza d'esempio marcava un fix come RESOLVED senza distinguere che il bot prod non era stato riavviato e quindi il fix non era ancora attivo. Non consolidare/riassumere mai i due stati in uno solo.",
+
+  "bot_prod": {
+    "process_running_since": "2026-07-22T16:08:45+02:00 (locale, PID 11840, verificato via Get-CimInstance)",
+    "note": "Qualunque commit successivo a questo timestamp non e' ancora in sys.modules del processo live — serve un riavvio bot (start.bat) per attivarlo. Vedi deployment_status delle singole issue sotto."
+  },
+
+  "active_issues": {
+    "navigator_unmatched_streak": {
+      "status": "RESOLVED_IN_CODE",
+      "deployment_status": "PENDING_RESTART",
+      "fix_commit": "5a58ca7",
+      "summary": "vai_in_home() in core/navigator.py restava bloccata quando dismiss_banners_loop trovava solo tap generici (_unmatched_*) — trattati come 'banner chiuso' e mai scavalcati verso il fallback reale. Aggiunto contatore unmatched_streak: dopo 2 tentativi consecutivi con solo unmatched, forza il fallback.",
+      "evidence_still_active_in_prod": "FAU_10, 2026-07-23 05:31-05:34 UTC: ripetuto esattamente il vecchio blocco (8/8 tentativi falliti, dismissed={'_unmatched_tap_back': 2} ad ogni giro) — 3 task saltati a cascata (arena_mercato, store, raccolta_chiusura). Prova diretta che il fix non e' ancora in memoria sul processo live."
+    },
+    "claim_catalog_periodic_revaluation": {
+      "status": "RESOLVED_IN_CODE",
+      "deployment_status": "PENDING_RESTART",
+      "fix_commit": "5da7d07",
+      "summary": "Voci non-claimabili nel catalogo event_center (es. Login Rewards, evento ciclico) non venivano mai rivalutate dopo il primo esito negativo. Aggiunto last_checked + deve_rivalutare(), rivalutazione ogni RIVALUTAZIONE_GIORNI=2. Nessuna whitelist (richiesta esplicita utente)."
+    },
+    "master_only_tasks_static_dynamic_schema": {
+      "status": "RESOLVED_IN_CODE",
+      "deployment_status": "PENDING_RESTART",
+      "fix_commit": "1a5915e",
+      "summary": "8 task (mall_daily/mega_armament/event_center_claims/titan_approaches/daily_mission_auto/daily_mission_claim/radar_master/special_promo) privi di schema statico e/o aggancio dinamico completo. Aggiunto schema statico (global_config.json, default false) + aggancio Python 5-punti in config_loader.py per i 4 master-only + fix TaskFlags Pydantic (dashboard/models.py) che li avrebbe eliminati silenziosamente da un roundtrip Advanced/reset."
+    },
+    "raccolta_fast_kill_switch": {
+      "status": "RESOLVED_IN_CODE",
+      "deployment_status": "PENDING_RESTART",
+      "fix_commit": "e39d324",
+      "summary": "task_abilitato(\"raccolta_fast\") non era mai mappato in config_loader.py — il kill-switch globale su 'raccolta' non si propagava al profilo fast. Trovato da Gemini nell'audit WU250, verificato da Claude, fix: raccolta_fast mappato allo stesso flag di raccolta.",
+      "impact_now": "nullo — 0/12 istanze hanno oggi tipologia raccolta_fast (tutte 'full' tranne FauMorfeus 'raccolta_only', classe standard). Gap latente per una futura riattivazione del profilo fast."
+    }
+  },
+
+  "technical_debt": {
+    "pytest_full_suite": {
+      "status": "KNOWN_NOT_FIXING",
+      "summary": "143 fail su 1296 lanciando pytest -q senza path (scoperta 22/07/2026, mai fatto prima nella pratica corrente). Verificato uno per uno: NON correlati a nessuna WU recente. (1) plugin pytest-asyncio mancante — test scritti come async def falliscono, riguarda solo la firma del test, non la regola V6 'mai async def run' nel codice applicativo. (2) test_ocr_helpers.py::test_zone_custom — drift test/codice (kwarg rimosso). (3) 2 fail in test_orchestrator.py (last_run/conteggio tick). Da assegnare quando si vuole ripulire la suite completa."
+    }
+  }
+}

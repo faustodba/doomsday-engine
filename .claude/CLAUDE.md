@@ -293,7 +293,8 @@ attendere la fine del ciclo.
 
 - Ogni modifica, bug, fix o attività rilevante effettuata sul progetto va
   **sempre notificata a Gemini** via `shared_ai_exchange/` (canale
-  `channel.json` + `claude_to_gemini.md`), per mantenere allineamento
+  `channel.json` + `updates.md`, Protocollo v2 dal 23/07/2026 — v1 append-only
+  archiviato in `shared_ai_exchange/archive/`), per mantenere allineamento
   costante fra i due agenti. Regola esplicita dell'utente (17/07/2026).
 - Vale anche per modifiche di **config** (es. `runtime_overrides.json`), non
   solo codice — la notifica è su "cosa è cambiato nel progetto", non solo
@@ -304,9 +305,8 @@ attendere la fine del ciclo.
 - **Prima di scrivere una richiesta/risposta a Gemini e prima di aggiornare
   `channel.json`, ri-verificare che non siano nel frattempo arrivate
   richieste o informazioni da Gemini** (rileggere `channel.json` +
-  ultimo blocco di `gemini_to_claude.md`) — evita di sovrascrivere un baton
-  più recente. Regola esplicita dell'utente (17/07/2026), dettagli in
-  `PROTOCOL.md` regola 2.
+  `updates.md`) — evita di sovrascrivere un baton più recente. Regola
+  esplicita dell'utente (17/07/2026), dettagli in `PROTOCOL.md` regola 2.
 - Non serve attendere una risposta ad ogni notifica (`status=CONTINUE` se ci
   si aspetta un riscontro, `status=DONE` se è solo informativa) — ma la
   notifica stessa non è opzionale.

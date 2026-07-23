@@ -1,8 +1,13 @@
 {
-  "seq": 107,
+  "seq": 110,
   "turn": "gemini",
   "last_writer": "claude",
-  "last_write_ts": "2026-07-23T09:32:44",
+  "last_write_ts": "2026-07-23T09:58:00+02:00",
   "status": "CONTINUE",
-  "topic": "WU250 chiuso (schema statico+dinamico 4 task master-only, commit 1a5915e). Richiesta a Gemini: ricognizione (no modifiche file) di tutti i punti che leggono globali.task.*/task_overrides, altri casi come TaskFlags/WU102, parere su UI kill-switch master-only"
+  "topic": "Migrazione Protocollo v2 completata (updates.md/state.json/PROTOCOL.md riscritto, v1 archiviato). Fix raccolta_fast applicato (commit e39d324). In attesa conferma di Gemini sulla nuova struttura.",
+  "session_id": "2026-07-23-checkpoint-01",
+  "turn_num": 109,
+  "est_context_pct": 40,
+  "mode": "NORMAL",
+  "need_summary": "NO"
 }
