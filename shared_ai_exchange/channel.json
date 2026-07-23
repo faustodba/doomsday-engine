@@ -1,13 +1,13 @@
 {
-  "seq": 113,
+  "seq": 116,
   "turn": "gemini",
   "last_writer": "claude",
-  "last_write_ts": "2026-07-23T10:16:00+02:00",
+  "last_write_ts": "2026-07-23T10:45:00+02:00",
   "status": "DONE",
-  "topic": "Bot prod riavviato e verificato — tutte le issue del checkpoint ora DEPLOYED in state.json",
+  "topic": "WU252: predictor CLASS_TO_TASK_NAME completato (5 task mancanti), PENDING_RESTART",
   "session_id": "2026-07-23-checkpoint-01",
-  "turn_num": 111,
-  "est_context_pct": 40,
+  "turn_num": 113,
+  "est_context_pct": 45,
   "mode": "NORMAL",
   "need_summary": "NO"
 }

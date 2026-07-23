@@ -1,6 +1,6 @@
 {
   "project": "Doomsday Engine V6",
-  "last_updated_ts": "2026-07-23T10:15:00+02:00",
+  "last_updated_ts": "2026-07-23T10:45:00+02:00",
   "last_updated_by": "claude",
   "schema_note": "Protocollo v2 (23/07/2026). Ogni voce in active_issues porta SEMPRE 'status' (stato del codice) E 'deployment_status' (stato reale in produzione) separati — richiesto esplicitamente dall'utente dopo che una bozza d'esempio marcava un fix come RESOLVED senza distinguere che il bot prod non era stato riavviato e quindi il fix non era ancora attivo. Non consolidare/riassumere mai i due stati in uno solo.",
 
@@ -36,6 +36,14 @@
       "fix_commit": "e39d324",
       "summary": "task_abilitato(\"raccolta_fast\") non era mai mappato in config_loader.py — il kill-switch globale su 'raccolta' non si propagava al profilo fast. Trovato da Gemini nell'audit WU250, verificato da Claude, fix: raccolta_fast mappato allo stesso flag di raccolta.",
       "impact_now": "nullo — 0/12 istanze hanno oggi tipologia raccolta_fast (tutte 'full' tranne FauMorfeus 'raccolta_only', classe standard). Gap latente per una futura riattivazione del profilo fast."
+    },
+    "predictor_class_to_task_name_gap": {
+      "status": "RESOLVED_IN_CODE",
+      "deployment_status": "PENDING_RESTART",
+      "fix_commit": "4e5cc42",
+      "summary": "Domanda diretta dell'utente ('il predictor sta considerando i nuovi task?') ha portato a un confronto esaustivo dei 28 task in task_setup.json contro core/cycle_duration_predictor.py::CLASS_TO_TASK_NAME: 5 mancavano (mega_armament, daily_mission_auto, daily_mission_claim, radar_master, special_promo). risolvi_task_istanza() li restituiva correttamente come dovuti, ma venivano scartati dal filtro task_globali perche' assenti dalla mappa locale del predictor — stima di ciclo sistematicamente sottostimata. Verificato NON essere lo stesso bug noto/intenzionale di GraficaHqTask/PuliziaCacheTask/ZainoTask (quello resta, escluso di design). Fix: 5 righe aggiunte alla mappa.",
+      "evidence": "Verifica empirica su dati prod reali (predict_cycle_from_config): prima del fix i 5 task erano completamente assenti dal breakdown per-istanza; dopo, tempi reali (+40.2s mega_armament su FAU_00, +~199s totali su FauMorfeus).",
+      "deployment_note": "Commit 4e5cc42 e' successivo all'ultimo riavvio bot (09:55:16) — serve un nuovo riavvio per attivare. adaptive_scheduler_enabled=true in prod, quindi finche' non deployato l'Adaptive Scheduler continua a sottostimare la durata di ciclo per le istanze che eseguono questi 5 task."
     }
   },
 
