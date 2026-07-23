@@ -642,6 +642,18 @@ def predict_cycle_duration(
 # task_globali indipendentemente dai flag dashboard. Allineare le due mappe
 # cambierebbe la stima (es. zaino passerebbe da "mai considerato" a gated
 # 24h) — è un cambio funzionale, va fatto con un ticket dedicato, non qui.
+#
+# WU252 (23/07/2026): confronto esaustivo con config/task_setup.json (28
+# classi totali) ha trovato 5 mancanze DIVERSE dal bug noto sopra — non
+# esclusioni di design ma dimenticanze quando i task sono stati aggiunti
+# (mega_armament nello stesso batch WU246-248 di mall_daily/event_center_
+# claims/titan_approaches, che invece erano già presenti; i 4 master-only
+# WU250 mai aggiunti). Effetto: risolvi_task_istanza() li restituiva
+# correttamente come dovuti, ma venivano scartati dal filtro
+# `if _row["task_name"] not in task_globali` (righe ~1084) perché assenti
+# da task_setup_by_name → stima di ciclo sistematicamente sottostimata,
+# con impatto reale sull'Adaptive Scheduler (adaptive_scheduler_enabled=
+# true in prod). Aggiunte qui, non nella lista dei 3 esclusi di proposito.
 CLASS_TO_TASK_NAME = {
     "BoostTask": "boost", "RifornimentoTask": "rifornimento",
     "RaccoltaTask": "raccolta", "RaccoltaChiusuraTask": "raccolta_chiusura",
@@ -651,6 +663,11 @@ CLASS_TO_TASK_NAME = {
     "MallDailyTask": "mall_daily",
     "EventCenterClaimsTask": "event_center_claims",
     "TitanApproachesTask": "titan_approaches",
+    "MegaArmamentTask": "mega_armament",
+    "DailyMissionAutoTask": "daily_mission_auto",
+    "DailyMissionClaimTask": "daily_mission_claim",
+    "RadarMasterTask": "radar_master",
+    "SpecialPromoTask": "special_promo",
     "ArenaTask": "arena", "ArenaMercatoTask": "arena_mercato",
     "StoreTask": "store", "ZainoTask": "zaino",
     "TruppeTask": "truppe", "DistrictShowdownTask": "district_showdown",
