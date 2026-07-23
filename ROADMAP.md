@@ -5,6 +5,37 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 23/07/2026 — WU252: predictor non conosceva 5 task recenti
+
+L'utente chiede direttamente: "il predictor attuale sta considerando i
+nuovi task?". Confronto esaustivo dei 28 task in `task_setup.json`
+contro `core/cycle_duration_predictor.py::CLASS_TO_TASK_NAME`: 3 dei
+task WU246-248 già presenti (`mall_daily`, `event_center_claims`,
+`titan_approaches`), ma 5 mancavano — `mega_armament` (stesso batch,
+dimenticato) più i 4 master-only di WU250 (`daily_mission_auto`,
+`daily_mission_claim`, `radar_master`, `special_promo`).
+
+Meccanismo: `risolvi_task_istanza()` (mappa canonica corretta)
+restituiva questi task come dovuti, ma il filtro
+`if task_name not in task_globali` li scartava perché assenti dalla
+mappa locale del predictor — stima di ciclo sistematicamente
+sottostimata, con impatto reale dato che `adaptive_scheduler_enabled=
+true` in prod (il predictor alimenta il riordino istanze). Verificato
+che NON è lo stesso bug noto/intenzionale di
+`GraficaHqTask`/`PuliziaCacheTask`/`ZainoTask` (escluse di design,
+commento esplicito nel codice) — le 5 aggiunte qui erano dimenticanze
+vere, non esclusioni volute.
+
+Verifica empirica su dati prod reali (`predict_cycle_from_config`):
+prima del fix i 5 task erano completamente assenti dal breakdown
+per-istanza; dopo, tempi reali — +40.2s (`mega_armament`) su FAU_00,
++~199s totali (5 task) su FauMorfeus.
+
+Commit `4e5cc42`, pushato. Test: 154 verdi. Sync prod byte-identico.
+**Richiede riavvio BOT** (il predictor gira nel processo bot).
+
+---
+
 ## Sessione 23/07/2026 — WU251: kill-switch raccolta non copriva raccolta_fast
 
 Continuazione diretta di WU250: la ricognizione delegata a Gemini
