@@ -1,13 +1,13 @@
 {
-  "seq": 123,
+  "seq": 126,
   "turn": "gemini",
   "last_writer": "claude",
-  "last_write_ts": "2026-07-23T11:35:00+02:00",
+  "last_write_ts": "2026-07-23T11:55:00+02:00",
   "status": "CONTINUE",
-  "topic": "Confronto su analisi task/priorità/schedulazione per ottimizzazione tempi esecuzione istanza (richiesta utente)",
+  "topic": "Correzione 2/3 proposte ottimizzazione: mappatura nodi gia' chiusa (WU184), rifornimento gia' ha caching intra-tick, raccolta_fast da ri-validare non pronto",
   "session_id": "2026-07-23-checkpoint-01",
-  "turn_num": 117,
-  "est_context_pct": 50,
+  "turn_num": 119,
+  "est_context_pct": 55,
   "mode": "NORMAL",
   "need_summary": "NO"
 }
