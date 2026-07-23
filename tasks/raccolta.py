@@ -2754,20 +2754,6 @@ class RaccoltaTask(Task):
 
         ctx._deposito_ocr = deposito_ocr  # type: ignore
 
-        # WU254 (23/07) — modalità "jolly": calibrazione esplicita del
-        # pannello livello solo al primo ciclo dopo il reset giornaliero
-        # (00:00 UTC), stessa logica di core.orchestrator._reset_daily_corrente
-        # (replicata qui per non introdurre una dipendenza cross-modulo su una
-        # funzione privata per 3 righe di calcolo).
-        if (bool(_cfg(ctx, "RACCOLTA_LIVELLO_JOLLY_ABILITATO"))
-                and hasattr(ctx, "state") and ctx.state is not None):
-            from datetime import datetime as _dt2, timezone as _tz2, timedelta as _td2
-            _now = _dt2.now(_tz2.utc)
-            _reset_oggi = _now.replace(hour=0, minute=0, second=0, microsecond=0)
-            _reset_corrente = _reset_oggi if _now >= _reset_oggi else _reset_oggi - _td2(days=1)
-            if ctx.state.raccolta.calibrazione_dovuta(_reset_corrente):
-                _calibra_livello_giornaliero(ctx)
-
         # Loop esterno: MAX_TENTATIVI_CICLO tentativi di riempire gli slot.
         # Ogni tentativo: naviga in mappa → _loop_invio_marce → HOME + OCR check.
         # Uscita anticipata se slot pieni (successo) o vai_in_mappa fallisce.
@@ -2829,6 +2815,27 @@ class RaccoltaTask(Task):
                     else:
                         ctx.device.key("KEYCODE_MAP")
                         time.sleep(2.0)
+
+                    # WU254 (23/07) — modalità "jolly": calibrazione esplicita
+                    # del pannello livello solo al primo ciclo dopo il reset
+                    # giornaliero (00:00 UTC), stessa logica di core.
+                    # orchestrator._reset_daily_corrente (replicata qui per
+                    # non introdurre una dipendenza cross-modulo su una
+                    # funzione privata per 3 righe di calcolo). Va fatta QUI
+                    # (dopo la prima vai_in_mappa riuscita), non prima del
+                    # loop: _apri_lente_verificata usa coordinate fisse
+                    # pensate per la vista MAPPA, chiamata da HOME fallisce
+                    # sistematicamente (bug osservato in prod 23/07, 4/4
+                    # istanze).
+                    if (bool(_cfg(ctx, "RACCOLTA_LIVELLO_JOLLY_ABILITATO"))
+                            and hasattr(ctx, "state") and ctx.state is not None):
+                        from datetime import datetime as _dt2, timezone as _tz2, timedelta as _td2
+                        _now = _dt2.now(_tz2.utc)
+                        _reset_oggi = _now.replace(hour=0, minute=0, second=0, microsecond=0)
+                        _reset_corrente = (_reset_oggi if _now >= _reset_oggi
+                                           else _reset_oggi - _td2(days=1))
+                        if ctx.state.raccolta.calibrazione_dovuta(_reset_corrente):
+                            _calibra_livello_giornaliero(ctx)
 
                 # WU55 — data collection MAP (shadow OCR, no decisione)
                 _ocr_debug_collect_map(ctx)
