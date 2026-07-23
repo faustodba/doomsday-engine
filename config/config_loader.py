@@ -1449,6 +1449,7 @@ def build_instance_cfg(ist: dict, gcfg: GlobalConfig, overrides: dict | None = N
                 "grafica_hq":            gcfg.task_grafica_hq,
                 "pulizia_cache":         gcfg.task_pulizia_cache,
                 "raccolta":              gcfg.task_raccolta,
+                "raccolta_fast":         gcfg.task_raccolta,
                 "rifornimento":          gcfg.task_rifornimento and (gcfg.rifornimento_mappa_abilitato or gcfg.rifornimento_membri_abilitato),
                 "rifornimento_mappa":    gcfg.rifornimento_mappa_abilitato,
                 "rifornimento_membri":   gcfg.rifornimento_membri_abilitato,
