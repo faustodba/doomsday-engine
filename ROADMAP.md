@@ -5,6 +5,28 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 23/07/2026 — WU251: kill-switch raccolta non copriva raccolta_fast
+
+Continuazione diretta di WU250: la ricognizione delegata a Gemini
+("tutti i punti che leggono `globali.task.*`/`task_overrides`") ha
+trovato un bug reale nello stesso audit. `tasks/raccolta_fast.py:157`
+chiama `ctx.config.task_abilitato("raccolta_fast")`, ma quel nome non
+era mai stato mappato in `config_loader.py::task_abilitato()` — il
+fallback lo faceva risultare sempre `True`. Disabilitare `raccolta` da
+dashboard non avrebbe fermato un'istanza con profilo/varianti "fast".
+
+Verificato da Claude sui 3 livelli prima di applicare (per la regola
+del workflow): codice confermato (grep vuoto su `raccolta_fast` in
+`config_loader.py`/`TaskFlags`/`global_config.json`), stato reale
+confermato (`runtime_overrides.json` prod: 0/12 istanze con tipologia
+`raccolta_fast` oggi — impatto pratico nullo ora, gap latente per il
+futuro). Fix: `"raccolta_fast"` mappato allo stesso flag di
+`"raccolta"`. Test comportamentale diretto + suite (210) verdi.
+
+Commit `e39d324`, pushato. Sync prod byte-identico.
+
+---
+
 ## Sessione 23/07/2026 — WU250: schema statico+dinamico completo per i task master-only
 
 **Filo dell'indagine**: l'utente nota che i nuovi task (Special Promo,
