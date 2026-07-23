@@ -5,6 +5,40 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 23/07/2026 — WU255: Mega Armament, claim challenge a catena mai gestito
+
+Bug report utente durante il monitoraggio attivo del rollout WU254: "mega
+armament non preleva tutti i claim, mancano quelli del challenge". Il
+codice esistente (`_seleziona_challenge_giornaliera`) gestiva solo la
+selezione once/day della challenge del giorno ("+" trovato/non trovato) —
+non un terzo caso: quando lo step corrente matura la ricompensa (es.
+"Resource Gathering" 1,000,000/1,000,000), nella stessa posizione appare
+un CLAIM verde mai gestito. Il claim sblocca subito lo step successivo
+della catena, che se già maturo richiede un altro claim.
+
+**Delega a Gemini** (analisi zona/soglia/bozza codice), **verifica di
+Claude prima di applicare**: script Python indipendente ha confermato lo
+score dichiarato da Gemini (0.8209 @ 156,466) su 5 immagini reali diverse
+— e scoperto in più che sul pulsante disabilitato (fine catena) lo score
+crolla a 0.28, zero rischio di falso positivo. **Validazione empirica dal
+vivo**: l'utente ha fermato il bot e navigato manualmente su un'istanza
+(tap via ADB diretto, screenshot in tempo reale) — 3 claim consecutivi
+hanno confermato la catena (1M → 3M → 5M, poi pulsante disabilitato).
+
+Nuovo metodo `_claim_challenge_catena()` (cap 5 iterazioni), agganciato
+in `run()` dopo la selezione challenge. Commit `3e9ef0f`, sync prod
+verificato sul file reale, **confermato in produzione**: log reale
+`[MEGA_ARMAMENT] challenge claim: 0` (riga mai esistita prima, girata
+senza errori).
+
+Come promemoria collaterale: `RaccoltaChiusuraTask` eredita interamente
+`run()` da `RaccoltaTask` — la modalità jolly (WU254, sotto) e il suo fix
+di posizionamento si applicano automaticamente anche lì, nessuna
+modifica separata necessaria (verificato leggendo il codice su richiesta
+esplicita dell'utente).
+
+---
+
 ## Sessione 23/07/2026 — WU254: modalità "jolly" livello raccolta
 
 Durante l'analisi task/priorità/schedulazione, l'utente chiede un'analisi
