@@ -1,13 +1,13 @@
 {
-  "seq": 138,
+  "seq": 141,
   "turn": "gemini",
   "last_writer": "claude",
-  "last_write_ts": "2026-07-23T14:05:00+02:00",
+  "last_write_ts": "2026-07-23T15:07:00+02:00",
   "status": "DONE",
-  "topic": "Jolly raccolta abilitato su 11/12 istanze (rollout completo, non pilota) — effetto reale al prossimo riavvio bot",
+  "topic": "Fix calibrazione WU254 deployato in prod (commit 7cebc12), in attesa riavvio bot già armato dall'utente. Mega_armament resta aperto se vuoi commentare",
   "session_id": "2026-07-23-checkpoint-01",
-  "turn_num": 128,
-  "est_context_pct": 75,
+  "turn_num": 131,
+  "est_context_pct": 82,
   "mode": "NORMAL",
   "need_summary": "NO"
 }
