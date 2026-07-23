@@ -5,6 +5,33 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 23/07/2026 — WU253: special_promo standard su tutte le istanze
+
+Durante l'analisi task/priorità/schedulazione (richiesta separata),
+l'utente nota nella tabella riepilogativa: "special promo vedo solo
+master, invece deve essere per tutte le istanze".
+
+Verificato prima sul codice (`tasks/special_promo.py` +
+`_SpecialPromoContestBase`): nessuna assunzione hardcoded sul master,
+solo il pattern generico `ctx.device`/`ctx.matcher`/`task_abilitato()`
+già usato da tutti i task standard. Il docstring di
+`tasks/parts_contest.py` conferma anzi che la validazione originale
+(21/07) fu fatta live su FAU_00, un'istanza ordinaria — "solo master"
+era una scelta di configurazione (`profiles.json`), non un vincolo
+tecnico.
+
+Fix: `special_promo` aggiunto a `profiles.json::completo`/`::fast`
+(stesso pattern WU246-248). Il wiring Python esisteva già da WU250.
+Aggiornati 2 file di test con esclusioni/conteggi hardcoded sul vecchio
+stato master-only (`test_migration_parity.py`, `test_task_resolution.py`
+— profilo completo 23→24 task). Verificato empiricamente:
+`risolvi_task_istanza(tipologia='full')` risolve ora 24 task, incluso
+`special_promo`.
+
+Commit `1e11a9a`, pushato. Test: 219 verdi. Sync prod byte-identico.
+
+---
+
 ## Sessione 23/07/2026 — WU252: predictor non conosceva 5 task recenti
 
 L'utente chiede direttamente: "il predictor attuale sta considerando i
