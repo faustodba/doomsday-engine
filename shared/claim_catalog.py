@@ -109,6 +109,21 @@ CLAIM_THRESHOLD:      float                   = 0.80
 CLAIM_TAP_CLOSE_SAFE: tuple[int, int]         = (100, 450)
 MAX_CLAIMS_PER_VOCE:  int                     = 10
 
+# Rivalutazione periodica (23/07/2026, richiesta utente dopo osservazione
+# live: "Login Rewards" ha pallino rosso ma resta skippata per sempre).
+# Alcune voci sono CICLICHE (si rinnovano ogni giorno — Login Rewards è il
+# caso noto) mentre altre hanno stato davvero fisso (Match Predictions:
+# sempre non-claim, è una feature di scommessa; Titan Approaches: sempre
+# un'azione di combattimento). "claimable" deciso una volta al primo
+# incontro e mai più rivalutato è strutturalmente sbagliato per le prime:
+# se il primo incontro capita in un giorno senza nulla da reclamare,
+# restano bloccate "non claimabili" per sempre anche nei giorni in cui il
+# premio torna disponibile. Niente whitelist per distinguere i due casi
+# (richiesta esplicita utente: "non ha senso") — più semplice e generale
+# ridare a OGNI voce non-claimabile una possibilità di essere riverificata
+# dopo N giorni, indipendentemente dal perché era stata segnata così.
+RIVALUTAZIONE_GIORNI: int = 2
+
 
 _DATA_DIR      = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
 _TITLES_DIR    = os.path.join(_DATA_DIR, "claim_titles")
@@ -250,3 +265,22 @@ def prossimo_id(crops: dict) -> str:
 
 def ts_ora() -> str:
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def deve_rivalutare(dati: dict) -> bool:
+    """True se una voce nota NON-claimabile ha superato RIVALUTAZIONE_GIORNI
+    dall'ultima verifica REALE (apertura + controllo widget CLAIM) — non va
+    confuso con last_seen, che si aggiorna ad ogni semplice avvistamento
+    nella sidebar durante lo scan, apertura o no. Fallback su first_seen per
+    le entry scritte prima dell'introduzione di last_checked
+    (retrocompatibilità — altrimenti resterebbero bloccate per sempre)."""
+    import calendar
+    ultimo = dati.get("last_checked") or dati.get("first_seen")
+    if not ultimo:
+        return True
+    try:
+        t_ultimo = calendar.timegm(time.strptime(ultimo, "%Y-%m-%dT%H:%M:%SZ"))
+    except (ValueError, TypeError):
+        return True
+    giorni_trascorsi = (time.time() - t_ultimo) / 86400.0
+    return giorni_trascorsi >= RIVALUTAZIONE_GIORNI

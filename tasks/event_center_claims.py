@@ -90,6 +90,8 @@ from shared.claim_catalog import (
     ritaglia_riga,
     prossimo_id,
     ts_ora,
+    deve_rivalutare,
+    RIVALUTAZIONE_GIORNI,
 )
 
 
@@ -247,15 +249,45 @@ class EventCenterClaimsTask(Task):
                         catalogo[riga_id] = dati
                         processate_run.add(riga_id)
                         if not dati.get("claimable"):
+                            if not deve_rivalutare(dati):
+                                log(f"[EVENT_CENTER_CLAIMS] '{label}' nota non "
+                                    f"claimabile (score={score:.3f}) → skip, "
+                                    f"nessun tap")
+                                continue
+                            # Rivalutazione periodica (23/07) — voci CICLICHE
+                            # come Login Rewards si rinnovano ogni giorno; se
+                            # il primo incontro cade in un giorno senza nulla
+                            # da reclamare, "claimable=False" fissato per
+                            # sempre le farebbe skippare anche nei giorni in
+                            # cui il premio torna disponibile. Riapre per
+                            # riverificare — stesso costo di una riga nuova.
                             log(f"[EVENT_CENTER_CLAIMS] '{label}' nota non "
-                                f"claimabile (score={score:.3f}) → skip, "
-                                f"nessun tap")
+                                f"claimabile ma rivalutazione scaduta "
+                                f"(>={RIVALUTAZIONE_GIORNI}gg) → riapro per "
+                                f"riverificare")
+                            ctx.device.tap(ROW_TAP_X, by)
+                            time.sleep(cfg.wait_open_s)
+                            shot2 = ctx.device.screenshot()
+                            m = ctx.matcher.find_one(shot2, CLAIM_TEMPLATE,
+                                                     threshold=CLAIM_THRESHOLD, zone=CLAIM_ZONE)
+                            claimable_ora = bool(m.found)
+                            dati["claimable"] = claimable_ora
+                            dati["last_checked"] = ts_ora()
+                            catalogo[riga_id] = dati
+                            log(f"[EVENT_CENTER_CLAIMS] '{label}' rivalutata "
+                                f"→ claimabile={claimable_ora} (score={m.score:.3f})")
+                            if claimable_ora:
+                                n = self._claim_loop(ctx, log)
+                                risultati[label] = risultati.get(label, 0) + n
+                            debug.snap(f"02_{riga_id}_rivalutata", shot2)
                             continue
                         log(f"[EVENT_CENTER_CLAIMS] '{label}' nota claimabile "
                             f"(score={score:.3f}) → apro e verifico")
                         ctx.device.tap(ROW_TAP_X, by)
                         time.sleep(cfg.wait_open_s)
                         shot2 = ctx.device.screenshot()
+                        dati["last_checked"] = ts_ora()
+                        catalogo[riga_id] = dati
                         n = self._claim_loop(ctx, log)
                         risultati[label] = risultati.get(label, 0) + n
                         debug.snap(f"02_{riga_id}", shot2)
@@ -282,6 +314,7 @@ class EventCenterClaimsTask(Task):
                         "label": riga_id,
                         "first_seen": ts_ora(),
                         "last_seen": ts_ora(),
+                        "last_checked": ts_ora(),
                     }
                     processate_run.add(riga_id)
                     if claimable:
