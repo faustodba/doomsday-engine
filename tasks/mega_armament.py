@@ -4,7 +4,8 @@ tasks/mega_armament.py — MegaArmamentTask V6
 Task custom (21/07/2026 master, 22/07/2026 esteso alle ordinarie) — evento
 Special Promo → Mega Armament Sale. Il più complesso della serie contest:
 oltre a traccia + collect all, ha una SCELTA GIORNALIERA della "challenge del
-giorno" (once/day, irreversibile) e una GRIGLIA di missioni +145 con
+giorno" (once/day, irreversibile), una CATENA di step della challenge con
+CLAIM (23/07/2026, WU255 — vedi sotto) e una GRIGLIA di missioni +145 con
 pulsanti CLAIM/GO.
 
 LOGICA (appresa live 21/07 sul master, dall'utente; estesa 22/07):
@@ -29,6 +30,15 @@ FLUSSO:
     → non ancora scelta → apri carosello, scorri fino a pin_mega_radar_icon,
     SELECT (icona_cy + select_dy), conferma OK. Se il "+" è assente → già
     scelta oggi → skip (guard once/day).
+  - Claim challenge a catena (WU255, 23/07/2026): quando lo step corrente
+    della challenge (colonna sinistra) è completato, nella STESSA posizione
+    dove prima c'era il "+" appare un CLAIM verde — claimarlo sblocca subito
+    lo step successivo, che se già maturo mostra di nuovo CLAIM. Verificato
+    empiricamente in game (3 claim consecutivi 1M→3M→5M risorse, poi il
+    pulsante diventa un timbro disabilitato/grigio quando il prossimo step
+    non è ancora maturo — score match crolla da 0.82 a 0.28, nessun rischio
+    di falso positivo). Loop find_one(pin_mega_claim, soglia dedicata più
+    bassa 0.78, zona colonna sinistra) fino a cap di sicurezza.
   - Claim griglia: find_all(pin_mega_claim) VERDI → tap ognuno; le missioni
     claimate scivolano in fondo (Completed) e in prima posizione riappare
     sempre un CLAIM/GO → nessuno scroll, ri-scandisci finché niente verde.
@@ -36,11 +46,11 @@ FLUSSO:
   - Back → vista Mega → Collect All (pin_mega_collect_all matcha solo quando
     attivo/ambra; grigio non matcha) → tap posizione fissa, loop.
 
-REGOLA SICUREZZA: si tappano solo CLAIM verdi + Collect All (gratis) + il SELECT
-della challenge del giorno (radar sul master, resource gathering sulle
-ordinarie — scelta corretta per il profilo dell'istanza). Mai GO, mai
-Purchase Level/€. Il SELECT apre un dialog "once selected can't be changed";
-si conferma OK.
+REGOLA SICUREZZA: si tappano solo CLAIM verdi (griglia + challenge a catena) +
+Collect All (gratis) + il SELECT della challenge del giorno (radar sul master,
+resource gathering sulle ordinarie — scelta corretta per il profilo
+dell'istanza). Mai GO, mai Purchase Level/€. Il SELECT apre un dialog "once
+selected can't be changed"; si conferma OK.
 
 Periodico 12h (via task_overrides). Master abilitato dal 21/07; ordinarie
 abilitabili singolarmente via `task_overrides.mega_armament=true`.
@@ -93,6 +103,13 @@ class MegaArmamentConfig(SpecialPromoContestConfig):
     zona_confirm:    tuple[int, int, int, int] = (480, 355, 700, 410)
     tap_confirm_ok:  tuple[int, int] = (592, 382)
     wait_confirm:    float = 2.0
+
+    # Claim challenge a catena (colonna sinistra, stessa zona del "+" di
+    # selezione — quando lo step è completato appare qui un CLAIM verde,
+    # score match più basso della griglia: soglia dedicata)
+    zona_challenge_claim:   tuple[int, int, int, int] = (10, 350, 300, 500)
+    soglia_challenge_claim: float = 0.78
+    max_challenge_claim:    int = 5
 
     # Griglia missioni +145 (CLAIM verdi)
     pin_mega_claim:  str = "pin/pin_mega_claim.png"
@@ -190,6 +207,33 @@ class MegaArmamentTask(_SpecialPromoContestBase):
         return "not_found"
 
     # ------------------------------------------------------------------
+    # Claim challenge a catena
+    # ------------------------------------------------------------------
+
+    def _claim_challenge_catena(self, ctx, cfg, log) -> int:
+        """Clama sequenzialmente i premi della challenge del giorno (colonna
+        sinistra). Quando lo step corrente è completato appare un CLAIM verde
+        nella stessa posizione del "+" di selezione; il claim sblocca subito
+        lo step successivo, che se già maturo mostra di nuovo CLAIM — ri-
+        scandisci finché niente verde (score crolla quando il prossimo step
+        non è ancora maturo, nessun rischio di falso positivo). Cap di
+        sicurezza per prevenire loop indefiniti."""
+        n = 0
+        for _ in range(cfg.max_challenge_claim):
+            shot = ctx.device.screenshot()
+            m = ctx.matcher.find_one(shot, cfg.pin_mega_claim,
+                                     threshold=cfg.soglia_challenge_claim,
+                                     zone=cfg.zona_challenge_claim)
+            if not m.found:
+                break
+            log(f"[MEGA_ARMAMENT] challenge CLAIM #{n+1} → tap ({m.cx},{m.cy}) score={m.score:.3f}")
+            ctx.device.tap(m.cx, m.cy)
+            time.sleep(cfg.wait_grid_claim)
+            n += 1
+        log(f"[MEGA_ARMAMENT] challenge claim: {n}")
+        return n
+
+    # ------------------------------------------------------------------
     # Claim griglia missioni
     # ------------------------------------------------------------------
 
@@ -281,6 +325,10 @@ class MegaArmamentTask(_SpecialPromoContestBase):
             esito_sel = self._seleziona_challenge_giornaliera(ctx, cfg, log)
             debug.snap("05_post_select", ctx.device.screenshot())
 
+            n_challenge = self._claim_challenge_catena(ctx, cfg, log)
+            if n_challenge > 0:
+                debug.snap("05b_post_challenge_claim", ctx.device.screenshot())
+
             n_grid = self._claim_griglia(ctx, cfg, log)
             debug.snap("06_post_grid", ctx.device.screenshot())
 
@@ -294,13 +342,15 @@ class MegaArmamentTask(_SpecialPromoContestBase):
 
             self._esci(ctx, cfg)
             log(f"[MEGA_ARMAMENT] completato — challenge={esito_sel} "
-                f"grid_claim={n_grid} collect_all={n_collect}")
+                f"challenge_claim={n_challenge} grid_claim={n_grid} collect_all={n_collect}")
             debug.flush(success=True,
-                        force=(esito_sel == "not_found" or (n_grid == 0 and n_collect == 0)),
+                        force=(esito_sel == "not_found"
+                               or (n_challenge == 0 and n_grid == 0 and n_collect == 0)),
                         log_fn=log)
             return TaskResult.ok(f"Mega Armament — challenge={esito_sel} "
-                                 f"grid={n_grid} collect={n_collect}",
-                                 challenge=esito_sel, grid=n_grid, collect_all=n_collect)
+                                 f"challenge_claim={n_challenge} grid={n_grid} collect={n_collect}",
+                                 challenge=esito_sel, challenge_claim=n_challenge,
+                                 grid=n_grid, collect_all=n_collect)
         except Exception as exc:
             log(f"[MEGA_ARMAMENT] eccezione: {exc}")
             debug.snap("99_exception", ctx.device.screenshot())
