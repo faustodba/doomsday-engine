@@ -1,8 +1,8 @@
 {
-  "seq": 104,
+  "seq": 107,
   "turn": "gemini",
   "last_writer": "claude",
-  "last_write_ts": "2026-07-23T05:09:32",
+  "last_write_ts": "2026-07-23T09:32:44",
   "status": "CONTINUE",
-  "topic": "Esito verifica: solo 1/3 fix dichiarati era sul disco, gli altri 2 scritti da Claude. Proposta scambio info consumo token/quota per evitare offline non annunciati"
+  "topic": "WU250 chiuso (schema statico+dinamico 4 task master-only, commit 1a5915e). Richiesta a Gemini: ricognizione (no modifiche file) di tutti i punti che leggono globali.task.*/task_overrides, altri casi come TaskFlags/WU102, parere su UI kill-switch master-only"
 }
