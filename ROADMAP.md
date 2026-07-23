@@ -5,6 +5,46 @@ V5 (produzione): `faustodba/doomsday-bot-farm` — `C:\Bot-farm`
 
 ---
 
+## Sessione 23/07/2026 — WU254: modalità "jolly" livello raccolta
+
+Durante l'analisi task/priorità/schedulazione, l'utente chiede un'analisi
+approfondita sulla gestione del LIVELLO in `tasks/raccolta.py` (il task
+più pesante, ~54% del tempo-task totale): eliminare il controllo/
+aggiustamento OCR del pannello livello ad ogni singolo CERCA.
+
+**Prima proposta (Gemini) scartata dopo verifica**: cache stateful
+in-memory che traccia i tap fatti senza mai rileggere il pannello.
+Misurato sui log reali che il 28% degli aggiustamenti (+/- tap) non
+viene registrato dal gioco al primo colpo (23/82 "MISMATCH level
+finale") — la cache andrebbe fuori sincrono troppo spesso.
+
+**Design finale** (idea utente, raffinata nel dialogo): "jolly" — tap
+CERCA diretto senza verifica per il tentativo primario di ogni marcia
+(riusa `skip_livello_check`, prima solo del fast); calibrazione
+esplicita SOLO al primo ciclo dopo il reset giornaliero (00:00 UTC,
+riusa il pattern `_e_dovuto_periodic_reset` già in uso da mega_armament/
+radar_master) — un giro sui 4 tipi per riportare il pannello al target;
+il fallback (nodo non trovato) usa sempre la verifica classica; la
+lettura del popup nodo (già esistente, oggi solo diagnostica) diventa
+il ground truth per telemetria quando il tentativo era in jolly.
+
+Verificato con l'utente prima di procedere: il gioco normalizza
+automaticamente al livello minimo disponibile in zona se il pannello è
+troppo basso — nessun bootstrap necessario oltre alla calibrazione
+giornaliera. Nuovo `core.state.RaccoltaState` + flag
+`RACCOLTA_LIVELLO_JOLLY_ABILITATO` (default `False`, pattern rollout
+graduale già consolidato nel progetto).
+
+27 nuovi test. **Zero regressioni verificate con metodo rigoroso**: i
+90 fail pre-esistenti in `tests/tasks/` (radar/rifornimento/store/
+zaino, scollegati) confermati identici con `git stash` mirato
+prima/dopo le modifiche.
+
+Commit `d9a947d`, pushato. Sync prod byte-identico. Pending:
+attivazione su istanza pilota + monitoraggio prima di estendere.
+
+---
+
 ## Sessione 23/07/2026 — WU253: special_promo standard su tutte le istanze
 
 Durante l'analisi task/priorità/schedulazione (richiesta separata),
