@@ -51,6 +51,8 @@ import json
 import os
 import time
 
+import numpy as np
+
 
 # ------------------------------------------------------------------
 # Geometria hub / sidebar (calibrata live su FAU_00 22/07/2026)
@@ -102,7 +104,7 @@ BADGE_RED_MIN_FRAC: float                    = 0.08
 # "Titan Approaches" (icona+etichetta pulite, nessun bleed da righe vicine).
 ROW_CROP_X:        tuple[int, int]            = (0, 220)
 ROW_CROP_HALF_H:    int                        = 25
-ROW_MATCH_THRESHOLD: float                     = 0.85
+ROW_MATCH_THRESHOLD: float                     = 0.82
 CLAIM_TEMPLATE:      str                      = "pin/pin_login_rewards_claim.png"
 CLAIM_ZONE:          tuple[int, int, int, int] = (780, 150, 925, 520)
 CLAIM_THRESHOLD:      float                   = 0.80
@@ -236,18 +238,40 @@ def salva_crop_riga(riga_id: str, frame, by: int) -> None:
     cv2.imwrite(os.path.join(_TITLES_DIR, f"{riga_id}.png"), crop)
 
 
+def _preprocess_riga_match(img):
+    """Preprocessing per il confronto riga (24/07/2026 — richiesta utente
+    dopo duplicati nel catalogo: la stessa voce veniva salvata più volte
+    perché il match a pixel grezzi risentiva del colore di sfondo riga
+    (chiaro se selezionata/tappata, scuro se deselezionata) e della
+    colonna badge rosso (185-215px, presente/assente a seconda del
+    conteggio non ancora reclamato). Fix: taglia la colonna badge
+    (mantiene solo 0-180px), poi estrae i soli contorni (Canny) e li
+    dilata 3x3 — confronta la SAGOMA di icona+testo, non i colori dello
+    sfondo, quindi resistente a selezione/badge."""
+    import cv2
+    sub = img[:, 0:180]
+    gray = cv2.cvtColor(sub, cv2.COLOR_BGR2GRAY)
+    edges = cv2.Canny(gray, 50, 150)
+    kernel = np.ones((3, 3), np.uint8)
+    return cv2.dilate(edges, kernel, iterations=1)
+
+
 def riconosci_riga(frame, by: int, crops: dict) -> tuple[str | None, float]:
     """Confronta la riga sidebar al pallino (bx,by) — crop dalla STESSA
     screenshot già usata per trova_pallini_sidebar, zero screenshot extra
-    — contro tutte le righe già viste. Ritorna (id, score) del migliore
+    — contro tutte le righe già viste. Preprocessa entrambe le immagini
+    (vedi _preprocess_riga_match) per ignorare sfondo/badge e confrontare
+    solo la sagoma icona+testo. Ritorna (id, score) del migliore
     se >= soglia, altrimenti (None, best_score)."""
     import cv2
     crop = ritaglia_riga(frame, by)
+    crop_prep = _preprocess_riga_match(crop)
     best_id, best_score = None, 0.0
     for tid, tmpl in crops.items():
         if tmpl.shape[:2] != crop.shape[:2]:
             continue
-        res = cv2.matchTemplate(crop, tmpl, cv2.TM_CCOEFF_NORMED)
+        tmpl_prep = _preprocess_riga_match(tmpl)
+        res = cv2.matchTemplate(crop_prep, tmpl_prep, cv2.TM_CCOEFF_NORMED)
         score = float(res.max())
         if score > best_score:
             best_id, best_score = tid, score
