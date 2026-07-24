@@ -720,6 +720,67 @@ def api_nodi_mappa_rebuild():
     return JSONResponse({"ok": True, "meta": meta})
 
 
+# ==============================================================================
+# Claim catalog (hub "Event Center") — pannello SOLA LETTURA (24/07/2026,
+# richiesta utente). Mostra il catalogo auto-appreso (shared/claim_catalog.py)
+# delle voci sidebar dell'hub Event Center, con l'immagine crop di
+# riconoscimento (l'identità di una voce è l'immagine, non un nome — vedi
+# docstring del modulo) e lo stato claimable/non-claimable appreso.
+# ==============================================================================
+
+@app.get("/ui/claim-catalog", include_in_schema=False)
+def ui_claim_catalog(request: Request, filtro: str = ""):
+    """Pagina sola-lettura del catalogo claim auto-appreso (hub Event Center).
+    filtro: '' (tutti) | 'si' (solo claimable) | 'no' (solo non-claimable)."""
+    from shared.claim_catalog import carica_catalogo, deve_rivalutare
+
+    catalogo = carica_catalogo()
+    righe = []
+    n_claimable = 0
+    for cid, dati in catalogo.items():
+        claimable = bool(dati.get("claimable"))
+        if claimable:
+            n_claimable += 1
+        if filtro == "si" and not claimable:
+            continue
+        if filtro == "no" and claimable:
+            continue
+        righe.append({
+            "id": cid,
+            "claimable": claimable,
+            "first_seen": dati.get("first_seen") or "—",
+            "last_seen": dati.get("last_seen") or "—",
+            "last_checked": dati.get("last_checked") or "—",
+            "da_rivalutare": (not claimable) and deve_rivalutare(dati),
+        })
+    righe.sort(key=lambda r: r["id"])
+
+    return templates.TemplateResponse(request, "claim_catalog.html", {
+        "active":      "claim_catalog",
+        "filtro":      filtro,
+        "righe":       righe,
+        "total":       len(catalogo),
+        "n_claimable": n_claimable,
+        **_env_label(),
+    })
+
+
+@app.get("/claim-catalog/image/{claim_id}", include_in_schema=False)
+def claim_catalog_image(claim_id: str):
+    """Serve il PNG crop (icona+etichetta riga sidebar) di una voce del
+    catalogo claim, per l'anteprima visiva nel pannello — l'id (es. t001)
+    non è un nome leggibile, solo l'immagine identifica la voce."""
+    from fastapi.responses import FileResponse
+    from shared.claim_catalog import _TITLES_DIR
+
+    if not claim_id.isalnum():
+        return HTMLResponse("id non valido", status_code=400)
+    path = os.path.join(_TITLES_DIR, f"{claim_id}.png")
+    if not os.path.exists(path):
+        return HTMLResponse("immagine non trovata", status_code=404)
+    return FileResponse(path, media_type="image/png")
+
+
 @app.get("/ui/raccolta", include_in_schema=False)
 def ui_raccolta(request: Request, days: int = 7):
     """Pagina analisi nodi raccolta — distribuzione tipo×livello + fill rate."""

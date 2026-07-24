@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Doomsday V6 — Claim Catalog{% endblock %}
+{% block content %}
+
+<div class="page-layout">
+  <div class="main-col" style="width:100%">
+
+    <div class="section">
+      <div class="sec-label">🎁 claim catalog — hub Event Center (sola lettura)</div>
+      <div style="color:var(--text-dim);font-size:11px;margin-bottom:10px">
+        Catalogo auto-appreso dalle voci sidebar dell'hub Event Center (icona rotante HOME) ·
+        l'identità di una voce è l'IMMAGINE della riga (icona+etichetta), non un nome — l'id
+        (es. <code>t001</code>) è solo un contatore progressivo · condiviso dev/prod, popolato dal
+        task <code>event_center_claims</code>
+      </div>
+
+      <!-- Sommario + filtri -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;flex-wrap:wrap">
+        <span style="color:var(--text-dim);font-size:12px">{{ total }} voci censite</span>
+        <span style="color:var(--text-dim);font-size:12px">·</span>
+        <span style="color:var(--accent);font-size:12px">{{ n_claimable }} claimable</span>
+        <span style="color:var(--text-dim);font-size:12px">·</span>
+        <span style="color:var(--text-dim);font-size:12px">{{ total - n_claimable }} non claimable</span>
+
+        <span style="margin-left:16px;color:var(--text-dim);font-size:12px;letter-spacing:1px;text-transform:uppercase">filtro</span>
+        <a href="{{ url_prefix }}/ui/claim-catalog"
+           style="display:inline-flex;align-items:center;padding:2px 9px;border:0.5px solid {% if not filtro %}var(--accent){% else %}var(--border){% endif %};border-radius:3px;font-size:12px;color:{% if not filtro %}var(--accent){% else %}var(--text-dim){% endif %};text-decoration:none">tutti</a>
+        <a href="{{ url_prefix }}/ui/claim-catalog?filtro=si"
+           style="display:inline-flex;align-items:center;padding:2px 9px;border:0.5px solid {% if filtro=='si' %}var(--accent){% else %}var(--border){% endif %};border-radius:3px;font-size:12px;color:{% if filtro=='si' %}var(--accent){% else %}var(--text-dim){% endif %};text-decoration:none">claimable</a>
+        <a href="{{ url_prefix }}/ui/claim-catalog?filtro=no"
+           style="display:inline-flex;align-items:center;padding:2px 9px;border:0.5px solid {% if filtro=='no' %}var(--accent){% else %}var(--border){% endif %};border-radius:3px;font-size:12px;color:{% if filtro=='no' %}var(--accent){% else %}var(--text-dim){% endif %};text-decoration:none">non claimable</a>
+      </div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="section">
+      <div class="sec-label">voci censite</div>
+      <div style="overflow-x:auto">
+        <table id="cc-tbl" style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px">
+          <thead>
+            <tr>
+              <th style="background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px">anteprima</th>
+              <th onclick="ccSort(1,'str')" style="cursor:pointer;background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px;user-select:none">id <span class="cc-arrow"></span></th>
+              <th onclick="ccSort(2,'str')" style="cursor:pointer;background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:center;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px;user-select:none">claimable <span class="cc-arrow"></span></th>
+              <th onclick="ccSort(3,'str')" style="cursor:pointer;background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px;user-select:none">prima vista <span class="cc-arrow"></span></th>
+              <th onclick="ccSort(4,'str')" style="cursor:pointer;background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px;user-select:none">ultima vista <span class="cc-arrow"></span></th>
+              <th onclick="ccSort(5,'str')" style="cursor:pointer;background:var(--bg2);padding:5px 10px;border:0.5px solid var(--border);text-align:left;color:var(--text-dim);font-weight:400;font-size:11px;letter-spacing:1px;user-select:none">ultima verifica <span class="cc-arrow"></span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for r in righe %}
+              <tr data-sort-1="{{ r.id }}" data-sort-2="{{ 1 if r.claimable else 0 }}"
+                  data-sort-3="{{ r.first_seen }}" data-sort-4="{{ r.last_seen }}" data-sort-5="{{ r.last_checked }}">
+                <td style="padding:4px 10px;border:0.5px solid var(--border)">
+                  <img src="{{ url_prefix }}/claim-catalog/image/{{ r.id }}" alt="{{ r.id }}"
+                       style="max-width:180px;max-height:40px;display:block" loading="lazy">
+                </td>
+                <td style="padding:4px 10px;border:0.5px solid var(--border);color:var(--text)">{{ r.id }}</td>
+                <td style="padding:4px 10px;border:0.5px solid var(--border);text-align:center">
+                  {% if r.claimable %}
+                    <span style="color:#81c784">✓ sì</span>
+                  {% else %}
+                    <span style="color:var(--text-dim)">no{% if r.da_rivalutare %} <span title="oltre la finestra di rivalutazione, verrà ricontrollata al prossimo incontro" style="color:#e5a373">⟳</span>{% endif %}</span>
+                  {% endif %}
+                </td>
+                <td style="padding:4px 10px;border:0.5px solid var(--border);color:var(--text-dim);font-size:11px">{{ r.first_seen }}</td>
+                <td style="padding:4px 10px;border:0.5px solid var(--border);color:var(--text-dim);font-size:11px">{{ r.last_seen }}</td>
+                <td style="padding:4px 10px;border:0.5px solid var(--border);color:var(--text-dim);font-size:11px">{{ r.last_checked }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="6" style="padding:14px;text-align:center;color:var(--text-dim);border:0.5px solid var(--border)">nessuna voce censita ancora</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+  let ccSortCol = -1, ccSortAsc = true;
+  function ccSort(col, kind) {
+    const tbl  = document.getElementById('cc-tbl');
+    const tbody = tbl.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr')).filter(r => r.hasAttribute('data-sort-' + col));
+    if (!rows.length) return;
+
+    ccSortAsc = (ccSortCol === col) ? !ccSortAsc : true;
+    ccSortCol = col;
+
+    rows.sort((a, b) => {
+      let va = a.getAttribute('data-sort-' + col) || '';
+      let vb = b.getAttribute('data-sort-' + col) || '';
+      if (kind === 'num') {
+        va = parseFloat(va) || 0;
+        vb = parseFloat(vb) || 0;
+        return ccSortAsc ? va - vb : vb - va;
+      }
+      return ccSortAsc ? va.localeCompare(vb) : vb.localeCompare(va);
+    });
+    rows.forEach(r => tbody.appendChild(r));
+
+    tbl.querySelectorAll('.cc-arrow').forEach(s => s.textContent = '');
+    const th = tbl.querySelectorAll('thead th')[col];
+    if (th) th.querySelector('.cc-arrow').textContent = ccSortAsc ? '▲' : '▼';
+  }
+</script>
+
+{% endblock %}
