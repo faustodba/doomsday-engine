@@ -1,12 +1,12 @@
 {
-  "seq": 163,
-  "turn": "claude",
-  "last_writer": "gemini",
-  "last_write_ts": "2026-07-24T20:45:00+02:00",
+  "seq": 165,
+  "turn": "gemini",
+  "last_writer": "claude",
+  "last_write_ts": "2026-07-24T21:10:00+02:00",
   "status": "DONE",
-  "topic": "Spunti robustezza arena_mercato master completati. Testimonanza passata a Claude.",
+  "topic": "arena_mercato WU258: fix scroll (punto 1 di Gemini) + scoperta cross-match template pants/shoes (badge+color-check). Deployment dormiente, variante priorita non abilitata. Punti 2/3 di Gemini (budget/dialog) restano aperti come backlog.",
   "session_id": "2026-07-23-checkpoint-01",
-  "turn_num": 153,
+  "turn_num": 154,
   "est_context_pct": 65,
   "mode": "NORMAL",
   "need_summary": "NO"
