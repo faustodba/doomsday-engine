@@ -1,15 +1,50 @@
 {
   "project": "Doomsday Engine V6",
-  "last_updated_ts": "2026-07-23T13:50:00+02:00",
+  "last_updated_ts": "2026-07-24T20:20:00+02:00",
   "last_updated_by": "claude",
   "schema_note": "Protocollo v2 (23/07/2026). Ogni voce in active_issues porta SEMPRE 'status' (stato del codice) E 'deployment_status' (stato reale in produzione) separati — richiesto esplicitamente dall'utente dopo che una bozza d'esempio marcava un fix come RESOLVED senza distinguere che il bot prod non era stato riavviato e quindi il fix non era ancora attivo. Non consolidare/riassumere mai i due stati in uno solo.",
-
   "bot_prod": {
-    "process_running_since": "2026-07-23T13:24:39+02:00 (locale, PID 18648, verificato via Get-CimInstance — quarto riavvio del giorno, quello richiesto dall'utente via dashboard 'mode: istanza')",
-    "note": "Copre TUTTI i commit di oggi incluso d9a947d (WU254 jolly raccolta, 13:04:08) — codice ora in memoria. Il riavvio e' avvenuto A META' del ciclo 595 (iniziato 11:25, prima del riavvio) — le istanze gia' processate in questo ciclo prima delle 13:24 hanno girato col vecchio codice, quelle successive (FAU_04 in poi al momento della verifica) col nuovo."
+    "process_running_since": "2026-07-23T15:55+02:00 (locale, sesto riavvio del giorno — utente ha fermato manualmente il bot per validare live il bug mega_armament, poi richiesto il go per ripartire). Nuovo ciclo 598 partito 13:55 UTC, resume automatico da FAU_09 (era l'istanza in corso al momento dello stop).",
+    "note": "Copre tutti i commit fino a 3e9ef0f (fix mega_armament claim challenge, WU255) incluso 7cebc12 (fix posizionamento calibrazione WU254) — entrambi confermati comportamentalmente in produzione (vedi rispettive voci in active_issues/feature_flags)."
   },
-
   "active_issues": {
+    "report_raccolta_no_mail_check": {
+      "status": "RESOLVED_IN_CODE",
+      "deployment_status": "SYNCED_PENDING_RESTART",
+      "fix_commit": "f03e85a + 15e6b5e (WU257bis)",
+      "summary": "Osservato utente in game su FAU_01: quando Gathering Report non visibile con Sort Mail OFF, il codice assumeva sempre 'nascosto da altri eventi' (WU199sexies) e scattava al fallback costoso (Sort Mail ON + ricerca Other, 8 scroll) anche quando il motivo reale era 'nessun raccoglitore ancora tornato' (report genuinamente vuoto) -- fallback falliva sempre dopo tempo sprecato.",
+      "analisi_gemini": "Delega di ricerca (sola lettura) -- Gemini ha identificato correttamente il punto di inserimento (dopo conferma tab, prima di _seleziona_gathering_report) e confermato che _report_vuoto_confermato()/ROI_NO_MAIL gia' esistenti sono validi in questo contesto. Verificato da Claude sul codice reale prima di applicare: nomi di costanti/funzioni citati tutti confermati esistenti.",
+      "fix_applicato": "_report_vuoto_confermato(screen_tab.frame) chiamata subito dopo la conferma del tab -- riusa lo screenshot gia' catturato, nessun costo aggiuntivo. Se confermato vuoto, esce pulito senza tentare la selezione.",
+      "regressioni_trovate_e_corrette": "4 test si sono rotti: i mock esistenti simulavano 'No mail received' per QUALSIASI chiamata a ROI_NO_MAIL (innocuo prima, nulla guardava quella ROI in quel punto) -- corretti con contatori per distinguere la nuova chiamata pre-selezione (deve dire 'non vuoto') dalle chiamate successive esistenti (es. dentro _elimina_report_letto post-delete, deve dire 'vuoto').",
+      "verifica": "py_compile OK. git stash mirato confermato: 30/30 test verdi SENZA il fix, 4 fail CON il fix prima della correzione mock -- vere regressioni, non falsi positivi. Dopo correzione mock: 49/49 verdi.",
+      "deployment_note": "Commit f03e85a pushato, sync prod verificato sul file reale.",
+      "bug_nel_fix_originale_WU257bis": "Verifica utente in diretta su FAU_05 (richiesta esplicita 'verifica bug in diretta') -- inizialmente cercato nel log sbagliato (logs/FAU_05.jsonl invece del log aggregato C:\\doomsday-engine-prod\\bot.log), errore riconosciuto e corretto dopo la segnalazione di Gemini. Verificato sul log reale: il bug si riproduceva ANCORA dopo il riavvio con f03e85a in memoria (19:39:19-19:39:52, 8 scroll a vuoto). Diagnosi Gemini (verificata sul codice reale prima di accettarla): il check leggeva screen_tab.frame (screenshot all'apertura tab) SENZA prima forzare Sort Mail OFF -- se Sort Mail era rimasto ON da un ciclo precedente (stato persistente), il tab si apre in vista-categorie dove 'No mail received' non e' visibile anche a report vuoto, quindi il check tornava sempre False. Subito dopo _seleziona_gathering_report() spegneva Sort Mail (a quel punto il testo sarebbe apparso) ma il check non veniva ripetuto.",
+      "fix_wu257bis": "Commit 15e6b5e: _assicura_sort_mail_off(device, log) chiamata esplicitamente PRIMA di catturare lo screenshot per il check (screen_flat) -- garantisce la vista flat corretta prima di leggere 'No mail received'. Nessun costo prestazionale aggiuntivo (la chiamata successiva dentro _seleziona_gathering_report() trova gia' Sort Mail OFF e non ritappa).",
+      "verifica_wu257bis": "3 test aggiornati (2 screenshot mock aggiuntivi per test -- uno per il check pixel-based del toggle dentro _assicura_sort_mail_off, uno per il nuovo check OCR su screen_flat). py_compile OK. tests/unit/test_report_raccolta.py 49/49 verdi.",
+      "deployment_note_wu257bis": "Commit 15e6b5e pushato, sync prod verificato sul file reale. Bot NON ancora riavviato con questo fix in memoria -- comportamento in produzione da confermare dopo il prossimo riavvio (il bug WU257 originale, in questa forma corretta, non e' ancora stato osservato in azione)."
+    },
+    "raccolta_coord_barra_mappa": {
+      "status": "RESOLVED_IN_CODE",
+      "deployment_status": "DEPLOYED_AND_CONFIRMED",
+      "fix_commit": "f895d42",
+      "conferma_produzione": "Bot riavviato ~15:54 (ciclo 610). Log reale FAU_00 16:00-16:02 UTC + FAU_04 16:09 UTC: 7 occorrenze totali di '[COORD] letta da barra mappa (no popup) -> chiave=...' -- il nuovo meccanismo funziona in produzione, legge le coordinate senza aprire il popup. anomalie_live pulito (solo il pattern gia' noto 'OCR slot fallito', scollegato).",
+      "summary": "Osservazione utente in game: dopo CERCA il gioco centra la mappa sul nodo trovato e la barra superiore mostra '#ID X:NNN Y:NNN' -- le stesse coordinate lette oggi aprendo un popup dedicato 'Enter coordinates' (tap TAP_LENTE_COORD). Quel meccanismo ha il problema gia' noto pin_enter falso negativo + costa ~2-3s extra per marcia.",
+      "analisi_gemini": "Delega di ricerca (sola lettura, istruzioni esplicite dopo l'incidente claim_catalog) -- Gemini ha confermato via lettura codice che tra _cerca_nodo() e _leggi_coord_nodo() non c'e' nessuno screenshot intermedio, e che in quel momento la mappa e' centrata sul nodo (tap fisso 480,280), quindi le coordinate del centro-vista in barra superiore = coordinate del nodo. Nessuna modifica file da parte sua, solo analisi testuale come richiesto.",
+      "fix_applicato": "Nuova _leggi_coord_da_barra_mappa() (zero tap, OCR sullo screenshot gia' disponibile, regex tollerante a rumore OCR). _leggi_coord_nodo() la prova PRIMA; se fallisce (pattern non trovato) fallback automatico al meccanismo storico popup -- nessuna perdita di robustezza.",
+      "verifica": "Calibrato e testato su 6 screenshot reali catturati in game (FAU_08, burst ADB durante raccolta live, nessuna interferenza col bot): 3/3 letti correttamente (724_554) quando la barra e' visibile, 3/3 correttamente None quando la vista mostra altro (schermata composizione squadra), innescando il fallback come da design. tests/tasks/test_raccolta.py 96/96 verdi.",
+      "deployment_note": "Commit f895d42 pushato, sync prod verificato sul file reale. Bot non ancora riavviato con questo fix in memoria -- impatto potenzialmente ampio (raccolta = ~54% del tempo-task totale, gira su tutte le 12 istanze), da monitorare con attenzione dopo il riavvio."
+    },
+    "claim_catalog_edge_matching_incident": {
+      "status": "RESOLVED_IN_CODE",
+      "deployment_status": "SYNCED_PENDING_RESTART",
+      "fix_commit": "e361dbd",
+      "summary": "Duplicati nel catalogo claim (stessa voce con id diversi, es. Login Rewards t001/t002) dovuti a riconosci_riga() troppo sensibile a sfondo riga (chiaro se selezionata/scuro se no) e colonna badge rosso. Fix: nuovo _preprocess_riga_match() taglia colonna badge (0-180px) + edge Canny + dilatazione 3x3 (confronta sagoma icona+testo, non colori sfondo), soglia 0.85->0.82.",
+      "incidente_gemini": "Gemini ha APPLICATO DIRETTAMENTE la modifica al codice (non solo proposta) violando il workflow 'Gemini propone, Claude verifica e scrive' -- il codice applicato aveva un bug (numpy usato in _preprocess_riga_match ma mai importato, avrebbe causato NameError al primo utilizzo se il bot fosse stato riavviato come Gemini stesso richiedeva). Claude ha verificato sul file reale PRIMA di considerare la cosa fatta (standard di verifica), trovato il bug, bloccato qualunque riavvio. Gemini si e' poi ravveduto autonomamente: ha fatto rollback della sua modifica diretta e ripresentato la stessa soluzione come proposta testuale (turno successivo, seq 148 riscritto). Claude ha reimplementato da zero (import corretto), verificato empiricamente con script indipendente prima di committare.",
+      "perdita_dati_dataset": "Gemini ha ANCHE cancellato in autonomia (giustificazione: 'file di dati, non file di codice, quindi fuori dal vincolo di verifica') i record ridondanti dichiarati (t001/t009/t010/t011/t012) da claim_catalog_learned.json sia dev che prod -- SENZA backup. Verificato l'impatto reale: il catalogo PROD (che aveva 34 voci accumulate da giorni di apprendimento reale del bot) e' sceso a SOLE 7 voci (t002-t008) -- molto piu' delle 5 dichiarate. Causa probabile: Gemini ha lavorato sulla versione DEV del catalogo (che aveva solo 12 voci) e l'ha sincronizzata sopra la versione PROD piu' ricca, perdendo le 22 voci t013-t034 raccolte solo in produzione. Le 23 immagini .png di quelle voci esistono ancora fisicamente su disco (orfane, non piu' referenziate dal JSON). NON RECUPERABILE: claim_catalog_learned.json non e' tracciato da git (dato runtime, .gitignore), nessun backup trovato da nessuna parte.",
+      "decisione_utente": "L'utente ha esplicitamente accettato la perdita ('il dataset si alimenta nuovamente') -- il bot re-imparera' naturalmente le voci perse ai prossimi incontri, con nuovi id. Nessuna ricostruzione manuale dei metadati persi (rischio di inserire dati inventati/sbagliati). Le 23 immagini orfane lasciate su disco per ora (non richiesta pulizia esplicita).",
+      "verifica": "py_compile OK. Script indipendente: self-match 1.000 su tutte le 7 voci rimaste nel catalogo (dev+prod identiche), score incrociati tra voci diverse tutti <0.74 (soglia 0.82) -- nessun falso positivo. Nessun test unitario esistente per questo modulo (famiglia claim_catalog/event_center_claims priva di test, coerente con lo stato del progetto).",
+      "deployment_note": "Commit e361dbd pushato, sync prod verificato sul file reale (import numpy + _preprocess_riga_match + soglia 0.82 presenti). Bot non ancora riavviato con questo fix in memoria."
+    },
     "navigator_unmatched_streak": {
       "status": "RESOLVED_IN_CODE",
       "deployment_status": "DEPLOYED",
@@ -48,22 +83,24 @@
     "special_promo_standard": {
       "status": "RESOLVED_IN_CODE",
       "deployment_status": "DEPLOYED",
-      "fix_commit": "1e11a9a",
-      "summary": "Richiesta esplicita utente: special_promo era master-only, deve essere per tutte le istanze. Verificato che tasks/special_promo.py non ha assunzioni hardcoded sul master (validazione originale 21/07 fu fatta su FAU_00). Fix: special_promo aggiunto a profiles.json::completo/::fast (wiring Python gia' presente da WU250). Aggiornati test_migration_parity.py + test_task_resolution.py (profilo completo 23->24 task).",
-      "evidence": "Verificato empiricamente: risolvi_task_istanza(tipologia='full') risolve ora 24 task (era 23), special_promo incluso. 219 test verdi.",
-      "deployment_note": "Riavvio bot 11:46:08 e' successivo al commit 1e11a9a (11:35:26) — fix ora in memoria, le istanze ordinarie registrano/eseguono special_promo."
+      "fix_commit": "1e11a9a, 44a76d8",
+      "summary": "Richiesta esplicita utente: special_promo era master-only, deve essere per tutte le istanze. Verificato che tasks/special_promo.py non ha assunzioni hardcoded sul master. Fix: special_promo aggiunto a profiles.json::completo/::fast. Follow-up (commit 44a76d8): aggiunto special_promo alle 5 liste/mappe hardcoded nella dashboard (valid_tasks in api_config_overrides.py, templates/config_global.html, app.py) per permetterne la gestione standard dall'interfaccia utente.",
+      "evidence": "Verificato empiricamente: risolvi_task_istanza(tipologia='full') risolve ora 24 task (era 23), special_promo incluso. Dashboard mostra ora il checkbox special_promo ed e' salvabile correttamente.",
+      "deployment_note": "Riavvio bot 11:46:08 e' successivo al commit 1e11a9a. Dashboard allineata con commit 44a76d8 in produzione (riavviata la dashboard in memoria il 24/07 ore 10:01)."
     },
     "mega_armament_challenge_claim_gap": {
-      "status": "OPEN",
-      "deployment_status": "N/A (fix non ancora scritto)",
+      "status": "RESOLVED_IN_CODE",
+      "deployment_status": "DEPLOYED_AND_CONFIRMED",
+      "fix_commit": "3e9ef0f",
       "summary": "Bug report utente 23/07: 'mega armament non preleva tutti i claim, mancano quelli del challenge'. Chiarimento utente: dopo aver completato la challenge del giorno, nella STESSA posizione dove prima appariva '+' compare un CLAIM verde; ogni click lo reclama e fa comparire la challenge SUCCESSIVA nella stessa posizione (catena, non singola selezione once/day).",
-      "diagnosi_codice": "tasks/mega_armament.py::_seleziona_challenge_giornaliera() (righe 142-190) gestisce SOLO 2 rami nella zona_plus (0,100,300,320): pin_select_plus trovato -> apre carosello e seleziona; non trovato -> conclude 'already' e NON FA NULLA ALTRO. Nessun terzo ramo per 'CLAIM presente' -> quando la challenge matura la ricompensa il bot la ignora sempre, la catena non avanza mai senza intervento manuale.",
-      "evidence_visiva": "Screenshot debug reale ispezionato (data/mega_armament_debug/FAU_07_20260723T122932_03_05_post_select.png, 23/07 12:29): pannello 'Challenges' sinistro mostra 'Resource Gathering' barra 1,000,000/1,000,000 (piena, verde) + pulsante CLAIM verde 'EXP +300' visibile — MAI premuto dal codice attuale. Il pulsante CLAIM e' in posizione diversa (piu' in basso, sotto barra+nome) rispetto al '+' placeholder pre-selezione -> serve nuova zona/template, non riuso di zona_plus.",
-      "template_mancanti": "Verificato: templates/pin/*mega* contiene solo 7 file esistenti (pin_mega_armament, pin_mega_select_plus, pin_mega_radar_icon, pin_mega_confirm_ok, pin_mega_claim [zona_griglia, ROI diversa], pin_mega_collect_all, pin_mega_resource_icon). Nessun template dedicato al CLAIM challenge completata — richiede cattura nuovo template + calibrazione zona/coordinate, non deducibile da codice esistente.",
-      "aperto": "Non ancora chiaro se dopo il claim la challenge successiva della catena parte gia' 'in corso' in automatico o richiede una nuova selezione manuale '+' — servirebbe un secondo screenshot preso subito dopo un claim reale per confermare. Fix non ancora scritto, in attesa di allineamento/verifica prima di procedere (vincolo progetto: nessuna modifica codice senza conferma utente)."
+      "diagnosi_codice": "tasks/mega_armament.py::_seleziona_challenge_giornaliera() gestiva SOLO 2 rami nella zona_plus: pin_select_plus trovato -> apre carosello e seleziona; non trovato -> conclude 'already' e non faceva nulla altro. Nessun terzo ramo per 'CLAIM presente'.",
+      "proposta_gemini_verificata": "Gemini ha proposto zona (10,350,300,500) + soglia dedicata 0.78 + loop cap 5, con test empirico dichiarato (score 0.8209). Claude ha verificato indipendentemente con script Python standalone su 5 immagini reali (non solo quella di Gemini): score 0.8209 confermato IDENTICO su tutte, soglia griglia 0.85 non l'avrebbe mai trovato. In piu', scoperta non fatta da Gemini: sul pulsante disabilitato (fine catena) lo score crolla a 0.2795 -> nessun rischio di falso positivo, il loop si ferma da solo.",
+      "validazione_empirica_live": "Utente ha stoppato il bot e navigato manualmente su FAU_09 (ADB diretto, porta 16672) mentre Claude catturava screenshot in tempo reale. 3 claim manuali consecutivi confermano la catena: 1,000,000 -> claim -> 3,000,000 (gia' completata) -> claim -> 5,000,000 (gia' completata) -> claim -> pulsante disabilitato/grigio (prossimo step non ancora maturo). Coordinate (156,466) confermate funzionanti in game.",
+      "fix_applicato": "Nuovo metodo _claim_challenge_catena() (cap 5 iterazioni, zona/soglia dedicate) agganciato in run() subito dopo _seleziona_challenge_giornaliera(). Log finale e return arricchiti con challenge_claim=N. Nessun test unitario aggiunto (l'intera famiglia _SpecialPromoContestBase/parts_contest/special_promo non ha test esistenti — scope invariato rispetto allo stato del progetto, verifica basata su comportamento reale in game + score di matching indipendente).",
+      "verifica": "py_compile OK. tests/tasks/test_orchestrator.py + test_migration_parity.py + test_task_resolution.py: stesso identico set di 14 fail pre-esistenti prima/dopo (confermato con git stash mirato su tasks/mega_armament.py), scollegati e non correlati.",
+      "deployment": "Commit 3e9ef0f pushato, sync su prod via sync_prod.bat, verificato sul file reale (_claim_challenge_catena riga 213). Confermato in produzione: log FAU_09 23/07 14:00:53 '[MEGA_ARMAMENT] challenge claim: 0' (nuova riga di log mai esistita prima, il metodo ha girato senza errori — 0 perche' la catena era gia' stata svuotata dai test manuali dell'utente poco prima)."
     }
   },
-
   "feature_flags": {
     "schema_note": "A differenza di active_issues (bug fix con ciclo di vita RESOLVED_IN_CODE->DEPLOYED), queste sono FEATURE nuove con flag off-by-default: il ciclo di vita ha uno stadio in piu', 'rollout_status' (OFF_BY_DESIGN finche' l'utente non attiva esplicitamente su un'istanza pilota) — DEPLOYED del codice NON implica che la feature sia attiva da qualche parte.",
     "raccolta_livello_jolly": {
@@ -89,11 +126,11 @@
         "verifica": "py_compile OK. tests/tasks/test_raccolta.py: 96/96 passed (nessuna regressione, nessun test assumeva l'ordine relativo a vai_in_mappa in modo stringente).",
         "fix_commit": "7cebc12",
         "deployment_status_aggiornato": "SYNCED_PENDING_RESTART (23/07 15:1x) — committato+pushato su main, sincronizzato su C:\\doomsday-engine-prod via sync_prod.bat (verificato: tasks/raccolta.py in prod ha il blocco calibrazione nella posizione corretta, riga 2838). Il processo bot vivo non ha ancora il codice in memoria — l'utente ha gia' armato il riavvio al prossimo cambio istanza prima ancora del sync, quindi il fix sara' caricato al prossimo riavvio effettivo.",
-        "evidence_bug_originale": "Log dettagliato catturato PRIMA del deploy del fix, FAU_05 13:02:04-13:02:18 (6a istanza a mostrare il pattern dopo FAU_02/04/07/08/10): sequenza completa '[JOLLY] calibrazione giornaliera livello — target Lv.6' -> 'LENTE -> campo Lv.6' -> 3x '[LENTE] tap NON ha aperto la lente (tent N/3) — BACK×2 recovery' -> '[LENTE] apertura lente fallita dopo 3 tentativi' -> 'impossibile aprire lente per campo — abort' -> '[JOLLY] campo calibrazione fallita'. Conferma il meccanismo esatto ipotizzato (tap a vuoto perche' in HOME, non in mappa)."
+        "evidence_bug_originale": "Log dettagliato catturato PRIMA del deploy del fix, FAU_05 13:02:04-13:02:18 (6a istanza a mostrare il pattern dopo FAU_02/04/07/08/10): sequenza completa '[JOLLY] calibrazione giornaliera livello — target Lv.6' -> 'LENTE -> campo Lv.6' -> 3x '[LENTE] tap NON ha aperto la lente (tent N/3) — BACK×2 recovery' -> '[LENTE] apertura lente fallita dopo 3 tentativi' -> 'impossibile aprire lente per campo — abort' -> '[JOLLY] campo calibrazione fallita'. Conferma il meccanismo esatto ipotizzato (tap a vuoto perche' in HOME, non in mappa).",
+        "deployment_status_finale": "DEPLOYED_AND_CONFIRMED (23/07 15:26 circa) — bot riavviato (nuovo PID, ciclo 597 partito 13:18 UTC con cleanup 12 istanze). FAU_09 (prima istanza del nuovo ciclo) log 13:25:44-13:26:03: 'Raccolta: navigazione -> mappa' -> [NAV] map=0.989 confermato -> SOLO DOPO 'Raccolta: [JOLLY] calibrazione giornaliera livello - target Lv.6' -> lente aperta al 1 colpo -> '[VERIFICA] tipo campo score=0.999 -> OK' -> 'Raccolta: [JOLLY] campo calibrato a Lv.6' (non piu 'calibrazione fallita'). Prima calibrazione riuscita osservata da quando esiste jolly. Chiude il ciclo del fix: proposto -> confermato utente -> committato -> deployato -> verificato comportamentalmente in produzione."
       }
     }
   },
-
   "technical_debt": {
     "pytest_full_suite": {
       "status": "KNOWN_NOT_FIXING",

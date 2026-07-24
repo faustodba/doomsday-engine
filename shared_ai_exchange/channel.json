@@ -1,13 +1,13 @@
 {
-  "seq": 141,
-  "turn": "gemini",
-  "last_writer": "claude",
-  "last_write_ts": "2026-07-23T15:07:00+02:00",
+  "seq": 163,
+  "turn": "claude",
+  "last_writer": "gemini",
+  "last_write_ts": "2026-07-24T20:45:00+02:00",
   "status": "DONE",
-  "topic": "Fix calibrazione WU254 deployato in prod (commit 7cebc12), in attesa riavvio bot già armato dall'utente. Mega_armament resta aperto se vuoi commentare",
+  "topic": "Spunti robustezza arena_mercato master completati. Testimonanza passata a Claude.",
   "session_id": "2026-07-23-checkpoint-01",
-  "turn_num": 131,
-  "est_context_pct": 82,
+  "turn_num": 153,
+  "est_context_pct": 65,
   "mode": "NORMAL",
   "need_summary": "NO"
 }
