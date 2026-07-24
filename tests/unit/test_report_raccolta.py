@@ -454,12 +454,14 @@ class TestEseguiReportRaccoltaAbortSuTabSbagliato:
             return ""
 
         # screenshot in ordine: check tab iniziale (fail), check tab retry
-        # (ok), check toggle Sort Mail dentro _assicura_sort_mail_off
-        # (pixel, non OCR -- frame nero = toggle OFF, nessun tap), ricerca
-        # Gathering Report (fast path OFF, matcher configurato -> trovato),
-        # conferma header, check finale dentro _elimina_report_letto
-        # ("No mail received")
-        for _ in range(6):
+        # (ok), [WU257bis] check toggle Sort Mail dentro _assicura_
+        # sort_mail_off (pixel, non OCR -- frame nero = toggle OFF, nessun
+        # tap) + screenshot per il check "report vuoto" pre-selezione,
+        # check toggle Sort Mail dentro _seleziona_gathering_report (di
+        # nuovo, gia' OFF -- nessun tap), ricerca Gathering Report (fast
+        # path OFF, matcher configurato -> trovato), conferma header,
+        # check finale dentro _elimina_report_letto ("No mail received")
+        for _ in range(8):
             device.add_screenshot(Screenshot(_frame()))
         matcher = FakeMatcher()
         matcher.set_result(PIN_GATHERING_REPORT, (150, 300))
@@ -529,7 +531,9 @@ class TestScrollFermoConfermaFineLista:
     def test_pagina_identica_dopo_scroll_conferma_fine_lista(self):
         device = FakeDevice()
         device.add_screenshot(Screenshot(_frame()))  # tab check
-        device.add_screenshot(Screenshot(_frame()))  # toggle-off check
+        device.add_screenshot(Screenshot(_frame()))  # [WU257bis] toggle-off check (pre-selezione)
+        device.add_screenshot(Screenshot(_frame()))  # [WU257bis] check "report vuoto" pre-selezione
+        device.add_screenshot(Screenshot(_frame()))  # toggle-off check (dentro _seleziona_gathering_report)
         device.add_screenshot(Screenshot(_frame()))  # ricerca Gathering Report (fast path)
         device.add_screenshot(Screenshot(_frame()))  # conferma header
         device.add_screenshot(Screenshot(_frame()))  # pagina 1
@@ -553,7 +557,9 @@ class TestScrollFermoConfermaFineLista:
     def test_pagine_diverse_non_scattano_falso_positivo(self):
         device = FakeDevice()
         device.add_screenshot(Screenshot(_frame()))  # tab check
-        device.add_screenshot(Screenshot(_frame()))  # toggle-off check
+        device.add_screenshot(Screenshot(_frame()))  # [WU257bis] toggle-off check (pre-selezione)
+        device.add_screenshot(Screenshot(_frame()))  # [WU257bis] check "report vuoto" pre-selezione
+        device.add_screenshot(Screenshot(_frame()))  # toggle-off check (dentro _seleziona_gathering_report)
         device.add_screenshot(Screenshot(_frame()))  # ricerca Gathering Report (fast path)
         device.add_screenshot(Screenshot(_frame()))  # conferma header
         device.add_screenshot(Screenshot(_frame()))  # pagina 1

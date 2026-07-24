@@ -799,7 +799,23 @@ def esegui_report_raccolta(ctx, log_fn=None, solo_reset: bool = True) -> dict:
         # aver sprecato tempo. _report_vuoto_confermato() già esiste (OCR
         # positiva "No mail received", vedi WU199octies) ma finora era usata
         # solo per confermare l'esito di una Delete, mai qui.
-        if _report_vuoto_confermato(screen_tab.frame):
+        #
+        # WU257bis (24/07) — bug nel fix sopra, osservato in produzione
+        # (si ripresentava identico ANCHE col fix in memoria): il check va
+        # fatto sullo screenshot di screen_tab, catturato subito dopo
+        # l'apertura del tab — ma se Sort Mail era rimasto ON dal giro
+        # precedente (persiste tra sessioni), la vista è quella a categorie,
+        # dove "No mail received" non compare (nascosto dietro le caselle
+        # categoria) anche a report vuoto — il check ritornava sempre False
+        # in quel caso, lasciando intatto il vecchio bug. Fix: forzare
+        # Sort Mail OFF (vista flat, quella dove ROI_NO_MAIL è verificata
+        # valida da WU199octies) PRIMA di catturare lo screenshot per il
+        # check. _seleziona_gathering_report() sotto chiama comunque
+        # _assicura_sort_mail_off() di suo — la trova già OFF, nessun tap
+        # aggiuntivo.
+        _assicura_sort_mail_off(device, log)
+        screen_flat = device.screenshot()
+        if screen_flat is not None and _report_vuoto_confermato(screen_flat.frame):
             log("[REPORT-RACCOLTA] report vuoto confermato (No mail received) "
                 "— nessun raccoglitore ancora tornato, nessuna azione necessaria")
             device.tap(TAP_TAB_ALLIANCE)
