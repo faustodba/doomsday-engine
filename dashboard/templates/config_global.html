@@ -130,7 +130,7 @@ async function promoteRuntimeToStatic() {
         <div class="col-sep"></div>
         <div class="col-sub">task baseline (default reset)</div>
         <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px">
-          {% for tk in ['raccolta','rifornimento','zaino','vip','alleanza','messaggi','arena','arena_mercato','boost','store','radar','radar_census','donazione','main_mission','district_showdown','truppe','grafica_hq','pulizia_cache','mall_daily','mega_armament','event_center_claims','titan_approaches'] %}
+          {% for tk in ['raccolta','rifornimento','zaino','vip','alleanza','messaggi','arena','arena_mercato','boost','store','radar','radar_census','donazione','main_mission','district_showdown','truppe','grafica_hq','pulizia_cache','mall_daily','mega_armament','event_center_claims','titan_approaches','special_promo'] %}
           <label style="display:flex;align-items:center;gap:5px;font-size:10px;color:var(--text-dim);cursor:pointer">
             <input type="checkbox" id="gc-task-{{ tk }}" {% if tsk.get(tk) %}checked{% endif %}>
             <span>{{ tk }}</span>
@@ -710,7 +710,7 @@ function gcUpdateRallocTotal() {
 
 async function gcSalvaSistema() {
   // Costruisce sezione sistema + task + auto_learn_banner + raccolta_ocr_debug
-  const taskList = ['raccolta','rifornimento','zaino','vip','alleanza','messaggi','arena','arena_mercato','boost','store','radar','radar_census','donazione','main_mission','district_showdown','truppe','grafica_hq','pulizia_cache','mall_daily','mega_armament','event_center_claims','titan_approaches'];
+  const taskList = ['raccolta','rifornimento','zaino','vip','alleanza','messaggi','arena','arena_mercato','boost','store','radar','radar_census','donazione','main_mission','district_showdown','truppe','grafica_hq','pulizia_cache','mall_daily','mega_armament','event_center_claims','titan_approaches','special_promo'];
   const task = {};
   taskList.forEach(t => { task[t] = gcGb('gc-task-'+t); });
   // Restart scheduler config (06/05): toggle ON/OFF esplicito per ogni
