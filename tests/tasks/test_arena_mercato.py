@@ -513,6 +513,106 @@ class TestAcquistoPriorita(unittest.TestCase):
         tot = self._task()._acquista_priorita(ctx)
         self.assertEqual(tot, 1)
 
+    def test_scan_singola_passata_swipe_totali_non_per_item(self):
+        # WU258 — fix bug scroll ripetuto: prima della fix, ogni item con
+        # template presente ma nessun match faceva comunque il proprio giro
+        # completo di _MERCATO_MAX_SCROLL+1 swipe (loop item-esterno) — con
+        # 3 item questo significava fino a 3x troppi swipe. Con lo scroll
+        # come loop ESTERNO (singola passata), il totale resta limitato a
+        # _MERCATO_MAX_SCROLL+1 indipendentemente dal numero di item.
+        from tasks.arena_mercato import _MERCATO_MAX_SCROLL
+        vuoto = [[] for _ in range(_MERCATO_MAX_SCROLL + 1)]
+        m = _PMatcher({
+            "pin/pin_honing_chip.png":    vuoto,
+            "pin/pin_pants_frag_oro.png": vuoto,
+            "pin/pin_shoes_frag_oro.png": vuoto,
+        })
+        ctx = _PCtx(m)
+        tot = self._task()._acquista_priorita(ctx)
+        self.assertEqual(tot, 0)
+        self.assertEqual(ctx.device.swipes, _MERCATO_MAX_SCROLL + 1)
+
+    def test_scan_trova_item_in_priorita_diversa_nella_stessa_passata(self):
+        # WU258 — honing_chip trovato SOLO al 3° scroll, pants_frag_oro
+        # trovato SOLO al 1° scroll: con lo scroll come loop esterno,
+        # entrambi vengono trovati nella stessa unica passata top-to-bottom.
+        from tasks.arena_mercato import _MERCATO_MAX_SCROLL
+        vuoto = []
+        seq_chip = [vuoto, vuoto, vuoto, [_PMatch(655, 200)], vuoto][: _MERCATO_MAX_SCROLL + 1]
+        seq_pants = [[_PMatch(358, 301)], vuoto, vuoto, vuoto, vuoto][: _MERCATO_MAX_SCROLL + 1]
+        m = _PMatcher({
+            "pin/pin_honing_chip.png":    seq_chip,
+            "pin/pin_pants_frag_oro.png": seq_pants,
+        })
+        ctx = _PCtx(m)
+        tot = self._task()._acquista_priorita(ctx)
+        # pants_frag_oro ha verifica_colore configurata ma _PCtx.device non
+        # espone .frame reale → getattr(shot,"frame",None) è None → check
+        # colore saltato per costruzione (nessun frame da leggere), quindi
+        # entrambi gli acquisti vanno a buon fine.
+        self.assertEqual(tot, 2)
+
+
+class TestAcquistoPrioritaVerificaColoreRarita(unittest.TestCase):
+    """WU258 — pants/shoes leggendari: match sul badge (discrimina l'oggetto)
+    + verifica colore sfondo card dietro il badge (discrimina la rarità,
+    scarta un match su una card epica/altro tier che condivide lo stesso
+    badge)."""
+
+    def setUp(self):
+        self._sp = patch("tasks.arena_mercato.time.sleep")
+        self._sp.start()
+
+    def tearDown(self):
+        self._sp.stop()
+
+    def _task(self):
+        from tasks.arena_mercato import ArenaMercatoTask
+        return ArenaMercatoTask()
+
+    @staticmethod
+    def _frame_con_pixel(punti: dict[tuple[int, int], tuple[int, int, int]]) -> np.ndarray:
+        """Frame BGR 540x960 nero con pixel campione impostati nei punti dati
+        (valori dati in ordine B,G,R, stessa convenzione di core.device.Screenshot)."""
+        frame = np.zeros((540, 960, 3), dtype=np.uint8)
+        for (x, y), (b, g, r) in punti.items():
+            frame[y, x] = (b, g, r)
+        return frame
+
+    def _ctx_con_frame(self, matcher, frame):
+        ctx = _PCtx(matcher)
+        shot = object.__new__(type("Shot", (), {}))
+        shot.frame = frame
+        ctx.device.screenshot = lambda: shot
+        return ctx
+
+    def test_match_su_card_leggendaria_viene_acquistato(self):
+        # pixel campione (cx-13, cy-2) = colore caldo (R-B>30) → tier leggendario confermato
+        m = _PMatcher({"pin/pin_pants_frag_oro.png": [[_PMatch(358, 301)]]})
+        frame = self._frame_con_pixel({(358 - 13, 301 - 2): (39, 75, 136)})  # B,G,R caldo
+        ctx = self._ctx_con_frame(m, frame)
+        tot = self._task()._acquista_priorita(ctx)
+        self.assertEqual(tot, 1)
+        self.assertIn((358 + 162, 301 + 68), ctx.device.taps)   # prezzo pants leggendario
+
+    def test_match_su_card_epica_viene_scartato(self):
+        # pixel campione = colore freddo/viola (B>R) → tier NON leggendario, scarta senza tap
+        m = _PMatcher({"pin/pin_pants_frag_oro.png": [[_PMatch(358, 175)]]})
+        frame = self._frame_con_pixel({(358 - 13, 175 - 2): (118, 34, 73)})  # B,G,R freddo
+        ctx = self._ctx_con_frame(m, frame)
+        tot = self._task()._acquista_priorita(ctx)
+        self.assertEqual(tot, 0)
+        self.assertEqual(len(ctx.device.taps), 0)
+
+    def test_honing_chip_non_verifica_colore_nessun_frame_richiesto(self):
+        # honing_chip non ha verifica_colore_dx/dy → deve comprare anche
+        # senza alcun pixel campione impostato (frame tutto nero di default)
+        m = _PMatcher({"pin/pin_honing_chip.png": [[_PMatch(655, 200)]]})
+        frame = self._frame_con_pixel({})
+        ctx = self._ctx_con_frame(m, frame)
+        tot = self._task()._acquista_priorita(ctx)
+        self.assertEqual(tot, 1)
+
 
 if __name__ == "__main__":
     unittest.main()

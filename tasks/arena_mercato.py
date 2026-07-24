@@ -81,29 +81,27 @@ _MERCATO_MAX_ITER   = 20   # guard anti-loop totale (FASE 1 + FASE 2)
 # nell'ordine di priorità. Priorità master (utente 20/07): Honing Chip →
 # Pants Frag leggendari (oro) → Shoes Frag leggendari (oro).
 #
-# Meccanica d'acquisto CALIBRATA live 20/07 sul master:
+# Meccanica d'acquisto CALIBRATA live 20/07 sul master (honing_chip):
 #   - tap sul PULSANTE PREZZO (non l'icona: quella apre solo il tooltip) →
 #     compra 1 + mostra quick-buy [x5][xMAX] a sinistra del prezzo.
 #   - tap xMAX → compra il massimo acquistabile con le medaglie correnti.
 #   - offset osservati: icona Honing Chip (655,200) → prezzo (787,248) →
 #     xMAX (654,248). Quindi prezzo ≈ icona+(132,48), xMAX ≈ prezzo+(-133,0).
 #
-# ⚠️ VALIDAZIONE LIVE PENDENTE: gli offset sono da 1 solo campione; i template
-# pants/scarpe ORO non sono ancora catturati (non in rotazione questa
-# settimana). Finché non validato, NON abilitare arena_mercato sul master.
-# Item con template assente → skip pulito (nessun tap). La lista è config-driven.
-@dataclass(frozen=True)
-class _ItemPrioritario:
-    nome:     str
-    template: str            # icona che INCLUDE la rarità (frame oro = leggendario)
-    soglia:   float = 0.80
-
-_PRIORITA_MASTER: tuple[_ItemPrioritario, ...] = (
-    _ItemPrioritario("honing_chip",     "pin/pin_honing_chip.png",     0.80),
-    _ItemPrioritario("pants_frag_oro",  "pin/pin_pants_frag_oro.png",  0.82),  # template da catturare
-    _ItemPrioritario("shoes_frag_oro",  "pin/pin_shoes_frag_oro.png",  0.82),  # template da catturare
-)
-
+# WU258 (24/07) — pants/shoes leggendari VALIDATI LIVE sul master (2 acquisti
+# reali di test, 1x ciascuno, FauMorfeus): scoperto e verificato con
+# matchTemplate reale (non solo osservazione visiva) che un template
+# "icona intera" confonde Pants con Shoes della STESSA rarità (score
+# incrociato 0.95 — la cassa 3D è identica, cambia solo il badge nell'angolo),
+# mentre un template "solo badge" confonde la STESSA voce fra rarità diverse
+# (score incrociato 0.886 — il badge è identico fra tier, cambia solo il
+# colore di sfondo della card). Design a due stadi adottato: match sul badge
+# (discrimina l'oggetto, nessuna conferma cross-item ≥0.85 osservata) +
+# verifica colore di un pixel campione dietro il badge (discrimina la
+# rarità: leggendario R≈136/G≈75/B≈39 "caldo" vs epico R≈73/G≈34/B≈118
+# "freddo/viola" — soglia R-B>30). Offset badge→prezzo ricalibrati sui 2
+# acquisti reali (162,68), diversi da quelli di honing_chip perché il
+# template badge-only ha un centro diverso dal template icona-intera.
 _ROI_STORE      = (60, 70, 900, 430)   # area griglia oggetti (esclude header/footer)
 _PREZZO_DX      = 132   # icona-center → pulsante prezzo
 _PREZZO_DY      = 48
@@ -111,6 +109,30 @@ _XMAX_DX        = -133  # pulsante prezzo → quick-buy xMAX (max acquistabile)
 _MERCATO_MAX_SCROLL = 4    # swipe per coprire tutta la griglia store
 _WAIT_ACQ       = 1.2  # dopo tap prezzo/xMAX (popup/animazione)
 _WAIT_SCROLL    = 1.2
+
+@dataclass(frozen=True)
+class _ItemPrioritario:
+    nome:     str
+    template: str            # per pants/shoes: SOLO il badge (discrimina l'oggetto)
+    soglia:   float = 0.80
+    prezzo_dx: int = _PREZZO_DX
+    prezzo_dy: int = _PREZZO_DY
+    xmax_dx:   int = _XMAX_DX
+    # Offset dal centro match a un pixel di sfondo campione dietro il badge,
+    # usato per discriminare la rarità (None = nessuna verifica, es. honing_chip
+    # che non ha varianti di rarità multiple nello store).
+    verifica_colore_dx: int | None = None
+    verifica_colore_dy: int | None = None
+
+_PRIORITA_MASTER: tuple[_ItemPrioritario, ...] = (
+    _ItemPrioritario("honing_chip",     "pin/pin_honing_chip.png",     0.80),
+    _ItemPrioritario("pants_frag_oro",  "pin/pin_pants_frag_oro.png",  0.82,
+                      prezzo_dx=162, prezzo_dy=68,
+                      verifica_colore_dx=-13, verifica_colore_dy=-2),
+    _ItemPrioritario("shoes_frag_oro",  "pin/pin_shoes_frag_oro.png",  0.82,
+                      prezzo_dx=162, prezzo_dy=68,
+                      verifica_colore_dx=-13, verifica_colore_dy=-2),
+)
 
 # WU115 (04/05) — debug screenshot via shared/debug_buffer (hot-reload).
 # Toggle config: globali.debug_tasks.arena_mercato (default False).
@@ -423,27 +445,34 @@ class ArenaMercatoTask(Task):
 
     def _acquista_priorita(self, ctx: TaskContext) -> int:
         """Compra gli oggetti della lista priorità (in ordine, a saturazione)
-        riconoscendone l'ICONA nella griglia ovunque sia, scorrendo lo store.
-        Per ogni occorrenza: tap PULSANTE PREZZO (icona+offset) → compra 1 +
-        mostra xMAX → tap xMAX (max acquistabile). Item con template assente
-        (es. pants/scarpe oro non ancora catturati) → skip pulito.
+        riconoscendone il BADGE nella griglia ovunque sia, in un'UNICA
+        passata dall'alto al basso dello store (WU258 — fix scroll ripetuto:
+        prima la versione iterava per-item con scroll indipendente, quindi
+        dopo aver scorso fino in fondo cercando il primo item, il secondo
+        veniva cercato solo nella parte bassa già raggiunta). Per ogni
+        occorrenza: verifica colore di rarità (se prevista) → tap PULSANTE
+        PREZZO (match+offset item) → compra 1 + mostra xMAX → tap xMAX (max
+        acquistabile). Item con template assente (es. pants/scarpe oro non
+        ancora catturati) → skip pulito, permanente per il resto del run.
 
         Robusto alla rotazione settimanale (match per tipo, non per posizione).
         Ritorna il numero totale di transazioni d'acquisto eseguite.
-
-        ⚠️ VALIDAZIONE LIVE PENDENTE (vedi note _PRIORITA_MASTER): offset da 1
-        campione, gestione item-a-limite/budget da rifinire sul primo run reale.
         """
         device, matcher = ctx.device, ctx.matcher
         log = ctx.log_msg
         tot = 0
-        for item in _PRIORITA_MASTER:
-            comprati = 0
-            viste: set[tuple[int, int]] = set()
-            for scroll_n in range(_MERCATO_MAX_SCROLL + 1):
-                shot = device.screenshot()
-                if shot is None:
-                    break
+        comprati = {item.nome: 0 for item in _PRIORITA_MASTER}
+        viste: dict[str, set[tuple[int, int]]] = {item.nome: set() for item in _PRIORITA_MASTER}
+        non_disponibile: set[str] = set()
+
+        for scroll_n in range(_MERCATO_MAX_SCROLL + 1):
+            shot = device.screenshot()
+            if shot is None:
+                break
+            frame = getattr(shot, "frame", None)
+            for item in _PRIORITA_MASTER:
+                if item.nome in non_disponibile:
+                    continue
                 try:
                     matches = matcher.find_all(shot, item.template,
                                                threshold=item.soglia,
@@ -451,28 +480,52 @@ class ArenaMercatoTask(Task):
                 except Exception as exc:
                     # template mancante/non caricabile (es. oro non ancora catturato)
                     log(f"[MERCATO-PRIO] {item.nome}: template non disponibile ({exc}) — skip")
-                    matches = None
-                    break
+                    non_disponibile.add(item.nome)
+                    continue
                 nuove = 0
                 for m in (matches or []):
                     key = (round(m.cx / 20), round(m.cy / 20))   # dedup grossolano
-                    if key in viste:
+                    if key in viste[item.nome]:
                         continue
-                    viste.add(key)
+                    viste[item.nome].add(key)
+                    if item.verifica_colore_dx is not None and frame is not None:
+                        cx_col = m.cx + item.verifica_colore_dx
+                        cy_col = m.cy + item.verifica_colore_dy
+                        if not self._e_rarita_leggendaria(frame, cx_col, cy_col):
+                            log(f"[MERCATO-PRIO] {item.nome}: match a ({m.cx},{m.cy}) "
+                                f"scartato — colore sfondo non coerente col tier leggendario")
+                            continue
                     nuove += 1
-                    px, py = m.cx + _PREZZO_DX, m.cy + _PREZZO_DY
+                    px, py = m.cx + item.prezzo_dx, m.cy + item.prezzo_dy
                     device.tap(px, py)                     # compra 1 + mostra xMAX
                     time.sleep(_WAIT_ACQ)
-                    device.tap(px + _XMAX_DX, py)          # xMAX (max acquistabile)
+                    device.tap(px + item.xmax_dx, py)      # xMAX (max acquistabile)
                     time.sleep(_WAIT_ACQ)
-                    comprati += 1
+                    comprati[item.nome] += 1
                     tot += 1
                 log(f"[MERCATO-PRIO] {item.nome}: scroll {scroll_n} — "
                     f"{len(matches or [])} match, {nuove} nuovi")
-                device.swipe(480, 380, 480, 230, 500)      # scroll giù
-                time.sleep(_WAIT_SCROLL)
-            log(f"[MERCATO-PRIO] {item.nome}: {comprati} acquisti a saturazione")
+            if len(non_disponibile) == len(_PRIORITA_MASTER):
+                break
+            device.swipe(480, 380, 480, 230, 500)      # scroll giù
+            time.sleep(_WAIT_SCROLL)
+
+        for item in _PRIORITA_MASTER:
+            log(f"[MERCATO-PRIO] {item.nome}: {comprati[item.nome]} acquisti a saturazione")
         return tot
+
+    @staticmethod
+    def _e_rarita_leggendaria(frame, x: int, y: int) -> bool:
+        """Verifica di rarità via colore sfondo card (WU258): leggendario ha
+        sfondo caldo (R>>B), epico/altri tier hanno sfondo freddo/viola (B>R).
+        `frame` è BGR (convenzione core.device.Screenshot). Fuori dai bordi
+        del frame → False (fail-safe: non acquistare se non verificabile).
+        """
+        h, w = frame.shape[:2]
+        if not (0 <= y < h and 0 <= x < w):
+            return False
+        b, g, r = frame[y, x][:3]
+        return int(r) - int(b) > 30
 
     # ── Rilevamento stato pulsanti ────────────────────────────────────────────
 
