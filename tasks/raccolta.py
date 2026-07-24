@@ -149,6 +149,11 @@ _DEFAULTS: dict = {
     # Coordinate UI (960x540)
     "TAP_LENTE":            (38,  325),
     "TAP_LENTE_COORD":      (380,  18),   # lente piccola → popup coordinate X/Y
+    # WU256 (24/07) — coordinate nodo leggibili direttamente dalla barra
+    # superiore mappa ("#ID X:NNN Y:NNN", subito dopo l'icona/might del
+    # castello, prima della riga risorse) SENZA aprire il popup "Enter
+    # coordinates". Calibrato live su screenshot reale FAU_08 960x540.
+    "ROI_COORD_BARRA_MAPPA": (200, 0, 375, 28),
     "TAP_NODO":             (480, 280),
     "TAP_RACCOGLI":         (230, 390),
     "TAP_SQUADRA":          (700, 185),
@@ -1059,12 +1064,64 @@ def _ocr_coord_box(frame, zona: tuple) -> Optional[int]:
         return None
 
 
+def _leggi_coord_da_barra_mappa(screen) -> Optional[str]:
+    """
+    WU256 (24/07) — legge le coordinate del nodo DIRETTAMENTE dalla barra
+    superiore della vista mappa ("#ID X:NNN Y:NNN", visibile subito dopo
+    CERCA quando il gioco centra la vista sul nodo trovato — prima della
+    riga risorse), SENZA aprire il popup "Enter coordinates". Nessun tap:
+    usa lo screenshot già disponibile. Ritorna "X_Y" o None se l'OCR non
+    trova un pattern X/Y riconoscibile (chiamante fa fallback al vecchio
+    meccanismo popup).
+
+    Calibrato live (screenshot reale FAU_08): OCR pulito legge
+    "#673 X:724 Y:554"; regex tollerante (fino a 4 caratteri di rumore
+    tra i due numeri) copre anche i casi con singolo carattere OCR
+    corrotto osservati (es. "Y:" letto come glifo illeggibile).
+    """
+    frame = getattr(screen, "frame", None)
+    if frame is None:
+        return None
+    try:
+        import pytesseract
+        import os
+        from PIL import Image
+        import cv2
+        pytesseract.pytesseract.tesseract_cmd = os.environ.get(
+            "TESSERACT_EXE",
+            r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        )
+        x1, y1, x2, y2 = (200, 0, 375, 28)
+        roi = frame[y1:y2, x1:x2]
+        big  = cv2.resize(roi, None, fx=4, fy=4, interpolation=cv2.INTER_CUBIC)
+        gray = cv2.cvtColor(big, cv2.COLOR_BGR2GRAY)
+        _, thresh = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        pil = Image.fromarray(thresh)
+        testo = pytesseract.image_to_string(pil, config="--psm 7").strip()
+        m = _re.search(r'X\D{0,3}(\d{2,4}).{0,4}?(\d{2,4})', testo)
+        if not m:
+            return None
+        return f"{int(m.group(1))}_{int(m.group(2))}"
+    except Exception:
+        return None
+
+
 def _leggi_coord_nodo(ctx: TaskContext) -> Optional[str]:
     """
-    Step 1: tap lente coordinate (380,18) → verifica popup → OCR X/Y.
+    Step 1: prova prima a leggere le coordinate dalla barra superiore
+    mappa (WU256, zero tap aggiuntivi — vedi _leggi_coord_da_barra_mappa).
+    Se fallisce: fallback al meccanismo storico — tap lente coordinate
+    (380,18) → verifica popup → OCR X/Y.
     Ritorna chiave "X_Y" (es. "712_535") oppure None se OCR fallisce.
     Tradotto da V5 raccolta._leggi_coord_nodo() + ocr.leggi_coordinate_nodo_mem().
     """
+    screen_barra = ctx.device.screenshot()
+    if screen_barra is not None:
+        chiave_barra = _leggi_coord_da_barra_mappa(screen_barra)
+        if chiave_barra is not None:
+            ctx.log_msg(f"[COORD] letta da barra mappa (no popup) → chiave={chiave_barra}")
+            return chiave_barra
+
     tap_lente_coord = _cfg(ctx, "TAP_LENTE_COORD")
     tmpl_enter      = _cfg(ctx, "TEMPLATE_ENTER")
     roi_enter       = _cfg(ctx, "ROI_ENTER")
