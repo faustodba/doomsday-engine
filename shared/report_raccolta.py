@@ -788,6 +788,27 @@ def esegui_report_raccolta(ctx, log_fn=None, solo_reset: bool = True) -> dict:
             log(f"[REPORT-RACCOLTA] completato: {esito}")
             return esito
 
+        # WU257 (24/07) — verifica POSITIVA "report vuoto" (nessun
+        # raccoglitore ancora tornato) PRIMA di cercare "Gathering Report".
+        # Bug osservato dall'utente: quando Gathering Report non è visibile
+        # con Sort Mail OFF, il codice sotto assumeva SEMPRE il caso
+        # WU199sexies (nascosto da altri eventi) e scattava al fallback
+        # costoso (Sort Mail ON, ricerca in "Other", fino a MAX_TENTATIVI_
+        # GATHERING scroll) — anche quando il motivo reale era semplicemente
+        # "nessuna mail", nel qual caso il fallback fallisce sempre dopo
+        # aver sprecato tempo. _report_vuoto_confermato() già esiste (OCR
+        # positiva "No mail received", vedi WU199octies) ma finora era usata
+        # solo per confermare l'esito di una Delete, mai qui.
+        if _report_vuoto_confermato(screen_tab.frame):
+            log("[REPORT-RACCOLTA] report vuoto confermato (No mail received) "
+                "— nessun raccoglitore ancora tornato, nessuna azione necessaria")
+            device.tap(TAP_TAB_ALLIANCE)
+            time.sleep(WAIT_RESTORE_TAB)
+            device.tap(TAP_CLOSE)
+            time.sleep(WAIT_CLOSE)
+            log(f"[REPORT-RACCOLTA] completato: {esito}")
+            return esito
+
         # WU199... (21/07) — seleziona ESPLICITAMENTE "Gathering Report"
         # prima di leggere/cancellare. Necessario in ENTRAMBE le modalità:
         # "Delete" è sempre contestuale alla riga selezionata (mai un'azione

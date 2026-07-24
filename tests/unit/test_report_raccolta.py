@@ -59,12 +59,24 @@ def _riga(coord, ts, tipo="petrolio", livello=7, base=264_000):
                       quantita_base=base, quantita_bonus=0, valore_alleanza=2640)
 
 
-def _ocr_tab_e_nomail(frame, roi, cfg):
-    if roi == (95, 62, 260, 82):      # ROI_TAB_LABEL
-        return "Sort Mail"
-    if roi == (330, 220, 950, 280):   # ROI_NO_MAIL
-        return "No mail received"
-    return ""
+def _ocr_tab_e_nomail():
+    """Factory (contatore isolato per-test, WU257 24/07): la 1a chiamata a
+    ROI_NO_MAIL è il nuovo check "report vuoto" pre-selezione, DEVE dire
+    "non vuoto" (altrimenti intercetterebbe prima ancora che il test possa
+    verificare il comportamento di _seleziona_gathering_report /
+    _elimina_report_letto). Le chiamate successive (es. dentro
+    _elimina_report_letto, se il test arriva fin lì) dicono "vuoto" come
+    da comportamento reale post-delete."""
+    calls = {"n": 0}
+
+    def _side_effect(frame, roi, cfg):
+        if roi == (95, 62, 260, 82):      # ROI_TAB_LABEL
+            return "Sort Mail"
+        if roi == (330, 220, 950, 280):   # ROI_NO_MAIL
+            calls["n"] += 1
+            return "" if calls["n"] == 1 else "No mail received"
+        return ""
+    return _side_effect
 
 
 class _FakeCtx:
@@ -425,12 +437,20 @@ class TestEseguiReportRaccoltaAbortSuTabSbagliato:
         device = FakeDevice()
         calls = {"n": 0}
 
+        nomail_calls = {"n": 0}
+
         def _ocr_side_effect(frame, roi, cfg):
             if roi == (95, 62, 260, 82):  # ROI_TAB_LABEL
                 calls["n"] += 1
                 return "" if calls["n"] == 1 else "Sort Mail"  # fallisce 1a volta, ok al retry
             if roi == (330, 220, 950, 280):  # ROI_NO_MAIL
-                return "No mail received"
+                # WU257 (24/07): 1a chiamata = check "report vuoto" pre-
+                # selezione (deve dire NON vuoto, per proseguire verso
+                # _seleziona_gathering_report); 2a chiamata = dentro
+                # _elimina_report_letto dopo il delete (deve dire vuoto,
+                # per confermare delete_ok=True).
+                nomail_calls["n"] += 1
+                return "" if nomail_calls["n"] == 1 else "No mail received"
             return ""
 
         # screenshot in ordine: check tab iniziale (fail), check tab retry
@@ -471,7 +491,7 @@ class TestEseguiReportRaccoltaAbortSuGatheringNonTrovato:
         matcher = FakeMatcher()   # nulla configurato -> mai trovato
         ctx = _FakeCtx(device, matcher=matcher)
 
-        with patch("shared.report_raccolta._ocr_raw", side_effect=_ocr_tab_e_nomail), \
+        with patch("shared.report_raccolta._ocr_raw", side_effect=_ocr_tab_e_nomail()), \
              patch("shared.report_raccolta.time.sleep"):   # MAX_TENTATIVI_GATHERING iterazioni, no wall-clock reale
             esito = esegui_report_raccolta(ctx, solo_reset=True)
 
@@ -519,7 +539,7 @@ class TestScrollFermoConfermaFineLista:
 
         pagina = self._righe_full_page("70", 1)
 
-        with patch("shared.report_raccolta._ocr_raw", side_effect=_ocr_tab_e_nomail), \
+        with patch("shared.report_raccolta._ocr_raw", side_effect=_ocr_tab_e_nomail()), \
              patch("shared.report_raccolta.leggi_pagina", side_effect=[pagina, pagina]):
             esito = esegui_report_raccolta(ctx, solo_reset=False)
 
@@ -546,7 +566,7 @@ class TestScrollFermoConfermaFineLista:
             for i in range(4)
         ]
 
-        with patch("shared.report_raccolta._ocr_raw", side_effect=_ocr_tab_e_nomail), \
+        with patch("shared.report_raccolta._ocr_raw", side_effect=_ocr_tab_e_nomail()), \
              patch("shared.report_raccolta.leggi_pagina", side_effect=[pagina1, pagina2]):
             esito = esegui_report_raccolta(ctx, solo_reset=False)
 
